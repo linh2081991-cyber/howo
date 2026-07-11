@@ -1177,7 +1177,7 @@ function openEditDriver(id){
 // stays fully editable in the shift form before saving, by design — never
 // auto-saved without review.
 
-const GEMINI_MODEL = 'gemini-2.5-flash'; // 'gemini-1.5-flash' was requested but Google has fully shut it down; this is its current cost-efficient equivalent. Change this one constant if Google renames/retires it again.
+const GEMINI_MODEL = 'gemini-3.5-flash'; // Google retires model names frequently (1.5-flash, then 2.5-flash, both already shut down for new API keys as of July 2026). This is the current stable "flash" tier with no announced shutdown date. If it ever errors with "model not found", change ONLY this one line to whatever Google's current recommended flash model is.
 
 const INBOX_CATEGORY_LABELS = {
   odometer: 'Ảnh Đồng Hồ Km',
