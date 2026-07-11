@@ -152,6 +152,13 @@
   .site-detail-row{ cursor:pointer; }
   .site-detail-row:active{ opacity:0.7; }
 
+  .rating-badge{ display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; }
+  .rating-badge.good{ background:var(--profit-soft); color:var(--profit); }
+  .rating-badge.ok{ background:var(--accent-soft); color:var(--accent); }
+  .rating-badge.watch{ background:#FFF3CD; color:#8A6D00; }
+  .rating-badge.warn{ background:var(--loss-soft); color:var(--loss); }
+  .rating-badge.risk{ background:var(--loss); color:#fff; }
+
   #loginScreen{
     display:none; position:fixed; inset:0; z-index:100; background:var(--bg);
     flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center;
@@ -227,7 +234,8 @@ const STATUS_OPTIONS = [
   {key:'idle', label:'Nằm Bãi'}
 ];
 const SHIFT_TYPES = [{key:'day', label:'Ca Ngày'}, {key:'night', label:'Ca Đêm'}];
-const PAYMENT_OPTIONS = [{key:'unpaid', label:'Chưa Thanh Toán'}, {key:'paid', label:'Đã Thanh Toán'}];
+// (Per-shift payment status removed — payment tracking now lives at the
+// site/partner level, see the "Đối Tác & Công Nợ" module below.)
 
 function defaultCostPolicies(){
   return {
@@ -255,10 +263,103 @@ let state = {
   resultsRoadFeeOverride: null, // if set, overrides settings.monthlyFixedRoadFee for the current results period
   inboxImages: [], // {id, dataUrl, status:'processing'|'done'|'error', category, rawText, extracted}
   sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
-  strategyAnalysis: { periodDays: 7, loading: false, error: null, result: null, generatedAt: null }
+  strategyAnalysis: { periodDays: 7, loading: false, error: null, result: null, generatedAt: null },
+  documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
+  maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
+  siteContracts: [] // {id, siteName, totalContractValue, notes}
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+/// Returns TODAY as "YYYY-MM-DD" using the PHONE'S LOCAL date/time zone.
+/// `new Date().toISOString()` is UTC-based and silently rolls back to the
+/// previous day during Vietnam's early-morning hours (UTC+7) — this is
+/// the correct replacement everywhere the app needs "today's date".
+function todayLocalDateStr(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+// ========================= DOCUMENTS & MAINTENANCE WARNINGS =========================
+// Deterministic (no AI, no guessing) tracking of hard deadlines: vehicle
+// paperwork (đăng kiểm, bảo hiểm, phù hiệu vận tải) and driver paperwork
+// (GPLX, khám sức khỏe), PLUS distance-based maintenance intervals (thay
+// dầu, đảo lốp...). All warnings surface as an in-app banner on the very
+// first tab the person sees every time they open the app — since a plain
+// web app cannot reliably send push notifications while closed (iOS
+// Safari's web-push support is inconsistent even when installed to the
+// home screen), "nhắc mỗi tuần" is honestly implemented as: the warning
+// re-appears EVERY time the app is opened for as long as the deadline is
+// within 30 days, which for someone logging shifts daily easily satisfies
+// "at least once a week" — just without a true background notification.
+
+const DOCUMENT_TYPE_OPTIONS = {
+  vehicle: ['Đăng Kiểm', 'Bảo Hiểm', 'Phù Hiệu Vận Tải', 'Khác (Xe)'],
+  driver: ['GPLX', 'Khám Sức Khoẻ Lái Xe', 'Khác (Tài Xế)']
+};
+
+function daysUntilLocal(dateStr){
+  const today = new Date(todayLocalDateStr()+'T00:00:00');
+  const target = new Date(dateStr+'T00:00:00');
+  return Math.round((target-today)/86400000);
+}
+
+function urgencyFromDays(daysLeft, warnThreshold, urgentThreshold){
+  if(daysLeft < 0) return { label:'ĐÃ HẾT HẠN', className:'risk' };
+  if(daysLeft <= urgentThreshold) return { label:`Còn ${daysLeft} ngày — GẤP`, className:'risk' };
+  if(daysLeft <= warnThreshold) return { label:`Còn ${daysLeft} ngày`, className:'warn' };
+  return { label:`Còn ${daysLeft} ngày`, className:'good' };
+}
+
+/// Every document within 30 days of expiry (or already expired), soonest first.
+function computeDocumentWarnings(){
+  return state.documents
+    .map(doc=>{
+      const daysLeft = daysUntilLocal(doc.expiryDate);
+      return { ...doc, daysLeft, urgency: urgencyFromDays(daysLeft, 30, 7),
+        driverName: doc.scope==='driver' ? (driverById(doc.driverId)?.name || '(tài xế đã xoá)') : null };
+    })
+    .filter(d=>d.daysLeft<=30)
+    .sort((a,b)=>a.daysLeft-b.daysLeft);
+}
+
+/// Latest known odometer reading across every logged shift — the "current
+/// km" used to compute how far each maintenance item still has to go.
+function currentOdometer(){
+  if(state.shifts.length===0) return 0;
+  const sorted = [...state.shifts].sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  return sorted[0].odoEnd || 0;
+}
+
+function computeMaintenanceStatus(schedule){
+  const current = currentOdometer();
+  const nextDueOdo = (Number(schedule.lastDoneOdo)||0) + (Number(schedule.intervalKm)||0);
+  const kmRemaining = Math.round(nextDueOdo - current);
+  let urgency;
+  if(kmRemaining<=0) urgency = { label:'ĐÃ QUÁ HẠN', className:'risk' };
+  else if(kmRemaining<=300) urgency = { label:`Còn ${kmRemaining} km — GẤP`, className:'risk' };
+  else if(kmRemaining<=1000) urgency = { label:`Còn ${kmRemaining} km`, className:'warn' };
+  else urgency = { label:`Còn ${kmRemaining} km`, className:'good' };
+  return { ...schedule, currentOdo: current, nextDueOdo, kmRemaining, urgency };
+}
+
+/// Every maintenance item within 1000km of being due (or already overdue),
+/// most urgent first.
+function computeMaintenanceWarnings(){
+  return state.maintenanceSchedules
+    .map(computeMaintenanceStatus)
+    .filter(m=>m.kmRemaining<=1000)
+    .sort((a,b)=>a.kmRemaining-b.kmRemaining);
+}
+
+function computeAllWarnings(){
+  const docs = computeDocumentWarnings();
+  const maint = computeMaintenanceWarnings();
+  return { docs, maint, total: docs.length + maint.length };
+}
 
 // ========================= FIREBASE: CLOUD STORAGE (NO LOGIN) =========================
 // Data lives in Firestore under one FIXED shared path — no Google sign-in
@@ -298,21 +399,30 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
       sharedDataRef('settings').get(),
-      sharedDataRef('sitePayments').get()
+      sharedDataRef('sitePayments').get(),
+      sharedDataRef('documents').get(),
+      sharedDataRef('maintenanceSchedules').get(),
+      sharedDataRef('siteContracts').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
     const rData = rSnap.exists ? rSnap.data() : null;
     const pData = pSnap.exists ? pSnap.data() : null;
+    const docData = docSnap.exists ? docSnap.data() : null;
+    const maintData = maintSnap.exists ? maintSnap.data() : null;
+    const contractData = contractSnap.exists ? contractSnap.data() : null;
     state.drivers = dData && Array.isArray(dData.list) ? dData.list : [];
     state.shifts = sData && Array.isArray(sData.list) ? sData.list : [];
     state.repairs = rData && Array.isArray(rData.list) ? rData.list : [];
     state.sitePayments = pData && Array.isArray(pData.list) ? pData.list : [];
+    state.documents = docData && Array.isArray(docData.list) ? docData.list : [];
+    state.maintenanceSchedules = maintData && Array.isArray(maintData.list) ? maintData.list : [];
+    state.siteContracts = contractData && Array.isArray(contractData.list) ? contractData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -336,6 +446,18 @@ async function saveSitePayments(){
   try { await sharedDataRef('sitePayments').set({ list: state.sitePayments }); }
   catch(e){ showToast('Lỗi lưu dữ liệu công nợ — kiểm tra mạng.'); }
 }
+async function saveDocuments(){
+  try { await sharedDataRef('documents').set({ list: state.documents }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu giấy tờ — kiểm tra mạng.'); }
+}
+async function saveMaintenanceSchedules(){
+  try { await sharedDataRef('maintenanceSchedules').set({ list: state.maintenanceSchedules }); }
+  catch(e){ showToast('Lỗi lưu lịch bảo dưỡng — kiểm tra mạng.'); }
+}
+async function saveSiteContracts(){
+  try { await sharedDataRef('siteContracts').set({ list: state.siteContracts }); }
+  catch(e){ showToast('Lỗi lưu hợp đồng công trình — kiểm tra mạng.'); }
+}
 async function saveSettings(){
   try { await sharedDataRef('settings').set(state.settings); }
   catch(e){ showToast('Lỗi lưu cài đặt — kiểm tra mạng.'); }
@@ -357,19 +479,22 @@ startApp();
 function exportBackupFile(){
   const backup = {
     appName: 'SoXeBenHOWO',
-    backupVersion: 3,
+    backupVersion: 4,
     exportedAt: new Date().toISOString(),
     drivers: state.drivers,
     shifts: state.shifts,
     repairs: state.repairs,
     sitePayments: state.sitePayments,
+    documents: state.documents,
+    maintenanceSchedules: state.maintenanceSchedules,
+    siteContracts: state.siteContracts,
     settings: state.settings
   };
   const json = JSON.stringify(backup, null, 2);
   const blob = new Blob([json], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href=url; a.download=`SaoLuu_SoXeBenHOWO_${new Date().toISOString().slice(0,10)}.json`;
+  a.href=url; a.download=`SaoLuu_SoXeBenHOWO_${todayLocalDateStr()}.json`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Đã tạo file sao lưu. Nhớ gửi file này qua Zalo/Email cho chính mình để cất giữ.');
@@ -395,8 +520,12 @@ async function handleRestoreFile(file){
     state.shifts = backup.shifts;
     state.repairs = Array.isArray(backup.repairs) ? backup.repairs : [];
     state.sitePayments = Array.isArray(backup.sitePayments) ? backup.sitePayments : [];
+    state.documents = Array.isArray(backup.documents) ? backup.documents : [];
+    state.maintenanceSchedules = Array.isArray(backup.maintenanceSchedules) ? backup.maintenanceSchedules : [];
+    state.siteContracts = Array.isArray(backup.siteContracts) ? backup.siteContracts : [];
     if(backup.settings) state.settings = Object.assign(state.settings, backup.settings);
-    await saveDrivers(); await saveShifts(); await saveRepairs(); await saveSitePayments(); await saveSettings();
+    await saveDrivers(); await saveShifts(); await saveRepairs(); await saveSitePayments();
+    await saveDocuments(); await saveMaintenanceSchedules(); await saveSiteContracts(); await saveSettings();
     renderAll();
     showToast('Đã phục hồi dữ liệu thành công.');
   }catch(e){
@@ -435,7 +564,6 @@ function blankIfZero(v){
 }
 function statusLabel(key){ return (STATUS_OPTIONS.find(s=>s.key===key)||{}).label || key; }
 function shiftTypeLabel(key){ return (SHIFT_TYPES.find(s=>s.key===key)||{}).label || key; }
-function paymentLabel(key){ return (PAYMENT_OPTIONS.find(s=>s.key===key)||{}).label || key; }
 
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 
@@ -545,6 +673,23 @@ function renderHeader(){
 function renderShiftList(){
   const app=document.getElementById('app');
 
+  const warnings = computeAllWarnings();
+  const warningsBannerHtml = warnings.total===0 ? '' : `
+    <div class="card" style="border:1.5px solid var(--loss); margin-bottom:14px;">
+      <div style="font-weight:800; color:var(--loss); margin-bottom:8px;">⚠️ ${warnings.total} Việc Cần Chú Ý</div>
+      ${warnings.docs.map(d=>`
+        <div class="kv" style="padding:4px 0;">
+          <span>${escapeHtml(d.type)}${d.driverName?' — '+escapeHtml(d.driverName):' (xe)'}</span>
+          <span class="rating-badge ${d.urgency.className}">${d.urgency.label}</span>
+        </div>`).join('')}
+      ${warnings.maint.map(m=>`
+        <div class="kv" style="padding:4px 0;">
+          <span>🔧 ${escapeHtml(m.name)}</span>
+          <span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span>
+        </div>`).join('')}
+      <button class="link-btn" id="warningsGoToSettingsBtn" style="margin-top:6px;">Quản lý giấy tờ / bảo dưỡng →</button>
+    </div>`;
+
   const searchBarHtml = `
     <div class="search-bar">
       <span class="ic">🔎</span>
@@ -553,10 +698,11 @@ function renderShiftList(){
     </div>`;
 
   if(state.shifts.length===0){
-    app.innerHTML = searchBarHtml + `
+    app.innerHTML = warningsBannerHtml + searchBarHtml + `
       <div class="banner">Bước đầu tiên: bấm "+ Tài Xế" ở tab Tài Xế để thêm người lái, rồi quay lại đây bấm "+ Ca Mới".</div>
       <div class="empty"><div class="big">🚛</div>Chưa có ca nào được ghi.<br>Bấm "+ Ca Mới" ở góc trên để bắt đầu.</div>`;
     bindSearchBar();
+    bindWarningsBanner();
     return;
   }
 
@@ -584,14 +730,19 @@ function renderShiftList(){
           </div>`;
       }).join('');
 
-  app.innerHTML = searchBarHtml + cardsHtml;
+  app.innerHTML = warningsBannerHtml + searchBarHtml + cardsHtml;
   bindSearchBar();
+  bindWarningsBanner();
 }
 function bindSearchBar(){
   const input = document.getElementById('searchDateInput');
   if(input) input.addEventListener('change', e=>{ state.searchDate = e.target.value || null; renderShiftList(); });
   const clearBtn = document.getElementById('clearSearchBtn');
   if(clearBtn) clearBtn.addEventListener('click', ()=>{ state.searchDate=null; renderShiftList(); });
+}
+function bindWarningsBanner(){
+  const btn = document.getElementById('warningsGoToSettingsBtn');
+  if(btn) btn.addEventListener('click', ()=>{ state.currentTab='settings'; renderAll(); });
 }
 function formatDateVN(dateStr){
   const [y,m,d]=dateStr.split('-');
@@ -616,7 +767,7 @@ function startNewShift(){
     return;
   }
   const today=new Date();
-  const dateStr=today.toISOString().slice(0,10);
+  const dateStr=todayLocalDateStr();
   const shiftType='day';
   const prev = findPreviousShift(dateStr, shiftType, null);
   const driver = state.drivers[0];
@@ -643,7 +794,6 @@ function startNewShift(){
     advanceAmount: 0,
     advanceRecipientName: '',
     notes: '',
-    paymentStatus: 'unpaid',
     siteLogs: []
   };
   state.draftShift = draft;
@@ -825,19 +975,14 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Ghi Chú & Thanh Toán</h3>
+      <h3>Ghi Chú Ca</h3>
       <div class="card">
-        <div class="field">
-          <label>Ghi chú ca</label>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú (lưu ý, phát sinh trong ca nếu có)</label>
           <input type="text" id="f_notes" value="${escapeHtml(sh.notes||'')}">
         </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Trạng thái thanh toán</label>
-          <select id="f_payment">
-            ${PAYMENT_OPTIONS.map(p=>`<option value="${p.key}" ${p.key===sh.paymentStatus?'selected':''}>${p.label}</option>`).join('')}
-          </select>
-        </div>
       </div>
+      <div class="hint" style="margin-top:8px;">Thanh toán không gắn với 1 ca cụ thể nữa — vào tab "📊 Kết Quả" → mục "🤝 Đối Tác & Công Nợ" để ghi nhận và theo dõi tiền thu về theo từng đối tác/công trình.</div>
     </section>
 
     <section class="group">
@@ -998,7 +1143,6 @@ function bindFormEvents(){
   document.getElementById('f_incidentalNotes').addEventListener('input', e=>{ sh.incidentalNotes=e.target.value; });
   document.getElementById('f_advanceRecipient').addEventListener('input', e=>{ sh.advanceRecipientName=e.target.value; });
   document.getElementById('f_notes').addEventListener('input', e=>{ sh.notes=e.target.value; });
-  document.getElementById('f_payment').addEventListener('change', e=>{ sh.paymentStatus=e.target.value; });
 
   document.getElementById('addSiteBtn').addEventListener('click', ()=>{
     sh.siteLogs.push({ siteName:'', volumePerTrip:0, materialUnitPrice:0, trips:0, driverWagePerTrip:0, wageQualifyingTripsOverride:null });
@@ -1329,7 +1473,7 @@ function buildDraftShiftFromInbox(){
     if(ex.rawSummary) summaryNotes.push(`[${INBOX_CATEGORY_LABELS[im.category]||im.category}] ${ex.rawSummary}`);
   }
 
-  const dateStr = new Date().toISOString().slice(0,10);
+  const dateStr = todayLocalDateStr();
   const driver = driverId ? driverById(driverId) : (state.drivers[0] || null);
   if(!driver){ showToast('Hãy thêm tài xế trước ở tab "Tài Xế".'); return; }
 
@@ -1356,7 +1500,6 @@ function buildDraftShiftFromInbox(){
     incidentalCost: maintenanceAmount,
     incidentalNotes: maintenanceNotes.length ? ('[Đọc từ hoá đơn] ' + maintenanceNotes.join(' | ')) : '',
     advanceAmount: 0,
-    paymentStatus: 'unpaid',
     notes: summaryNotes.length ? summaryNotes.join(' | ').slice(0,600) : '',
     siteLogs: driverReportTripsTotal ? [{ siteName: siteNameGuess||'', volumePerTrip:0, materialUnitPrice:0, trips:driverReportTripsTotal, driverWagePerTrip:0, wageQualifyingTripsOverride:null }] : []
   };
@@ -1487,8 +1630,9 @@ function renderInboxExtractCard(im){
 function aggregateStrategyData(periodDays){
   const toDate = new Date();
   const fromDate = new Date(toDate.getTime() - (periodDays-1)*86400000);
-  const to = toDate.toISOString().slice(0,10);
-  const from = fromDate.toISOString().slice(0,10);
+  const to = todayLocalDateStr();
+  const y = fromDate.getFullYear(), m = String(fromDate.getMonth()+1).padStart(2,'0'), d = String(fromDate.getDate()).padStart(2,'0');
+  const from = `${y}-${m}-${d}`;
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
 
   const byDriver = {};
@@ -1698,8 +1842,8 @@ function currentMonthRange(){
   const now = new Date();
   const first = new Date(now.getFullYear(), now.getMonth(), 1);
   const last = new Date(now.getFullYear(), now.getMonth()+1, 0);
-  const toISO = d => d.toISOString().slice(0,10);
-  return { from: toISO(first), to: toISO(last) };
+  const toLocalISO = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return { from: toLocalISO(first), to: toLocalISO(last) };
 }
 
 function computeResultsGroup(shifts){
@@ -1767,6 +1911,65 @@ function renderComparisonChartSVG(gDay, gNight){
 }
 
 // ---- Per-day breakdown within the selected range ----
+/// Break-even: how many trips this period needs, at the period's own
+/// average revenue/trip and fuel-cost/trip, to cover its fixed costs
+/// (allocated base salary + housing across all shifts in range, plus the
+/// road-fee figure already resolved for the period).
+function computeBreakEven(inRangeShifts, roadFee){
+  const totalTrips = inRangeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalRevenue = inRangeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
+  const totalFuelCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh),0);
+  const totalFixed = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.housingAllocation)||0),0) + roadFee;
+  if(totalTrips===0) return { breakEvenTrips:null, totalFixed, note:'Chưa có chuyến nào trong kỳ để tính điểm hoà vốn.' };
+  const avgRevenuePerTrip = totalRevenue/totalTrips;
+  const avgVariableCostPerTrip = totalFuelCost/totalTrips;
+  const marginPerTrip = avgRevenuePerTrip - avgVariableCostPerTrip;
+  if(marginPerTrip<=0) return { breakEvenTrips:null, totalFixed, avgRevenuePerTrip, avgVariableCostPerTrip, note:'Doanh thu/chuyến hiện đang thấp hơn chi phí dầu/chuyến — không thể hoà vốn với cơ cấu giá hiện tại, dù chạy bao nhiêu chuyến.' };
+  const breakEvenTrips = Math.ceil(totalFixed/marginPerTrip);
+  return { breakEvenTrips, totalFixed, avgRevenuePerTrip, avgVariableCostPerTrip, marginPerTrip, actualTrips: totalTrips, surplusTrips: totalTrips-breakEvenTrips, note:null };
+}
+
+/// Cost-per-km for each of the last N calendar months (ALL shifts, not
+/// filtered by the Results tab's selected period — a trend needs its own
+/// fixed time axis) — surfaces whether operating cost is drifting up.
+function computeCostPerKmTrend(monthsBack){
+  const now = new Date();
+  const buckets = [];
+  for(let i=monthsBack-1;i>=0;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const label = `${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    const monthStart = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+    const monthEndDate = new Date(d.getFullYear(), d.getMonth()+1, 0);
+    const monthEnd = `${monthEndDate.getFullYear()}-${String(monthEndDate.getMonth()+1).padStart(2,'0')}-${String(monthEndDate.getDate()).padStart(2,'0')}`;
+    const shiftsInMonth = state.shifts.filter(sh=>sh.date>=monthStart && sh.date<=monthEnd);
+    const totalKm = shiftsInMonth.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+    const totalCost = shiftsInMonth.reduce((s,sh)=>s+shiftTotalCost(sh),0);
+    buckets.push({ label, costPerKm: totalKm>0 ? totalCost/totalKm : 0, totalKm, totalCost });
+  }
+  return buckets;
+}
+
+function renderCostPerKmChartSVG(buckets){
+  const maxVal = Math.max(1, ...buckets.map(b=>b.costPerKm));
+  const chartH = 130, barW = 34, gap = 14, baseY = chartH + 20;
+  const width = buckets.length * (barW+gap) + 20;
+  let bars = '';
+  buckets.forEach((b,i)=>{
+    const x = 20 + i*(barW+gap);
+    const h = b.totalKm>0 ? Math.max(2, b.costPerKm/maxVal*chartH) : 2;
+    const y = baseY - h;
+    bars += `
+      <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="4" fill="${b.totalKm>0?'var(--accent)':'var(--border)'}"></rect>
+      <text x="${x+barW/2}" y="${y-6}" font-size="9" text-anchor="middle" fill="var(--ink)">${b.totalKm>0?fmtShortVND(b.costPerKm):'—'}</text>
+      <text x="${x+barW/2}" y="${baseY+16}" font-size="10" text-anchor="middle" fill="var(--ink-soft)">${b.label}</text>
+    `;
+  });
+  return `<svg viewBox="0 0 ${width} ${baseY+28}" style="width:100%; height:auto;">
+    <line x1="10" y1="${baseY}" x2="${width-10}" y2="${baseY}" stroke="var(--border)" stroke-width="1"></line>
+    ${bars}
+  </svg>`;
+}
+
 function computeDailyBreakdown(inRangeShifts){
   const byDate = {};
   for(const sh of inRangeShifts){
@@ -1828,6 +2031,114 @@ function computeSiteDetail(siteName, from, to){
   const collected = payments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const owed = billed - collected;
   return { siteName, billed, collected, owed, tripsByDriver, dailyActivity, payments };
+}
+
+// ========================= PARTNERS & RECEIVABLES (ALL-TIME AR AGING) =========================
+// Distinct from the period-filtered "Công Nợ Công Trình" block above (which
+// answers "how much did I bill THIS period"), this module answers "how
+// much is CURRENTLY owed, and since when" — a running balance that never
+// resets with the Results date filter, computed with proper FIFO ageing
+// (each payment received pays off the OLDEST outstanding billed amount
+// first, exactly like real accounts-receivable bookkeeping) plus a
+// reliability rating per business partner built from that ageing.
+
+const ALL_TIME_FROM = '1900-01-01';
+const ALL_TIME_TO = '2999-12-31';
+
+/// Every construction site's full, all-time list of billed amounts —
+/// one entry per shift-site contribution, dated by the shift's date.
+function computeAllSiteBilledEvents(){
+  const map = {};
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
+      const rev = siteRevenue(s);
+      if(rev<=0) continue;
+      if(!map[name]) map[name] = [];
+      map[name].push({ date: sh.date, amount: rev });
+    }
+  }
+  return map;
+}
+
+/// FIFO ageing: applies the total pool of payments received against the
+/// oldest billed amounts first. Returns which billed amounts remain
+/// (fully or partially) unpaid, the oldest unpaid billing date, and the
+/// resulting total still owed.
+function computeFifoAging(billedEvents, paymentEvents){
+  const billed = [...billedEvents].sort((a,b)=>a.date.localeCompare(b.date)).map(e=>({date:e.date, remaining:e.amount}));
+  let paymentPool = paymentEvents.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  for(const b of billed){
+    if(paymentPool<=0) break;
+    const applied = Math.min(paymentPool, b.remaining);
+    b.remaining -= applied;
+    paymentPool -= applied;
+  }
+  const unpaidBuckets = billed.filter(b=>b.remaining > 0.5);
+  const oldestUnpaidDate = unpaidBuckets.length ? unpaidBuckets[0].date : null;
+  const totalOwed = unpaidBuckets.reduce((s,b)=>s+b.remaining,0);
+  const today = todayLocalDateStr();
+  const daysOutstanding = oldestUnpaidDate ? Math.floor((new Date(today) - new Date(oldestUnpaidDate)) / 86400000) : 0;
+  return { totalOwed, oldestUnpaidDate, daysOutstanding, unpaidBuckets };
+}
+
+/// Picks the most-frequently-used partner name among a site's logged
+/// payments — sites are usually tied to one ongoing contractor, so this
+/// is a reliable proxy without needing a separate "assign partner" step.
+function derivePartnerForSite(siteName){
+  const payments = state.sitePayments.filter(p=>p.siteName===siteName);
+  const counts = {};
+  payments.forEach(p=>{ const n=(p.partnerName||'').trim(); if(n) counts[n] = (counts[n]||0)+1; });
+  const names = Object.keys(counts);
+  if(names.length===0) return null;
+  names.sort((a,b)=>counts[b]-counts[a]);
+  return names[0];
+}
+
+/// Deterministic reliability rating from the ageing result — the more
+/// overdue the oldest unpaid amount, the higher the risk flag.
+function partnerReliabilityRating(daysOutstanding, totalOwed){
+  if(totalOwed <= 0) return { label:'Tốt — Không nợ', className:'good' };
+  if(daysOutstanding <= 30) return { label:'Bình thường', className:'ok' };
+  if(daysOutstanding <= 60) return { label:'Cần chú ý', className:'watch' };
+  if(daysOutstanding <= 90) return { label:'Cảnh báo — Nợ lâu', className:'warn' };
+  return { label:'Rủi ro cao — Nợ quá hạn', className:'risk' };
+}
+
+/// Full all-time roster of business partners derived from every site's
+/// billed history + payment log, each with FIFO-aged outstanding balance,
+/// payment-history statistics, and a reliability rating.
+function computePartnersOverview(){
+  const siteBilled = computeAllSiteBilledEvents();
+  const partners = {};
+
+  for(const siteName of Object.keys(siteBilled)){
+    const partnerName = derivePartnerForSite(siteName) || `(Chưa gán đối tác) ${siteName}`;
+    const payments = state.sitePayments.filter(p=>p.siteName===siteName).map(p=>({date:p.date, amount:Number(p.amount)||0}));
+    const aging = computeFifoAging(siteBilled[siteName], payments);
+    const billedTotal = siteBilled[siteName].reduce((s,e)=>s+e.amount,0);
+    const collectedTotal = payments.reduce((s,p)=>s+p.amount,0);
+    const lastPaymentDate = payments.length ? payments.map(p=>p.date).sort().slice(-1)[0] : null;
+
+    if(!partners[partnerName]) partners[partnerName] = {
+      name: partnerName, sites: [], totalBilled:0, totalCollected:0, totalOwed:0,
+      oldestUnpaidDate: null, paymentCount: 0, lastPaymentDate: null
+    };
+    const P = partners[partnerName];
+    P.sites.push({ siteName, billed: billedTotal, collected: collectedTotal, owed: aging.totalOwed, daysOutstanding: aging.daysOutstanding });
+    P.totalBilled += billedTotal;
+    P.totalCollected += collectedTotal;
+    P.totalOwed += aging.totalOwed;
+    P.paymentCount += payments.length;
+    if(aging.oldestUnpaidDate && (!P.oldestUnpaidDate || aging.oldestUnpaidDate < P.oldestUnpaidDate)) P.oldestUnpaidDate = aging.oldestUnpaidDate;
+    if(lastPaymentDate && (!P.lastPaymentDate || lastPaymentDate > P.lastPaymentDate)) P.lastPaymentDate = lastPaymentDate;
+  }
+
+  const today = todayLocalDateStr();
+  return Object.values(partners).map(P=>{
+    const daysOutstanding = P.oldestUnpaidDate ? Math.floor((new Date(today)-new Date(P.oldestUnpaidDate))/86400000) : 0;
+    return { ...P, daysOutstanding, rating: partnerReliabilityRating(daysOutstanding, P.totalOwed) };
+  }).sort((a,b)=>b.totalOwed-a.totalOwed);
 }
 
 // ---- Strategic advisory engine (deterministic rules on real numbers) ----
@@ -1925,6 +2236,8 @@ function renderResults(){
   const dailyBreakdown = computeDailyBreakdown(inRange);
   const siteRanking = computeSiteRanking(inRange);
   const insights = generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, from, to, siteRanking});
+  const breakEven = computeBreakEven(inRange, roadFee);
+  const costTrend = computeCostPerKmTrend(6);
 
   app.innerHTML = `
     <section class="group">
@@ -1954,6 +2267,25 @@ function renderResults(){
           <input type="text" inputmode="decimal" id="res_roadFee">
         </div>
       </div>
+    </section>
+
+    <section class="group">
+      <h3>⚖️ Điểm Hoà Vốn Trong Kỳ</h3>
+      <div class="card">
+        ${breakEven.breakEvenTrips===null ? `<div class="hint">${escapeHtml(breakEven.note)}</div>` : `
+        <div class="summary-row"><span>Chi phí cố định cần bù (lương cứng + nhà + luật đường)</span><span class="val">${fmtVND(breakEven.totalFixed)}</span></div>
+        <div class="summary-row"><span>Lãi gộp bình quân / chuyến</span><span class="val">${fmtVND(breakEven.marginPerTrip)}</span></div>
+        <div class="summary-row total"><span>Cần tối thiểu</span><span class="val">${breakEven.breakEvenTrips} chuyến</span></div>
+        <div class="summary-row"><span>Thực tế đã chạy</span><span class="val" style="color:${breakEven.surplusTrips>=0?'var(--profit)':'var(--loss)'}">${breakEven.actualTrips} chuyến (${breakEven.surplusTrips>=0?'dư':'thiếu'} ${Math.abs(breakEven.surplusTrips)})</span></div>
+        `}
+      </div>
+      <div class="hint" style="margin-top:8px;">Số chuyến tối thiểu cần chạy trong kỳ để doanh thu bù đủ chi phí cố định — chạy nhiều hơn số này mới bắt đầu có lãi thật.</div>
+    </section>
+
+    <section class="group">
+      <h3>📈 Xu Hướng Chi Phí / Km (6 Tháng Gần Nhất)</h3>
+      <div class="card">${renderCostPerKmChartSVG(costTrend)}</div>
+      <div class="hint" style="margin-top:8px;">Nếu cột các tháng gần đây cao dần lên — dấu hiệu xe xuống cấp, hao dầu tăng, hoặc giá dầu tăng, cần xem lại.</div>
     </section>
 
     <section class="group">
@@ -2029,6 +2361,12 @@ function renderResults(){
     </section>
 
     <section class="group">
+      <h3>🤝 Đối Tác & Công Nợ (Toàn Bộ, Không Theo Kỳ)</h3>
+      <div class="hint" style="margin-bottom:10px;">Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày mày chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
+      <div id="partnersOverviewWrap"></div>
+    </section>
+
+    <section class="group">
       <h3>🧭 Tư Vấn Chiến Lược</h3>
       ${insights.map(ins=>`
         <div class="card" style="display:flex; gap:12px; align-items:flex-start;">
@@ -2048,6 +2386,7 @@ function renderResults(){
   });
 
   renderRepairList(repairsHere);
+  renderPartnersOverview();
 
   document.getElementById('res_from').addEventListener('change', e=>{
     state.resultsRange.from = e.target.value; state.resultsRoadFeeOverride=null; renderResults();
@@ -2067,10 +2406,117 @@ function renderResults(){
 /// Full-screen drill-down for ONE construction site: billed/collected/owed,
 /// which driver ran how many trips, day-by-day activity, and the payment
 /// log (money received from the site's client/contractor) with add/edit.
+/// Renders the all-time partner list (sorted by amount owed, worst first)
+/// into the #partnersOverviewWrap placeholder inside renderResults().
+function renderPartnersOverview(){
+  const wrap = document.getElementById('partnersOverviewWrap');
+  if(!wrap) return;
+  const partners = computePartnersOverview();
+  if(partners.length===0){
+    wrap.innerHTML = '<div class="hint">Chưa có khoản thu nào được ghi nhận từ đối tác nào.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="card dash-wrap" style="padding:0;">
+      <table class="dash">
+        <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th>Xếp Hạng</th></tr></thead>
+        <tbody>
+          ${partners.map(p=>`
+            <tr class="site-detail-row" data-partner="${escapeHtml(p.name)}">
+              <td>${escapeHtml(p.name)}</td>
+              <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
+              <td><span class="rating-badge ${p.rating.className}">${p.rating.label}</span></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="hint" style="margin-top:8px;">Bấm vào 1 đối tác để xem chi tiết công trình, lịch sử thu tiền, và khoản nợ quá hạn bao lâu.</div>
+  `;
+  wrap.querySelectorAll('.site-detail-row').forEach(row=>{
+    row.addEventListener('click', ()=>openPartnerDetail(row.dataset.partner));
+  });
+}
+
+/// Full-screen drill-down for ONE business partner: all-time billed vs
+/// collected vs owed, ageing (since when the oldest unpaid amount is
+/// outstanding), reliability rating, per-site breakdown, and the complete
+/// payment history across every site tied to them.
+function openPartnerDetail(partnerName){
+  const app = document.getElementById('app');
+  const partners = computePartnersOverview();
+  const P = partners.find(x=>x.name===partnerName);
+  if(!P){ renderAll(); return; }
+
+  const allPayments = state.sitePayments
+    .filter(p=>P.sites.some(s=>s.siteName===p.siteName))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="partnerDetailBackBtn">← Quay Lại Kết Quả</button>
+    </section>
+
+    <section class="group">
+      <h3>🤝 ${escapeHtml(P.name)}</h3>
+      <div class="card">
+        <div class="summary-row"><span>Tổng tiền công (toàn bộ)</span><span class="val">${fmtVND(P.totalBilled)}</span></div>
+        <div class="summary-row"><span>Đã thu về (toàn bộ)</span><span class="val">${fmtVND(P.totalCollected)}</span></div>
+        <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${P.totalOwed>0?'var(--loss)':'var(--profit)'}">${fmtVND(P.totalOwed)}</span></div>
+        <div style="margin-top:12px;">
+          <span class="rating-badge ${P.rating.className}">${P.rating.label}</span>
+          ${P.totalOwed>0 && P.oldestUnpaidDate ? `<span class="hint" style="margin-left:8px;">Nợ từ ngày ${formatDateVN(P.oldestUnpaidDate)} (${P.daysOutstanding} ngày)</span>` : ''}
+        </div>
+        <div class="hint" style="margin-top:8px;">Đã nhận ${P.paymentCount} lần thanh toán${P.lastPaymentDate ? ', gần nhất ngày '+formatDateVN(P.lastPaymentDate) : ''}.</div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Công Trình Liên Quan</h3>
+      <div class="card dash-wrap" style="padding:0;">
+        <table class="dash">
+          <thead><tr><th>Công Trình</th><th>Đã Thu</th><th>Còn Nợ</th></tr></thead>
+          <tbody>
+            ${P.sites.map(s=>`
+              <tr class="site-detail-row" data-site="${escapeHtml(s.siteName)}">
+                <td>${escapeHtml(s.siteName)}</td>
+                <td>${fmtVND(s.collected)}</td>
+                <td style="color:${s.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(s.owed)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px;">Bấm vào 1 công trình để xem chi tiết chuyến/tài xế và ghi nhận thêm khoản thu.</div>
+    </section>
+
+    <section class="group">
+      <h3>Lịch Sử Thu Tiền</h3>
+      ${allPayments.length===0 ? '<div class="hint">Chưa có khoản thu nào.</div>' : allPayments.map(p=>`
+        <div class="card" style="padding:12px 14px;">
+          <div class="driver-row"><strong>${fmtVND(p.amount)}</strong><span class="hint">${escapeHtml(p.siteName)}</span></div>
+          <div class="hint">${formatDateVN(p.date)} · ${escapeHtml(p.notes||'')}</div>
+        </div>
+      `).join('')}
+    </section>
+  `;
+
+  document.getElementById('partnerDetailBackBtn').addEventListener('click', renderAll);
+  app.querySelectorAll('.site-detail-row[data-site]').forEach(row=>{
+    row.addEventListener('click', ()=>openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO));
+  });
+}
+
 function openSiteDetail(siteName, from, to){
   const app = document.getElementById('app');
   const det = computeSiteDetail(siteName, from, to);
   const driverRows = Object.entries(det.tripsByDriver).sort((a,b)=>b[1].trips-a[1].trips);
+
+  const allTimeBilled = (computeAllSiteBilledEvents()[siteName]||[]).reduce((s,e)=>s+e.amount,0);
+  const contract = state.siteContracts.find(c=>c.siteName===siteName) || null;
+  const contractValue = contract ? Number(contract.totalContractValue)||0 : 0;
+  const contractPercent = contractValue>0 ? Math.min(999, (allTimeBilled/contractValue*100)) : null;
+  const contractRemaining = contractValue>0 ? Math.max(0, contractValue-allTimeBilled) : null;
 
   app.innerHTML = `
     <section class="group">
@@ -2084,6 +2530,23 @@ function openSiteDetail(siteName, from, to){
         <div class="summary-row"><span>Đã thu về</span><span class="val">${fmtVND(det.collected)}</span></div>
         <div class="summary-row total"><span>${det.owed>0?'CÒN NỢ':'ĐÃ THU ĐỦ (DƯ)'}</span><span class="val" style="color:${det.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(Math.abs(det.owed))}</span></div>
       </div>
+    </section>
+
+    <section class="group">
+      <h3>📑 Giá Trị Hợp Đồng Công Trình</h3>
+      <div class="card">
+        <div class="field" style="margin-bottom:${contractValue>0?'14px':'0'};">
+          <label>Tổng giá trị hợp đồng đã ký (để trống nếu chưa có/không cố định)</label>
+          <input type="text" inputmode="decimal" id="contract_value">
+        </div>
+        ${contractValue>0 ? `
+        <div class="summary-row"><span>Đã thực hiện (toàn bộ, không tính theo kỳ)</span><span class="val">${fmtVND(allTimeBilled)}</span></div>
+        <div class="summary-row"><span>Tiến độ hoàn thành</span><span class="val">${contractPercent.toFixed(1)}%</span></div>
+        <div class="summary-row total" style="margin-bottom:0;"><span>Còn lại theo hợp đồng</span><span class="val">${fmtVND(contractRemaining)}</span></div>
+        ` : ''}
+      </div>
+      <div class="hint" style="margin-top:8px;">Dùng để biết công trình này sắp hết khối lượng hợp đồng chưa, để chủ động tìm mối mới trước khi xe nằm không.</div>
+      <button class="btn btn-ghost btn-block" id="saveContractBtn" style="margin-top:10px;">Lưu Giá Trị Hợp Đồng</button>
     </section>
 
     <section class="group">
@@ -2122,6 +2585,17 @@ function openSiteDetail(siteName, from, to){
   `;
 
   renderSitePaymentList(det.payments, siteName, from, to);
+
+  let contractDraftValue = contractValue;
+  attachMoneyInput(document.getElementById('contract_value'), contractDraftValue, v=>contractDraftValue=v);
+  document.getElementById('saveContractBtn').addEventListener('click', async ()=>{
+    const idx = state.siteContracts.findIndex(c=>c.siteName===siteName);
+    const record = { id: contract ? contract.id : uid('contract'), siteName, totalContractValue: contractDraftValue, notes: contract ? contract.notes : '' };
+    if(idx>=0) state.siteContracts[idx]=record; else state.siteContracts.push(record);
+    await saveSiteContracts();
+    openSiteDetail(siteName, from, to);
+    showToast('Đã lưu giá trị hợp đồng.');
+  });
 
   document.getElementById('siteDetailBackBtn').addEventListener('click', renderAll);
   document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>openSitePaymentEditor(null, siteName, from, to));
@@ -2198,6 +2672,204 @@ function openSitePaymentEditor(id, siteName, from, to){
       state.sitePayments = state.sitePayments.filter(p=>p.id!==draft.id);
       await saveSitePayments();
       openSiteDetail(siteName, from, to);
+      showToast('Đã xoá.');
+    }
+  });
+}
+
+// ---- Documents (vehicle + driver paperwork) list & editor ----
+function renderDocumentList(){
+  const wrap = document.getElementById('documentListWrap');
+  if(!wrap) return;
+  if(state.documents.length===0){
+    wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa có giấy tờ nào được nhập.</div>';
+    return;
+  }
+  const sorted = [...state.documents].sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate));
+  wrap.innerHTML = sorted.map(doc=>{
+    const daysLeft = daysUntilLocal(doc.expiryDate);
+    const urgency = urgencyFromDays(daysLeft, 30, 7);
+    const driverName = doc.scope==='driver' ? (driverById(doc.driverId)?.name || '(tài xế đã xoá)') : null;
+    return `
+      <div class="card" data-id="${doc.id}" style="padding:12px 14px;">
+        <div class="driver-row">
+          <strong>${escapeHtml(doc.type)}${driverName?' — '+escapeHtml(driverName):''}</strong>
+          <button class="link-btn editDocumentBtn" data-id="${doc.id}">Sửa</button>
+        </div>
+        <div class="hint">Hết hạn: ${formatDateVN(doc.expiryDate)} · <span class="rating-badge ${urgency.className}">${urgency.label}</span></div>
+        ${doc.notes ? `<div class="hint">${escapeHtml(doc.notes)}</div>` : ''}
+      </div>`;
+  }).join('');
+  wrap.querySelectorAll('.editDocumentBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openDocumentEditor(btn.dataset.id));
+  });
+}
+
+function openDocumentEditor(id){
+  const existing = id ? state.documents.find(d=>d.id===id) : null;
+  const draft = existing ? {...existing} : { id: uid('doc'), scope:'vehicle', type: DOCUMENT_TYPE_OPTIONS.vehicle[0], driverId: null, expiryDate: todayLocalDateStr(), notes:'' };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Thêm'} Giấy Tờ</h3>
+      <div class="card">
+        <div class="field">
+          <label>Phạm vi</label>
+          <div class="seg" id="doc_scope">
+            <button data-val="vehicle" class="${draft.scope==='vehicle'?'active':''}">Xe</button>
+            <button data-val="driver" class="${draft.scope==='driver'?'active':''}">Tài Xế</button>
+          </div>
+        </div>
+        <div class="field" id="doc_driverField" style="${draft.scope==='driver'?'':'display:none;'}">
+          <label>Tài xế</label>
+          <select id="doc_driver">
+            ${state.drivers.map(d=>`<option value="${d.id}" ${d.id===draft.driverId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Loại giấy tờ</label>
+          <select id="doc_type"></select>
+        </div>
+        <div class="field">
+          <label>Ngày hết hạn</label>
+          <input type="date" id="doc_expiry" value="${draft.expiryDate}">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="doc_notes" value="${escapeHtml(draft.notes)}">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delDocumentBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelDocumentBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveDocumentBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+
+  function refreshTypeOptions(){
+    const typeSelect = document.getElementById('doc_type');
+    const options = DOCUMENT_TYPE_OPTIONS[draft.scope];
+    typeSelect.innerHTML = options.map(t=>`<option value="${t}" ${t===draft.type?'selected':''}>${t}</option>`).join('');
+    if(!options.includes(draft.type)) draft.type = options[0];
+  }
+  refreshTypeOptions();
+
+  document.querySelectorAll('#doc_scope button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      draft.scope = btn.dataset.val;
+      document.querySelectorAll('#doc_scope button').forEach(b=>b.classList.toggle('active', b===btn));
+      document.getElementById('doc_driverField').style.display = draft.scope==='driver' ? '' : 'none';
+      refreshTypeOptions();
+    });
+  });
+
+  document.getElementById('saveDocumentBtn').addEventListener('click', async ()=>{
+    draft.type = document.getElementById('doc_type').value;
+    draft.driverId = draft.scope==='driver' ? document.getElementById('doc_driver').value : null;
+    draft.expiryDate = document.getElementById('doc_expiry').value || draft.expiryDate;
+    draft.notes = document.getElementById('doc_notes').value.trim();
+    if(draft.scope==='driver' && !draft.driverId){ showToast('Hãy thêm tài xế trước ở tab "Tài Xế".'); return; }
+    const idx = state.documents.findIndex(d=>d.id===draft.id);
+    if(idx>=0) state.documents[idx]=draft; else state.documents.push(draft);
+    await saveDocuments();
+    renderAll();
+    showToast('Đã lưu giấy tờ.');
+  });
+  document.getElementById('cancelDocumentBtn').addEventListener('click', renderAll);
+  const delBtn = document.getElementById('delDocumentBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá giấy tờ này?')){
+      state.documents = state.documents.filter(d=>d.id!==draft.id);
+      await saveDocuments();
+      renderAll();
+      showToast('Đã xoá.');
+    }
+  });
+}
+
+// ---- Maintenance schedules (distance-based) list & editor ----
+function renderMaintenanceList(){
+  const wrap = document.getElementById('maintenanceListWrap');
+  if(!wrap) return;
+  if(state.maintenanceSchedules.length===0){
+    wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa có hạng mục bảo dưỡng nào.</div>';
+    return;
+  }
+  const statuses = state.maintenanceSchedules.map(computeMaintenanceStatus).sort((a,b)=>a.kmRemaining-b.kmRemaining);
+  wrap.innerHTML = statuses.map(m=>`
+    <div class="card" data-id="${m.id}" style="padding:12px 14px;">
+      <div class="driver-row">
+        <strong>${escapeHtml(m.name)}</strong>
+        <button class="link-btn editMaintenanceBtn" data-id="${m.id}">Sửa</button>
+      </div>
+      <div class="hint">Chu kỳ ${m.intervalKm.toLocaleString('vi-VN')}km · Làm gần nhất ở Km ${Number(m.lastDoneOdo).toLocaleString('vi-VN')} (${formatDateVN(m.lastDoneDate)}) · <span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span></div>
+      ${m.notes ? `<div class="hint">${escapeHtml(m.notes)}</div>` : ''}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('.editMaintenanceBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openMaintenanceEditor(btn.dataset.id));
+  });
+}
+
+function openMaintenanceEditor(id){
+  const existing = id ? state.maintenanceSchedules.find(m=>m.id===id) : null;
+  const draft = existing ? {...existing} : { id: uid('maint'), name:'', intervalKm:5000, lastDoneOdo: currentOdometer(), lastDoneDate: todayLocalDateStr(), notes:'' };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Thêm'} Hạng Mục Bảo Dưỡng</h3>
+      <div class="card">
+        <div class="field">
+          <label>Tên hạng mục</label>
+          <input type="text" id="maint_name" value="${escapeHtml(draft.name)}" placeholder="VD: Thay dầu máy, Đảo lốp...">
+        </div>
+        <div class="field">
+          <label>Chu kỳ (km)</label>
+          <input type="number" inputmode="numeric" id="maint_interval" value="${draft.intervalKm}">
+        </div>
+        <div class="field">
+          <label>Đã làm ở Km số</label>
+          <input type="number" inputmode="numeric" id="maint_lastOdo" value="${draft.lastDoneOdo}">
+        </div>
+        <div class="field">
+          <label>Ngày làm gần nhất</label>
+          <input type="date" id="maint_lastDate" value="${draft.lastDoneDate}">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="maint_notes" value="${escapeHtml(draft.notes)}">
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px;">Odo hiện tại của xe (theo ca gần nhất đã ghi): ${currentOdometer().toLocaleString('vi-VN')} km.</div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delMaintenanceBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelMaintenanceBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveMaintenanceBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+
+  document.getElementById('saveMaintenanceBtn').addEventListener('click', async ()=>{
+    draft.name = document.getElementById('maint_name').value.trim();
+    draft.intervalKm = Number(document.getElementById('maint_interval').value)||0;
+    draft.lastDoneOdo = Number(document.getElementById('maint_lastOdo').value)||0;
+    draft.lastDoneDate = document.getElementById('maint_lastDate').value || draft.lastDoneDate;
+    draft.notes = document.getElementById('maint_notes').value.trim();
+    if(!draft.name){ showToast('Nhập tên hạng mục trước.'); return; }
+    const idx = state.maintenanceSchedules.findIndex(m=>m.id===draft.id);
+    if(idx>=0) state.maintenanceSchedules[idx]=draft; else state.maintenanceSchedules.push(draft);
+    await saveMaintenanceSchedules();
+    renderAll();
+    showToast('Đã lưu lịch bảo dưỡng.');
+  });
+  document.getElementById('cancelMaintenanceBtn').addEventListener('click', renderAll);
+  const delBtn = document.getElementById('delMaintenanceBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá hạng mục bảo dưỡng này?')){
+      state.maintenanceSchedules = state.maintenanceSchedules.filter(m=>m.id!==draft.id);
+      await saveMaintenanceSchedules();
+      renderAll();
       showToast('Đã xoá.');
     }
   });
@@ -2298,6 +2970,20 @@ function renderSettings(){
     </section>
 
     <section class="group">
+      <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
+      <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
+      <div id="documentListWrap"></div>
+      <button class="btn btn-ghost btn-block" id="addDocumentBtn">+ Thêm Giấy Tờ</button>
+    </section>
+
+    <section class="group">
+      <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
+      <div class="hint" style="margin-bottom:10px;">Nhập chu kỳ (ví dụ thay dầu mỗi 5.000km) và lần làm gần nhất — app tự tính còn bao nhiêu km nữa tới hạn dựa trên Odo mới nhất mày ghi.</div>
+      <div id="maintenanceListWrap"></div>
+      <button class="btn btn-ghost btn-block" id="addMaintenanceBtn">+ Thêm Hạng Mục Bảo Dưỡng</button>
+    </section>
+
+    <section class="group">
       <h3>Công Chuẩn Toàn Đội</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
@@ -2391,6 +3077,10 @@ function renderSettings(){
   });
 
   document.getElementById('exportBtn').addEventListener('click', exportCSV);
+  renderDocumentList();
+  renderMaintenanceList();
+  document.getElementById('addDocumentBtn').addEventListener('click', ()=>openDocumentEditor(null));
+  document.getElementById('addMaintenanceBtn').addEventListener('click', ()=>openMaintenanceEditor(null));
   document.getElementById('backupBtn').addEventListener('click', exportBackupFile);
   document.getElementById('restoreBtn').addEventListener('click', triggerRestoreFilePicker);
   document.getElementById('resetBtn').addEventListener('click', async ()=>{
@@ -2431,7 +3121,7 @@ function buildOperationLogRows(){
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến Tổng',
     'Tổng Doanh Thu Ca','Lương Cứng Phân Bổ','Tiền Ăn','Tiền Nhà+Điện Nước',
     'Chi Phí Phát Sinh','Ghi Chú Phát Sinh','Ứng Lương/Đền Bù','Người Nhận Ứng','Ghi Chú Ca',
-    'Tổng Chi Phí Ca','Lợi Nhuận Ròng Ca','Trạng Thái Thanh Toán'];
+    'Tổng Chi Phí Ca','Lợi Nhuận Ròng Ca'];
   const rows = [header];
   const sorted = [...state.shifts].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
   for(const sh of sorted){
@@ -2441,7 +3131,7 @@ function buildOperationLogRows(){
       sh.fuelUnitPrice||0, shiftFuelCost(sh)];
     const trailing = [shiftTotalRevenue(sh), sh.baseSalaryAllocation||0, sh.foodAllowance||0, sh.housingAllocation||0,
       sh.incidentalCost||0, sh.incidentalNotes||'', sh.advanceAmount||0, sh.advanceRecipientName||'',
-      sh.notes||'', shiftTotalCost(sh), shiftNetProfit(sh), paymentLabel(sh.paymentStatus)];
+      sh.notes||'', shiftTotalCost(sh), shiftNetProfit(sh)];
     if((sh.siteLogs||[]).length===0){
       rows.push([...shared, '','','','','','','','', ...trailing]);
     } else {
@@ -2557,7 +3247,7 @@ function exportResultsXLSX(resultsData){
 function exportCSV(){
   let from, to;
   if(state.shifts.length===0){
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayLocalDateStr();
     from = today; to = today;
   } else {
     const dates = state.shifts.map(sh=>sh.date).sort();
