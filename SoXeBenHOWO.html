@@ -387,6 +387,8 @@ let state = {
   resultsRoadFeeOverride: null, // if set, overrides settings.monthlyFixedRoadFee for the current results period
   sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
+  strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' — which screen is showing inside the "Trợ Lý" tab right now
+  appraisalAnalysis: { loading: false, error: null, result: null, generatedAt: null }, // expert pros/cons + recommendation for the project appraisal comparison, powered by the same Gemini pipeline as strategyAnalysis
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [], // {id, siteName, totalContractValue, notes}
@@ -926,7 +928,7 @@ function renderHeader(){
   } else if(state.currentTab==='drivers'){
     title.textContent='Tài Xế'; sub.textContent=state.drivers.length+' tài xế';
   } else if(state.currentTab==='strategy'){
-    title.textContent='Trợ Lý Chiến Lược'; sub.textContent='Phân tích sâu bằng AI';
+    title.textContent='Trợ Lý'; sub.textContent='Chọn tác vụ cần thực hiện';
   } else if(state.currentTab==='results'){
     title.textContent='Kết Quả Kinh Doanh'; sub.textContent='Theo khoảng thời gian';
   } else {
@@ -1815,7 +1817,7 @@ async function runStrategyAnalysis(){
       sa.error = 'Chưa có ca nào trong khoảng thời gian này để phân tích.';
       sa.loading = false;
       if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
-      if(state.currentTab==='strategy') renderStrategy();
+      if(state.currentTab==='strategy' && state.strategyView==='ai') renderStrategy();
       return;
     }
     const prompt = buildStrategyPrompt(summary);
@@ -1836,10 +1838,42 @@ async function runStrategyAnalysis(){
   }
   sa.loading = false;
   if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
-  if(state.currentTab==='strategy') renderStrategy();
+  if(state.currentTab==='strategy' && state.strategyView==='ai') renderStrategy();
+}
+
+/// Landing screen for the "Trợ Lý" tab — two clearly separated action
+/// buttons instead of one merged screen, because "Trợ Lý Chiến Lược" (AI
+/// đọc số liệu vận hành đã có) and "Thẩm Định Công Trình Trước Khi Nhận"
+/// (mô phỏng công trình CHƯA nhận) are two unrelated tasks that just
+/// happened to share a tab before. Neither sub-screen's own logic changes
+/// here — this only decides which one Ông Chủ sees first.
+function renderStrategyHub(){
+  state.strategyView = 'hub';
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <div class="card" style="text-align:center; padding:26px 18px;">
+        <div style="font-size:42px; margin-bottom:8px;">🧭</div>
+        <div style="font-weight:700; font-size:15.5px; margin-bottom:6px;">Trợ Lý Chiến Lược</div>
+        <div class="hint" style="margin-bottom:16px;">AI đọc số liệu vận hành thực tế (7/30 ngày gần nhất) và đưa ra nhận xét: cảnh báo hao dầu theo tài xế, công trình hiệu quả nhất/kém nhất, đề xuất bảo dưỡng.</div>
+        <button class="btn btn-accent btn-block" id="hubGoStrategyBtn">🧭 TRỢ LÝ CHIẾN LƯỢC</button>
+      </div>
+    </section>
+    <section class="group">
+      <div class="card" style="text-align:center; padding:26px 18px;">
+        <div style="font-size:42px; margin-bottom:8px;">🧮</div>
+        <div style="font-weight:700; font-size:15.5px; margin-bottom:6px;">Thẩm Định Công Trình Trước Khi Nhận</div>
+        <div class="hint" style="margin-bottom:16px;">Nhập số liệu công trình dự kiến (CHƯA nhận chạy), mô phỏng lãi gộp/hoà vốn, so sánh song song nhiều công trình và nhận định hướng từ chuyên gia nên ưu tiên công trình nào.</div>
+        <button class="btn btn-accent btn-block" id="hubGoAppraisalBtn">🧮 THẨM ĐỊNH CÔNG TRÌNH TRƯỚC KHI NHẬN</button>
+      </div>
+    </section>
+  `;
+  document.getElementById('hubGoStrategyBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategy(); });
+  document.getElementById('hubGoAppraisalBtn').addEventListener('click', ()=>{ saveMainScroll(); renderProjectAppraisal(); });
 }
 
 function renderStrategy(){
+  state.strategyView = 'ai';
   const app = document.getElementById('app');
   const sa = state.strategyAnalysis;
   if(!sa.from || !sa.to){
@@ -1851,9 +1885,13 @@ function renderStrategy(){
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
 
   app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="strategyBackBtn">← Quay Lại</button>
+    </section>
     ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới phân tích được.</div>` : ''}
     <section class="group">
-      <h3>Khoảng Thời Gian Phân Tích</h3>
+      <h3>🧭 Trợ Lý Chiến Lược</h3>
+      <div class="hint" style="margin-bottom:10px;">AI đọc số liệu vận hành thực tế trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -1872,12 +1910,6 @@ function renderStrategy(){
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
 
-    <section class="group">
-      <h3>🧮 Thẩm Định Công Trình Trước Khi Nhận</h3>
-      <div class="hint" style="margin-bottom:10px;">So sánh song song nhiều công trình dự kiến — dựa trên mức tiêu hao dầu trung bình thực tế của xe và đơn giá dầu hiện tại — trước khi quyết định nhận chạy.</div>
-      <button class="btn btn-ghost btn-block" id="openAppraisalBtn">🧮 Mở Bảng Thẩm Định Công Trình</button>
-    </section>
-
     ${sa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(sa.error)}</div></section>` : ''}
 
     ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
@@ -1893,10 +1925,10 @@ function renderStrategy(){
     activeStrategyTruckRun = null;
   }
 
+  document.getElementById('strategyBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
-  document.getElementById('openAppraisalBtn').addEventListener('click', ()=>{ saveMainScroll(); renderProjectAppraisal(); });
 }
 
 function renderStrategyResult(result){
@@ -2011,12 +2043,15 @@ function computeAppraisalMetrics(p){
 /// and returns there via renderAll()+restoreMainScroll(), matching every
 /// other full-screen drill-down in the app (openPartnerDetail, etc).
 function renderProjectAppraisal(){
+  state.strategyView = 'appraisal';
   const app = document.getElementById('app');
   const fuelPerKm = historicalAvgFuelPerKm();
   const fuelPrice = currentFuelUnitPriceForAppraisal();
   const projects = state.siteAppraisals || [];
   const metricsById = {};
   projects.forEach(p=>{ metricsById[p.id] = computeAppraisalMetrics(p); });
+  const hasKey = !!(state.settings.geminiApiKey || '').trim();
+  const aa = state.appraisalAnalysis;
 
   let bestId = null;
   projects.forEach(p=>{
@@ -2026,7 +2061,7 @@ function renderProjectAppraisal(){
 
   app.innerHTML = `
     <section class="group">
-      <button class="btn btn-ghost btn-sm" id="appraisalBackBtn">← Quay Lại Trợ Lý</button>
+      <button class="btn btn-ghost btn-sm" id="appraisalBackBtn">← Quay Lại</button>
     </section>
 
     <section class="group">
@@ -2063,11 +2098,34 @@ function renderProjectAppraisal(){
         }).join('')}
       </div>
     </section>` : ''}
+
+    ${projects.length>=1 ? `
+    <section class="group">
+      <h3>🧑‍💼 Phân Tích Chuyên Gia</h3>
+      <div class="hint" style="margin-bottom:10px;">AI đóng vai chuyên gia thẩm định vận tải, đọc đúng các số liệu đã tính ở trên (không tự bịa thêm) để nêu ưu/nhược điểm từng công trình và định hướng nên ưu tiên công trình nào — nếu số liệu chưa đủ rõ để kết luận chắc chắn, AI sẽ nói rõ thay vì đoán bừa.</div>
+      ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key để dùng được mục này.</div>` : ''}
+      <button class="btn btn-accent btn-block ${aa.loading?'strategy-run-line':''}" id="runAppraisalAnalysisBtn" ${aa.loading?'disabled':''}>
+        ${aa.loading ? 'Đang phân tích...' : '🧑‍💼 Phân Tích Chuyên Gia'}
+        ${aa.loading ? HOWO_TRUCK_HTML : ''}
+      </button>
+      ${aa.loading ? `<div class="hint" id="appraisalRetryHint" style="margin-top:8px;"></div>` : ''}
+      ${aa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(aa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
+    </section>
+    ${aa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(aa.error)}</div></section>` : ''}
+    ${aa.result ? renderAppraisalAnalysisResult(aa.result) : ''}
+    ` : ''}
   `;
 
   renderAppraisalList(metricsById);
+  if(aa.loading){
+    activeAppraisalTruckRun = startTruckRun(document.getElementById('runAppraisalAnalysisBtn'));
+  } else {
+    activeAppraisalTruckRun = null;
+  }
   document.getElementById('appraisalBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addAppraisalBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null));
+  const runBtn = document.getElementById('runAppraisalAnalysisBtn');
+  if(runBtn) runBtn.addEventListener('click', runAppraisalAnalysis);
 }
 
 /// Renders the project cards into #appraisalListWrap — split out from
@@ -2227,6 +2285,136 @@ function openProjectAppraisalEditor(id){
       showToast('Đã xoá.');
     }
   });
+}
+
+// ========================= APPRAISAL EXPERT ANALYSIS (AI PROS/CONS + RECOMMENDATION) =========================
+// Reuses the exact same Gemini call plumbing as the Strategy Assistant
+// (callGeminiText / callGeminiWithRetry / startTruckRun) but with its own
+// prompt, its own state (state.appraisalAnalysis), and its own truck-run
+// handle — completely separate pipeline from strategyAnalysis so the two
+// features can never clobber each other's loading state. Reads ONLY the
+// numbers already produced by computeAppraisalMetrics() (the frozen math
+// above); never recomputes or overrides them.
+
+/// Handle for the HOWO truck run currently live on the appraisal screen's
+/// analysis button — mirrors activeStrategyTruckRun, kept separate so the
+/// two screens' animations never interfere with each other.
+let activeAppraisalTruckRun = null;
+
+/// Builds the Vietnamese expert-persona prompt. Explicitly forbids Gemini
+/// from inventing figures not present in the payload, and explicitly
+/// requires it to say "chưa đủ căn cứ" (not enough basis) rather than
+/// force a pick whenever the projects are too close to call or there's
+/// only one project to look at — this is the actual mechanism behind
+/// "không được tự ý quyết định khi chưa chắc chắn".
+function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice){
+  return `Mày là Chuyên gia Thẩm định & Tư vấn Vận tải xe ben (nhiều năm kinh nghiệm ngành vận tải vật liệu xây dựng, tư duy thận trọng, không phán đoán cảm tính). Dưới đây là số liệu MÔ PHỎNG các công trình dự kiến — CHƯA nhận chạy — đã được tính sẵn bằng công thức kế toán chính xác của app (không cần và không được tính lại), dựa trên mức tiêu hao dầu trung bình thực tế của xe (${fuelPerKm.toFixed(2)} lít/km) và đơn giá dầu hiện tại (${fmtVND(fuelPrice)}/lít):
+
+${JSON.stringify(payload, null, 2)}
+
+Nhiệm vụ: đọc đúng các số liệu trên (net revenue, chi phí dầu, tiền luật đường, lãi gộp/chuyến, chi phí cố định phân bổ, số chuyến hoà vốn, ROI) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào.
+
+Chỉ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
+{
+  "projects": [
+    { "name": "<tên công trình, khớp đúng tên trong dữ liệu>", "pros": ["<ưu điểm cụ thể, dựa trên số liệu>"], "cons": ["<nhược điểm/rủi ro cụ thể, dựa trên số liệu>"] }
+  ],
+  "recommendation": {
+    "confident": true hoặc false,
+    "recommendedProject": "<tên công trình nên ưu tiên nhận nếu confident=true, để chuỗi rỗng nếu confident=false>",
+    "reasoning": "<giải thích ngắn gọn, dựa trên số liệu cụ thể — lãi gộp/chuyến, số chuyến hoà vốn, ROI, mức rủi ro, hoặc lý do vì sao chưa thể kết luận>",
+    "caveats": "<những điều Ông Chủ nên hỏi thêm/xác minh thêm trước khi quyết định, nếu có; để chuỗi rỗng nếu không có>"
+  }
+}
+QUY TẮC BẮT BUỘC: Chỉ nhận xét dựa trên số liệu có trong dữ liệu trên, tuyệt đối không bịa thêm số liệu. Nếu chỉ có 1 công trình, hoặc các công trình có lãi gộp/chuyến, ROI, số chuyến hoà vốn quá sát nhau khiến không đủ căn cứ để khẳng định chắc chắn công trình nào tốt hơn hẳn, PHẢI đặt "confident": false, để "recommendedProject" là chuỗi rỗng, và nêu rõ lý do trong "reasoning" — không được tự ý chọn đại một công trình khi chưa chắc chắn.`;
+}
+
+async function runAppraisalAnalysis(){
+  const aa = state.appraisalAnalysis;
+  aa.loading = true; aa.error = null;
+  renderProjectAppraisal();
+  try{
+    const projects = state.siteAppraisals || [];
+    if(projects.length===0){
+      aa.error = 'Chưa có công trình dự kiến nào để phân tích.';
+      aa.loading = false;
+      if(activeAppraisalTruckRun) await activeAppraisalTruckRun.finish();
+      if(state.currentTab==='strategy' && state.strategyView==='appraisal') renderProjectAppraisal();
+      return;
+    }
+    const fuelPerKm = historicalAvgFuelPerKm();
+    const fuelPrice = currentFuelUnitPriceForAppraisal();
+    const payload = projects.map(p=>{
+      const m = computeAppraisalMetrics(p);
+      return {
+        name: p.name || '(chưa đặt tên)',
+        kmPerTripKhuHoi: Math.round(m.kmPerTrip),
+        khoiLuongMoiChuyen: Number(p.loadPerTrip)||0,
+        giaCuocDaCoVat: !!p.priceIncludesVat,
+        doanhThuThuanMoiChuyen: Math.round(m.netRevenuePerTrip),
+        chiPhiDauMoiChuyen: Math.round(m.fuelCostPerTrip),
+        tienLuatDuongMoiChuyen: Math.round(m.roadFeePerTrip),
+        laiGopMoiChuyen: Math.round(m.grossProfitPerTrip),
+        chiPhiCoDinhPhanBo: Math.round(m.fixedCostAllocated),
+        soChuyenHoaVon: m.breakEvenTrips,
+        roiPhanTram: m.roiPercent!==null ? +m.roiPercent.toFixed(1) : null
+      };
+    });
+    const prompt = buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice);
+    const result = await callGeminiText(prompt, (attempt)=>{
+      if(attempt>=3){
+        const hintEl = document.getElementById('appraisalRetryHint');
+        if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
+      }
+    });
+    aa.result = result;
+    aa.generatedAt = new Date().toISOString();
+  }catch(e){
+    aa.error = e.message || 'Không phân tích được — thử lại.';
+  }
+  aa.loading = false;
+  if(activeAppraisalTruckRun) await activeAppraisalTruckRun.finish();
+  if(state.currentTab==='strategy' && state.strategyView==='appraisal') renderProjectAppraisal();
+}
+
+/// Renders the expert pros/cons cards + the final recommendation card.
+/// When Gemini set confident=false, the headline deliberately does NOT
+/// name a project — it says plainly that there isn't enough basis yet,
+/// matching the "don't decide when unsure" rule from the prompt.
+function renderAppraisalAnalysisResult(result){
+  const list = Array.isArray(result.projects) ? result.projects : [];
+  const rec = result.recommendation || {};
+  const isConfident = !!rec.confident && !!(rec.recommendedProject||'').trim();
+  return `
+    <section class="group">
+      <h3>📋 Ưu / Nhược Điểm Từng Công Trình</h3>
+      ${list.length===0 ? '<div class="hint">Không có dữ liệu phân tích.</div>' : list.map(p=>`
+        <div class="card">
+          <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(p.name||'')}</div>
+          ${Array.isArray(p.pros) && p.pros.length ? `
+          <div style="font-size:12.5px; font-weight:700; color:var(--profit); margin-bottom:2px;">✅ Ưu điểm</div>
+          <ul style="margin:0 0 8px 18px; padding:0; font-size:13px; color:var(--ink-soft); line-height:1.5;">
+            ${p.pros.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+          </ul>` : ''}
+          ${Array.isArray(p.cons) && p.cons.length ? `
+          <div style="font-size:12.5px; font-weight:700; color:var(--loss); margin-bottom:2px;">⚠️ Nhược điểm</div>
+          <ul style="margin:0; padding:0 0 0 18px; font-size:13px; color:var(--ink-soft); line-height:1.5;">
+            ${p.cons.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+          </ul>` : ''}
+        </div>
+      `).join('')}
+    </section>
+    <section class="group">
+      <h3>🧭 Định Hướng Từ Chuyên Gia</h3>
+      <div class="card">
+        ${isConfident
+          ? `<div style="font-weight:700; margin-bottom:6px; color:var(--profit);">Đề xuất ưu tiên: ${escapeHtml(rec.recommendedProject)}</div>`
+          : `<div style="font-weight:700; margin-bottom:6px; color:var(--ink-soft);">Chưa đủ căn cứ để khẳng định chắc chắn nên ưu tiên công trình nào.</div>`}
+        ${rec.reasoning ? `<div style="font-size:13px; color:var(--ink-soft); line-height:1.6;">${escapeHtml(rec.reasoning)}</div>` : ''}
+        ${rec.caveats ? `<div style="font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);">💡 Cần xác minh thêm: ${escapeHtml(rec.caveats)}</div>` : ''}
+      </div>
+    </section>
+  `;
 }
 
 // ========================= RESULTS / DASHBOARD TAB =========================
@@ -4233,7 +4421,7 @@ function renderAll(){
   } else if(state.currentTab==='drivers'){
     renderDrivers();
   } else if(state.currentTab==='strategy'){
-    renderStrategy();
+    renderStrategyHub();
   } else if(state.currentTab==='results'){
     renderResults();
   } else {
