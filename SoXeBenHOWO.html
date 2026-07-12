@@ -693,19 +693,23 @@ function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); 
 const REPAIR_RESPONSIBILITY_OPTIONS = [
   { key:'owner_full', label:'Chủ xe chịu 100% (hao mòn/lỗi kỹ thuật thông thường)' },
   { key:'driver_full', label:'Do tài xế làm hỏng — Tài xế chịu 100%' },
-  { key:'split', label:'Do tài xế làm hỏng — Chia đôi chi phí (50/50)' }
+  { key:'custom', label:'Tùy chọn — Nhập tay số tiền tài xế phải chịu' }
 ];
 function repairResponsibilityLabel(key){
   return (REPAIR_RESPONSIBILITY_OPTIONS.find(o=>o.key===key)||REPAIR_RESPONSIBILITY_OPTIONS[0]).label;
 }
 /// Portion of a repair's cost that gets deducted from the RESPONSIBLE
-/// driver's pay — 0 if the owner absorbs it fully (default), the full
-/// amount if the driver is 100% at fault, or half on a 50/50 split.
+/// driver's pay:
+///  - owner_full (default): 0 — chủ xe chịu toàn bộ.
+///  - driver_full: toàn bộ số tiền hoá đơn.
+///  - custom: số tiền chủ xe tự nhập tay (driverCustomAmount), không được
+///    vượt quá số tiền hoá đơn — phần còn lại ngầm hiểu là chủ xe/bên thứ
+///    ba chịu, không tạo tiền lệ khoá cứng 50/50.
 function repairDriverResponsibleAmount(r){
   const amt = Number(r.amount)||0;
   const resp = r.responsibility || 'owner_full';
   if(resp==='driver_full') return amt;
-  if(resp==='split') return amt/2;
+  if(resp==='custom') return Math.max(0, Math.min(amt, Number(r.driverCustomAmount)||0));
   return 0;
 }
 /// All-time total deducted from ONE driver across every repair record
@@ -713,7 +717,7 @@ function repairDriverResponsibleAmount(r){
 /// running "hồ sơ lỗi" figure.
 function driverResponsibleRepairTotal(driverId){
   return state.repairs
-    .filter(r=>r.responsibleDriverId===driverId && (r.responsibility==='driver_full' || r.responsibility==='split'))
+    .filter(r=>r.responsibleDriverId===driverId && (r.responsibility==='driver_full' || r.responsibility==='custom'))
     .reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
 }
 /// Same total but scoped to [from, to] — used when building the payroll
@@ -721,7 +725,7 @@ function driverResponsibleRepairTotal(driverId){
 /// breakages actually dated within that payroll period.
 function driverResponsibleRepairTotalInRange(driverId, from, to){
   return state.repairs
-    .filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to && (r.responsibility==='driver_full' || r.responsibility==='split'))
+    .filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to && (r.responsibility==='driver_full' || r.responsibility==='custom'))
     .reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
 }
 
@@ -2791,19 +2795,18 @@ function openPartnerDetail(partnerName){
     </section>
 
     <section class="group">
-      <h3>Lịch Sử Thu Tiền</h3>
-      ${allPayments.length===0 ? '<div class="hint">Chưa có khoản thu nào.</div>' : allPayments.map(p=>`
-        <div class="card" style="padding:12px 14px;">
-          <div class="driver-row"><strong>${fmtVND(p.amount)}</strong><span class="hint">${escapeHtml(p.siteName)}</span></div>
-          <div class="hint">${formatDateVN(p.date)} · ${escapeHtml(p.notes||'')}</div>
-        </div>
-      `).join('')}
+      <h3>💵 Dòng Tiền Thu Về Từ Đối Tác</h3>
+      <div id="sitePaymentListWrap"></div>
+      <button class="btn btn-ghost btn-block" id="addSitePaymentBtn">+ Ghi Nhận Khoản Đã Thu</button>
     </section>
   `;
 
+  renderSitePaymentList(allPayments, partnerName);
+
   document.getElementById('partnerDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>openAddSitePaymentForPartner(partnerName));
   app.querySelectorAll('.site-detail-row[data-site]').forEach(row=>{
-    row.addEventListener('click', ()=>openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO));
+    row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO); });
   });
 }
 
@@ -2876,14 +2879,8 @@ function openSiteDetail(siteName, from, to){
       </div>
     </section>
 
-    <section class="group">
-      <h3>💵 Dòng Tiền Thu Về Từ Đối Tác</h3>
-      <div id="sitePaymentListWrap"></div>
-      <button class="btn btn-ghost btn-block" id="addSitePaymentBtn">+ Ghi Nhận Khoản Đã Thu</button>
-    </section>
+    <div class="hint" style="margin:0 16px 16px;">Ghi nhận khoản đã thu tiền từ đối tác được thực hiện ở màn hình <strong>Chi Tiết Đối Tác</strong> (mục Đối Tác &amp; Công Nợ) — vì một đối tác có thể phụ trách nhiều công trình, dòng tiền thu về được quản lý tập trung tại đó.</div>
   `;
-
-  renderSitePaymentList(det.payments, siteName, from, to);
 
   let contractDraftValue = contractValue;
   attachMoneyInput(document.getElementById('contract_value'), contractDraftValue, v=>contractDraftValue=v);
@@ -2897,13 +2894,16 @@ function openSiteDetail(siteName, from, to){
   });
 
   document.getElementById('siteDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>openSitePaymentEditor(null, siteName, from, to));
 }
 
-function renderSitePaymentList(payments, siteName, from, to){
+/// Renders the payment list inside the PARTNER detail screen — covers every
+/// site tied to that partner, each row tagged with its site name since a
+/// partner can have several sites. Edit navigates back into this same
+/// function's caller (openPartnerDetail) once saved/cancelled/deleted.
+function renderSitePaymentList(payments, partnerName){
   const wrap = document.getElementById('sitePaymentListWrap');
   if(payments.length===0){
-    wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa ghi nhận khoản thu nào từ công trình này trong kỳ.</div>';
+    wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa ghi nhận khoản thu nào từ đối tác này.</div>';
     return;
   }
   wrap.innerHTML = payments.map(p=>`
@@ -2912,21 +2912,55 @@ function renderSitePaymentList(payments, siteName, from, to){
         <strong>${fmtVND(p.amount)}</strong>
         <button class="link-btn editSitePaymentBtn" data-id="${p.id}">Sửa</button>
       </div>
-      <div class="hint">${formatDateVN(p.date)} · ${escapeHtml(p.partnerName||'—')} · ${escapeHtml(p.notes||'')}</div>
+      <div class="hint">${formatDateVN(p.date)} · ${escapeHtml(p.siteName)} · ${escapeHtml(p.notes||'')}</div>
     </div>
   `).join('');
   wrap.querySelectorAll('.editSitePaymentBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>openSitePaymentEditor(btn.dataset.id, siteName, from, to));
+    btn.addEventListener('click', ()=>openSitePaymentEditor(btn.dataset.id, null, null, null, partnerName));
   });
 }
 
-function openSitePaymentEditor(id, siteName, from, to){
+/// Opens a modal letting the person pick WHICH of the partner's sites a new
+/// payment belongs to, then hands off to openSitePaymentEditor. Skipped
+/// entirely (goes straight to the editor) when the partner only has one site.
+function openAddSitePaymentForPartner(partnerName){
+  const partners = computePartnersOverview();
+  const P = partners.find(x=>x.name===partnerName);
+  if(!P || P.sites.length===0){ showToast('Đối tác này chưa có công trình nào.'); return; }
+  if(P.sites.length===1){
+    openSitePaymentEditor(null, P.sites[0].siteName, null, null, partnerName);
+    return;
+  }
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>Chọn Công Trình</h3>
+    <div class="hint" style="margin-bottom:10px;">Khoản thu này thuộc công trình nào của đối tác "${escapeHtml(partnerName)}"?</div>
+    <div class="field" style="margin-bottom:0;">
+      <select id="pickSitePaymentSite">
+        ${P.sites.map(s=>`<option value="${escapeHtml(s.siteName)}">${escapeHtml(s.siteName)}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn btn-accent btn-block" id="pickSitePaymentBtn" style="margin-top:14px;">Tiếp Tục</button>
+  `);
+  document.getElementById('pickSitePaymentBtn').addEventListener('click', ()=>{
+    const chosen = document.getElementById('pickSitePaymentSite').value;
+    closeModal();
+    openSitePaymentEditor(null, chosen, null, null, partnerName);
+  });
+}
+
+/// Payment editor for money received from a partner/client. Always returns
+/// to the PARTNER detail screen (openPartnerDetail), since collection is
+/// now managed exclusively from there rather than from the site screen.
+function openSitePaymentEditor(id, siteName, from, to, partnerName){
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid('pay'), siteName, date: to, partnerName:'', amount:0, notes:'' };
+  const resolvedSiteName = existing ? existing.siteName : siteName;
+  const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'' };
+  const goBack = () => openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName);
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(siteName)}</h3>
+      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(resolvedSiteName)}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
@@ -2961,17 +2995,17 @@ function openSitePaymentEditor(id, siteName, from, to){
     const idx = state.sitePayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.sitePayments[idx]=draft; else state.sitePayments.push(draft);
     await saveSitePayments();
-    openSiteDetail(siteName, from, to);
     showToast('Đã lưu khoản thu.');
+    goBack();
   });
-  document.getElementById('cancelSitePaymentBtn').addEventListener('click', ()=>openSiteDetail(siteName, from, to));
+  document.getElementById('cancelSitePaymentBtn').addEventListener('click', goBack);
   const delBtn = document.getElementById('delSitePaymentBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản thu này?')){
       state.sitePayments = state.sitePayments.filter(p=>p.id!==draft.id);
       await saveSitePayments();
-      openSiteDetail(siteName, from, to);
       showToast('Đã xoá.');
+      goBack();
     }
   });
 }
@@ -3201,7 +3235,7 @@ function renderRepairList(repairsHere){
         return `
         <div class="repair-day-item" data-id="${r.id}">
           <div>
-            <div style="font-weight:600; font-size:13px;">${escapeHtml(r.item||'(chưa ghi hạng mục)')}${resp!=='owner_full' ? `<span class="resp-badge ${resp}">${resp==='driver_full'?'Tài xế chịu 100%':'Chia đôi'}${respDriver?': '+escapeHtml(respDriver.name):''}</span>` : ''}</div>
+            <div style="font-weight:600; font-size:13px;">${escapeHtml(r.item||'(chưa ghi hạng mục)')}${resp!=='owner_full' ? `<span class="resp-badge ${resp}">${resp==='driver_full'?'Tài xế chịu 100%':'Tài xế chịu '+fmtVND(repairDriverResponsibleAmount(r))}${respDriver?': '+escapeHtml(respDriver.name):''}</span>` : ''}</div>
             <div class="hint">${escapeHtml(r.invoiceCode||'—')} · ${fmtVND(r.amount)}</div>
           </div>
           <button class="link-btn editRepairBtn" data-id="${r.id}">Sửa</button>
@@ -3216,8 +3250,8 @@ function renderRepairList(repairsHere){
 
 function openRepairEditor(id){
   const existing = id ? state.repairs.find(r=>r.id===id) : null;
-  const draft = existing ? {...existing, responsibility: existing.responsibility || 'owner_full', responsibleDriverId: existing.responsibleDriverId || null}
-    : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'', responsibility:'owner_full', responsibleDriverId:null };
+  const draft = existing ? {...existing, responsibility: existing.responsibility || 'owner_full', responsibleDriverId: existing.responsibleDriverId || null, driverCustomAmount: existing.driverCustomAmount || 0}
+    : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'', responsibility:'owner_full', responsibleDriverId:null, driverCustomAmount:0 };
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -3254,6 +3288,10 @@ function openRepairEditor(id){
             ${state.drivers.map(d=>`<option value="${d.id}" ${d.id===draft.responsibleDriverId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
           </select>
         </div>
+        <div class="field" id="rp_customAmountField" style="margin-top:12px; margin-bottom:0; display:${draft.responsibility==='custom'?'block':'none'};">
+          <label>Số tiền cụ thể tài xế phải chịu (phần còn lại tính vào chi phí vận hành chung)</label>
+          <input type="text" inputmode="decimal" id="rp_customAmount">
+        </div>
         <div class="hint" id="rp_deductionPreview" style="margin-top:10px;"></div>
       </div>
       <div style="display:flex; gap:10px; margin-top:10px;">
@@ -3264,13 +3302,20 @@ function openRepairEditor(id){
     </section>
   `;
   attachMoneyInput(document.getElementById('rp_amount'), draft.amount, v=>{ draft.amount=v; refreshDeductionPreview(); });
+  attachMoneyInput(document.getElementById('rp_customAmount'), draft.driverCustomAmount, v=>{ draft.driverCustomAmount=v; refreshDeductionPreview(); });
 
   function refreshDeductionPreview(){
     const prev = document.getElementById('rp_deductionPreview');
     if(!prev) return;
     const deduction = repairDriverResponsibleAmount(draft);
+    if(draft.responsibility==='custom' && (Number(draft.driverCustomAmount)||0) > (Number(draft.amount)||0)){
+      prev.textContent = `Số tiền tài xế chịu không được vượt quá ${fmtVND(draft.amount)} (số tiền hoá đơn) — sẽ tự động giới hạn về ${fmtVND(deduction)} khi lưu.`;
+      prev.style.color = 'var(--loss)';
+      return;
+    }
+    prev.style.color = '';
     prev.textContent = deduction>0
-      ? `Sẽ trừ ${fmtVND(deduction)} vào lương của tài xế được chọn khi xuất lương kỳ có ngày ${formatDateVN(draft.date)}.`
+      ? `Sẽ trừ ${fmtVND(deduction)} vào lương của tài xế được chọn khi xuất lương kỳ có ngày ${formatDateVN(draft.date)}${draft.responsibility==='custom' ? ' (phần còn lại '+fmtVND(Math.max(0,(Number(draft.amount)||0)-deduction))+' tính vào chi phí vận hành chung)' : ''}.`
       : 'Chủ xe chịu toàn bộ chi phí này — không trừ vào lương tài xế nào.';
   }
   refreshDeductionPreview();
@@ -3278,6 +3323,7 @@ function openRepairEditor(id){
   document.getElementById('rp_responsibility').addEventListener('change', e=>{
     draft.responsibility = e.target.value;
     document.getElementById('rp_driverField').style.display = draft.responsibility==='owner_full' ? 'none' : 'block';
+    document.getElementById('rp_customAmountField').style.display = draft.responsibility==='custom' ? 'block' : 'none';
     refreshDeductionPreview();
   });
   document.getElementById('rp_driver').addEventListener('change', e=>{
@@ -3294,6 +3340,14 @@ function openRepairEditor(id){
     draft.responsibleDriverId = draft.responsibility==='owner_full' ? null : (driverSel.value || null);
     if(draft.responsibility!=='owner_full' && !draft.responsibleDriverId){
       showToast('Chọn tài xế chịu trách nhiệm trước khi lưu.'); return;
+    }
+    if(draft.responsibility==='custom'){
+      draft.driverCustomAmount = Math.max(0, Math.min(Number(draft.driverCustomAmount)||0, Number(draft.amount)||0));
+      if(draft.driverCustomAmount<=0){
+        showToast('Nhập số tiền cụ thể tài xế phải chịu trước khi lưu.'); return;
+      }
+    } else {
+      draft.driverCustomAmount = 0;
     }
     const idx = state.repairs.findIndex(r=>r.id===draft.id);
     if(idx>=0) state.repairs[idx]=draft; else state.repairs.push(draft);
@@ -3489,10 +3543,35 @@ function applyAccountingFormat(ws, colIndices, startRow){
       const addr = XLSX.utils.encode_cell({ r:R, c:C });
       const cell = ws[addr];
       if(cell && cell.t === 'n'){
+        // Writing the format code directly onto the cell (z) is honored by
+        // SheetJS on save — Excel/Google Sheets render the "1.000.000"
+        // thousand-separator style the instant the file is opened, with no
+        // manual reformatting needed.
         cell.z = '#,##0';
       }
     }
   }
+}
+
+/// Auto-fits every column of a sheet to its widest cell content (header or
+/// data), so the workbook opens in Excel/Google Sheets with columns already
+/// wide enough to read — no manual drag-to-resize needed. `rows` is the
+/// same array-of-arrays passed to XLSX.utils.aoa_to_sheet for this sheet.
+function autoFitColumns(ws, rows){
+  if(!ws || !rows || rows.length===0) return;
+  const colCount = rows.reduce((max,row)=>Math.max(max, row.length), 0);
+  const widths = [];
+  for(let c=0;c<colCount;c++){
+    let maxLen = 8; // sensible floor so short numeric columns aren't squeezed
+    for(const row of rows){
+      const cell = row[c];
+      if(cell===undefined || cell===null || cell==='') continue;
+      const text = (typeof cell === 'number') ? cell.toLocaleString('vi-VN') : String(cell);
+      if(text.length > maxLen) maxLen = text.length;
+    }
+    widths.push({ wch: Math.min(maxLen + 2, 48) });
+  }
+  ws['!cols'] = widths;
 }
 
 /// Builds the flat "Nhật Ký Vận Hành" sheet: ALL shifts ever recorded (not
@@ -3610,26 +3689,34 @@ function buildRepairRows(from, to){
 function downloadWorkbook(from, to, resultsData, filenamePrefix){
   const wb = XLSX.utils.book_new();
 
-  const wsLog = XLSX.utils.aoa_to_sheet(buildOperationLogRows());
+  const logRows = buildOperationLogRows();
+  const wsLog = XLSX.utils.aoa_to_sheet(logRows);
   applyAccountingFormat(wsLog, [4,5,6,7,8,9,10,11,12,14,15,16,17,18,19,20,21,22,23,24,25,27,30,31], 1);
+  autoFitColumns(wsLog, logRows);
   XLSX.utils.book_append_sheet(wb, wsLog, 'Nhat Ky Van Hanh');
 
-  const wsPayroll = XLSX.utils.aoa_to_sheet(buildDriverPayrollRows(from, to));
+  const payrollRows = buildDriverPayrollRows(from, to);
+  const wsPayroll = XLSX.utils.aoa_to_sheet(payrollRows);
   applyAccountingFormat(wsPayroll, [1,2,3,4,5,6,7,8,9], 1);
+  autoFitColumns(wsPayroll, payrollRows);
   XLSX.utils.book_append_sheet(wb, wsPayroll, 'Luong Tai Xe');
 
   if(resultsData){
-    const wsResults = XLSX.utils.aoa_to_sheet(buildResultsRows(resultsData));
+    const resultsRows = buildResultsRows(resultsData);
+    const wsResults = XLSX.utils.aoa_to_sheet(resultsRows);
     applyAccountingFormat(wsResults, [1,2,3], 0);
+    autoFitColumns(wsResults, resultsRows);
     XLSX.utils.book_append_sheet(wb, wsResults, 'Ket Qua Kinh Doanh');
   }
 
-  const wsRepairs = XLSX.utils.aoa_to_sheet(buildRepairRows(from, to));
+  const repairRows = buildRepairRows(from, to);
+  const wsRepairs = XLSX.utils.aoa_to_sheet(repairRows);
   applyAccountingFormat(wsRepairs, [3,6], 1);
+  autoFitColumns(wsRepairs, repairRows);
   XLSX.utils.book_append_sheet(wb, wsRepairs, 'Sua Chua Khau Hao');
 
   XLSX.writeFile(wb, `${filenamePrefix}_${from}_den_${to}.xlsx`);
-  showToast('Đã xuất file Excel (.xlsx).');
+  showToast('Đã xuất file Excel (.xlsx) — cột đã tự giãn, số tiền có dấu chấm ngăn cách hàng nghìn.');
 }
 
 /// Called from the Kết Quả tab's export button — includes the period's
