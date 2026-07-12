@@ -159,6 +159,40 @@
   .rating-badge.warn{ background:var(--loss-soft); color:var(--loss); }
   .rating-badge.risk{ background:var(--loss); color:#fff; }
 
+  .driver-cv-card{ padding:14px; }
+  .driver-cv-head{ display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .driver-cv-avatar{ width:42px; height:42px; border-radius:50%; background:var(--accent); color:#fff; font-weight:800; font-size:18px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .driver-cv-name{ font-weight:800; font-size:16px; }
+  .driver-cv-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .driver-cv-item{ display:flex; flex-direction:column; gap:2px; background:var(--bg); border-radius:10px; padding:8px 10px; }
+  .driver-cv-item .k{ font-size:11px; color:var(--ink-soft); }
+  .driver-cv-item .v{ font-size:13px; font-weight:700; word-break:break-word; }
+
+  .formula-block{ padding:10px 0; }
+  .formula-label{ font-size:12px; color:var(--ink-soft); margin-bottom:4px; line-height:1.4; }
+  .formula-value{ font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; word-break:break-word; }
+  .formula-op{ text-align:center; font-size:18px; font-weight:800; color:var(--accent); padding:2px 0; }
+  .formula-result .formula-value{ color:var(--accent); font-size:24px; }
+  .formula-divider{ border-top:1px solid var(--border); margin:10px 0; }
+
+  .repair-day-item{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border); }
+
+  .truck-progress-track{
+    position:relative; height:38px; background:var(--accent-soft); border-radius:20px;
+    overflow:hidden; margin-top:12px;
+  }
+  .truck-progress-icon{
+    position:absolute; top:50%; font-size:22px; transform:translateY(-50%);
+    animation: truckDrive 1.8s ease-in-out infinite;
+  }
+  @keyframes truckDrive{
+    0%   { left:2px;               transform:translateY(-50%) scaleX(1); }
+    46%  { left:calc(100% - 28px); transform:translateY(-50%) scaleX(1); }
+    50%  { left:calc(100% - 28px); transform:translateY(-50%) scaleX(-1); }
+    96%  { left:2px;               transform:translateY(-50%) scaleX(-1); }
+    100% { left:2px;               transform:translateY(-50%) scaleX(1); }
+  }
+
   #loginScreen{
     display:none; position:fixed; inset:0; z-index:100; background:var(--bg);
     flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center;
@@ -263,13 +297,30 @@ let state = {
   resultsRoadFeeOverride: null, // if set, overrides settings.monthlyFixedRoadFee for the current results period
   inboxImages: [], // {id, dataUrl, status:'processing'|'done'|'error', category, rawText, extracted}
   sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
-  strategyAnalysis: { periodDays: 7, loading: false, error: null, result: null, generatedAt: null },
+  strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [] // {id, siteName, totalContractValue, notes}
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+/// Scroll-position retention: the app re-renders the whole #app innerHTML
+/// on every navigation, which naturally resets scroll to the top. These
+/// two helpers save the scrollable <main> element's position right before
+/// drilling into a detail view, and restore it after coming back — so
+/// "Back" returns to where the person was, not the top of the page.
+let savedMainScrollTop = 0;
+function saveMainScroll(){
+  const main = document.querySelector('main');
+  if(main) savedMainScrollTop = main.scrollTop;
+}
+function restoreMainScroll(){
+  requestAnimationFrame(()=>{
+    const main = document.querySelector('main');
+    if(main) main.scrollTop = savedMainScrollTop;
+  });
+}
 
 /// Returns TODAY as "YYYY-MM-DD" using the PHONE'S LOCAL date/time zone.
 /// `new Date().toISOString()` is UTC-based and silently rolls back to the
@@ -781,7 +832,7 @@ function startNewShift(){
     driverNameSnapshot: driver.name,
     status: 'active',
     odoStart: prev ? prev.odoEnd : 0,
-    odoEnd: prev ? prev.odoEnd : 0,
+    odoEnd: 0,
     fuelStart: prev ? prev.fuelEnd : 0,
     fuelEnd: 0,
     fuelAdded: 0,
@@ -823,7 +874,7 @@ function reapplyOdoFuelInheritance(){
   const inheritedOdo = prev ? prev.odoEnd : 0;
   const inheritedFuel = prev ? prev.fuelEnd : 0;
   sh.odoStart = inheritedOdo;
-  sh.odoEnd = inheritedOdo;
+  sh.odoEnd = 0;
   sh.fuelStart = inheritedFuel;
 }
 
@@ -1217,13 +1268,25 @@ function renderDrivers(){
       <h3>Danh Sách Tài Xế</h3>
       ${state.drivers.length===0 ? '<div class="empty"><div class="big">👤</div>Chưa có tài xế nào.</div>' :
         state.drivers.map(d=>`
-        <div class="card" data-id="${d.id}">
-          <div class="driver-row">
-            <strong>${escapeHtml(d.name)}</strong>
+        <div class="card driver-cv-card" data-id="${d.id}">
+          <div class="driver-cv-head">
+            <div class="driver-cv-avatar">${escapeHtml((d.name||'?').trim().charAt(0).toUpperCase())}</div>
+            <div style="flex:1;">
+              <div class="driver-cv-name">${escapeHtml(d.name)}</div>
+              <div class="hint">${d.isActive===false ? 'Ngừng hoạt động' : 'Đang hoạt động'}</div>
+            </div>
             <button class="link-btn editDriverBtn" data-id="${d.id}">Sửa</button>
           </div>
-          <div class="hint">Lương cứng: ${fmtVND(d.monthlyBaseSalary)}/tháng · Tiền ăn: ${fmtVND(d.dailyFoodAllowance)}/ngày · Tiền nhà: ${fmtVND(d.monthlyHousingBudget)}/tháng</div>
-          <div class="hint">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
+          <div class="driver-cv-grid">
+            <div class="driver-cv-item"><span class="k">Lương cứng/tháng</span><span class="v">${fmtVND(d.monthlyBaseSalary)}</span></div>
+            <div class="driver-cv-item"><span class="k">Tiền ăn/ngày</span><span class="v">${fmtVND(d.dailyFoodAllowance)}</span></div>
+            <div class="driver-cv-item"><span class="k">Tiền nhà/tháng</span><span class="v">${fmtVND(d.monthlyHousingBudget)}</span></div>
+            <div class="driver-cv-item"><span class="k">Tip/thưởng mỗi chuyến</span><span class="v">${fmtVND(d.tipPerTrip||0)}</span></div>
+            <div class="driver-cv-item"><span class="k">Số CCCD</span><span class="v">${escapeHtml(d.cccdNumber||'—')}</span></div>
+            <div class="driver-cv-item"><span class="k">Bằng lái</span><span class="v">${escapeHtml(d.licenseInfo||'—')}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tình trạng sức khoẻ</span><span class="v">${escapeHtml(d.healthStatus||'—')}</span></div>
+          </div>
+          <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
         </div>
       `).join('')}
     </section>
@@ -1243,6 +1306,10 @@ function renderDrivers(){
       monthlyBaseSalary: ndVals.salary,
       dailyFoodAllowance: ndVals.food,
       monthlyHousingBudget: ndVals.housing,
+      tipPerTrip: 0,
+      cccdNumber: '',
+      licenseInfo: '',
+      healthStatus: '',
       isActive: true
     };
     state.drivers.push(driver);
@@ -1275,9 +1342,25 @@ function openEditDriver(id){
           <label>Tiền ăn / ngày</label>
           <input type="text" inputmode="decimal" id="ed_food">
         </div>
-        <div class="field" style="margin-bottom:0;">
+        <div class="field">
           <label>Tiền nhà + điện nước / tháng</label>
           <input type="text" inputmode="decimal" id="ed_housing">
+        </div>
+        <div class="field">
+          <label>Tiền tip/thưởng mỗi chuyến</label>
+          <input type="text" inputmode="decimal" id="ed_tip">
+        </div>
+        <div class="field">
+          <label>Số CCCD</label>
+          <input type="text" id="ed_cccd" value="${escapeHtml(d.cccdNumber||'')}">
+        </div>
+        <div class="field">
+          <label>Thông tin bằng lái (hạng, số bằng...)</label>
+          <input type="text" id="ed_license" value="${escapeHtml(d.licenseInfo||'')}">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Tình trạng sức khoẻ</label>
+          <input type="text" id="ed_health" value="${escapeHtml(d.healthStatus||'')}" placeholder="VD: Tốt, khám gần nhất 01/2026">
         </div>
       </div>
       <div style="display:flex; gap:10px; margin-top:10px;">
@@ -1287,15 +1370,20 @@ function openEditDriver(id){
       </div>
     </section>
   `;
-  const edVals = { salary: d.monthlyBaseSalary, food: d.dailyFoodAllowance, housing: d.monthlyHousingBudget };
+  const edVals = { salary: d.monthlyBaseSalary, food: d.dailyFoodAllowance, housing: d.monthlyHousingBudget, tip: d.tipPerTrip||0 };
   attachMoneyInput(document.getElementById('ed_salary'), edVals.salary, v=>edVals.salary=v);
   attachMoneyInput(document.getElementById('ed_food'), edVals.food, v=>edVals.food=v);
   attachMoneyInput(document.getElementById('ed_housing'), edVals.housing, v=>edVals.housing=v);
+  attachMoneyInput(document.getElementById('ed_tip'), edVals.tip, v=>edVals.tip=v);
   document.getElementById('saveDriverBtn').addEventListener('click', async ()=>{
     d.name = document.getElementById('ed_name').value.trim() || d.name;
     d.monthlyBaseSalary = edVals.salary;
     d.dailyFoodAllowance = edVals.food;
     d.monthlyHousingBudget = edVals.housing;
+    d.tipPerTrip = edVals.tip;
+    d.cccdNumber = document.getElementById('ed_cccd').value.trim();
+    d.licenseInfo = document.getElementById('ed_license').value.trim();
+    d.healthStatus = document.getElementById('ed_health').value.trim();
     await saveDrivers();
     renderAll(); showToast('Đã lưu thông tin tài xế.');
   });
@@ -1489,7 +1577,7 @@ function buildDraftShiftFromInbox(){
     driverNameSnapshot: driver.name,
     status: 'active',
     odoStart: prev ? prev.odoEnd : 0,
-    odoEnd: odoEndGuess !== null ? odoEndGuess : (prev ? prev.odoEnd : 0),
+    odoEnd: odoEndGuess !== null ? odoEndGuess : 0,
     fuelStart: prev ? prev.fuelEnd : 0,
     fuelEnd: 0,
     fuelAdded: fuelAddedGuess !== null ? fuelAddedGuess : 0,
@@ -1627,13 +1715,9 @@ function renderInboxExtractCard(im){
 /// Builds the compact numeric summary sent to Gemini — deliberately NOT
 /// the full raw shift log (keeps the prompt small/fast/cheap); every
 /// number here is already computed by the app's own verified formulas.
-function aggregateStrategyData(periodDays){
-  const toDate = new Date();
-  const fromDate = new Date(toDate.getTime() - (periodDays-1)*86400000);
-  const to = todayLocalDateStr();
-  const y = fromDate.getFullYear(), m = String(fromDate.getMonth()+1).padStart(2,'0'), d = String(fromDate.getDate()).padStart(2,'0');
-  const from = `${y}-${m}-${d}`;
+function aggregateStrategyData(from, to){
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const periodDays = Math.max(1, Math.round((new Date(to+'T00:00:00') - new Date(from+'T00:00:00'))/86400000) + 1);
 
   const byDriver = {};
   for(const sh of inRange){
@@ -1681,7 +1765,7 @@ function aggregateStrategyData(periodDays){
 /// output so the result can be rendered as organized cards, not a wall of
 /// text.
 function buildStrategyPrompt(summary){
-  return `Mày là Chuyên gia Kế toán và Tối ưu hoá vận tải xe ben HOWO 4 chân. Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính toán chính xác bằng công thức kế toán, không cần tính lại) trong ${summary.periodDays} ngày gần nhất (từ ${summary.from} đến ${summary.to}):
+  return `Mày là Chuyên gia Kế toán và Tối ưu hoá vận tải xe ben HOWO 4 chân. Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính toán chính xác bằng công thức kế toán, không cần tính lại) trong khoảng ${summary.periodDays} ngày, từ ${summary.from} đến ${summary.to}:
 
 ${JSON.stringify(summary, null, 2)}
 
@@ -1731,7 +1815,7 @@ async function runStrategyAnalysis(){
   sa.loading = true; sa.error = null;
   renderStrategy();
   try{
-    const summary = aggregateStrategyData(sa.periodDays);
+    const summary = aggregateStrategyData(sa.from, sa.to);
     if(summary.driverStats.length===0 && summary.siteRanking.length===0){
       sa.error = 'Chưa có ca nào trong khoảng thời gian này để phân tích.';
       sa.loading = false;
@@ -1752,19 +1836,35 @@ async function runStrategyAnalysis(){
 function renderStrategy(){
   const app = document.getElementById('app');
   const sa = state.strategyAnalysis;
+  if(!sa.from || !sa.to){
+    sa.to = todayLocalDateStr();
+    const d = new Date(sa.to+'T00:00:00');
+    d.setDate(d.getDate()-6);
+    sa.from = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
 
   app.innerHTML = `
     ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới phân tích được.</div>` : ''}
     <section class="group">
       <h3>Khoảng Thời Gian Phân Tích</h3>
-      <div class="seg" id="periodSeg">
-        <button data-val="7" class="${sa.periodDays===7?'active':''}">7 Ngày Gần Nhất</button>
-        <button data-val="30" class="${sa.periodDays===30?'active':''}">30 Ngày Gần Nhất</button>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="strategy_from" value="${sa.from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="strategy_to" value="${sa.to}">
+        </div>
       </div>
       <button class="btn btn-accent btn-block" id="runStrategyBtn" style="margin-top:12px;" ${sa.loading?'disabled':''}>
-        ${sa.loading ? '⏳ Đang phân tích...' : '🧭 Phân Tích Ngay'}
+        ${sa.loading ? 'Đang phân tích...' : '🧭 Phân Tích Ngay'}
       </button>
+      ${sa.loading ? `
+      <div class="truck-progress-track" id="truckProgressTrack">
+        <div class="truck-progress-icon">🚛</div>
+      </div>` : ''}
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
 
@@ -1772,18 +1872,13 @@ function renderStrategy(){
 
     ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
       <section class="group">
-        <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc số liệu vận hành gần đây và đưa ra nhận xét chiến lược.</div>
+        <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc số liệu vận hành trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
       </section>
     ` : '')}
   `;
 
-  document.querySelectorAll('#periodSeg button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      sa.periodDays = Number(btn.dataset.val);
-      sa.result = null; sa.error = null;
-      renderStrategy();
-    });
-  });
+  document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
+  document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
 }
 
@@ -2009,8 +2104,12 @@ function sitePaymentsInRange(siteName, from, to){
 /// owed, a driver × trips breakdown, and a day-by-day activity log —
 /// mirrors the original spreadsheet's per-site cash-flow view.
 function computeSiteDetail(siteName, from, to){
+  // Trip/driver activity respects the requested period (useful for browsing
+  // a specific window of work), but every FINANCIAL total (billed,
+  // collected, owed) is always ALL-TIME — debt is a running balance, not a
+  // period concept, and mixing the two produced inconsistent "owed"
+  // numbers between this view and the Đối Tác & Công Nợ overview.
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
-  let billed = 0;
   const tripsByDriver = {};
   const dailyActivity = [];
   for(const sh of inRange){
@@ -2019,15 +2118,19 @@ function computeSiteDetail(siteName, from, to){
       const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
       if(name !== siteName) continue;
       const rev = siteRevenue(s);
-      billed += rev;
-      if(!tripsByDriver[driverName]) tripsByDriver[driverName] = { trips:0, revenue:0 };
+      const cost = siteWageTotal(s);
+      if(!tripsByDriver[driverName]) tripsByDriver[driverName] = { trips:0, revenue:0, cost:0 };
       tripsByDriver[driverName].trips += Number(s.trips)||0;
       tripsByDriver[driverName].revenue += rev;
-      dailyActivity.push({ date: sh.date, driverName, trips: Number(s.trips)||0, volumePerTrip: s.volumePerTrip||0, revenue: rev });
+      tripsByDriver[driverName].cost += cost;
+      dailyActivity.push({ date: sh.date, driverName, trips: Number(s.trips)||0, volumePerTrip: s.volumePerTrip||0, revenue: rev, cost });
     }
   }
   dailyActivity.sort((a,b)=>a.date.localeCompare(b.date));
-  const payments = sitePaymentsInRange(siteName, from, to).sort((a,b)=>a.date.localeCompare(b.date));
+
+  const allTimeBilledEvents = computeAllSiteBilledEvents()[siteName] || [];
+  const billed = allTimeBilledEvents.reduce((s,e)=>s+e.amount,0);
+  const payments = state.sitePayments.filter(p=>p.siteName===siteName).sort((a,b)=>a.date.localeCompare(b.date));
   const collected = payments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const owed = billed - collected;
   return { siteName, billed, collected, owed, tripsByDriver, dailyActivity, payments };
@@ -2113,7 +2216,7 @@ function computePartnersOverview(){
   const partners = {};
 
   for(const siteName of Object.keys(siteBilled)){
-    const partnerName = derivePartnerForSite(siteName) || `(Chưa gán đối tác) ${siteName}`;
+    const partnerName = derivePartnerForSite(siteName) || siteName;
     const payments = state.sitePayments.filter(p=>p.siteName===siteName).map(p=>({date:p.date, amount:Number(p.amount)||0}));
     const aging = computeFifoAging(siteBilled[siteName], payments);
     const billedTotal = siteBilled[siteName].reduce((s,e)=>s+e.amount,0);
@@ -2273,10 +2376,25 @@ function renderResults(){
       <h3>⚖️ Điểm Hoà Vốn Trong Kỳ</h3>
       <div class="card">
         ${breakEven.breakEvenTrips===null ? `<div class="hint">${escapeHtml(breakEven.note)}</div>` : `
-        <div class="summary-row"><span>Chi phí cố định cần bù (lương cứng + nhà + luật đường)</span><span class="val">${fmtVND(breakEven.totalFixed)}</span></div>
-        <div class="summary-row"><span>Lãi gộp bình quân / chuyến</span><span class="val">${fmtVND(breakEven.marginPerTrip)}</span></div>
-        <div class="summary-row total"><span>Cần tối thiểu</span><span class="val">${breakEven.breakEvenTrips} chuyến</span></div>
-        <div class="summary-row"><span>Thực tế đã chạy</span><span class="val" style="color:${breakEven.surplusTrips>=0?'var(--profit)':'var(--loss)'}">${breakEven.actualTrips} chuyến (${breakEven.surplusTrips>=0?'dư':'thiếu'} ${Math.abs(breakEven.surplusTrips)})</span></div>
+        <div class="formula-block">
+          <div class="formula-label">Tổng chi phí cố định (lương cứng + nhà + luật đường)</div>
+          <div class="formula-value">${fmtVND(breakEven.totalFixed)}</div>
+        </div>
+        <div class="formula-op">÷</div>
+        <div class="formula-block">
+          <div class="formula-label">Lãi gộp bình quân mỗi chuyến</div>
+          <div class="formula-value">${fmtVND(breakEven.marginPerTrip)}</div>
+        </div>
+        <div class="formula-op">=</div>
+        <div class="formula-block formula-result">
+          <div class="formula-label">Số chuyến tối thiểu để hoà vốn trong kỳ</div>
+          <div class="formula-value">${breakEven.breakEvenTrips} chuyến</div>
+        </div>
+        <div class="formula-divider"></div>
+        <div class="formula-block">
+          <div class="formula-label">Thực tế đã chạy trong kỳ</div>
+          <div class="formula-value" style="color:${breakEven.surplusTrips>=0?'var(--profit)':'var(--loss)'}">${breakEven.actualTrips} chuyến (${breakEven.surplusTrips>=0?'dư':'thiếu'} ${Math.abs(breakEven.surplusTrips)})</div>
+        </div>
         `}
       </div>
       <div class="hint" style="margin-top:8px;">Số chuyến tối thiểu cần chạy trong kỳ để doanh thu bù đủ chi phí cố định — chạy nhiều hơn số này mới bắt đầu có lãi thật.</div>
@@ -2344,19 +2462,19 @@ function renderResults(){
         <table class="dash">
           <thead><tr><th>Công Trình</th><th>Đã Thu</th><th>Còn Nợ</th></tr></thead>
           <tbody>
-            ${siteRanking.map(s=>{
-              const det = computeSiteDetail(s.name, from, to);
-              return `
-              <tr class="site-detail-row" data-site="${escapeHtml(s.name)}">
-                <td>${escapeHtml(s.name)}</td>
+            ${siteRanking
+              .map(s=>({ name:s.name, det: computeSiteDetail(s.name, from, to) }))
+              .sort((a,b)=>b.det.owed-a.det.owed)
+              .map(({name, det})=>`
+              <tr class="site-detail-row" data-site="${escapeHtml(name)}">
+                <td>${escapeHtml(name)}</td>
                 <td>${fmtVND(det.collected)}</td>
                 <td style="color:${det.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(det.owed)}</td>
-              </tr>`;
-            }).join('')}
+              </tr>`).join('')}
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:8px;">Bấm vào một công trình để xem chi tiết: tài xế nào chạy bao nhiêu chuyến, dòng tiền thu về từng ngày.</div>
+      <div class="hint" style="margin-top:8px;">Bấm vào một công trình để xem chi tiết: tài xế nào chạy bao nhiêu chuyến, dòng tiền thu về từng ngày. Công trình nợ nhiều nhất luôn hiện lên đầu.</div>
       `}
     </section>
 
@@ -2399,7 +2517,7 @@ function renderResults(){
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
   document.querySelectorAll('.site-detail-row').forEach(row=>{
-    row.addEventListener('click', ()=>openSiteDetail(row.dataset.site, from, to));
+    row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, from, to); });
   });
 }
 
@@ -2434,7 +2552,7 @@ function renderPartnersOverview(){
     <div class="hint" style="margin-top:8px;">Bấm vào 1 đối tác để xem chi tiết công trình, lịch sử thu tiền, và khoản nợ quá hạn bao lâu.</div>
   `;
   wrap.querySelectorAll('.site-detail-row').forEach(row=>{
-    row.addEventListener('click', ()=>openPartnerDetail(row.dataset.partner));
+    row.addEventListener('click', ()=>{ saveMainScroll(); openPartnerDetail(row.dataset.partner); });
   });
 }
 
@@ -2501,7 +2619,7 @@ function openPartnerDetail(partnerName){
     </section>
   `;
 
-  document.getElementById('partnerDetailBackBtn').addEventListener('click', renderAll);
+  document.getElementById('partnerDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   app.querySelectorAll('.site-detail-row[data-site]').forEach(row=>{
     row.addEventListener('click', ()=>openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO));
   });
@@ -2512,11 +2630,10 @@ function openSiteDetail(siteName, from, to){
   const det = computeSiteDetail(siteName, from, to);
   const driverRows = Object.entries(det.tripsByDriver).sort((a,b)=>b[1].trips-a[1].trips);
 
-  const allTimeBilled = (computeAllSiteBilledEvents()[siteName]||[]).reduce((s,e)=>s+e.amount,0);
   const contract = state.siteContracts.find(c=>c.siteName===siteName) || null;
   const contractValue = contract ? Number(contract.totalContractValue)||0 : 0;
-  const contractPercent = contractValue>0 ? Math.min(999, (allTimeBilled/contractValue*100)) : null;
-  const contractRemaining = contractValue>0 ? Math.max(0, contractValue-allTimeBilled) : null;
+  const contractPercent = contractValue>0 ? Math.min(999, (det.billed/contractValue*100)) : null;
+  const contractRemaining = contractValue>0 ? Math.max(0, contractValue-det.billed) : null;
 
   app.innerHTML = `
     <section class="group">
@@ -2540,7 +2657,7 @@ function openSiteDetail(siteName, from, to){
           <input type="text" inputmode="decimal" id="contract_value">
         </div>
         ${contractValue>0 ? `
-        <div class="summary-row"><span>Đã thực hiện (toàn bộ, không tính theo kỳ)</span><span class="val">${fmtVND(allTimeBilled)}</span></div>
+        <div class="summary-row"><span>Đã thực hiện (toàn bộ, không tính theo kỳ)</span><span class="val">${fmtVND(det.billed)}</span></div>
         <div class="summary-row"><span>Tiến độ hoàn thành</span><span class="val">${contractPercent.toFixed(1)}%</span></div>
         <div class="summary-row total" style="margin-bottom:0;"><span>Còn lại theo hợp đồng</span><span class="val">${fmtVND(contractRemaining)}</span></div>
         ` : ''}
@@ -2553,10 +2670,10 @@ function openSiteDetail(siteName, from, to){
       <h3>Tài Xế Chạy Công Trình Này</h3>
       <div class="card dash-wrap" style="padding:0;">
         <table class="dash">
-          <thead><tr><th>Tài Xế</th><th>Số Chuyến</th><th>Doanh Thu</th></tr></thead>
+          <thead><tr><th>Tài Xế</th><th>Số Chuyến</th><th>Doanh Thu</th><th>Chi Phí</th></tr></thead>
           <tbody>
-            ${driverRows.length===0 ? '<tr><td colspan="3">Chưa có dữ liệu</td></tr>' : driverRows.map(([name,d])=>`
-              <tr><td>${escapeHtml(name)}</td><td>${d.trips}</td><td>${fmtVND(d.revenue)}</td></tr>
+            ${driverRows.length===0 ? '<tr><td colspan="4">Chưa có dữ liệu</td></tr>' : driverRows.map(([name,d])=>`
+              <tr><td>${escapeHtml(name)}</td><td>${d.trips}</td><td>${fmtVND(d.revenue)}</td><td>${fmtVND(d.cost)}</td></tr>
             `).join('')}
           </tbody>
         </table>
@@ -2597,7 +2714,7 @@ function openSiteDetail(siteName, from, to){
     showToast('Đã lưu giá trị hợp đồng.');
   });
 
-  document.getElementById('siteDetailBackBtn').addEventListener('click', renderAll);
+  document.getElementById('siteDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>openSitePaymentEditor(null, siteName, from, to));
 }
 
@@ -2881,16 +2998,32 @@ function renderRepairList(repairsHere){
     wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa có khoản sửa chữa nào trong kỳ này.</div>';
     return;
   }
-  const sorted = [...repairsHere].sort((a,b)=>b.date.localeCompare(a.date));
-  wrap.innerHTML = sorted.map(r=>`
-    <div class="card" data-id="${r.id}" style="padding:12px 14px;">
+  const byDate = {};
+  for(const r of repairsHere){
+    if(!byDate[r.date]) byDate[r.date] = [];
+    byDate[r.date].push(r);
+  }
+  const dates = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+  wrap.innerHTML = dates.map(date=>{
+    const items = byDate[date];
+    const dayTotal = items.reduce((s,r)=>s+(Number(r.amount)||0),0);
+    return `
+    <div class="card" style="padding:12px 14px;">
       <div class="driver-row">
-        <strong>${escapeHtml(r.item||'(chưa ghi hạng mục)')}</strong>
-        <button class="link-btn editRepairBtn" data-id="${r.id}">Sửa</button>
+        <strong>${formatDateVN(date)}</strong>
+        <span class="hint">${fmtVND(dayTotal)}</span>
       </div>
-      <div class="hint">${formatDateVN(r.date)} · ${escapeHtml(r.invoiceCode||'—')} · ${fmtVND(r.amount)}</div>
-    </div>
-  `).join('');
+      ${items.map(r=>`
+        <div class="repair-day-item" data-id="${r.id}">
+          <div>
+            <div style="font-weight:600; font-size:13px;">${escapeHtml(r.item||'(chưa ghi hạng mục)')}</div>
+            <div class="hint">${escapeHtml(r.invoiceCode||'—')} · ${fmtVND(r.amount)}</div>
+          </div>
+          <button class="link-btn editRepairBtn" data-id="${r.id}">Sửa</button>
+        </div>
+      `).join('')}
+    </div>`;
+  }).join('');
   wrap.querySelectorAll('.editRepairBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>openRepairEditor(btn.dataset.id));
   });
@@ -3151,27 +3284,30 @@ function buildOperationLogRows(){
 /// LƯƠNG THỰC NHẬN = lương cứng + lương chuyến + tiền ăn − ứng lương.
 /// (Verified against the original spreadsheet's driver payroll formula.)
 function buildDriverPayrollRows(from, to){
-  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','LƯƠNG THỰC NHẬN'];
+  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tổng Tiền Tip/Thưởng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','LƯƠNG THỰC NHẬN'];
   const rows = [header];
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
   const byDriver = {};
   for(const sh of inRange){
-    const name = driverById(sh.driverId)?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
-    if(!byDriver[name]) byDriver[name] = { shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0 };
+    const driver = driverById(sh.driverId);
+    const name = driver?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
+    if(!byDriver[name]) byDriver[name] = { shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0, tip:0 };
     const b = byDriver[name];
+    const shiftTrips = (sh.siteLogs||[]).reduce((s,l)=>s+(Number(l.trips)||0),0);
     b.shifts += 1;
     b.baseSalary += sh.baseSalaryAllocation||0;
     b.tripWage += shiftTotalTripWage(sh);
     b.food += sh.foodAllowance||0;
     b.housing += sh.housingAllocation||0;
     b.advance += sh.advanceAmount||0;
+    b.tip += (driver?.tipPerTrip||0) * shiftTrips;
   }
   Object.keys(byDriver).sort().forEach(name=>{
     const b = byDriver[name];
-    const netPay = b.baseSalary + b.tripWage + b.food - b.advance;
-    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(b.housing), Math.round(b.advance), Math.round(netPay)]);
+    const netPay = b.baseSalary + b.tripWage + b.food + b.tip - b.advance;
+    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(b.tip), Math.round(b.housing), Math.round(b.advance), Math.round(netPay)]);
   });
-  if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','']);
+  if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','','']);
   return rows;
 }
 
