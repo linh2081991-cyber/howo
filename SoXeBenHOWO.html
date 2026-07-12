@@ -160,6 +160,16 @@
   .formula-result .formula-value{ color:var(--accent); font-size:24px; }
   .formula-divider{ border-top:1px solid var(--border); margin:10px 0; }
 
+  .be-formula{ display:flex; align-items:center; justify-content:center; gap:16px; flex-wrap:wrap; padding:14px 4px 8px; }
+  .be-frac{ display:flex; flex-direction:column; align-items:center; min-width:148px; }
+  .be-frac .fr-num, .be-frac .fr-den{ font-size:12px; color:var(--ink-soft); text-align:center; line-height:1.35; }
+  .be-frac .fr-num strong, .be-frac .fr-den strong{ display:block; font-size:15.5px; color:var(--ink); font-weight:800; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .be-frac .fr-line{ width:100%; height:2px; background:var(--ink); margin:7px 0; border-radius:2px; }
+  .be-eq-sign{ font-size:24px; font-weight:800; color:var(--accent); }
+  .be-result{ display:flex; flex-direction:column; align-items:center; min-width:82px; }
+  .be-result .val{ font-size:32px; font-weight:900; color:var(--accent); line-height:1; font-variant-numeric:tabular-nums; }
+  .be-result .lbl{ font-size:11px; color:var(--ink-soft); margin-top:5px; text-align:center; line-height:1.35; }
+
   .appraisal-compare{ display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; -webkit-overflow-scrolling:touch; }
   .appraisal-compare .compare-card{ flex:0 0 230px; border:1.5px solid var(--border); border-radius:14px; padding:14px; background:var(--surface); }
   .appraisal-compare .compare-card.best{ border-color:var(--profit); box-shadow:0 0 0 1.5px var(--profit) inset; }
@@ -1997,16 +2007,18 @@ function renderStrategyResult(result){
 // this section.
 
 /// Most recent ca with a real đơn giá dầu entered — used as the fallback
-/// "real-time" fuel price when Ông Chủ hasn't set one in Cài Đặt yet.
+/// "real-time" fuel price when Ông Chủ hasn't set one on the appraisal
+/// screen yet.
 function latestKnownFuelUnitPrice(){
   const priced = state.shifts.filter(sh=>Number(sh.fuelUnitPrice)>0);
   if(priced.length===0) return 0;
   priced.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
   return Number(priced[0].fuelUnitPrice)||0;
 }
-/// The price actually used to run a simulation: Cài Đặt's "Đơn giá dầu
-/// hiện tại" takes priority; if that's still 0 (never set), falls back to
-/// the most recent real đơn giá dầu recorded on any ca.
+/// The price actually used to run a simulation: the "Đơn giá dầu dùng để
+/// mô phỏng" field on the "Thẩm Định Công Trình" screen (tab Trợ Lý) takes
+/// priority; if that's still 0 (never set), falls back to the most recent
+/// real đơn giá dầu recorded on any ca.
 function currentFuelUnitPriceForAppraisal(){
   return (Number(state.settings.currentFuelUnitPrice)||0) || latestKnownFuelUnitPrice();
 }
@@ -2073,9 +2085,19 @@ function renderProjectAppraisal(){
       <h3>🧮 Thẩm Định &amp; So Sánh Công Trình Trước Khi Nhận</h3>
       <div class="card">
         <div class="summary-row"><span>Mức tiêu hao dầu trung bình thực tế (toàn bộ lịch sử)</span><span class="val">${fuelPerKm>0?fuelPerKm.toFixed(2)+' lít/km':'Chưa có dữ liệu'}</span></div>
-        <div class="summary-row"><span>Đơn giá dầu dùng để mô phỏng</span><span class="val">${fuelPrice>0?fmtVND(fuelPrice)+'/lít':'Chưa có'}</span></div>
       </div>
-      <div class="hint" style="margin-top:8px;">Đơn giá lấy từ mục "Đơn giá dầu hiện tại" trong Cài Đặt; nếu Ông Chủ chưa nhập, app tự lấy đơn giá dầu của ca gần nhất đã ghi. ${fuelPrice===0?'Hiện chưa có đơn giá nào — vào tab "⚙️ Cài Đặt" để nhập trước khi mô phỏng.':''}</div>
+      <div class="card" style="margin-top:8px;">
+        <div class="field">
+          <label>Đơn giá dầu dùng để mô phỏng (đ/lít)</label>
+          <input type="text" inputmode="decimal" id="aps_fuelPrice">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Thuế suất VAT (%)</label>
+          <input type="number" inputmode="decimal" id="aps_vatRate" value="${Number(state.settings.vatRatePercent)||0}">
+        </div>
+        <button class="btn btn-ghost btn-sm" id="saveAppraisalParamsBtn" style="margin-top:12px;">💾 Lưu Thông Số Mô Phỏng</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">2 thông số này chỉ dùng riêng để mô phỏng thẩm định công trình ở đây, không ảnh hưởng tới đơn giá dầu ghi nhận trên từng ca thực tế. ${fuelPrice===0?'Chưa có đơn giá nào để mô phỏng — nhập ở trên rồi bấm "Lưu Thông Số Mô Phỏng".':'Để trống rồi Lưu sẽ khiến app tự lấy đơn giá dầu của ca gần nhất đã ghi.'}</div>
     </section>
 
     <section class="group">
@@ -2131,6 +2153,16 @@ function renderProjectAppraisal(){
   document.getElementById('addAppraisalBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null));
   const runBtn = document.getElementById('runAppraisalAnalysisBtn');
   if(runBtn) runBtn.addEventListener('click', runAppraisalAnalysis);
+
+  let apsFuelVal = state.settings.currentFuelUnitPrice;
+  attachMoneyInput(document.getElementById('aps_fuelPrice'), apsFuelVal, v=>{ apsFuelVal=v; });
+  document.getElementById('saveAppraisalParamsBtn').addEventListener('click', async ()=>{
+    state.settings.currentFuelUnitPrice = apsFuelVal;
+    state.settings.vatRatePercent = Number(document.getElementById('aps_vatRate').value)||0;
+    await saveSettings();
+    showToast('Đã lưu thông số mô phỏng.');
+    renderProjectAppraisal();
+  });
 }
 
 /// Renders the project cards into #appraisalListWrap — split out from
@@ -2235,7 +2267,7 @@ function openProjectAppraisalEditor(id){
     <section class="group">
       <h3>Mô Phỏng Nhanh</h3>
       <div class="card" id="ap_preview"></div>
-      <div class="hint" style="margin-top:8px;">Dựa trên mức tiêu hao dầu trung bình thực tế ${historicalAvgFuelPerKm().toFixed(2)} lít/km và đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít hiện đang dùng để mô phỏng (sửa ở tab Cài Đặt).</div>
+      <div class="hint" style="margin-top:8px;">Dựa trên mức tiêu hao dầu trung bình thực tế ${historicalAvgFuelPerKm().toFixed(2)} lít/km và đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít hiện đang dùng để mô phỏng (sửa ở đầu trang "Thẩm Định Công Trình" trong tab Trợ Lý).</div>
     </section>
 
     <section class="group" style="display:flex; gap:10px;">
@@ -3188,25 +3220,22 @@ function renderResults(){
 
       <div class="card" style="margin-top:10px;">
         ${breakEven.breakEvenTrips===null ? `<div class="hint">${escapeHtml(breakEven.note)}</div>` : `
-        <div class="formula-block">
-          <div class="formula-label">Tổng chi phí cố định</div>
-          <div class="formula-value">${fmtVND(breakEven.fixedCost)}</div>
+        <div class="be-formula">
+          <div class="be-frac">
+            <div class="fr-num">Tổng chi phí cố định<strong>${fmtVND(breakEven.fixedCost)}</strong></div>
+            <div class="fr-line"></div>
+            <div class="fr-den">Lãi gộp bình quân / chuyến<strong>${fmtVND(breakEven.marginPerTrip)}</strong></div>
+          </div>
+          <div class="be-eq-sign">=</div>
+          <div class="be-result">
+            <div class="val">${breakEven.breakEvenTrips}</div>
+            <div class="lbl">chuyến tối thiểu để hoà vốn</div>
+          </div>
         </div>
-        <div class="formula-op">÷</div>
-        <div class="formula-block">
-          <div class="formula-label">Lãi gộp bình quân mỗi chuyến</div>
-          <div class="formula-value">${fmtVND(breakEven.marginPerTrip)}</div>
-        </div>
-        <div class="formula-op">=</div>
-        <div class="formula-block formula-result">
-          <div class="formula-label">Số chuyến tối thiểu để hoà vốn trong kỳ</div>
-          <div class="formula-value">${breakEven.breakEvenTrips} chuyến</div>
-        </div>
-        <div class="hint" style="margin-top:2px;">Số chuyến tối thiểu để hoà vốn trong kỳ = Tổng chi phí cố định ÷ Lãi gộp bình quân mỗi chuyến = ${fmtVND(breakEven.fixedCost)} ÷ ${fmtVND(breakEven.marginPerTrip)} = ${breakEven.breakEvenTrips} chuyến.</div>
         <div class="formula-divider"></div>
-        <div class="formula-block">
-          <div class="formula-label">Thực tế đã chạy trong kỳ</div>
-          <div class="formula-value"><span style="color:var(--profit)">${breakEven.actualTrips} chuyến</span>${breakEven.surplusTrips<0 ? ` <span style="color:var(--loss)">(thiếu ${Math.abs(breakEven.surplusTrips)} chuyến)</span>` : breakEven.surplusTrips>0 ? ` <span style="color:var(--profit)">(dư ${breakEven.surplusTrips} chuyến)</span>` : ''}</div>
+        <div class="summary-row">
+          <span>Thực tế đã chạy trong kỳ</span>
+          <span class="val"><span style="color:var(--profit); font-weight:800;">${breakEven.actualTrips} chuyến</span>${breakEven.surplusTrips<0 ? ` <span style="color:var(--loss); font-weight:800;">(thiếu ${Math.abs(breakEven.surplusTrips)} chuyến)</span>` : breakEven.surplusTrips>0 ? ` <span style="color:var(--profit); font-weight:800;">(dư ${breakEven.surplusTrips} chuyến)</span>` : ''}</span>
         </div>
         `}
       </div>
@@ -3851,7 +3880,6 @@ function renderRepairList(repairsHere){
     return;
   }
   const sorted = [...repairsHere].sort((a,b)=>b.date.localeCompare(a.date));
-  const total = sorted.reduce((s,r)=>s+(Number(r.amount)||0),0);
   wrap.innerHTML = `
     <div class="card dash-wrap" style="padding:0; margin-bottom:8px;">
       <table class="dash">
@@ -3870,7 +3898,6 @@ function renderRepairList(repairsHere){
         </tbody>
       </table>
     </div>
-    <div class="hint">${sorted.length} khoản sửa chữa/khấu hao trong kỳ này — tổng ${fmtVND(total)}.</div>
   `;
   wrap.querySelectorAll('.repair-detail-row').forEach(tr=>{
     tr.addEventListener('click', ()=>openRepairEditor(tr.dataset.id));
@@ -4032,21 +4059,6 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>🧮 Thông Số Mô Phỏng Thẩm Định Công Trình</h3>
-      <div class="hint" style="margin-bottom:10px;">Dùng riêng cho mục "🧮 Thẩm Định Công Trình" ở tab Trợ Lý — không ảnh hưởng tới đơn giá dầu ghi nhận trên từng ca thực tế.</div>
-      <div class="card">
-        <div class="field">
-          <label>Đơn giá dầu hiện tại (đ/lít)</label>
-          <input type="text" inputmode="decimal" id="s_currentFuelPrice">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Thuế suất VAT (%)</label>
-          <input type="number" inputmode="decimal" id="s_vatRate" value="${Number(s.vatRatePercent)||0}">
-        </div>
-      </div>
-    </section>
-
-    <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
       <div id="documentListWrap"></div>
@@ -4126,12 +4138,11 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn">Lưu Cài Đặt</button>
   `;
 
-  const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget, roadFee: s.monthlyFixedRoadFee, currentFuelPrice: s.currentFuelUnitPrice };
+  const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget, roadFee: s.monthlyFixedRoadFee };
   attachMoneyInput(document.getElementById('s_salary'), sVals.salary, v=>sVals.salary=v);
   attachMoneyInput(document.getElementById('s_food'), sVals.food, v=>sVals.food=v);
   attachMoneyInput(document.getElementById('s_housing'), sVals.housing, v=>sVals.housing=v);
   attachMoneyInput(document.getElementById('s_roadFee'), sVals.roadFee, v=>sVals.roadFee=v);
-  attachMoneyInput(document.getElementById('s_currentFuelPrice'), sVals.currentFuelPrice, v=>sVals.currentFuelPrice=v);
 
   const changeKeyBtn = document.getElementById('changeGeminiKeyBtn');
   if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
@@ -4144,8 +4155,6 @@ function renderSettings(){
     s.defaultDailyFoodAllowance = sVals.food;
     s.defaultMonthlyHousingBudget = sVals.housing;
     s.monthlyFixedRoadFee = sVals.roadFee;
-    s.currentFuelUnitPrice = sVals.currentFuelPrice;
-    s.vatRatePercent = Number(document.getElementById('s_vatRate').value)||0;
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
