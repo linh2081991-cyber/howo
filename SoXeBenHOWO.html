@@ -227,10 +227,11 @@
     flex-direction:column; align-items:center; justify-content:center; color:var(--ink-soft); font-size:14px;
   }
 
-  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:8px 10px; margin-bottom:14px; }
+  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:8px 10px; margin-bottom:6px; cursor:pointer; }
   .search-bar .ic{ font-size:16px; }
-  .search-bar input[type=date]{ border:none; flex:1; padding:6px 4px; }
+  .search-bar input[type=date]{ border:none; flex:1; padding:6px 4px; width:100%; background:transparent; color:var(--ink); }
   .search-bar button{ background:none; border:none; color:var(--ink-soft); font-size:13px; font-weight:700; }
+  .search-bar-hint{ font-size:11px; color:var(--ink-soft); margin:0 2px 14px; }
 
   .date-range{ display:flex; gap:10px; margin-bottom:14px; }
   .date-range .field{ flex:1; margin-bottom:0; }
@@ -402,7 +403,7 @@ let state = {
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [], // {id, siteName, totalContractValue, notes}
-  siteAppraisals: [] // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice, fixedCostAllocated, roadFeeEstimate} — prospective-project appraisal module, fully isolated from shift logs
+  siteAppraisals: [] // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice, fixedCostAllocated, roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift} — prospective-project appraisal module, fully isolated from shift logs
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -592,6 +593,35 @@ function computeShiftIssues(sh){
   return issues;
 }
 function shiftHasIssues(sh){ return computeShiftIssues(sh).length > 0; }
+
+// ========================= EXCLUDE INCOMPLETE "REALTIME" CA FROM AGGREGATES =========================
+// A ca vừa mới chạy xong thường chưa kịp nhập ODO cuối ca / dầu cuối ca —
+// nhưng shiftFuelConsumed()/shiftOdoDriven() vẫn âm thầm trả về số liệu
+// (thường là SAI, ví dụ dầu tiêu hao bị tính vống lên vì fuelEnd=0) nếu cứ
+// cộng thẳng vào "bài toán vận hành chung". Quy tắc: chỉ xét 2 ca có
+// chronoKey mới nhất trên toàn bộ sổ ca — nếu ca đó vẫn còn thiếu dữ liệu
+// bắt buộc (computeShiftIssues) thì tạm loại nó khỏi MỌI phép tính tổng
+// hợp (Kết Quả Kinh Doanh, Điểm Hoà Vốn, số lít dầu TB dùng cho Thẩm Định
+// Công Trình...), y hệt như một ca "Nghỉ" — không cộng, không trừ. Ca vẫn
+// hiện đầy đủ trên tab Ca Làm Việc kèm nút [⚠️ Cảnh Báo Hành Động]; ngay
+// khi Ông Chủ điền xong, computeShiftIssues() trả về rỗng và ca đó tự
+// động rơi lại vào phép tính chung như bất kỳ ca nào khác — không cần
+// thao tác "khôi phục" riêng.
+function getExcludedRecentShiftIds(){
+  const sorted = [...state.shifts].sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  const excluded = new Set();
+  sorted.slice(0,2).forEach(sh=>{ if(computeShiftIssues(sh).length>0) excluded.add(sh.id); });
+  return excluded;
+}
+/// Full shift list minus the currently-excluded newest-but-incomplete ca
+/// above. Every fleet-wide historical average (tiêu hao dầu, lương
+/// chuyến, tiền ăn...) should read from THIS, never straight from
+/// state.shifts, so a half-filled ca can't quietly skew the numbers used
+/// to judge công trình mới hay kỳ kinh doanh hiện tại.
+function operationalShifts(){
+  const excluded = getExcludedRecentShiftIds();
+  return excluded.size===0 ? state.shifts : state.shifts.filter(sh=>!excluded.has(sh.id));
+}
 
 // ========================= FIREBASE: CLOUD STORAGE (NO LOGIN) =========================
 // Data lives in Firestore under one FIXED shared path — no Google sign-in
@@ -967,12 +997,17 @@ function renderShiftList(){
       <button class="link-btn" id="warningsGoToSettingsBtn" style="margin-top:6px;">Quản lý giấy tờ / bảo dưỡng →</button>
     </div>`;
 
+  // Search bar is deliberately date-picker-only (no free-text/realtime
+  // filter-as-you-type) — tapping ANYWHERE on the bar opens the native
+  // lịch (calendar) so Ông Chủ chọn đúng 1 ngày muốn xem lại. Để trống
+  // vẫn hiển thị toàn bộ ca theo thứ tự mới nhất như bình thường.
   const searchBarHtml = `
-    <div class="search-bar">
-      <span class="ic">🔎</span>
+    <div class="search-bar" id="shiftSearchBar">
+      <span class="ic">📅</span>
       <input type="date" id="searchDateInput" value="${state.searchDate||''}">
       ${state.searchDate ? '<button id="clearSearchBtn">Xoá</button>' : ''}
-    </div>`;
+    </div>
+    <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)}.` : 'Bấm để mở lịch chọn 1 ngày cụ thể — để trống sẽ xem tất cả ca, mới nhất trước.'}</div>`;
 
   if(state.shifts.length===0){
     app.innerHTML = warningsBannerHtml + searchBarHtml + `
@@ -1032,10 +1067,20 @@ function bindShiftIssueButtons(){
   });
 }
 function bindSearchBar(){
+  const bar = document.getElementById('shiftSearchBar');
   const input = document.getElementById('searchDateInput');
   if(input) input.addEventListener('change', e=>{ state.searchDate = e.target.value || null; renderShiftList(); });
+  // Tapping anywhere on the bar (icon, padding, empty space) opens the
+  // calendar — not just the few pixels of the native input itself — so
+  // it reliably behaves like "bấm vào là ra lịch" on iOS Safari.
+  if(bar) bar.addEventListener('click', (e)=>{
+    if(e.target.tagName==='BUTTON') return; // đừng chặn nút "Xoá"
+    if(!input) return;
+    if(typeof input.showPicker === 'function'){ try{ input.showPicker(); return; }catch(_ignored){} }
+    input.focus();
+  });
   const clearBtn = document.getElementById('clearSearchBtn');
-  if(clearBtn) clearBtn.addEventListener('click', ()=>{ state.searchDate=null; renderShiftList(); });
+  if(clearBtn) clearBtn.addEventListener('click', (e)=>{ e.stopPropagation(); state.searchDate=null; renderShiftList(); });
 }
 function bindWarningsBanner(){
   const btn = document.getElementById('warningsGoToSettingsBtn');
@@ -2026,32 +2071,114 @@ function currentFuelUnitPriceForAppraisal(){
 /// logged (read-only — reuses the exact same shiftFuelConsumed/
 /// shiftOdoDriven getters the frozen P&L math uses, never redefines them).
 function historicalAvgFuelPerKm(){
-  const totalKm = state.shifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
-  const totalFuel = state.shifts.reduce((s,sh)=>s+shiftFuelConsumed(sh),0);
+  const shifts = operationalShifts();
+  const totalKm = shifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+  const totalFuel = shifts.reduce((s,sh)=>s+shiftFuelConsumed(sh),0);
   return totalKm>0 ? totalFuel/totalKm : 0;
+}
+/// Fleet-wide historical average lương/chuyến (đ/chuyến) — same read-only,
+/// frozen-getter pattern as historicalAvgFuelPerKm(), weighted by số
+/// chuyến thực tế (không phải trung bình cộng đơn giá nhập tay) nên phản
+/// ánh đúng chi phí nhân công thực tế của đội xe. Dùng để mô phỏng công
+/// trình dự kiến theo đúng "thông số hiện tại đang vận hành".
+function historicalAvgWagePerTrip(){
+  const shifts = operationalShifts();
+  const totalTrips = shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalWage = shifts.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  return totalTrips>0 ? totalWage/totalTrips : 0;
+}
+/// Fleet-wide historical average tiền ăn/ca (đ/ca) — trung bình trên các
+/// ca Hoạt Động đã thực sự có ghi nhận tiền ăn, dùng cho mô phỏng công
+/// trình dự kiến vì tiền ăn tính theo CA chứ không theo chuyến.
+function historicalAvgFoodPerShift(){
+  const shifts = operationalShifts().filter(sh=>sh.status==='active' && Number(sh.foodAllowance)>0);
+  if(shifts.length===0) return 0;
+  const total = shifts.reduce((s,sh)=>s+(Number(sh.foodAllowance)||0),0);
+  return total/shifts.length;
 }
 /// Core simulation for ONE prospective project. Everything downstream
 /// (list cards, side-by-side comparison, live preview in the editor) is
 /// rendered from this single function so all three views can never drift
 /// out of sync with each other.
+///
+/// Rebuilt to follow the EXACT same FIXED-vs-VARIABLE accounting logic
+/// the app already uses for real kỳ vận hành (xem computeBreakEvenDetailed
+/// ở Kết Quả Kinh Doanh):
+///  - FIXED (đóng THEO THÁNG, không nhân theo chuyến): chi phí cố định
+///    phân bổ (lương cứng + nhà + sửa chữa/khấu hao) CỘNG tiền luật
+///    đường — tiền luật đường luôn là khoản đóng cả tháng ngoài đời
+///    thật, KHÔNG PHẢI chi phí phát sinh mỗi chuyến.
+///  - VARIABLE (di chuyển theo mỗi chuyến): dầu + lương chuyến — cả hai
+///    đều lấy từ số liệu vận hành thực tế trung bình toàn đội xe
+///    (historicalAvgFuelPerKm/historicalAvgWagePerTrip), không phải số
+///    áng chừng, đúng yêu cầu "căn cứ vào thông số hiện tại đang vận
+///    hành". Tiền ăn tính theo CA (không nhân theo chuyến).
+///  - "Số chuyến dự tính chạy được trong ca" (estimatedTripsPerShift) là
+///    chỉ số bản lề: nó quy đổi "số chuyến hoà vốn" thành "số CA hoà
+///    vốn", rồi so với ngày công chuẩn/tháng (Cài Đặt) để biết công
+///    trình này có KHẢ THI trong 1 tháng thực tế hay không — đây chính
+///    là câu trả lời "lãi lỗ ra sao" mà Ông Chủ cần trước khi nhận việc.
 function computeAppraisalMetrics(p){
   const fuelPerKm = historicalAvgFuelPerKm();
   const fuelPrice = currentFuelUnitPriceForAppraisal();
+  const avgWagePerTrip = historicalAvgWagePerTrip();
+  const avgFoodPerShift = historicalAvgFoodPerShift();
+
   const kmPerTrip = (Number(p.kmOneWay)||0) + (Number(p.kmReturn)||0);
   const fuelLitersPerTrip = fuelPerKm * kmPerTrip;
   const fuelCostPerTrip = fuelLitersPerTrip * fuelPrice;
+
   const grossCargoRevenuePerTrip = (Number(p.loadPerTrip)||0) * (Number(p.cargoUnitPrice)||0);
   const vatRate = (Number(state.settings.vatRatePercent)||0)/100;
   const netRevenuePerTrip = p.priceIncludesVat ? grossCargoRevenuePerTrip/(1+vatRate) : grossCargoRevenuePerTrip;
-  const roadFeePerTrip = Number(p.roadFeeEstimate)||0;
-  const variableCostPerTrip = fuelCostPerTrip + roadFeePerTrip;
+
+  // Chi phí biến đổi/chuyến: dầu + lương chuyến (KHÔNG gồm luật đường —
+  // luật đường là chi phí cố định theo tháng, xem bên dưới).
+  const variableCostPerTrip = fuelCostPerTrip + avgWagePerTrip;
   const grossProfitPerTrip = netRevenuePerTrip - variableCostPerTrip;
+
+  const tripsPerShift = Math.max(0, Number(p.estimatedTripsPerShift)||0);
+  // Lãi gộp/ca = lãi gộp cộng dồn các chuyến trong ca, trừ tiền ăn/ca
+  // (tiền ăn KHÔNG nhân theo số chuyến).
+  const grossProfitPerShift = tripsPerShift>0 ? (tripsPerShift*grossProfitPerTrip - avgFoodPerShift) : null;
+
+  // Chi phí cố định/tháng: chi phí cố định phân bổ CỘNG tiền luật đường —
+  // cả hai đều là khoản đóng cả tháng, không nhân theo chuyến/ca.
+  const roadFeeMonthly = Number(p.roadFeeEstimate)||0;
   const fixedCostAllocated = Number(p.fixedCostAllocated)||0;
-  const breakEvenTrips = grossProfitPerTrip>0 ? Math.ceil(fixedCostAllocated/grossProfitPerTrip) : null;
-  const roiPercent = variableCostPerTrip>0 ? (grossProfitPerTrip/variableCostPerTrip*100) : null;
-  return { fuelPerKm, fuelPrice, kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip, grossCargoRevenuePerTrip,
-           netRevenuePerTrip, roadFeePerTrip, variableCostPerTrip, grossProfitPerTrip, fixedCostAllocated,
-           breakEvenTrips, roiPercent };
+  const fixedCostMonthly = fixedCostAllocated + roadFeeMonthly;
+
+  // Quy đổi tiền ăn/ca về tương đương mỗi chuyến (chỉ quy đổi được khi
+  // đã biết số chuyến/ca) để "số chuyến hoà vốn" phản ánh đúng TOÀN BỘ
+  // chi phí biến đổi thực tế, không chỉ riêng dầu + lương chuyến.
+  const foodPerTripEquivalent = tripsPerShift>0 ? avgFoodPerShift/tripsPerShift : 0;
+  const effectiveMarginPerTrip = grossProfitPerTrip - foodPerTripEquivalent;
+  const breakEvenTrips = effectiveMarginPerTrip>0 ? Math.ceil(fixedCostMonthly/effectiveMarginPerTrip) : null;
+  const breakEvenShifts = (breakEvenTrips!==null && tripsPerShift>0) ? Math.ceil(breakEvenTrips/tripsPerShift) : null;
+
+  const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||0;
+  const feasible = (breakEvenShifts!==null && standardWorkDays>0) ? (breakEvenShifts<=standardWorkDays) : null;
+  const shortfallShifts = (feasible===false) ? (breakEvenShifts-standardWorkDays) : 0;
+
+  // Lợi nhuận dự kiến/tháng nếu chạy đủ ngày công chuẩn đã cấu hình ở
+  // Cài Đặt — con số quyết định cuối cùng, không chỉ dừng ở "lãi/chuyến".
+  const projectedMonthlyProfit = (grossProfitPerShift!==null && standardWorkDays>0)
+    ? (standardWorkDays*grossProfitPerShift - fixedCostMonthly) : null;
+  const roiPercent = (fixedCostMonthly>0 && projectedMonthlyProfit!==null)
+    ? (projectedMonthlyProfit/fixedCostMonthly*100) : null;
+
+  // Cờ cảnh báo: chưa đủ lịch sử vận hành để tính lương chuyến/tiền ăn
+  // trung bình — nếu = 0 mà đội xe THỰC TẾ có phát sinh 2 khoản này, số
+  // liệu mô phỏng đang bị thiếu chi phí, dễ khiến quyết định sai.
+  const hasWageBasis = avgWagePerTrip>0;
+  const hasFoodBasis = avgFoodPerShift>0;
+
+  return { fuelPerKm, fuelPrice, avgWagePerTrip, avgFoodPerShift, hasWageBasis, hasFoodBasis,
+           kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip, grossCargoRevenuePerTrip, netRevenuePerTrip,
+           variableCostPerTrip, grossProfitPerTrip, tripsPerShift, grossProfitPerShift,
+           roadFeeMonthly, fixedCostAllocated, fixedCostMonthly, foodPerTripEquivalent, effectiveMarginPerTrip,
+           breakEvenTrips, breakEvenShifts, standardWorkDays, feasible, shortfallShifts,
+           projectedMonthlyProfit, roiPercent };
 }
 
 /// Full-screen module: intro card (fuel efficiency + price source), the
@@ -2064,17 +2191,28 @@ function renderProjectAppraisal(){
   const app = document.getElementById('app');
   const fuelPerKm = historicalAvgFuelPerKm();
   const fuelPrice = currentFuelUnitPriceForAppraisal();
+  const avgWagePerTrip = historicalAvgWagePerTrip();
+  const avgFoodPerShift = historicalAvgFoodPerShift();
   const projects = state.siteAppraisals || [];
   const metricsById = {};
   projects.forEach(p=>{ metricsById[p.id] = computeAppraisalMetrics(p); });
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
   const aa = state.appraisalAnalysis;
 
+  // Ưu tiên xếp hạng theo lợi nhuận dự kiến/tháng (đã tính đủ số chuyến/
+  // ca + toàn bộ chi phí cố định lẫn biến đổi) — chỉ số quyết định cuối
+  // cùng. Công trình nào chưa nhập "số chuyến dự tính/ca" thì chưa đủ
+  // căn cứ để so ở mức tháng, tạm xếp sau theo lãi gộp/chuyến.
   let bestId = null;
-  projects.forEach(p=>{
-    const m = metricsById[p.id];
-    if(m.grossProfitPerTrip>0 && (bestId===null || m.grossProfitPerTrip>metricsById[bestId].grossProfitPerTrip)) bestId = p.id;
-  });
+  const withMonthlyProfit = projects.filter(p=>metricsById[p.id].projectedMonthlyProfit!==null && metricsById[p.id].projectedMonthlyProfit>0);
+  if(withMonthlyProfit.length>0){
+    bestId = withMonthlyProfit.reduce((a,b)=>metricsById[b.id].projectedMonthlyProfit>metricsById[a.id].projectedMonthlyProfit?b:a).id;
+  } else {
+    const withTripProfit = projects.filter(p=>metricsById[p.id].grossProfitPerTrip>0);
+    if(withTripProfit.length>0){
+      bestId = withTripProfit.reduce((a,b)=>metricsById[b.id].grossProfitPerTrip>metricsById[a.id].grossProfitPerTrip?b:a).id;
+    }
+  }
 
   app.innerHTML = `
     <section class="group">
@@ -2084,7 +2222,11 @@ function renderProjectAppraisal(){
     <section class="group">
       <h3>🧮 Thẩm Định &amp; So Sánh Công Trình Trước Khi Nhận</h3>
       <div class="card">
-        <div class="summary-row"><span>Mức tiêu hao dầu trung bình thực tế (toàn bộ lịch sử)</span><span class="val">${fuelPerKm>0?fuelPerKm.toFixed(2)+' lít/km':'Chưa có dữ liệu'}</span></div>
+        <div class="hint" style="margin-bottom:8px;">Các thông số dưới đây lấy trực tiếp từ số liệu vận hành thực tế của đội xe (đã loại ca gần nhất còn thiếu dữ liệu) — dùng làm căn cứ mô phỏng, không phải số áng chừng.</div>
+        <div class="summary-row"><span>Mức tiêu hao dầu trung bình thực tế</span><span class="val">${fuelPerKm>0?fuelPerKm.toFixed(2)+' lít/km':'Chưa có dữ liệu'}</span></div>
+        <div class="summary-row"><span>Lương chuyến trung bình thực tế</span><span class="val">${avgWagePerTrip>0?fmtVND(avgWagePerTrip)+'/chuyến':'Chưa có dữ liệu'}</span></div>
+        <div class="summary-row"><span>Tiền ăn trung bình thực tế</span><span class="val">${avgFoodPerShift>0?fmtVND(avgFoodPerShift)+'/ca':'Chưa có dữ liệu'}</span></div>
+        ${(avgWagePerTrip<=0 || avgFoodPerShift<=0) ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Chưa đủ lịch sử vận hành để tính ${avgWagePerTrip<=0?'lương chuyến':''}${(avgWagePerTrip<=0 && avgFoodPerShift<=0)?' và ':''}${avgFoodPerShift<=0?'tiền ăn':''} trung bình — mô phỏng bên dưới đang tạm tính các khoản này bằng 0, lãi gộp có thể đang bị TÍNH CAO HƠN thực tế.</div>` : ''}
       </div>
       <div class="card" style="margin-top:8px;">
         <div class="field">
@@ -2117,10 +2259,14 @@ function renderProjectAppraisal(){
           <div class="compare-card ${p.id===bestId?'best':''}">
             <h4>${escapeHtml(p.name||'(chưa đặt tên)')}${p.id===bestId?' <span class="rating-badge good">Đề xuất</span>':''}</h4>
             <div class="compare-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
-            <div class="compare-row"><span>Chi phí dầu/chuyến</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+            <div class="compare-row"><span>Dầu + lương chuyến/chuyến</span><span class="val">${fmtVND(m.variableCostPerTrip)}</span></div>
             <div class="compare-row"><span>Lãi gộp/chuyến</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+            <div class="compare-row"><span>Số chuyến/ca dự tính</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
             <div class="compare-row"><span>Số chuyến hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn'}</span></div>
-            <div class="compare-row"><span>ROI/chuyến</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+            <div class="compare-row"><span>Số ca hoà vốn / tháng</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'—'}</span></div>
+            <div class="compare-row"><span>Khả thi (so ngày công chuẩn ${m.standardWorkDays} ca)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+            <div class="compare-row"><span>Lợi nhuận dự kiến/tháng</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
+            <div class="compare-row"><span>ROI/tháng</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
           </div>`;
         }).join('')}
       </div>
@@ -2190,11 +2336,17 @@ function renderAppraisalList(metricsById){
       <div class="hint" style="margin:6px 0;">${m.kmPerTrip.toLocaleString('vi-VN')} km/chuyến (khứ hồi) · ${(Number(p.loadPerTrip)||0).toLocaleString('vi-VN')} tấn/khối mỗi chuyến · Giá cước ${p.priceIncludesVat?'đã có VAT':'chưa VAT'}</div>
       <div class="summary-row"><span>Doanh thu thuần ước tính/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
       <div class="summary-row"><span>Chi phí dầu ước tính/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
-      <div class="summary-row"><span>Tiền luật đường dọc tuyến/chuyến</span><span class="val">${fmtVND(m.roadFeePerTrip)}</span></div>
+      <div class="summary-row"><span>Lương chuyến (TB thực tế)</span><span class="val">${fmtVND(m.avgWagePerTrip)}</span></div>
       <div class="summary-row total"><span>LỢI NHUẬN GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
-      <div class="summary-row"><span>Chi phí cố định dự kiến phân bổ</span><span class="val">${fmtVND(m.fixedCostAllocated)}</span></div>
+      <div class="summary-row"><span>Số chuyến dự tính chạy được/ca</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
+      <div class="summary-row"><span>Tiền ăn/ca (TB thực tế)</span><span class="val">${fmtVND(m.avgFoodPerShift)}</span></div>
+      <div class="summary-row"><span>LỢI NHUẬN GỘP / CA</span><span class="val" style="color:${m.grossProfitPerShift!==null&&m.grossProfitPerShift>=0?'var(--profit)':'var(--loss)'}">${m.grossProfitPerShift!==null?fmtVND(m.grossProfitPerShift):'— (chưa nhập số chuyến/ca)'}</span></div>
+      <div class="summary-row"><span>Chi phí cố định/tháng (phân bổ + luật đường)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
       <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được với cơ cấu giá này'}</span></div>
-      <div class="summary-row"><span>ROI/chuyến (lãi gộp ÷ chi phí biến đổi)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+      <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'Chưa đủ dữ liệu (cần nhập số chuyến/ca)'}</span></div>
+      <div class="summary-row"><span>So với ngày công chuẩn (${m.standardWorkDays} ca/tháng)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ngày công chuẩn)</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
+      <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
     </div>`;
   }).join('');
   wrap.querySelectorAll('.editAppraisalBtn').forEach(btn=>btn.addEventListener('click', e=>{ e.stopPropagation(); openProjectAppraisalEditor(btn.dataset.id); }));
@@ -2217,7 +2369,12 @@ function openProjectAppraisalEditor(id){
   const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
   const draft = existing ? {...existing} : {
     id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
-    priceIncludesVat:false, cargoUnitPrice:0, fixedCostAllocated:0, roadFeeEstimate:0
+    priceIncludesVat:false, cargoUnitPrice:0, fixedCostAllocated:0,
+    // Tiền luật đường mặc định lấy đúng mức đang đóng thật ở Cài Đặt
+    // (đóng theo THÁNG) — Ông Chủ vẫn sửa được riêng cho công trình này
+    // nếu dự tính khác đi.
+    roadFeeEstimate: Number(state.settings.monthlyFixedRoadFee)||0,
+    estimatedTripsPerShift: 0
   };
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -2243,6 +2400,11 @@ function openProjectAppraisalEditor(id){
           <input type="number" inputmode="decimal" id="ap_load" placeholder="0" value="${blankIfZero(draft.loadPerTrip)}">
         </div>
         <div class="field">
+          <label>Số chuyến dự tính chạy được trong 1 ca</label>
+          <input type="number" inputmode="decimal" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
+          <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế — đây là chỉ số quyết định công trình cần bao nhiêu CA mới hoà vốn, không chỉ bao nhiêu chuyến.</div>
+        </div>
+        <div class="field">
           <label>Giá cước</label>
           <div class="seg" id="ap_vatToggle">
             <button data-val="0" class="${!draft.priceIncludesVat?'active':''}">Giá cước chưa VAT</button>
@@ -2254,12 +2416,13 @@ function openProjectAppraisalEditor(id){
           <input type="text" inputmode="decimal" id="ap_cargoPrice">
         </div>
         <div class="field">
-          <label>Chi phí cố định dự kiến phân bổ cho công trình</label>
+          <label>Chi phí cố định dự kiến phân bổ cho công trình (lương cứng + nhà + sửa chữa/khấu hao, theo THÁNG)</label>
           <input type="text" inputmode="decimal" id="ap_fixedCost">
         </div>
         <div class="field" style="margin-bottom:0;">
-          <label>Tiền luật đường / chi phí dọc tuyến dự kiến (mỗi chuyến)</label>
+          <label>Tiền luật đường dự kiến (đóng theo THÁNG — mặc định lấy từ Cài Đặt)</label>
           <input type="text" inputmode="decimal" id="ap_roadFee">
+          <div class="hint">Tiền luật đường là khoản đóng cả tháng, KHÔNG nhân theo số chuyến — sửa ở đây nếu công trình này dự tính đóng khác mức đang đóng chung.</div>
         </div>
       </div>
     </section>
@@ -2267,7 +2430,7 @@ function openProjectAppraisalEditor(id){
     <section class="group">
       <h3>Mô Phỏng Nhanh</h3>
       <div class="card" id="ap_preview"></div>
-      <div class="hint" style="margin-top:8px;">Dựa trên mức tiêu hao dầu trung bình thực tế ${historicalAvgFuelPerKm().toFixed(2)} lít/km và đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít hiện đang dùng để mô phỏng (sửa ở đầu trang "Thẩm Định Công Trình" trong tab Trợ Lý).</div>
+      <div class="hint" style="margin-top:8px;">Dầu ${historicalAvgFuelPerKm().toFixed(2)} lít/km · Đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít · Lương chuyến TB ${fmtVND(historicalAvgWagePerTrip())}/chuyến · Tiền ăn TB ${fmtVND(historicalAvgFoodPerShift())}/ca — toàn bộ lấy từ số liệu vận hành thực tế (sửa đơn giá dầu/VAT ở đầu trang "Thẩm Định Công Trình" trong tab Trợ Lý).</div>
     </section>
 
     <section class="group" style="display:flex; gap:10px;">
@@ -2280,11 +2443,33 @@ function openProjectAppraisalEditor(id){
   const updatePreview = ()=>{
     const m = computeAppraisalMetrics(draft);
     document.getElementById('ap_preview').innerHTML = `
+      <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">MỖI CHUYẾN</div>
       <div class="summary-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
-      <div class="summary-row"><span>Chi phí dầu ước tính/chuyến</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
-      <div class="summary-row total"><span>LỢI NHUẬN GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
-      <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được'}</span></div>
-      <div class="summary-row"><span>ROI/chuyến (lãi gộp ÷ chi phí biến đổi)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+      <div class="summary-row"><span>− Chi phí dầu (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+      <div class="summary-row"><span>− Lương chuyến (TB thực tế)</span><span class="val">${fmtVND(m.avgWagePerTrip)}</span></div>
+      <div class="summary-row total"><span>LÃI GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+
+      <div class="formula-divider" style="margin:10px 0;"></div>
+      <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">MỖI CA (${m.tripsPerShift>0?m.tripsPerShift+' chuyến/ca':'chưa nhập số chuyến/ca'})</div>
+      ${m.tripsPerShift>0 ? `
+      <div class="summary-row"><span>${m.tripsPerShift} chuyến × ${fmtVND(m.grossProfitPerTrip)}</span><span class="val">${fmtVND(m.tripsPerShift*m.grossProfitPerTrip)}</span></div>
+      <div class="summary-row"><span>− Tiền ăn/ca (TB thực tế)</span><span class="val">${fmtVND(m.avgFoodPerShift)}</span></div>
+      <div class="summary-row total"><span>LÃI GỘP / CA</span><span class="val" style="color:${m.grossProfitPerShift>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerShift)}</span></div>
+      ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được trong 1 ca" ở trên để tính lãi/ca, số ca hoà vốn và lợi nhuận dự kiến/tháng.</div>`}
+
+      <div class="formula-divider" style="margin:10px 0;"></div>
+      <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">HOÀ VỐN &amp; KHẢ THI TRONG THÁNG</div>
+      <div class="summary-row"><span>Chi phí cố định/tháng (phân bổ + luật đường)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
+      ${m.breakEvenTrips===null ? `<div class="hint" style="color:var(--loss);">Lãi gộp/chuyến hiện đang ≤ 0 (đã trừ dầu + lương chuyến${m.tripsPerShift>0?' + tiền ăn quy đổi':''}) — KHÔNG thể hoà vốn với cơ cấu giá này dù chạy bao nhiêu chuyến. Cần thương lượng lại đơn giá cước.</div>` : `
+      <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.fixedCostMonthly.toLocaleString('vi-VN')} ÷ ${Math.round(m.effectiveMarginPerTrip).toLocaleString('vi-VN')} = <strong>${m.breakEvenTrips} chuyến</strong></span></div>
+      ${m.breakEvenShifts!==null ? `
+      <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips} ÷ ${m.tripsPerShift} = <strong>${m.breakEvenShifts} ca</strong></span></div>
+      <div class="summary-row"><span>Ngày công chuẩn/tháng (Cài Đặt)</span><span class="val">${m.standardWorkDays} ca</span></div>
+      <div class="summary-row total"><span>KẾT LUẬN KHẢ THI</span><span class="val">${m.feasible ? `<span class="rating-badge good">Khả thi — dư ${m.standardWorkDays-m.breakEvenShifts} ca</span>` : `<span class="rating-badge warn">Không khả thi trong 1 tháng — thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.standardWorkDays} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
+      <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+      ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được trong 1 ca" để quy đổi ra số CA hoà vốn và kiểm tra có khả thi trong 1 tháng hay không.</div>`}
+      `}
     `;
   };
 
@@ -2292,6 +2477,7 @@ function openProjectAppraisalEditor(id){
   document.getElementById('ap_kmGo').addEventListener('input', e=>{ draft.kmOneWay=Number(e.target.value)||0; updatePreview(); });
   document.getElementById('ap_kmBack').addEventListener('input', e=>{ draft.kmReturn=Number(e.target.value)||0; updatePreview(); });
   document.getElementById('ap_load').addEventListener('input', e=>{ draft.loadPerTrip=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_tripsPerShift').addEventListener('input', e=>{ draft.estimatedTripsPerShift=Number(e.target.value)||0; updatePreview(); });
   document.querySelectorAll('#ap_vatToggle button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       draft.priceIncludesVat = btn.dataset.val==='1';
@@ -2344,12 +2530,12 @@ let activeAppraisalTruckRun = null;
 /// force a pick whenever the projects are too close to call or there's
 /// only one project to look at — this is the actual mechanism behind
 /// "không được tự ý quyết định khi chưa chắc chắn".
-function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice){
-  return `Mày là Chuyên gia Thẩm định & Tư vấn Vận tải xe ben (nhiều năm kinh nghiệm ngành vận tải vật liệu xây dựng, tư duy thận trọng, không phán đoán cảm tính). Dưới đây là số liệu MÔ PHỎNG các công trình dự kiến — CHƯA nhận chạy — đã được tính sẵn bằng công thức kế toán chính xác của app (không cần và không được tính lại), dựa trên mức tiêu hao dầu trung bình thực tế của xe (${fuelPerKm.toFixed(2)} lít/km) và đơn giá dầu hiện tại (${fmtVND(fuelPrice)}/lít):
+function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice, avgWagePerTrip, avgFoodPerShift){
+  return `Mày là Chuyên gia Thẩm định & Tư vấn Vận tải xe ben (nhiều năm kinh nghiệm ngành vận tải vật liệu xây dựng, tư duy thận trọng, không phán đoán cảm tính). Dưới đây là số liệu MÔ PHỎNG các công trình dự kiến — CHƯA nhận chạy — đã được tính sẵn bằng công thức kế toán chính xác của app (không cần và không được tính lại), dựa trên số liệu vận hành thực tế trung bình toàn đội xe: tiêu hao dầu ${fuelPerKm.toFixed(2)} lít/km, đơn giá dầu ${fmtVND(fuelPrice)}/lít, lương chuyến ${fmtVND(avgWagePerTrip)}/chuyến, tiền ăn ${fmtVND(avgFoodPerShift)}/ca:
 
 ${JSON.stringify(payload, null, 2)}
 
-Nhiệm vụ: đọc đúng các số liệu trên (net revenue, chi phí dầu, tiền luật đường, lãi gộp/chuyến, chi phí cố định phân bổ, số chuyến hoà vốn, ROI) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào.
+Nhiệm vụ: đọc đúng các số liệu trên (doanh thu thuần/chuyến, chi phí dầu, lương chuyến, lãi gộp/chuyến, lãi gộp/ca, chi phí cố định/tháng đã gồm tiền luật đường, số chuyến VÀ số ca hoà vốn, có khả thi trong 1 tháng hay không so với ngày công chuẩn, lợi nhuận dự kiến/tháng, ROI/tháng) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào. Lưu ý: "lợi nhuận dự kiến/tháng" và "khả thi trong tháng" là căn cứ quyết định quan trọng hơn lãi gộp/chuyến đơn lẻ — công trình lãi/chuyến cao nhưng không đủ ca trong tháng để hoà vốn vẫn là một rủi ro cần nêu rõ. Nếu một công trình có "soChuyenDuTinhMoiCa" là null (chưa nhập), PHẢI nêu rõ đây là thiếu sót dữ liệu khiến chưa đánh giá được tính khả thi trong tháng của công trình đó.
 
 Chỉ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
 {
@@ -2359,11 +2545,11 @@ Chỉ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, 
   "recommendation": {
     "confident": true hoặc false,
     "recommendedProject": "<tên công trình nên ưu tiên nhận nếu confident=true, để chuỗi rỗng nếu confident=false>",
-    "reasoning": "<giải thích ngắn gọn, dựa trên số liệu cụ thể — lãi gộp/chuyến, số chuyến hoà vốn, ROI, mức rủi ro, hoặc lý do vì sao chưa thể kết luận>",
+    "reasoning": "<giải thích ngắn gọn, dựa trên số liệu cụ thể — lãi gộp/ca, số ca hoà vốn, tính khả thi trong tháng, lợi nhuận dự kiến/tháng, ROI, mức rủi ro, hoặc lý do vì sao chưa thể kết luận>",
     "caveats": "<những điều Ông Chủ nên hỏi thêm/xác minh thêm trước khi quyết định, nếu có; để chuỗi rỗng nếu không có>"
   }
 }
-QUY TẮC BẮT BUỘC: Chỉ nhận xét dựa trên số liệu có trong dữ liệu trên, tuyệt đối không bịa thêm số liệu. Nếu chỉ có 1 công trình, hoặc các công trình có lãi gộp/chuyến, ROI, số chuyến hoà vốn quá sát nhau khiến không đủ căn cứ để khẳng định chắc chắn công trình nào tốt hơn hẳn, PHẢI đặt "confident": false, để "recommendedProject" là chuỗi rỗng, và nêu rõ lý do trong "reasoning" — không được tự ý chọn đại một công trình khi chưa chắc chắn.`;
+QUY TẮC BẮT BUỘC: Chỉ nhận xét dựa trên số liệu có trong dữ liệu trên, tuyệt đối không bịa thêm số liệu. Nếu chỉ có 1 công trình, hoặc thiếu "soChuyenDuTinhMoiCa" nên chưa tính được tính khả thi trong tháng, hoặc các công trình có lãi gộp/ca, ROI, số ca hoà vốn quá sát nhau khiến không đủ căn cứ để khẳng định chắc chắn công trình nào tốt hơn hẳn, PHẢI đặt "confident": false, để "recommendedProject" là chuỗi rỗng, và nêu rõ lý do trong "reasoning" — không được tự ý chọn đại một công trình khi chưa chắc chắn.`;
 }
 
 async function runAppraisalAnalysis(){
@@ -2381,6 +2567,8 @@ async function runAppraisalAnalysis(){
     }
     const fuelPerKm = historicalAvgFuelPerKm();
     const fuelPrice = currentFuelUnitPriceForAppraisal();
+    const avgWagePerTrip = historicalAvgWagePerTrip();
+    const avgFoodPerShift = historicalAvgFoodPerShift();
     const payload = projects.map(p=>{
       const m = computeAppraisalMetrics(p);
       return {
@@ -2390,14 +2578,21 @@ async function runAppraisalAnalysis(){
         giaCuocDaCoVat: !!p.priceIncludesVat,
         doanhThuThuanMoiChuyen: Math.round(m.netRevenuePerTrip),
         chiPhiDauMoiChuyen: Math.round(m.fuelCostPerTrip),
-        tienLuatDuongMoiChuyen: Math.round(m.roadFeePerTrip),
+        luongChuyenTrungBinhThucTe: Math.round(m.avgWagePerTrip),
         laiGopMoiChuyen: Math.round(m.grossProfitPerTrip),
-        chiPhiCoDinhPhanBo: Math.round(m.fixedCostAllocated),
+        soChuyenDuTinhMoiCa: m.tripsPerShift || null,
+        tienAnTrungBinhMoiCa: Math.round(m.avgFoodPerShift),
+        laiGopMoiCa: m.grossProfitPerShift!==null ? Math.round(m.grossProfitPerShift) : null,
+        chiPhiCoDinhMoiThang: Math.round(m.fixedCostMonthly),
         soChuyenHoaVon: m.breakEvenTrips,
-        roiPhanTram: m.roiPercent!==null ? +m.roiPercent.toFixed(1) : null
+        soCaHoaVon: m.breakEvenShifts,
+        ngayCongChuanMoiThang: m.standardWorkDays,
+        khaThiTrongThang: m.feasible,
+        loiNhuanDuKienMoiThang: m.projectedMonthlyProfit!==null ? Math.round(m.projectedMonthlyProfit) : null,
+        roiPhanTramMoiThang: m.roiPercent!==null ? +m.roiPercent.toFixed(1) : null
       };
     });
-    const prompt = buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice);
+    const prompt = buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice, avgWagePerTrip, avgFoodPerShift);
     const result = await callGeminiText(prompt, (attempt)=>{
       if(attempt>=3){
         const hintEl = document.getElementById('appraisalRetryHint');
@@ -3110,7 +3305,11 @@ function renderResults(){
   if(!state.resultsRange) state.resultsRange = currentMonthRange();
   const { from, to } = state.resultsRange;
 
-  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  // Loại các ca gần nhất còn thiếu ODO/dầu cuối ca/tài xế ra khỏi bài
+  // toán vận hành chung của kỳ — xem getExcludedRecentShiftIds() ở trên.
+  const excludedShiftIds = getExcludedRecentShiftIds();
+  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
+  const pendingShiftsInRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && excludedShiftIds.has(sh.id));
   const dayShifts = inRange.filter(sh=>sh.shiftType==='day');
   const nightShifts = inRange.filter(sh=>sh.shiftType==='night');
 
@@ -3153,6 +3352,18 @@ function renderResults(){
   const costTrend = computeCostPerKmTrend(6);
 
   app.innerHTML = `
+    ${pendingShiftsInRange.length>0 ? `
+    <section class="group">
+      <div class="card" style="border:1.5px solid var(--accent);">
+        <div style="font-weight:800; margin-bottom:8px;">⏳ ${pendingShiftsInRange.length} Ca Gần Nhất Chưa Đủ Dữ Liệu — Tạm Chưa Cộng Vào Kết Quả Kỳ Này</div>
+        ${pendingShiftsInRange.map(sh=>`
+          <div class="kv" style="padding:4px 0; align-items:flex-start;">
+            <span>${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}: ${escapeHtml(computeShiftIssues(sh).join(', '))}</span>
+          </div>`).join('')}
+        <button class="btn btn-ghost btn-sm" id="goCompletePendingShiftsBtn" style="margin-top:10px;">Hoàn thiện ngay →</button>
+        <div class="hint" style="margin-top:8px;">Ca vừa chạy xong thường chưa kịp nhập đủ ODO/dầu cuối ca nên app tạm loại khỏi mọi phép tính (doanh thu, chi phí, hoà vốn...) để không làm sai lệch số liệu chung. Điền xong các trường còn thiếu ở tab Ca Làm Việc, ca sẽ tự động được cộng lại như bình thường.</div>
+      </div>
+    </section>` : ''}
     ${financialWarnings.length>0 ? `
     <section class="group">
       <h3>⚠️ Cảnh Báo Tài Chính</h3>
@@ -3358,6 +3569,8 @@ function renderResults(){
   });
   document.getElementById('addRepairBtn').addEventListener('click', ()=>openRepairEditor(null));
   document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal(breakEven));
+  const goCompleteBtn = document.getElementById('goCompletePendingShiftsBtn');
+  if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
