@@ -1269,7 +1269,6 @@ function renderShiftForm(){
           <input type="text" id="f_notes" value="${escapeHtml(sh.notes||'')}">
         </div>
       </div>
-      <div class="hint" style="margin-top:8px;">Thanh toán không gắn với 1 ca cụ thể nữa — vào tab "📊 Kết Quả" → mục "🤝 Đối Tác & Công Nợ" để ghi nhận và theo dõi tiền thu về theo từng đối tác/công trình.</div>
     </section>
 
     <section class="group">
@@ -1277,7 +1276,7 @@ function renderShiftForm(){
       <div class="card" id="summaryCard"></div>
     </section>
 
-    <div style="display:flex; gap:10px; margin-top:6px;">
+    <div style="display:flex; gap:10px; margin-top:6px; margin-bottom:28px;">
       ${sh.isNew ? '' : `<button class="btn btn-danger" id="deleteShiftBtn">Xoá Ca Này</button>`}
       <button class="btn btn-accent btn-block" id="saveShiftBtn">Lưu Ca Này</button>
     </div>
@@ -1467,7 +1466,13 @@ async function saveDraftShift(){
   // period total/average down without any visible error. Since Tổng tiền dầu
   // = Σ(Dầu tiêu hao mỗi ca × Đơn giá dầu mỗi ca), each ca's price MUST be
   // entered before that ca is allowed to save.
-  if(shiftFuelConsumed(sh) > 0 && (Number(sh.fuelUnitPrice)||0) <= 0){
+  // Chỉ chặn lưu khi ca đã thực sự có số liệu dầu cuối ca (sh.fuelEnd > 0) —
+  // tức là một ca ĐÃ CHẠY XONG và có tiêu hao dầu thật nhưng bị bỏ trống đơn
+  // giá. Một ca vừa xuất phát (xe mới đi làm, chưa có dầu cuối ca — fuelEnd
+  // vẫn = 0) KHÔNG bị chặn lưu nữa: Ông Chủ vẫn lưu bình thường để giữ dữ
+  // liệu đầu ca, và ca này sẽ tự hiện nút "⚠️ Cảnh Báo Hành Động" ở Danh
+  // Sách Ca cho tới khi bổ sung đủ số liệu cuối ca.
+  if(Number(sh.fuelEnd) > 0 && shiftFuelConsumed(sh) > 0 && (Number(sh.fuelUnitPrice)||0) <= 0){
     showToast('Ca này có dầu tiêu hao nhưng chưa nhập Đơn giá dầu/lít — nhập đơn giá thực tế trước khi lưu (nếu không tổng tiền dầu của kỳ sẽ bị tính thiếu).');
     return;
   }
@@ -3175,9 +3180,10 @@ function renderResults(){
       </div>
 
       <div class="card">
-        <div class="summary-row"><span>Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao)</span><span class="val">${fmtVND(breakEven.fixedCost)}</span></div>
-        <div class="summary-row"><span>Tổng chi phí biến đổi thực tế (dầu + lương chuyến + tiền ăn + phát sinh)</span><span class="val">${fmtVND(breakEven.variableCost)}</span></div>
-        <div class="summary-row total"><span>LỢI NHUẬN GỘP (Doanh thu − Biến đổi)</span><span class="val" style="color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(breakEven.grossProfit)}</span></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao) = <strong>${fmtVND(breakEven.fixedCost)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Tổng chi phí biến đổi thực tế (dầu + lương chuyến + tiền ăn + phát sinh) = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
+        <div class="formula-divider" style="margin:10px 0;"></div>
+        <div style="font-weight:800; font-size:15.5px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi) = ${fmtVND(breakEven.grossProfit)}</div>
       </div>
 
       <div class="card" style="margin-top:10px;">
