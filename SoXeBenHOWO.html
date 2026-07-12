@@ -149,8 +149,8 @@
   .inbox-extract-card{ font-size:12px; }
   .inbox-extract-card .kv{ display:flex; justify-content:space-between; padding:3px 0; }
 
-  .site-detail-row{ cursor:pointer; }
-  .site-detail-row:active{ opacity:0.7; }
+  .site-detail-row, .partner-detail-row{ cursor:pointer; }
+  .site-detail-row:active, .partner-detail-row:active{ opacity:0.7; }
 
   .rating-badge{ display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; }
   .rating-badge.good{ background:var(--profit-soft); color:var(--profit); }
@@ -227,6 +227,27 @@
   table.dash tbody tr:last-child td{ border-bottom:none; }
   .dash-wrap{ overflow-x:auto; }
   .dash-highlight td{ font-weight:800; color:var(--ink); }
+
+  .modal-backdrop{
+    position:fixed; inset:0; z-index:200; background:rgba(0,0,0,.45);
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .modal-sheet{
+    background:var(--bg); width:100%; max-width:520px; max-height:88vh; overflow-y:auto;
+    border-radius:18px 18px 0 0; padding:18px 18px 28px 18px; box-shadow:0 -6px 24px rgba(0,0,0,.2);
+  }
+  .modal-sheet h3{ margin-top:0; }
+  .modal-close-row{ display:flex; justify-content:flex-end; margin-bottom:6px; }
+  .modal-step{ padding:10px 0; border-top:1px solid var(--border); }
+  .modal-step:first-of-type{ border-top:none; }
+  .modal-step .st-title{ font-weight:700; font-size:13px; margin-bottom:3px; }
+  .modal-step .st-body{ font-size:12.5px; color:var(--ink-soft); line-height:1.5; }
+  .modal-step .st-formula{ font-family:ui-monospace,Menlo,monospace; font-size:12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; word-break:break-word; }
+
+  .resp-badge{ display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:6px; vertical-align:middle; }
+  .resp-badge.driver_full{ background:var(--loss-soft); color:var(--loss); }
+  .resp-badge.split{ background:#FFF3CD; color:#8A6D00; }
+  .resp-badge.owner_full{ background:var(--accent-soft); color:var(--accent); }
 </style>
 </head>
 <body>
@@ -257,6 +278,7 @@
   <input type="file" id="inboxFileInput" accept="image/*" multiple style="display:none;">
 </div>
 <datalist id="siteNamesList"></datalist>
+<div id="modalRoot"></div>
 <script>
 // ========================= DATA & CONSTANTS =========================
 
@@ -320,6 +342,24 @@ function restoreMainScroll(){
     const main = document.querySelector('main');
     if(main) main.scrollTop = savedMainScrollTop;
   });
+}
+
+/// Lightweight bottom-sheet modal used for explainer/detail popups (e.g.
+/// the break-even accounting walkthrough) that shouldn't replace the whole
+/// screen or disturb the underlying scroll position.
+function openModal(innerHtml){
+  const root = document.getElementById('modalRoot');
+  if(!root) return;
+  root.innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal-sheet">${innerHtml}</div></div>`;
+  document.getElementById('modalBackdrop').addEventListener('click', e=>{
+    if(e.target.id==='modalBackdrop') closeModal();
+  });
+  const closeBtn = document.getElementById('modalCloseBtn');
+  if(closeBtn) closeBtn.addEventListener('click', closeModal);
+}
+function closeModal(){
+  const root = document.getElementById('modalRoot');
+  if(root) root.innerHTML = '';
 }
 
 /// Returns TODAY as "YYYY-MM-DD" using the PHONE'S LOCAL date/time zone.
@@ -648,6 +688,42 @@ function shiftTotalCost(sh){
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0);
 }
 function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); }
+
+// ---- Repair/depreciation responsibility (who pays for a breakage) ----
+const REPAIR_RESPONSIBILITY_OPTIONS = [
+  { key:'owner_full', label:'Chủ xe chịu 100% (hao mòn/lỗi kỹ thuật thông thường)' },
+  { key:'driver_full', label:'Do tài xế làm hỏng — Tài xế chịu 100%' },
+  { key:'split', label:'Do tài xế làm hỏng — Chia đôi chi phí (50/50)' }
+];
+function repairResponsibilityLabel(key){
+  return (REPAIR_RESPONSIBILITY_OPTIONS.find(o=>o.key===key)||REPAIR_RESPONSIBILITY_OPTIONS[0]).label;
+}
+/// Portion of a repair's cost that gets deducted from the RESPONSIBLE
+/// driver's pay — 0 if the owner absorbs it fully (default), the full
+/// amount if the driver is 100% at fault, or half on a 50/50 split.
+function repairDriverResponsibleAmount(r){
+  const amt = Number(r.amount)||0;
+  const resp = r.responsibility || 'owner_full';
+  if(resp==='driver_full') return amt;
+  if(resp==='split') return amt/2;
+  return 0;
+}
+/// All-time total deducted from ONE driver across every repair record
+/// where they were marked responsible — surfaced on their CV card as a
+/// running "hồ sơ lỗi" figure.
+function driverResponsibleRepairTotal(driverId){
+  return state.repairs
+    .filter(r=>r.responsibleDriverId===driverId && (r.responsibility==='driver_full' || r.responsibility==='split'))
+    .reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
+}
+/// Same total but scoped to [from, to] — used when building the payroll
+/// export sheet for a specific period, so the deduction only reflects
+/// breakages actually dated within that payroll period.
+function driverResponsibleRepairTotalInRange(driverId, from, to){
+  return state.repairs
+    .filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to && (r.responsibility==='driver_full' || r.responsibility==='split'))
+    .reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
+}
 
 function chronoKey(dateStr, shiftType){
   const days = Math.floor(new Date(dateStr+'T00:00:00').getTime()/86400000);
@@ -1285,6 +1361,7 @@ function renderDrivers(){
             <div class="driver-cv-item"><span class="k">Số CCCD</span><span class="v">${escapeHtml(d.cccdNumber||'—')}</span></div>
             <div class="driver-cv-item"><span class="k">Bằng lái</span><span class="v">${escapeHtml(d.licenseInfo||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tình trạng sức khoẻ</span><span class="v">${escapeHtml(d.healthStatus||'—')}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--loss)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
         </div>
@@ -2010,18 +2087,104 @@ function renderComparisonChartSVG(gDay, gNight){
 /// average revenue/trip and fuel-cost/trip, to cover its fixed costs
 /// (allocated base salary + housing across all shifts in range, plus the
 /// road-fee figure already resolved for the period).
-function computeBreakEven(inRangeShifts, roadFee){
-  const totalTrips = inRangeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
-  const totalRevenue = inRangeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
-  const totalFuelCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh),0);
-  const totalFixed = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.housingAllocation)||0),0) + roadFee;
-  if(totalTrips===0) return { breakEvenTrips:null, totalFixed, note:'Chưa có chuyến nào trong kỳ để tính điểm hoà vốn.' };
+/// Full break-even analysis for the period, restructured per proper
+/// transport-accounting practice:
+///  - Revenue & trip volume split by Ca Ngày / Ca Đêm (production overview)
+///  - Costs split into FIXED (doesn't move with trip count: allocated base
+///    salary, housing, monthly road fee, repair/depreciation booked this
+///    period) vs VARIABLE (moves with each trip run: fuel, trip wage, food
+///    allowance, incidental cost)
+///  - Gross profit = Revenue − Variable cost (the "contribution margin"
+///    pool available to cover fixed cost)
+///  - Break-even trips = Fixed cost ÷ average contribution margin per trip
+function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal){
+  const dayShifts = inRangeShifts.filter(sh=>sh.shiftType==='day');
+  const nightShifts = inRangeShifts.filter(sh=>sh.shiftType==='night');
+  const tripsOf = shifts => shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const revenueOf = shifts => shifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
+
+  const dayTrips = tripsOf(dayShifts), nightTrips = tripsOf(nightShifts);
+  const dayRevenue = revenueOf(dayShifts), nightRevenue = revenueOf(nightShifts);
+  const totalTrips = dayTrips + nightTrips;
+  const totalRevenue = dayRevenue + nightRevenue;
+
+  const fixedCost = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.housingAllocation)||0),0) + roadFee + repairTotal;
+  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0),0);
+  const grossProfit = totalRevenue - variableCost;
+
+  const base = { dayTrips, nightTrips, dayRevenue, nightRevenue, totalTrips, totalRevenue, fixedCost, variableCost, grossProfit, roadFee, repairTotal };
+
+  if(totalTrips===0) return { ...base, breakEvenTrips:null, note:'Chưa có chuyến nào trong kỳ để tính điểm hoà vốn.' };
   const avgRevenuePerTrip = totalRevenue/totalTrips;
-  const avgVariableCostPerTrip = totalFuelCost/totalTrips;
+  const avgVariableCostPerTrip = variableCost/totalTrips;
   const marginPerTrip = avgRevenuePerTrip - avgVariableCostPerTrip;
-  if(marginPerTrip<=0) return { breakEvenTrips:null, totalFixed, avgRevenuePerTrip, avgVariableCostPerTrip, note:'Doanh thu/chuyến hiện đang thấp hơn chi phí dầu/chuyến — không thể hoà vốn với cơ cấu giá hiện tại, dù chạy bao nhiêu chuyến.' };
-  const breakEvenTrips = Math.ceil(totalFixed/marginPerTrip);
-  return { breakEvenTrips, totalFixed, avgRevenuePerTrip, avgVariableCostPerTrip, marginPerTrip, actualTrips: totalTrips, surplusTrips: totalTrips-breakEvenTrips, note:null };
+  if(marginPerTrip<=0) return { ...base, avgRevenuePerTrip, avgVariableCostPerTrip, breakEvenTrips:null, note:'Doanh thu/chuyến hiện đang thấp hơn chi phí biến đổi/chuyến — không thể hoà vốn với cơ cấu giá hiện tại, dù chạy bao nhiêu chuyến.' };
+  const breakEvenTrips = Math.ceil(fixedCost/marginPerTrip);
+  return { ...base, avgRevenuePerTrip, avgVariableCostPerTrip, marginPerTrip, breakEvenTrips, actualTrips: totalTrips, surplusTrips: totalTrips-breakEvenTrips, note:null };
+}
+
+/// Renders the full plain-language accounting walkthrough shown inside the
+/// "Chi Tiết" modal — every number here is pulled straight from the same
+/// `breakEven` object the summary card already displays, so the two can
+/// never drift out of sync.
+function renderBreakEvenExplainerModal(breakEven){
+  const be = breakEven;
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>⚖️ Cách Tính Điểm Hoà Vốn — Giải Trình Chi Tiết</h3>
+    <div class="hint" style="margin-bottom:10px;">Toàn bộ công thức dưới đây dùng đúng số liệu thực tế của kỳ đang xem, theo đúng cách kế toán vận tải: tách chi phí thành CỐ ĐỊNH và BIẾN ĐỔI, rồi tìm ra cần bao nhiêu chuyến để doanh thu bù đủ chi phí cố định.</div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 1 — Sản lượng &amp; doanh thu theo ca</div>
+      <div class="st-body">Ca Ngày: ${be.dayTrips} chuyến, doanh thu ${fmtVND(be.dayRevenue)}. Ca Đêm: ${be.nightTrips} chuyến, doanh thu ${fmtVND(be.nightRevenue)}. Cộng lại là tổng sản lượng và doanh thu cả kỳ.</div>
+      <div class="st-formula">Tổng chuyến = ${be.dayTrips} + ${be.nightTrips} = ${be.totalTrips} chuyến
+Tổng doanh thu = ${fmtVND(be.dayRevenue)} + ${fmtVND(be.nightRevenue)} = ${fmtVND(be.totalRevenue)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 2 — Tách chi phí CỐ ĐỊNH (không đổi theo số chuyến)</div>
+      <div class="st-body">Đây là các khoản phải trả dù xe chạy nhiều hay ít trong kỳ: lương cứng phân bổ, tiền nhà cho tài xế, chi phí luật đường (phí đường bộ cố định theo tháng), và chi phí sửa chữa/khấu hao phát sinh trong kỳ.</div>
+      <div class="st-formula">Chi phí cố định = Lương cứng + Tiền nhà + Luật đường + Sửa chữa/khấu hao
+= ${fmtVND(be.fixedCost - be.roadFee - be.repairTotal)} + ${fmtVND(be.roadFee)} + ${fmtVND(be.repairTotal)}
+= ${fmtVND(be.fixedCost)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 3 — Tách chi phí BIẾN ĐỔI (tăng/giảm theo số chuyến)</div>
+      <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, và chi phí phát sinh lặt vặt trong ca.</div>
+      <div class="st-formula">Chi phí biến đổi (cả kỳ) = ${fmtVND(be.variableCost)}
+Chi phí biến đổi bình quân / chuyến = ${fmtVND(be.variableCost)} ÷ ${be.totalTrips} = ${be.avgVariableCostPerTrip!==undefined?fmtVND(be.avgVariableCostPerTrip):'—'}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 4 — Lợi nhuận gộp (biên đóng góp)</div>
+      <div class="st-body">Lợi nhuận gộp là phần doanh thu còn lại sau khi trừ chi phí biến đổi — đây chính là "quỹ" dùng để bù đắp chi phí cố định. Lợi nhuận gộp CHƯA trừ chi phí cố định, nên chưa phải lãi thật.</div>
+      <div class="st-formula">Lợi nhuận gộp = Tổng doanh thu − Chi phí biến đổi
+= ${fmtVND(be.totalRevenue)} − ${fmtVND(be.variableCost)} = ${fmtVND(be.grossProfit)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 5 — Doanh thu &amp; biên lãi bình quân mỗi chuyến</div>
+      <div class="st-body">Chia đều tổng doanh thu và biên lãi gộp cho tổng số chuyến để biết trung bình mỗi chuyến đóng góp được bao nhiêu vào việc bù chi phí cố định.</div>
+      <div class="st-formula">Doanh thu bình quân/chuyến = ${fmtVND(be.totalRevenue)} ÷ ${be.totalTrips} = ${be.avgRevenuePerTrip!==undefined?fmtVND(be.avgRevenuePerTrip):'—'}
+Biên lãi gộp bình quân/chuyến = Doanh thu bình quân − Chi phí biến đổi bình quân
+= ${be.marginPerTrip!==undefined?fmtVND(be.marginPerTrip):'—'}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 6 — Điểm hoà vốn</div>
+      <div class="st-body">Lấy chi phí cố định chia cho biên lãi gộp bình quân mỗi chuyến — ra số chuyến TỐI THIỂU cần chạy trong kỳ để doanh thu bù đủ chi phí cố định. Chạy nhiều hơn số này mới thật sự có lãi.</div>
+      <div class="st-formula">Số chuyến hoà vốn = Chi phí cố định ÷ Biên lãi gộp bình quân/chuyến
+= ${fmtVND(be.fixedCost)} ÷ ${be.marginPerTrip!==undefined?fmtVND(be.marginPerTrip):'—'}
+= ${be.breakEvenTrips!==null?be.breakEvenTrips+' chuyến':'Không xác định — '+escapeHtml(be.note||'')}</div>
+    </div>
+
+    ${be.breakEvenTrips!==null ? `
+    <div class="modal-step">
+      <div class="st-title">Kết luận</div>
+      <div class="st-body">Kỳ này đã chạy thực tế ${be.actualTrips} chuyến, so với ${be.breakEvenTrips} chuyến cần để hoà vốn → ${be.surplusTrips>=0?`DƯ ${be.surplusTrips} chuyến, tức đã có lãi thật sau khi bù đủ chi phí cố định`:`THIẾU ${Math.abs(be.surplusTrips)} chuyến, tức lợi nhuận gộp kỳ này chưa đủ bù chi phí cố định`}.</div>
+    </div>` : ''}
+  `);
 }
 
 /// Cost-per-km for each of the last N calendar months (ALL shifts, not
@@ -2339,7 +2502,7 @@ function renderResults(){
   const dailyBreakdown = computeDailyBreakdown(inRange);
   const siteRanking = computeSiteRanking(inRange);
   const insights = generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, from, to, siteRanking});
-  const breakEven = computeBreakEven(inRange, roadFee);
+  const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal);
   const costTrend = computeCostPerKmTrend(6);
 
   app.innerHTML = `
@@ -2374,11 +2537,28 @@ function renderResults(){
 
     <section class="group">
       <h3>⚖️ Điểm Hoà Vốn Trong Kỳ</h3>
+
+      <div class="card dash-wrap" style="padding:0; margin-bottom:10px;">
+        <table class="dash">
+          <thead><tr><th>Sản Lượng &amp; Doanh Thu</th><th>Ca Ngày</th><th>Ca Đêm</th><th>Tổng</th></tr></thead>
+          <tbody>
+            <tr><td>Số chuyến</td><td>${breakEven.dayTrips}</td><td>${breakEven.nightTrips}</td><td>${breakEven.totalTrips}</td></tr>
+            <tr><td>Doanh thu</td><td>${fmtVND(breakEven.dayRevenue)}</td><td>${fmtVND(breakEven.nightRevenue)}</td><td>${fmtVND(breakEven.totalRevenue)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="card">
+        <div class="summary-row"><span>Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao)</span><span class="val">${fmtVND(breakEven.fixedCost)}</span></div>
+        <div class="summary-row"><span>Tổng chi phí biến đổi thực tế (dầu + lương chuyến + tiền ăn + phát sinh)</span><span class="val">${fmtVND(breakEven.variableCost)}</span></div>
+        <div class="summary-row total"><span>LỢI NHUẬN GỘP (Doanh thu − Biến đổi)</span><span class="val" style="color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(breakEven.grossProfit)}</span></div>
+      </div>
+
+      <div class="card" style="margin-top:10px;">
         ${breakEven.breakEvenTrips===null ? `<div class="hint">${escapeHtml(breakEven.note)}</div>` : `
         <div class="formula-block">
-          <div class="formula-label">Tổng chi phí cố định (lương cứng + nhà + luật đường)</div>
-          <div class="formula-value">${fmtVND(breakEven.totalFixed)}</div>
+          <div class="formula-label">Tổng chi phí cố định</div>
+          <div class="formula-value">${fmtVND(breakEven.fixedCost)}</div>
         </div>
         <div class="formula-op">÷</div>
         <div class="formula-block">
@@ -2397,6 +2577,7 @@ function renderResults(){
         </div>
         `}
       </div>
+      <button class="btn btn-ghost btn-block" id="breakEvenDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
       <div class="hint" style="margin-top:8px;">Số chuyến tối thiểu cần chạy trong kỳ để doanh thu bù đủ chi phí cố định — chạy nhiều hơn số này mới bắt đầu có lãi thật.</div>
     </section>
 
@@ -2513,6 +2694,7 @@ function renderResults(){
     state.resultsRange.to = e.target.value; state.resultsRoadFeeOverride=null; renderResults();
   });
   document.getElementById('addRepairBtn').addEventListener('click', ()=>openRepairEditor(null));
+  document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal(breakEven));
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
@@ -2540,7 +2722,7 @@ function renderPartnersOverview(){
         <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th>Xếp Hạng</th></tr></thead>
         <tbody>
           ${partners.map(p=>`
-            <tr class="site-detail-row" data-partner="${escapeHtml(p.name)}">
+            <tr class="partner-detail-row" data-partner="${escapeHtml(p.name)}">
               <td>${escapeHtml(p.name)}</td>
               <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
               <td><span class="rating-badge ${p.rating.className}">${p.rating.label}</span></td>
@@ -2551,7 +2733,7 @@ function renderPartnersOverview(){
     </div>
     <div class="hint" style="margin-top:8px;">Bấm vào 1 đối tác để xem chi tiết công trình, lịch sử thu tiền, và khoản nợ quá hạn bao lâu.</div>
   `;
-  wrap.querySelectorAll('.site-detail-row').forEach(row=>{
+  wrap.querySelectorAll('.partner-detail-row').forEach(row=>{
     row.addEventListener('click', ()=>{ saveMainScroll(); openPartnerDetail(row.dataset.partner); });
   });
 }
@@ -3013,15 +3195,18 @@ function renderRepairList(repairsHere){
         <strong>${formatDateVN(date)}</strong>
         <span class="hint">${fmtVND(dayTotal)}</span>
       </div>
-      ${items.map(r=>`
+      ${items.map(r=>{
+        const resp = r.responsibility || 'owner_full';
+        const respDriver = resp!=='owner_full' ? driverById(r.responsibleDriverId) : null;
+        return `
         <div class="repair-day-item" data-id="${r.id}">
           <div>
-            <div style="font-weight:600; font-size:13px;">${escapeHtml(r.item||'(chưa ghi hạng mục)')}</div>
+            <div style="font-weight:600; font-size:13px;">${escapeHtml(r.item||'(chưa ghi hạng mục)')}${resp!=='owner_full' ? `<span class="resp-badge ${resp}">${resp==='driver_full'?'Tài xế chịu 100%':'Chia đôi'}${respDriver?': '+escapeHtml(respDriver.name):''}</span>` : ''}</div>
             <div class="hint">${escapeHtml(r.invoiceCode||'—')} · ${fmtVND(r.amount)}</div>
           </div>
           <button class="link-btn editRepairBtn" data-id="${r.id}">Sửa</button>
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>`;
   }).join('');
   wrap.querySelectorAll('.editRepairBtn').forEach(btn=>{
@@ -3031,7 +3216,8 @@ function renderRepairList(repairsHere){
 
 function openRepairEditor(id){
   const existing = id ? state.repairs.find(r=>r.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'' };
+  const draft = existing ? {...existing, responsibility: existing.responsibility || 'owner_full', responsibleDriverId: existing.responsibleDriverId || null}
+    : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'', responsibility:'owner_full', responsibleDriverId:null };
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -3054,6 +3240,22 @@ function openRepairEditor(id){
           <input type="text" inputmode="decimal" id="rp_amount">
         </div>
       </div>
+      <div class="card">
+        <div class="field">
+          <label>Trách nhiệm gây hỏng hóc</label>
+          <select id="rp_responsibility">
+            ${REPAIR_RESPONSIBILITY_OPTIONS.map(o=>`<option value="${o.key}" ${o.key===draft.responsibility?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" id="rp_driverField" style="margin-bottom:0; display:${draft.responsibility==='owner_full'?'none':'block'};">
+          <label>Tài xế chịu trách nhiệm</label>
+          <select id="rp_driver">
+            <option value="">— Chọn tài xế —</option>
+            ${state.drivers.map(d=>`<option value="${d.id}" ${d.id===draft.responsibleDriverId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="hint" id="rp_deductionPreview" style="margin-top:10px;"></div>
+      </div>
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing ? '<button class="btn btn-danger" id="delRepairBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelRepairBtn">Huỷ</button>
@@ -3061,12 +3263,38 @@ function openRepairEditor(id){
       </div>
     </section>
   `;
-  attachMoneyInput(document.getElementById('rp_amount'), draft.amount, v=>draft.amount=v);
+  attachMoneyInput(document.getElementById('rp_amount'), draft.amount, v=>{ draft.amount=v; refreshDeductionPreview(); });
+
+  function refreshDeductionPreview(){
+    const prev = document.getElementById('rp_deductionPreview');
+    if(!prev) return;
+    const deduction = repairDriverResponsibleAmount(draft);
+    prev.textContent = deduction>0
+      ? `Sẽ trừ ${fmtVND(deduction)} vào lương của tài xế được chọn khi xuất lương kỳ có ngày ${formatDateVN(draft.date)}.`
+      : 'Chủ xe chịu toàn bộ chi phí này — không trừ vào lương tài xế nào.';
+  }
+  refreshDeductionPreview();
+
+  document.getElementById('rp_responsibility').addEventListener('change', e=>{
+    draft.responsibility = e.target.value;
+    document.getElementById('rp_driverField').style.display = draft.responsibility==='owner_full' ? 'none' : 'block';
+    refreshDeductionPreview();
+  });
+  document.getElementById('rp_driver').addEventListener('change', e=>{
+    draft.responsibleDriverId = e.target.value || null;
+    refreshDeductionPreview();
+  });
 
   document.getElementById('saveRepairBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('rp_date').value || draft.date;
     draft.item = document.getElementById('rp_item').value.trim();
     draft.invoiceCode = document.getElementById('rp_invoice').value.trim();
+    draft.responsibility = document.getElementById('rp_responsibility').value;
+    const driverSel = document.getElementById('rp_driver');
+    draft.responsibleDriverId = draft.responsibility==='owner_full' ? null : (driverSel.value || null);
+    if(draft.responsibility!=='owner_full' && !draft.responsibleDriverId){
+      showToast('Chọn tài xế chịu trách nhiệm trước khi lưu.'); return;
+    }
     const idx = state.repairs.findIndex(r=>r.id===draft.id);
     if(idx>=0) state.repairs[idx]=draft; else state.repairs.push(draft);
     await saveRepairs();
@@ -3244,6 +3472,29 @@ function switchHtml(id, checked){
 
 // ========================= XLSX EXPORT (REAL EXCEL FILE, MULTI-SHEET) =========================
 
+/// Forces Excel / Google Sheets to render the given numeric columns with
+/// accounting-style thousands separators the INSTANT the file is opened
+/// (no manual "Format Cells" step needed), while the cell stays a real
+/// number (t:'n') underneath — so SUM/AVERAGE and further formulas in the
+/// spreadsheet keep working. Without setting `cell.z`, SheetJS writes
+/// numeric cells with the "General" format, which is what was causing
+/// Excel/Sheets to sometimes show the raw ungrouped digit string, or a
+/// spreadsheet app to mis-guess the column type on open.
+/// `startRow` is 0-indexed and should point past any header row(s).
+function applyAccountingFormat(ws, colIndices, startRow){
+  if(!ws || !ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for(let R = startRow; R <= range.e.r; R++){
+    for(const C of colIndices){
+      const addr = XLSX.utils.encode_cell({ r:R, c:C });
+      const cell = ws[addr];
+      if(cell && cell.t === 'n'){
+        cell.z = '#,##0';
+      }
+    }
+  }
+}
+
 /// Builds the flat "Nhật Ký Vận Hành" sheet: ALL shifts ever recorded (not
 /// filtered by period), one row per site within a shift, mirroring the
 /// original spreadsheet's column layout exactly.
@@ -3284,14 +3535,14 @@ function buildOperationLogRows(){
 /// LƯƠNG THỰC NHẬN = lương cứng + lương chuyến + tiền ăn − ứng lương.
 /// (Verified against the original spreadsheet's driver payroll formula.)
 function buildDriverPayrollRows(from, to){
-  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tổng Tiền Tip/Thưởng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','LƯƠNG THỰC NHẬN'];
+  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tổng Tiền Tip/Thưởng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','Trừ Do Hỏng Hóc','LƯƠNG THỰC NHẬN'];
   const rows = [header];
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
   const byDriver = {};
   for(const sh of inRange){
     const driver = driverById(sh.driverId);
     const name = driver?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
-    if(!byDriver[name]) byDriver[name] = { shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0, tip:0 };
+    if(!byDriver[name]) byDriver[name] = { driverId: driver?.id || null, shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0, tip:0 };
     const b = byDriver[name];
     const shiftTrips = (sh.siteLogs||[]).reduce((s,l)=>s+(Number(l.trips)||0),0);
     b.shifts += 1;
@@ -3304,10 +3555,11 @@ function buildDriverPayrollRows(from, to){
   }
   Object.keys(byDriver).sort().forEach(name=>{
     const b = byDriver[name];
-    const netPay = b.baseSalary + b.tripWage + b.food + b.tip - b.advance;
-    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(b.tip), Math.round(b.housing), Math.round(b.advance), Math.round(netPay)]);
+    const repairDeduction = b.driverId ? driverResponsibleRepairTotalInRange(b.driverId, from, to) : 0;
+    const netPay = b.baseSalary + b.tripWage + b.food + b.tip - b.advance - repairDeduction;
+    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(b.tip), Math.round(b.housing), Math.round(b.advance), Math.round(repairDeduction), Math.round(netPay)]);
   });
-  if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','','']);
+  if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','','','']);
   return rows;
 }
 
@@ -3339,11 +3591,15 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
 
 /// Builds the "Sửa Chữa Khấu Hao" sheet — repair log within [from, to].
 function buildRepairRows(from, to){
-  const header = ['Ngày','Hạng Mục','Mã Hoá Đơn/Gara','Số Tiền'];
+  const header = ['Ngày','Hạng Mục','Mã Hoá Đơn/Gara','Số Tiền','Trách Nhiệm','Tài Xế Chịu Trách Nhiệm','Số Tiền Tài Xế Bị Trừ'];
   const rows = [header];
   const inRange = repairsInRange(from, to).sort((a,b)=>a.date.localeCompare(b.date));
-  inRange.forEach(r=>{ rows.push([formatDateVN(r.date), r.item||'', r.invoiceCode||'', Math.round(r.amount)||0]); });
-  if(rows.length===1) rows.push(['(Không có khoản sửa chữa nào trong kỳ này)','','','']);
+  inRange.forEach(r=>{
+    const respDriver = driverById(r.responsibleDriverId);
+    rows.push([formatDateVN(r.date), r.item||'', r.invoiceCode||'', Math.round(r.amount)||0,
+      repairResponsibilityLabel(r.responsibility), respDriver?.name || '', Math.round(repairDriverResponsibleAmount(r))]);
+  });
+  if(rows.length===1) rows.push(['(Không có khoản sửa chữa nào trong kỳ này)','','','','','','']);
   return rows;
 }
 
@@ -3355,17 +3611,21 @@ function downloadWorkbook(from, to, resultsData, filenamePrefix){
   const wb = XLSX.utils.book_new();
 
   const wsLog = XLSX.utils.aoa_to_sheet(buildOperationLogRows());
+  applyAccountingFormat(wsLog, [4,5,6,7,8,9,10,11,12,14,15,16,17,18,19,20,21,22,23,24,25,27,30,31], 1);
   XLSX.utils.book_append_sheet(wb, wsLog, 'Nhat Ky Van Hanh');
 
   const wsPayroll = XLSX.utils.aoa_to_sheet(buildDriverPayrollRows(from, to));
+  applyAccountingFormat(wsPayroll, [1,2,3,4,5,6,7,8,9], 1);
   XLSX.utils.book_append_sheet(wb, wsPayroll, 'Luong Tai Xe');
 
   if(resultsData){
     const wsResults = XLSX.utils.aoa_to_sheet(buildResultsRows(resultsData));
+    applyAccountingFormat(wsResults, [1,2,3], 0);
     XLSX.utils.book_append_sheet(wb, wsResults, 'Ket Qua Kinh Doanh');
   }
 
   const wsRepairs = XLSX.utils.aoa_to_sheet(buildRepairRows(from, to));
+  applyAccountingFormat(wsRepairs, [3,6], 1);
   XLSX.utils.book_append_sheet(wb, wsRepairs, 'Sua Chua Khau Hao');
 
   XLSX.writeFile(wb, `${filenamePrefix}_${from}_den_${to}.xlsx`);
