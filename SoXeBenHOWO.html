@@ -57,10 +57,20 @@
   .shift-card{ display:flex; gap:12px; align-items:stretch; padding:0; overflow:hidden; }
   .shift-card .bar{ width:6px; flex-shrink:0; }
   .shift-card .body{ flex:1; padding:13px 14px; }
-  .shift-card .row1{ display:flex; justify-content:space-between; align-items:baseline; }
-  .shift-card .date{ font-weight:700; font-size:15px; }
-  .shift-card .tag{ font-size:11px; padding:3px 8px; border-radius:20px; background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  .shift-card .row1{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .shift-card .date{ font-weight:700; font-size:15px; padding-top:2px; }
+  .shift-card .tag{ font-size:11px; padding:3px 8px; border-radius:20px; background:var(--accent-soft); color:var(--accent); font-weight:600; white-space:nowrap; }
   .shift-card .driver{ font-size:13px; color:var(--ink-soft); margin-top:3px; }
+  .shift-card .row1-right{ display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0; }
+  /// Only rendered when computeShiftIssues() finds at least one missing
+  /// field or cash-flow anomaly on that shift — a clean shift keeps the
+  /// plain single-tag layout untouched, per spec.
+  .shift-issue-btn{
+    appearance:none; border:none; border-radius:20px; padding:4px 10px 4px 8px;
+    font-size:10.5px; font-weight:700; background:var(--loss-soft); color:var(--loss);
+    white-space:nowrap; cursor:pointer; line-height:1.4;
+  }
+  .shift-issue-btn:active{ opacity:0.7; }
   .shift-card .profit{ font-size:17px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:8px; }
   .empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
   .empty .big{ font-size:38px; margin-bottom:10px; }
@@ -177,18 +187,23 @@
 
   .repair-day-item{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border); }
 
-  /// Runs the HOWO truck exactly once, left→right, directly on top of the
-  /// "Đang phân tích..." button label — no separate track/bar underneath.
-  /// `forwards` fill-mode + `iteration-count:1` means it stops dead at the
-  /// right edge instead of looping back, per spec. The 3 `.howo-wheel`
-  /// overlays sit exactly on top of the truck image's 3 wheel hubs (measured
-  /// from the source photo) and spin in place while the whole assembly
-  /// translates — a real rolling-wheel illusion, not just a sliding image.
+  /// The HOWO truck's horizontal position and wheel spin are now driven
+  /// entirely from JS (see startTruckRun()) using the Web Animations API
+  /// instead of a fixed-length CSS @keyframes — a real Gemini call has no
+  /// known duration up front, so a static N-second animation either
+  /// finishes early and sits idle, or (worse) has to loop, which looks
+  /// broken. JS eases the truck up to ~97% of the track and HOLDS it
+  /// there — via Animation.fill:'forwards', the WAAPI equivalent of this
+  /// old `forwards` fill-mode — for as long as the real call (including
+  /// any silent background retries) actually takes, then plays one short
+  /// final hop to 100% the instant the response arrives. It still runs
+  /// left→right exactly once and never loops back, per spec — only the
+  /// timing source changed. Only static positioning/sizing rules remain
+  /// here; no `animation:` property on these two classes anymore.
   .strategy-run-line{ position:relative; overflow:hidden; }
   .howo-truck-run{
     position:absolute; top:50%; left:-4px; width:55px; height:36px;
     transform:translateY(-50%); pointer-events:none; z-index:2;
-    animation: howoTruckRunOnce 2.4s cubic-bezier(.42,0,.58,1) forwards;
   }
   .howo-truck-run img{
     display:block; width:100%; height:100%; object-fit:contain;
@@ -197,19 +212,10 @@
   .howo-wheel{
     position:absolute; border-radius:50%;
     background: repeating-conic-gradient(#20242b 0deg 20deg, #d8a83a 20deg 40deg);
-    animation: howoWheelSpin 2.4s cubic-bezier(.42,0,.58,1) forwards;
   }
   .howo-wheel-1{ left:14.3px; top:28.9px; width:6.9px; height:6.9px; }
   .howo-wheel-2{ left:31.6px; top:27.4px; width:6.9px; height:6.9px; }
   .howo-wheel-3{ left:43.5px; top:27.4px; width:7.4px; height:7.4px; }
-  @keyframes howoTruckRunOnce{
-    0%   { left:-4px; }
-    100% { left:calc(100% - 58px); }
-  }
-  @keyframes howoWheelSpin{
-    from{ transform:rotate(0deg); }
-    to  { transform:rotate(2160deg); }
-  }
 
   #loginScreen{
     display:none; position:fixed; inset:0; z-index:100; background:var(--bg);
@@ -323,6 +329,55 @@ const HOWO_TRUCK_HTML = `
   <i class="howo-wheel howo-wheel-2"></i>
   <i class="howo-wheel howo-wheel-3"></i>
 </span>`;
+
+/// Starts the HOWO truck run for ONE async Gemini call whose real duration
+/// is unknown ahead of time (and may include several silent retries).
+/// Two phases instead of a fixed-length animation:
+///  - "approach": eases the truck from the left edge up to ~97% of the
+///    track over a generous 45s window, then just HOLDS there
+///    (fill:'forwards') for as long as the call actually takes — including
+///    through every retry, with no restart/jump/loop, satisfying "giữ
+///    trạng thái mượt mà" through the retry loop.
+///  - "arrival": on finish(), the approach is snapped to its 97% end
+///    state and one short 260ms hop covers the last stretch to 100%, so
+///    the truck visibly finishes AT THE MOMENT the real data comes back,
+///    never before and never with a lingering gap after.
+/// The 3 wheels spin on their own infinite loop the whole time, entirely
+/// decoupled from how long the approach/arrival phases take.
+/// Returns null (no-op finish()) if the truck element isn't in the DOM,
+/// so callers never need to null-check before use.
+function startTruckRun(container){
+  const truckEl = container ? container.querySelector('.howo-truck-run') : null;
+  if(!truckEl) return { finish: ()=>Promise.resolve() };
+
+  container.querySelectorAll('.howo-wheel').forEach(wheelEl=>{
+    wheelEl.animate(
+      [{ transform:'rotate(0deg)' }, { transform:'rotate(360deg)' }],
+      { duration:550, iterations:Infinity, easing:'linear' }
+    );
+  });
+
+  const approach = truckEl.animate(
+    [
+      { left:'-4px',              offset:0    },
+      { left:'calc(55% - 20px)',  offset:0.35 },
+      { left:'calc(80% - 25px)',  offset:0.7  },
+      { left:'calc(97% - 30px)',  offset:1    }
+    ],
+    { duration:45000, easing:'cubic-bezier(0,.6,.25,1)', fill:'forwards' }
+  );
+
+  return {
+    finish(){
+      approach.finish();
+      const arrival = truckEl.animate(
+        [{ left:'calc(97% - 30px)' }, { left:'calc(100% - 58px)' }],
+        { duration:260, easing:'ease-in', fill:'forwards' }
+      );
+      return arrival.finished.catch(()=>{});
+    }
+  };
+}
 // (Per-shift payment status removed — payment tracking now lives at the
 // site/partner level, see the "Đối Tác & Công Nợ" module below.)
 
@@ -484,6 +539,59 @@ function computeAllWarnings(){
   const maint = computeMaintenanceWarnings();
   return { docs, maint, total: docs.length + maint.length };
 }
+
+// ========================= PER-SHIFT ACTION-NEEDED VALIDATION =========================
+// Separate from computeAllWarnings() above (vehicle paperwork / maintenance
+// deadlines): this scans ONE shift's own fields for missing required data
+// or cash-flow numbers that don't add up, so the Shift List can surface a
+// [Cảnh Báo Hành Động] button on exactly the ca that need fixing — and stay
+// silent on every ca that's already clean, per spec. Never rendered in the
+// Kết Quả Kinh Doanh tab; that tab has its own, purely-financial warning
+// engine (computeFinancialWarnings, further below).
+
+/// Returns an array of short Vietnamese issue descriptions for one shift.
+/// Empty array = the shift is complete and internally consistent.
+function computeShiftIssues(sh){
+  const issues = [];
+
+  if(!driverById(sh.driverId)) issues.push('Chưa chọn tài xế (hoặc tài xế đã bị xoá)');
+
+  if(!(Number(sh.odoEnd) > 0)){
+    issues.push('Chưa nhập ODO cuối ca');
+  } else if(Number(sh.odoEnd) < Number(sh.odoStart)){
+    issues.push('ODO cuối nhỏ hơn ODO đầu — kiểm tra lại số công tơ mét');
+  }
+
+  if(!(Number(sh.fuelEnd) > 0)){
+    issues.push('Chưa nhập lượng dầu cuối ca');
+  } else {
+    const consumed = (Number(sh.fuelStart)||0) + (Number(sh.fuelAdded)||0) - Number(sh.fuelEnd);
+    if(consumed < 0) issues.push('Dầu cuối ca lớn hơn dầu đầu ca cộng dầu đổ thêm — số liệu dầu bị sai');
+  }
+  if(Number(sh.fuelAdded) > 0 && !(Number(sh.fuelUnitPrice) > 0)){
+    issues.push('Có đổ dầu nhưng chưa nhập đơn giá dầu');
+  }
+
+  const policy = state.settings.costPolicies[sh.status];
+  const expectsTrips = policy ? policy.operations : true;
+  const siteLogs = sh.siteLogs || [];
+  if(expectsTrips && siteLogs.length===0){
+    issues.push('Ca có vận hành nhưng chưa nhập công trình / chuyến nào');
+  }
+  siteLogs.forEach((s,idx)=>{
+    const label = s.siteName ? `"${s.siteName}"` : `Công trình #${idx+1}`;
+    if(!s.siteName) issues.push(`Công trình #${idx+1} chưa nhập tên công trình`);
+    if(!(Number(s.trips) > 0)) issues.push(`${label}: chưa nhập số chuyến`);
+    if(!(Number(s.volumePerTrip) > 0)) issues.push(`${label}: chưa nhập khối lượng/chuyến`);
+    if(!(Number(s.materialUnitPrice) > 0)) issues.push(`${label}: chưa nhập đơn giá vật liệu`);
+  });
+
+  if(Number(sh.incidentalCost) < 0) issues.push('Chi phí phát sinh đang âm — kiểm tra lại số liệu');
+  if(Number(sh.advanceAmount) < 0) issues.push('Số tiền tạm ứng/phạt đang âm — kiểm tra lại số liệu');
+
+  return issues;
+}
+function shiftHasIssues(sh){ return computeShiftIssues(sh).length > 0; }
 
 // ========================= FIREBASE: CLOUD STORAGE (NO LOGIN) =========================
 // Data lives in Firestore under one FIXED shared path — no Google sign-in
@@ -880,13 +988,17 @@ function renderShiftList(){
         const profit=shiftNetProfit(sh);
         const positive = profit>=0;
         const driverName = driverById(sh.driverId)?.name || sh.driverNameSnapshot || '(chưa chọn tài xế)';
+        const issues = computeShiftIssues(sh);
         return `
           <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
             <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
             <div class="body">
               <div class="row1">
                 <span class="date">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}</span>
-                <span class="tag">${statusLabel(sh.status)}</span>
+                <div class="row1-right">
+                  <span class="tag">${statusLabel(sh.status)}</span>
+                  ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
+                </div>
               </div>
               <div class="driver">Tài xế: ${escapeHtml(driverName)}</div>
               <div class="profit" style="color:${positive?'var(--profit)':'var(--loss)'}">${positive?'+':''}${fmtVND(profit)}</div>
@@ -897,6 +1009,22 @@ function renderShiftList(){
   app.innerHTML = warningsBannerHtml + searchBarHtml + cardsHtml;
   bindSearchBar();
   bindWarningsBanner();
+  bindShiftIssueButtons();
+}
+/// Tapping the badge jumps straight into the shift (same destination as
+/// tapping the card) but first toasts the single most relevant issue —
+/// stopPropagation keeps the card's own onclick from also double-firing.
+function bindShiftIssueButtons(){
+  document.querySelectorAll('.shift-issue-btn').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const issuesList = (btn.dataset.issues||'').split(' | ').filter(Boolean);
+      if(issuesList.length>0){
+        showToast(issuesList[0] + (issuesList.length>1 ? ` (+${issuesList.length-1} việc khác)` : ''));
+      }
+      openShift(btn.dataset.id);
+    });
+  });
 }
 function bindSearchBar(){
   const input = document.getElementById('searchDateInput');
@@ -1535,6 +1663,38 @@ function openEditDriver(id){
 
 const GEMINI_MODEL = 'gemini-3.5-flash'; // Google retires model names frequently (1.5-flash, then 2.5-flash, both already shut down for new API keys as of July 2026). This is the current stable "flash" tier with no announced shutdown date. If it ever errors with "model not found", change ONLY this one line to whatever Google's current recommended flash model is.
 
+// ========================= PERSISTENT RETRY (SHARED BY BOTH GEMINI CALLS) =========================
+// Error codes that will NEVER succeed by simply retrying the exact same
+// request — a missing/invalid API key, a corrupt image, or a rejected key
+// need Ông Chủ to fix something in Cài Đặt, not the network to recover.
+// Everything else (connection drop, timeout, Gemini 429/5xx, empty or
+// unparseable model output) is treated as transient and retried FOREVER
+// with capped exponential backoff — per spec, never surface a mid-stream
+// error that forces a manual re-tap of the analyze button.
+const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400','HTTP_401','HTTP_403']);
+
+/// Runs one Gemini attempt (`attemptFn`) and keeps retrying on transient
+/// failure with capped exponential backoff (1.5s → 3s → 6s → … → capped at
+/// 20s), indefinitely, until it either succeeds or hits a non-retryable
+/// error above. `onRetry(attemptNumber, error, waitMs)` fires right before
+/// each wait so the caller can keep its loading UI (the truck animation)
+/// alive and, after enough attempts, let Ông Chủ know it's still working
+/// rather than silently stuck — without ever showing a dead-end error.
+async function callGeminiWithRetry(attemptFn, onRetry){
+  let attempt = 0;
+  while(true){
+    attempt++;
+    try {
+      return await attemptFn();
+    } catch(err){
+      if(GEMINI_NON_RETRYABLE_CODES.has(err.code)) throw err;
+      const waitMs = Math.min(1500 * Math.pow(2, attempt-1), 20000);
+      if(onRetry){ try{ onRetry(attempt, err, waitMs); }catch(_ignored){} }
+      await new Promise(resolve=>setTimeout(resolve, waitMs));
+    }
+  }
+}
+
 const INBOX_CATEGORY_LABELS = {
   odometer: 'Ảnh Đồng Hồ Km',
   fuel: 'Hoá Đơn Dầu',
@@ -1587,7 +1747,7 @@ function splitDataUrl(dataUrl){
 /// API and returns the parsed structured JSON result. This is the entire
 /// "GeminiManager" — a single focused network call, since JS has no
 /// native SDK requirement the way Swift would.
-async function callGeminiVision(dataUrl, promptText){
+async function callGeminiVision(dataUrl, promptText, onRetry){
   const apiKey = (state.settings.geminiApiKey || '').trim();
   if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
 
@@ -1605,32 +1765,34 @@ async function callGeminiVision(dataUrl, promptText){
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
   };
 
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
-  } catch(networkErr) {
-    const e = new Error('Không kết nối được tới Gemini — kiểm tra mạng.'); e.code='NETWORK'; throw e;
-  }
+  return callGeminiWithRetry(async ()=>{
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+    } catch(networkErr) {
+      const e = new Error('Không kết nối được tới Gemini — kiểm tra mạng.'); e.code='NETWORK'; throw e;
+    }
 
-  if(!response.ok){
-    let detail = '';
-    try{ detail = (await response.json()).error?.message || ''; }catch(e){ /* ignore parse failure */ }
-    const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
-  }
+    if(!response.ok){
+      let detail = '';
+      try{ detail = (await response.json()).error?.message || ''; }catch(e){ /* ignore parse failure */ }
+      const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
+    }
 
-  const payload = await response.json();
-  const textOut = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
+    const payload = await response.json();
+    const textOut = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
 
-  try {
-    return JSON.parse(textOut);
-  } catch(parseErr) {
-    const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e;
-  }
+    try {
+      return JSON.parse(textOut);
+    } catch(parseErr) {
+      const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e;
+    }
+  }, onRetry);
 }
 
 /// Processes one queued inbox image end-to-end: send to Gemini → store the
@@ -1638,10 +1800,14 @@ async function callGeminiVision(dataUrl, promptText){
 async function processInboxImage(entry){
   try{
     const prompt = buildGeminiInboxPrompt(state.drivers);
-    const result = await callGeminiVision(entry.dataUrl, prompt);
+    const result = await callGeminiVision(entry.dataUrl, prompt, (attempt)=>{
+      entry.retryAttempt = attempt;
+      if(state.currentTab==='inbox') renderInbox();
+    });
     entry.category = GEMINI_VALID_CATEGORIES.includes(result.category) ? result.category : 'unknown';
     entry.extracted = result;
     entry.status = 'done';
+    entry.retryAttempt = null;
   }catch(e){
     entry.status = 'error';
     entry.errorMessage = e.message || 'Không phân tích được ảnh này.';
@@ -1729,7 +1895,7 @@ function handleInboxFiles(fileList){
   files.forEach(file=>{
     const reader = new FileReader();
     reader.onload = () => {
-      const entry = { id: uid('img'), dataUrl: reader.result, status: 'processing', category: null, extracted: {}, errorMessage: '' };
+      const entry = { id: uid('img'), dataUrl: reader.result, status: 'processing', category: null, extracted: {}, errorMessage: '', retryAttempt: null };
       state.inboxImages.push(entry);
       if(state.currentTab==='inbox') renderInbox();
       processInboxImage(entry);
@@ -1769,7 +1935,7 @@ function renderInbox(){
           <div class="inbox-thumb" data-id="${im.id}">
             <img src="${im.dataUrl}">
             <span class="badge ${im.status==='processing'?'processing':(im.category||'unknown')}">
-              ${im.status==='processing' ? 'Đang phân tích...' : (im.status==='error' ? 'Lỗi' : INBOX_CATEGORY_LABELS[im.category||'unknown'])}
+              ${im.status==='processing' ? (im.retryAttempt ? `Đang thử lại (${im.retryAttempt})...` : 'Đang phân tích...') : (im.status==='error' ? 'Lỗi' : INBOX_CATEGORY_LABELS[im.category||'unknown'])}
             </span>
             <button class="rm" data-id="${im.id}">✕</button>
           </div>
@@ -1906,7 +2072,7 @@ Chỉ đưa nhận xét dựa trên số liệu thực tế ở trên, không su
 
 /// Text-only Gemini call (no image) — same API, just omits the inline_data
 /// image part.
-async function callGeminiText(promptText){
+async function callGeminiText(promptText, onRetry){
   const apiKey = (state.settings.geminiApiKey || '').trim();
   if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
 
@@ -1916,23 +2082,34 @@ async function callGeminiText(promptText){
     generationConfig: { responseMimeType: 'application/json', temperature: 0.3 }
   };
 
-  let response;
-  try {
-    response = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
-  } catch(networkErr) {
-    const e = new Error('Không kết nối được tới Gemini — kiểm tra mạng.'); e.code='NETWORK'; throw e;
-  }
-  if(!response.ok){
-    let detail = '';
-    try{ detail = (await response.json()).error?.message || ''; }catch(e){}
-    const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
-  }
-  const payload = await response.json();
-  const textOut = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
-  try { return JSON.parse(textOut); }
-  catch(parseErr){ const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e; }
+  return callGeminiWithRetry(async ()=>{
+    let response;
+    try {
+      response = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
+    } catch(networkErr) {
+      const e = new Error('Không kết nối được tới Gemini — kiểm tra mạng.'); e.code='NETWORK'; throw e;
+    }
+    if(!response.ok){
+      let detail = '';
+      try{ detail = (await response.json()).error?.message || ''; }catch(e){}
+      const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
+    }
+    const payload = await response.json();
+    const textOut = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
+    try { return JSON.parse(textOut); }
+    catch(parseErr){ const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e; }
+  }, onRetry);
 }
+
+/// Handle for whichever HOWO truck run is currently live in the DOM for
+/// the Strategy tab — intentionally NOT part of `state` (a live WAAPI
+/// Animation object isn't serializable app data, just a UI detail).
+/// renderStrategy() replaces this every time it draws the loading button,
+/// so runStrategyAnalysis() below always finishes the truck that's
+/// actually on screen right now, even if Ông Chủ switched tabs away and
+/// back while a long retry chain was still running in the background.
+let activeStrategyTruckRun = null;
 
 async function runStrategyAnalysis(){
   const sa = state.strategyAnalysis;
@@ -1943,18 +2120,29 @@ async function runStrategyAnalysis(){
     if(summary.driverStats.length===0 && summary.siteRanking.length===0){
       sa.error = 'Chưa có ca nào trong khoảng thời gian này để phân tích.';
       sa.loading = false;
-      renderStrategy();
+      if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
+      if(state.currentTab==='strategy') renderStrategy();
       return;
     }
     const prompt = buildStrategyPrompt(summary);
-    const result = await callGeminiText(prompt);
+    const result = await callGeminiText(prompt, (attempt)=>{
+      // Silent for the first couple of attempts — the truck itself is
+      // already the "still working" cue. Only after a retry chain runs
+      // long enough to look suspicious does a status line appear, so
+      // Ông Chủ never wonders if the app has frozen.
+      if(attempt>=3){
+        const hintEl = document.getElementById('strategyRetryHint');
+        if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
+      }
+    });
     sa.result = result;
     sa.generatedAt = new Date().toISOString();
   }catch(e){
     sa.error = e.message || 'Không phân tích được — thử lại.';
   }
   sa.loading = false;
-  renderStrategy();
+  if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
+  if(state.currentTab==='strategy') renderStrategy();
 }
 
 function renderStrategy(){
@@ -1986,6 +2174,7 @@ function renderStrategy(){
         ${sa.loading ? 'Đang phân tích...' : '🧭 Phân Tích Ngay'}
         ${sa.loading ? HOWO_TRUCK_HTML : ''}
       </button>
+      ${sa.loading ? `<div class="hint" id="strategyRetryHint" style="margin-top:8px;"></div>` : ''}
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
 
@@ -1997,6 +2186,12 @@ function renderStrategy(){
       </section>
     ` : '')}
   `;
+
+  if(sa.loading){
+    activeStrategyTruckRun = startTruckRun(document.getElementById('runStrategyBtn'));
+  } else {
+    activeStrategyTruckRun = null;
+  }
 
   document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
@@ -2451,23 +2646,227 @@ function computePartnersOverview(){
   }).sort((a,b)=>b.totalOwed-a.totalOwed);
 }
 
+// ========================= FINANCIAL WARNING ENGINE (KẾT QUẢ KINH DOANH TAB ONLY) =========================
+// Deterministic rules on real computed numbers — never AI, never a guess.
+// Deliberately separate from computeShiftIssues() (per-shift data-entry
+// completeness, shown only on the Shift List) and from computeAllWarnings()
+// (vehicle-paperwork/maintenance deadlines, shown only on the Shift List):
+// this is the ONLY warning source allowed inside Kết Quả Kinh Doanh, and it
+// is re-derived fresh from live data on every render — there is no
+// "dismissed" flag to manage or get out of sync. The instant the
+// underlying numbers stop breaching a rule, that rule simply stops
+// producing a warning object and the card disappears on its own.
+const FUEL_SPIKE_THRESHOLD_PCT = 20;       // current period's đ/km vs all-time baseline
+const FIXED_COST_RATIO_THRESHOLD_PCT = 15; // (sửa chữa + luật đường) ÷ doanh thu
+const DEBT_OVERDUE_DAYS_THRESHOLD = 60;    // ngày nợ quá hạn mới tính là vượt mức thu hồi an toàn
+
+function computeFinancialWarnings({ gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts, missingFuelPriceShifts, missingFuelPriceLiters, from, to }){
+  const warnings = [];
+  if(inRangeShifts.length===0) return warnings;
+
+  // 1. Negative net margin
+  if(finalNetProfit < 0){
+    warnings.push({
+      id:'negativeMargin', icon:'🔴',
+      title:'Lợi nhuận ròng đang ÂM trong kỳ',
+      text:`Sau khi trừ hết chi phí sửa chữa và luật đường, kỳ này đang lỗ ${fmtVND(Math.abs(finalNetProfit))}.`,
+      detail:()=>renderFinancialWarningDetail('negativeMargin', { gTotal, finalNetProfit, repairTotal, roadFee })
+    });
+  }
+
+  // 2. Fixed cost eating an unhealthy share of revenue
+  if(gTotal.revenue > 0){
+    const fixedRatio = (repairTotal+roadFee)/gTotal.revenue*100;
+    if(fixedRatio >= FIXED_COST_RATIO_THRESHOLD_PCT){
+      warnings.push({
+        id:'fixedCostRatio', icon:'⚠️',
+        title:'Chi phí cố định chiếm tỷ trọng cao trên doanh thu',
+        text:`Sửa chữa + luật đường đang chiếm ${fixedRatio.toFixed(1)}% doanh thu kỳ này (ngưỡng an toàn ${FIXED_COST_RATIO_THRESHOLD_PCT}%).`,
+        detail:()=>renderFinancialWarningDetail('fixedCostRatio', { gTotal, repairTotal, roadFee, fixedRatio })
+      });
+    }
+  }
+
+  // 3. Fuel cost/km spiking vs the all-time baseline (every shift OUTSIDE
+  // the currently selected period — a large enough, independent sample).
+  const baselineShifts = state.shifts.filter(sh=>!(sh.date>=from && sh.date<=to));
+  const baselineKm = baselineShifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+  const baselineFuelCost = baselineShifts.reduce((s,sh)=>s+shiftFuelCost(sh),0);
+  if(baselineShifts.length>=5 && baselineKm>0 && gTotal.totalKm>0){
+    const baselinePerKm = baselineFuelCost/baselineKm;
+    const currentPerKm = gTotal.fuelCost/gTotal.totalKm;
+    if(baselinePerKm>0){
+      const increasePct = (currentPerKm-baselinePerKm)/baselinePerKm*100;
+      if(increasePct >= FUEL_SPIKE_THRESHOLD_PCT){
+        warnings.push({
+          id:'fuelCostSpike', icon:'⛽',
+          title:'Chi phí dầu / Km đang tăng vọt bất thường',
+          text:`${fmtVND(currentPerKm)}/km trong kỳ này, cao hơn ${increasePct.toFixed(0)}% so với bình quân ${fmtVND(baselinePerKm)}/km các kỳ trước.`,
+          detail:()=>renderFinancialWarningDetail('fuelCostSpike', { currentPerKm, baselinePerKm, increasePct })
+        });
+      }
+    }
+  }
+
+  // 4. Fuel consumed but no đơn giá entered — silently understates cost
+  if(missingFuelPriceShifts.length>0){
+    warnings.push({
+      id:'missingFuelPrice', icon:'⛽',
+      title:'Có ca tiêu hao dầu nhưng chưa nhập đơn giá',
+      text:`${missingFuelPriceShifts.length} ca, tổng ${Math.round(missingFuelPriceLiters).toLocaleString('vi-VN')} lít, đang tính 0đ tiền dầu — Tổng tiền dầu tiêu hao bên dưới đang bị TÍNH THIẾU.`,
+      detail:()=>renderFinancialWarningDetail('missingFuelPrice', { missingFuelPriceShifts })
+    });
+  }
+
+  // 5. Accounts receivable past the safe recovery threshold (all-time,
+  // independent of the selected period — nợ là con số dồn từ trước tới giờ)
+  const overduePartners = computePartnersOverview().filter(p=>p.totalOwed>0 && p.daysOutstanding>DEBT_OVERDUE_DAYS_THRESHOLD);
+  if(overduePartners.length>0){
+    const totalOverdue = overduePartners.reduce((s,p)=>s+p.totalOwed,0);
+    warnings.push({
+      id:'debtOverdue', icon:'💸',
+      title:'Công nợ đã vượt hạn mức thu hồi an toàn',
+      text:`${overduePartners.length} đối tác nợ quá ${DEBT_OVERDUE_DAYS_THRESHOLD} ngày, tổng ${fmtVND(totalOverdue)} chưa thu.`,
+      detail:()=>renderFinancialWarningDetail('debtOverdue', { overduePartners, totalOverdue })
+    });
+  }
+
+  return warnings;
+}
+
+/// Cause + concrete remediation steps for ONE financial warning, in the
+/// same numbered `.modal-step` format as the break-even walkthrough — so
+/// "Chi Tiết" always means the same thing everywhere in the app: real
+/// numbers pulled from the exact same data the summary card used, never
+/// generic advice.
+function renderFinancialWarningDetail(type, ctx){
+  let title = '', stepsHtml = '';
+
+  if(type==='negativeMargin'){
+    title = '🔴 Lợi Nhuận Ròng Đang Âm';
+    stepsHtml = `
+      <div class="modal-step">
+        <div class="st-title">Nguyên nhân</div>
+        <div class="st-body">Lợi nhuận gộp vận hành trong kỳ không đủ bù chi phí sửa chữa/khấu hao cộng chi phí luật đường của kỳ.</div>
+        <div class="st-formula">Lợi nhuận ròng = ${fmtVND(ctx.gTotal.grossProfit)} − ${fmtVND(ctx.repairTotal)} − ${fmtVND(ctx.roadFee)}
+= ${fmtVND(ctx.finalNetProfit)}</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 1 — Xem công trình nào đang kéo lùi doanh thu</div>
+        <div class="st-body">Cuộn xuống mục "🏗️ Công Nợ Công Trình" bên dưới để so sánh doanh thu/chuyến từng công trình — ưu tiên nhận việc ở công trình có đơn giá tốt hơn nếu được chọn.</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 2 — Đối chiếu với điểm hoà vốn</div>
+        <div class="st-body">Bấm "📖 Chi Tiết Cách Tính" ở mục "⚖️ Điểm Hoà Vốn Trong Kỳ" phía trên để biết chính xác còn thiếu bao nhiêu chuyến mới đủ bù chi phí cố định.</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 3 — Hành động cụ thể</div>
+        <div class="st-body">Tăng số chuyến hoặc số ngày hoạt động trong kỳ tới; kiểm tra các khoản sửa chữa có hạng mục hỏng lặp lại bất thường không; xem lại chi phí luật đường có thể đàm phán giảm được không.</div>
+      </div>`;
+  } else if(type==='fixedCostRatio'){
+    title = '⚠️ Chi Phí Cố Định Chiếm Tỷ Trọng Cao';
+    stepsHtml = `
+      <div class="modal-step">
+        <div class="st-title">Nguyên nhân</div>
+        <div class="st-body">Sửa chữa và chi phí luật đường không đổi theo số chuyến chạy — khi doanh thu kỳ này thấp hoặc chi phí sửa chữa phát sinh nhiều, tỷ trọng này tăng vọt.</div>
+        <div class="st-formula">Tỷ trọng = (Sửa chữa + Luật đường) ÷ Doanh thu
+= (${fmtVND(ctx.repairTotal)} + ${fmtVND(ctx.roadFee)}) ÷ ${fmtVND(ctx.gTotal.revenue)} = ${ctx.fixedRatio.toFixed(1)}%</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 1 — Kiểm tra khoản sửa chữa</div>
+        <div class="st-body">Mở "Sổ Chi Phí Sửa Chữa / Khấu Hao" bên dưới — nếu có hạng mục hỏng lặp lại nhiều lần trong thời gian ngắn, đây thường là dấu hiệu cần bảo dưỡng phòng ngừa thay vì sửa khi đã hỏng.</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 2 — San đều chi phí cố định</div>
+        <div class="st-body">Chi phí luật đường là số cố định theo tháng dù chạy nhiều hay ít — tăng số ngày/số chuyến hoạt động sẽ làm tỷ trọng này tự giảm xuống mà không cần cắt giảm gì.</div>
+      </div>`;
+  } else if(type==='fuelCostSpike'){
+    title = '⛽ Chi Phí Dầu / Km Tăng Vọt Bất Thường';
+    stepsHtml = `
+      <div class="modal-step">
+        <div class="st-title">Nguyên nhân</div>
+        <div class="st-body">Chi phí dầu bình quân mỗi km trong kỳ này đang cao hơn hẳn bình quân các kỳ trước cộng lại.</div>
+        <div class="st-formula">Chi phí dầu/km kỳ này = ${fmtVND(ctx.currentPerKm)}
+Bình quân các kỳ trước = ${fmtVND(ctx.baselinePerKm)}
+Chênh lệch = +${ctx.increasePct.toFixed(0)}%</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 1 — Loại trừ nguyên nhân giá dầu thị trường</div>
+        <div class="st-body">Kiểm tra Đơn giá dầu/lít nhập trong các ca gần đây có đúng theo hoá đơn thực tế không, và có tăng theo mặt bằng giá xăng dầu chung hay không — nếu có, đây là biến động giá đầu vào, không phải lỗi vận hành.</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 2 — Kiểm tra hao dầu cơ học</div>
+        <div class="st-body">Nếu giá dầu không đổi mà lượng lít/km vẫn tăng: kiểm tra tình trạng máy, lốp, tuyến đường (chạy không tải/đường xấu nhiều hơn), hoặc đối chiếu ghi chép của từng tài xế ở tab "Trợ Lý" (mục cảnh báo hao dầu theo tài xế).</div>
+      </div>`;
+  } else if(type==='missingFuelPrice'){
+    title = '⛽ Ca Tiêu Hao Dầu Nhưng Chưa Nhập Đơn Giá';
+    const dateList = ctx.missingFuelPriceShifts
+      .slice()
+      .sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType))
+      .slice(0,8)
+      .map(sh=>`${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}`);
+    const extra = ctx.missingFuelPriceShifts.length - dateList.length;
+    stepsHtml = `
+      <div class="modal-step">
+        <div class="st-title">Nguyên nhân</div>
+        <div class="st-body">Công thức Tiền dầu tiêu hao = Số lít tiêu hao × Đơn giá/lít. Khi Đơn giá/lít chưa nhập (đang là 0), khoản này tự động tính ra 0đ dù xe đã thực sự tiêu hao dầu — làm Tổng tiền dầu của cả kỳ bị thấp hơn thực tế.</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 1 — Bổ sung đơn giá cho từng ca dưới đây</div>
+        <div class="st-body">${dateList.map(escapeHtml).join('<br>')}${extra>0?`<br>+ ${extra} ca khác`:''}</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 2 — Vào sửa</div>
+        <div class="st-body">Vào tab "Ca Làm Việc", mở từng ca ở trên, nhập Đơn giá dầu/lít theo đúng hoá đơn mua dầu ngày đó rồi Lưu lại. Cảnh báo này tự tắt ngay khi không còn ca nào thiếu đơn giá.</div>
+      </div>`;
+  } else if(type==='debtOverdue'){
+    title = '💸 Công Nợ Vượt Hạn Mức Thu Hồi An Toàn';
+    const partnerList = ctx.overduePartners
+      .map(p=>`${escapeHtml(p.name)} — nợ ${p.daysOutstanding} ngày, còn ${fmtVND(p.totalOwed)}`);
+    stepsHtml = `
+      <div class="modal-step">
+        <div class="st-title">Nguyên nhân</div>
+        <div class="st-body">${ctx.overduePartners.length} đối tác có khoản nợ CŨ NHẤT đã quá ${DEBT_OVERDUE_DAYS_THRESHOLD} ngày chưa thu — tính theo đúng kiểu kế toán FIFO (tiền thu về trừ vào khoản nợ cũ nhất trước).</div>
+        <div class="st-formula">${partnerList.join('<br>')}</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 1 — Ưu tiên thu hồi theo thứ tự nợ lâu nhất</div>
+        <div class="st-body">Mở mục "🤝 Đối Tác & Công Nợ" bên dưới, liên hệ đối tác nợ lâu nhất trước — nợ càng để lâu, rủi ro không thu hồi được càng cao.</div>
+      </div>
+      <div class="modal-step">
+        <div class="st-title">Bước 2 — Cân nhắc điều kiện nhận việc mới</div>
+        <div class="st-body">Với đối tác đang nợ quá hạn, cân nhắc tạm dừng nhận thêm việc mới hoặc yêu cầu thanh toán một phần công nợ cũ trước khi tiếp tục, cho đến khi công nợ được thu hồi.</div>
+      </div>`;
+  }
+
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>${title}</h3>
+    ${stepsHtml}
+  `);
+}
+
 // ---- Strategic advisory engine (deterministic rules on real numbers) ----
+// NOTE: profit/loss status and the fixed-cost-ratio rule used to live here
+// as insight #1 and #3. Both are now computed once, in one place, by
+// computeFinancialWarnings() above — #1 surfaces as the negativeMargin
+// warning card when the period is actually losing money (and is simply
+// omitted when positive, since a positive figure only repeats the number
+// already shown in "Lợi Nhuận Thực Tế Cuối Cùng"), and #3 as the
+// fixedCostRatio warning. Keeping them in two places would mean the same
+// number could show two different pieces of copy if the rules ever drift.
+// What remains here is pure opportunity/comparison commentary — never a
+// "something is broken" message — so it stays out of the Cảnh Báo Tài
+// Chính block and never needs a [Chi Tiết] fix-it flow of its own.
 function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts, from, to, siteRanking}){
   const insights = [];
 
-  // 1. Final profit status
   if(gTotal.revenue===0 && inRangeShifts.length===0){
     insights.push({icon:'ℹ️', title:'Chưa có dữ liệu trong kỳ này', text:'Hãy chọn lại khoảng thời gian có ca đã ghi, hoặc ghi ca mới ở tab "Ca Làm Việc".'});
     return insights;
   }
-  if(finalNetProfit < 0){
-    insights.push({icon:'🔴', title:'Đang LỖ thực tế trong kỳ này', text:`Lợi nhuận gộp vận hành ${fmtVND(gTotal.grossProfit)} không đủ bù chi phí sửa chữa (${fmtVND(repairTotal)}) và chi phí luật đường (${fmtVND(roadFee)}). Lỗ ròng ${fmtVND(Math.abs(finalNetProfit))}. Cần tăng số chuyến/doanh thu, hoặc xem lại chi phí luật đường có đàm phán giảm được không.`});
-  } else {
-    const marginFinal = gTotal.revenue>0 ? (finalNetProfit/gTotal.revenue*100) : 0;
-    insights.push({icon:'🟢', title:'Đang có LÃI thực tế trong kỳ này', text:`Sau khi trừ hết sửa chữa và luật đường, lãi ròng ${fmtVND(finalNetProfit)}, tương đương ${marginFinal.toFixed(1)}% trên doanh thu. Duy trì nhịp độ vận hành hiện tại.`});
-  }
 
-  // 2. Day vs Night margin comparison
+  // 1. Day vs Night margin comparison
   if(gDay.revenue>0 && gNight.revenue>0){
     const diff = gNight.margin - gDay.margin;
     if(Math.abs(diff) >= 8){
@@ -2478,15 +2877,7 @@ function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, ro
     }
   }
 
-  // 3. Fixed cost burden ratio
-  if(gTotal.revenue>0){
-    const fixedRatio = (repairTotal+roadFee)/gTotal.revenue*100;
-    if(fixedRatio >= 15){
-      insights.push({icon:'⚠️', title:'Chi phí cố định đang chiếm tỷ trọng cao', text:`Sửa chữa + luật đường đang chiếm ${fixedRatio.toFixed(1)}% doanh thu trong kỳ. Nếu tỷ lệ này kéo dài, lợi nhuận thực tế sẽ khó dương. Cân nhắc tăng tần suất chạy xe để san đều chi phí cố định, hoặc kiểm tra lại các khoản sửa chữa có bất thường không.`});
-    }
-  }
-
-  // 4. Utilization (operating days vs calendar days in range)
+  // 2. Utilization (operating days vs calendar days in range)
   const operatingDates = new Set(inRangeShifts.map(sh=>sh.date));
   const totalDaysInRange = Math.round((new Date(to+'T00:00:00') - new Date(from+'T00:00:00'))/86400000) + 1;
   if(totalDaysInRange > 0){
@@ -2496,16 +2887,12 @@ function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, ro
     }
   }
 
-  // 5. Site profitability ranking
+  // 3. Site profitability ranking
   if(siteRanking.length >= 2){
     const best = siteRanking[0], worst = siteRanking[siteRanking.length-1];
     if(best.revenuePerTrip > 0 && worst.revenuePerTrip < best.revenuePerTrip*0.7){
       insights.push({icon:'🏗️', title:'Chênh lệch hiệu quả giữa các công trình', text:`"${best.name}" đang cho doanh thu/chuyến cao nhất (${fmtVND(best.revenuePerTrip)}), trong khi "${worst.name}" thấp hơn nhiều (${fmtVND(worst.revenuePerTrip)}). Nếu được chọn, nên ưu tiên nhận thêm việc ở công trình có doanh thu/chuyến cao.`});
     }
-  }
-
-  if(insights.length === 0){
-    insights.push({icon:'✅', title:'Các chỉ số đang cân bằng', text:'Không phát hiện điểm bất thường rõ rệt trong kỳ này. Tiếp tục theo dõi định kỳ để phát hiện sớm biến động.'});
   }
 
   return insights;
@@ -2554,14 +2941,27 @@ function renderResults(){
   const dailyBreakdown = computeDailyBreakdown(inRange);
   const siteRanking = computeSiteRanking(inRange);
   const insights = generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, from, to, siteRanking});
+  const financialWarnings = computeFinancialWarnings({ gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, missingFuelPriceShifts, missingFuelPriceLiters, from, to });
   const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal);
   const costTrend = computeCostPerKmTrend(6);
 
   app.innerHTML = `
-    ${missingFuelPriceShifts.length>0 ? `
-    <div class="banner" style="background:var(--loss-soft); color:var(--loss);">
-      ⚠️ Có ${missingFuelPriceShifts.length} ca trong kỳ tiêu hao tổng cộng ${Math.round(missingFuelPriceLiters).toLocaleString('vi-VN')} lít dầu nhưng CHƯA nhập Đơn giá dầu/lít (đang tính 0đ) — Tổng tiền dầu tiêu hao bên dưới đang bị TÍNH THIẾU. Vào từng ca đó ở tab "Nhật Ký" để bổ sung đơn giá thực tế.
-    </div>` : ''}
+    ${financialWarnings.length>0 ? `
+    <section class="group">
+      <h3>⚠️ Cảnh Báo Tài Chính</h3>
+      ${financialWarnings.map(w=>`
+        <div class="card" style="border:1.5px solid var(--loss);">
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="font-size:22px; line-height:1;">${w.icon}</div>
+            <div style="flex:1;">
+              <div style="font-weight:800; color:var(--loss); margin-bottom:4px;">${escapeHtml(w.title)}</div>
+              <div style="font-size:13px; color:var(--ink-soft); line-height:1.5;">${escapeHtml(w.text)}</div>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm fin-warning-detail-btn" data-warning-id="${w.id}" style="margin-top:10px;">📖 Chi Tiết</button>
+        </div>
+      `).join('')}
+    </section>` : ''}
     <section class="group">
       <h3>Khoảng Thời Gian</h3>
       <div class="date-range">
@@ -2721,6 +3121,7 @@ function renderResults(){
       <div id="partnersOverviewWrap"></div>
     </section>
 
+    ${insights.length>0 ? `
     <section class="group">
       <h3>🧭 Tư Vấn Chiến Lược</h3>
       ${insights.map(ins=>`
@@ -2732,7 +3133,7 @@ function renderResults(){
           </div>
         </div>
       `).join('')}
-    </section>
+    </section>` : ''}
   `;
 
   attachMoneyInput(document.getElementById('res_roadFee'), roadFee, v=>{
@@ -2756,6 +3157,12 @@ function renderResults(){
   });
   document.querySelectorAll('.site-detail-row').forEach(row=>{
     row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, from, to); });
+  });
+  document.querySelectorAll('.fin-warning-detail-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const w = financialWarnings.find(x=>x.id===btn.dataset.warningId);
+      if(w) w.detail();
+    });
   });
 }
 
@@ -3421,18 +3828,36 @@ function openRepairEditor(id){
 
 // ========================= SETTINGS TAB =========================
 
+/// Local-only UI toggle, never persisted: whether the Gemini API Key field
+/// is currently expanded for editing. Resets to false (masked) every time
+/// Cài Đặt is opened fresh and again right after every save — the raw key
+/// input and its instructions only reappear when Ông Chủ explicitly taps
+/// "Đổi Key", and even then the field always starts EMPTY (never
+/// re-displays the previously saved key), per spec.
+let showGeminiKeyInput = false;
+
 function renderSettings(){
   const app=document.getElementById('app');
   const s = state.settings;
+  const hasGeminiKey = !!(s.geminiApiKey || '').trim();
+  const revealKeyInput = !hasGeminiKey || showGeminiKeyInput;
   app.innerHTML = `
     <section class="group">
       <h3>🤖 Trí Tuệ Nhân Tạo (Đọc Ảnh + Trợ Lý Chiến Lược)</h3>
       <div class="card">
+        ${revealKeyInput ? `
         <div class="field" style="margin-bottom:0;">
           <label>Gemini API Key</label>
           <input type="text" id="s_geminiKey" placeholder="Dán API Key vào đây" autocomplete="off" autocapitalize="off" spellcheck="false">
         </div>
         <div class="hint" style="margin-top:8px;">Lấy miễn phí tại <strong>aistudio.google.com</strong> → "Get API key" → "Create API key". Cần có key này thì tab "Hộp Nhận" và "Trợ Lý Chiến Lược" mới đọc ảnh/phân tích được. Key này lưu chung trong dữ liệu app — đừng gửi link app cho người lạ.</div>
+        ${hasGeminiKey ? `<button class="link-btn" id="cancelGeminiKeyEditBtn" style="margin-top:2px; padding-left:0;">Huỷ, giữ Key hiện tại</button>` : ''}
+        ` : `
+        <div class="driver-row">
+          <span style="font-weight:700;">🔒 Đã có mã API</span>
+          <button class="btn btn-ghost btn-sm" id="changeGeminiKeyBtn">Đổi Key</button>
+        </div>
+        `}
       </div>
     </section>
 
@@ -3516,13 +3941,16 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn">Lưu Cài Đặt</button>
   `;
 
-  document.getElementById('s_geminiKey').value = s.geminiApiKey || '';
-
   const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget, roadFee: s.monthlyFixedRoadFee };
   attachMoneyInput(document.getElementById('s_salary'), sVals.salary, v=>sVals.salary=v);
   attachMoneyInput(document.getElementById('s_food'), sVals.food, v=>sVals.food=v);
   attachMoneyInput(document.getElementById('s_housing'), sVals.housing, v=>sVals.housing=v);
   attachMoneyInput(document.getElementById('s_roadFee'), sVals.roadFee, v=>sVals.roadFee=v);
+
+  const changeKeyBtn = document.getElementById('changeGeminiKeyBtn');
+  if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
+  const cancelKeyEditBtn = document.getElementById('cancelGeminiKeyEditBtn');
+  if(cancelKeyEditBtn) cancelKeyEditBtn.addEventListener('click', ()=>{ showGeminiKeyInput = false; renderAll(); });
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
     s.standardWorkDaysPerMonth = Number(document.getElementById('s_workDays').value)||28;
@@ -3530,7 +3958,14 @@ function renderSettings(){
     s.defaultDailyFoodAllowance = sVals.food;
     s.defaultMonthlyHousingBudget = sVals.housing;
     s.monthlyFixedRoadFee = sVals.roadFee;
-    s.geminiApiKey = document.getElementById('s_geminiKey').value.trim();
+    const keyInput = document.getElementById('s_geminiKey');
+    if(keyInput){
+      const typedKey = keyInput.value.trim();
+      // A blank submit (field left empty, or "Đổi Key" tapped and then
+      // saved without pasting a new one) is never treated as "delete the
+      // key" — only a non-empty value overwrites the saved one.
+      if(typedKey) s.geminiApiKey = typedKey;
+    }
     STATUS_OPTIONS.forEach(st=>{
       s.costPolicies[st.key] = {
         baseSalary: document.getElementById(`pol_${st.key}_base`).checked,
@@ -3539,7 +3974,9 @@ function renderSettings(){
         operations: document.getElementById(`pol_${st.key}_ops`).checked
       };
     });
+    showGeminiKeyInput = false; // collapse back to the masked "🔒 Đã có mã API" state
     await saveSettings();
+    renderAll();
     showToast('Đã lưu cài đặt.');
   });
 
