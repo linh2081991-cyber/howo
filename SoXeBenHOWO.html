@@ -185,6 +185,13 @@
   .formula-result .formula-value{ color:var(--accent); font-size:24px; }
   .formula-divider{ border-top:1px solid var(--border); margin:10px 0; }
 
+  .appraisal-compare{ display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; -webkit-overflow-scrolling:touch; }
+  .appraisal-compare .compare-card{ flex:0 0 230px; border:1.5px solid var(--border); border-radius:14px; padding:14px; background:var(--surface); }
+  .appraisal-compare .compare-card.best{ border-color:var(--profit); box-shadow:0 0 0 1.5px var(--profit) inset; }
+  .appraisal-compare .compare-card h4{ margin:0 0 8px; font-size:14px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .appraisal-compare .compare-row{ display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:3px 0; }
+  .appraisal-compare .compare-row .val{ font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; }
+
   .repair-day-item{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border); }
 
   /// The HOWO truck's horizontal position and wheel spin are now driven
@@ -397,7 +404,8 @@ let state = {
   repairs: [], // {id, date, item, invoiceCode, amount, notes}
   settings: { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
               defaultMonthlyBaseSalary: 15000000, defaultDailyFoodAllowance: 150000, defaultMonthlyHousingBudget: 5000000,
-              monthlyFixedRoadFee: 25000000, geminiApiKey: '' },
+              monthlyFixedRoadFee: 25000000, geminiApiKey: '',
+              currentFuelUnitPrice: 0, vatRatePercent: 10 },
   currentTab: 'shifts',
   view: 'list', // 'list' | 'form'
   draftShift: null,
@@ -410,7 +418,8 @@ let state = {
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
-  siteContracts: [] // {id, siteName, totalContractValue, notes}
+  siteContracts: [], // {id, siteName, totalContractValue, notes}
+  siteAppraisals: [] // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice, fixedCostAllocated, roadFeeEstimate} — prospective-project appraisal module, fully isolated from shift logs
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -552,6 +561,14 @@ function computeAllWarnings(){
 /// Returns an array of short Vietnamese issue descriptions for one shift.
 /// Empty array = the shift is complete and internally consistent.
 function computeShiftIssues(sh){
+  // Gate: the scan only ever runs on an actually-operational ca (status
+  // 'active' = "Hoạt Động"). Every idle/off status (Nghỉ Mưa, Nghỉ Phép,
+  // Bảo Trì / Sửa Chữa, Nằm Bãi) has no odo/fuel/trip data to validate in
+  // the first place, so it's skipped outright — keeps the Shift List free
+  // of false-positive [Cảnh Báo Hành Động] buttons on ca that were never
+  // meant to have those numbers filled in.
+  if(sh.status !== 'active') return [];
+
   const issues = [];
 
   if(!driverById(sh.driverId)) issues.push('Chưa chọn tài xế (hoặc tài xế đã bị xoá)');
@@ -631,7 +648,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -639,7 +656,8 @@ async function loadAll(){
       sharedDataRef('sitePayments').get(),
       sharedDataRef('documents').get(),
       sharedDataRef('maintenanceSchedules').get(),
-      sharedDataRef('siteContracts').get()
+      sharedDataRef('siteContracts').get(),
+      sharedDataRef('siteAppraisals').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -648,6 +666,7 @@ async function loadAll(){
     const docData = docSnap.exists ? docSnap.data() : null;
     const maintData = maintSnap.exists ? maintSnap.data() : null;
     const contractData = contractSnap.exists ? contractSnap.data() : null;
+    const appraisalData = appraisalSnap.exists ? appraisalSnap.data() : null;
     state.drivers = dData && Array.isArray(dData.list) ? dData.list : [];
     state.shifts = sData && Array.isArray(sData.list) ? sData.list : [];
     state.repairs = rData && Array.isArray(rData.list) ? rData.list : [];
@@ -655,6 +674,7 @@ async function loadAll(){
     state.documents = docData && Array.isArray(docData.list) ? docData.list : [];
     state.maintenanceSchedules = maintData && Array.isArray(maintData.list) ? maintData.list : [];
     state.siteContracts = contractData && Array.isArray(contractData.list) ? contractData.list : [];
+    state.siteAppraisals = appraisalData && Array.isArray(appraisalData.list) ? appraisalData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -689,6 +709,10 @@ async function saveMaintenanceSchedules(){
 async function saveSiteContracts(){
   try { await sharedDataRef('siteContracts').set({ list: state.siteContracts }); }
   catch(e){ showToast('Lỗi lưu hợp đồng công trình — kiểm tra mạng.'); }
+}
+async function saveSiteAppraisals(){
+  try { await sharedDataRef('siteAppraisals').set({ list: state.siteAppraisals }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình — kiểm tra mạng.'); }
 }
 async function saveSettings(){
   try { await sharedDataRef('settings').set(state.settings); }
@@ -2178,6 +2202,12 @@ function renderStrategy(){
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
 
+    <section class="group">
+      <h3>🧮 Thẩm Định Công Trình Trước Khi Nhận</h3>
+      <div class="hint" style="margin-bottom:10px;">So sánh song song nhiều công trình dự kiến — dựa trên mức tiêu hao dầu trung bình thực tế của xe và đơn giá dầu hiện tại — trước khi quyết định nhận chạy.</div>
+      <button class="btn btn-ghost btn-block" id="openAppraisalBtn">🧮 Mở Bảng Thẩm Định Công Trình</button>
+    </section>
+
     ${sa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(sa.error)}</div></section>` : ''}
 
     ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
@@ -2196,6 +2226,7 @@ function renderStrategy(){
   document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
+  document.getElementById('openAppraisalBtn').addEventListener('click', ()=>{ saveMainScroll(); renderProjectAppraisal(); });
 }
 
 function renderStrategyResult(result){
@@ -2245,6 +2276,287 @@ function renderStrategyResult(result){
       `).join('')}
     </section>
   `;
+}
+
+// ========================= PRE-PROJECT APPRAISAL MODULE =========================
+// "BẢNG THẨM ĐỊNH VÀ SO SÁNH HIỆU QUẢ CÔNG TRÌNH TRƯỚC KHI NHẬN CHẠY".
+// Fully isolated from the shift log / P&L engine: it only READS existing
+// data through the existing getters (shiftFuelConsumed, shiftOdoDriven,
+// chronoKey) to pull the fleet's real historical fuel efficiency — it
+// never writes into state.shifts, never touches a single shift record,
+// and lives in its own separate state array + Firestore collection
+// (state.siteAppraisals / 'siteAppraisals'). None of the P&L, fuel-cost,
+// or debt-offset formulas above are read from or altered by anything in
+// this section.
+
+/// Most recent ca with a real đơn giá dầu entered — used as the fallback
+/// "real-time" fuel price when Ông Chủ hasn't set one in Cài Đặt yet.
+function latestKnownFuelUnitPrice(){
+  const priced = state.shifts.filter(sh=>Number(sh.fuelUnitPrice)>0);
+  if(priced.length===0) return 0;
+  priced.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  return Number(priced[0].fuelUnitPrice)||0;
+}
+/// The price actually used to run a simulation: Cài Đặt's "Đơn giá dầu
+/// hiện tại" takes priority; if that's still 0 (never set), falls back to
+/// the most recent real đơn giá dầu recorded on any ca.
+function currentFuelUnitPriceForAppraisal(){
+  return (Number(state.settings.currentFuelUnitPrice)||0) || latestKnownFuelUnitPrice();
+}
+/// Fleet-wide historical average lít/km, computed over every ca ever
+/// logged (read-only — reuses the exact same shiftFuelConsumed/
+/// shiftOdoDriven getters the frozen P&L math uses, never redefines them).
+function historicalAvgFuelPerKm(){
+  const totalKm = state.shifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+  const totalFuel = state.shifts.reduce((s,sh)=>s+shiftFuelConsumed(sh),0);
+  return totalKm>0 ? totalFuel/totalKm : 0;
+}
+/// Core simulation for ONE prospective project. Everything downstream
+/// (list cards, side-by-side comparison, live preview in the editor) is
+/// rendered from this single function so all three views can never drift
+/// out of sync with each other.
+function computeAppraisalMetrics(p){
+  const fuelPerKm = historicalAvgFuelPerKm();
+  const fuelPrice = currentFuelUnitPriceForAppraisal();
+  const kmPerTrip = (Number(p.kmOneWay)||0) + (Number(p.kmReturn)||0);
+  const fuelLitersPerTrip = fuelPerKm * kmPerTrip;
+  const fuelCostPerTrip = fuelLitersPerTrip * fuelPrice;
+  const grossCargoRevenuePerTrip = (Number(p.loadPerTrip)||0) * (Number(p.cargoUnitPrice)||0);
+  const vatRate = (Number(state.settings.vatRatePercent)||0)/100;
+  const netRevenuePerTrip = p.priceIncludesVat ? grossCargoRevenuePerTrip/(1+vatRate) : grossCargoRevenuePerTrip;
+  const roadFeePerTrip = Number(p.roadFeeEstimate)||0;
+  const variableCostPerTrip = fuelCostPerTrip + roadFeePerTrip;
+  const grossProfitPerTrip = netRevenuePerTrip - variableCostPerTrip;
+  const fixedCostAllocated = Number(p.fixedCostAllocated)||0;
+  const breakEvenTrips = grossProfitPerTrip>0 ? Math.ceil(fixedCostAllocated/grossProfitPerTrip) : null;
+  const roiPercent = variableCostPerTrip>0 ? (grossProfitPerTrip/variableCostPerTrip*100) : null;
+  return { fuelPerKm, fuelPrice, kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip, grossCargoRevenuePerTrip,
+           netRevenuePerTrip, roadFeePerTrip, variableCostPerTrip, grossProfitPerTrip, fixedCostAllocated,
+           breakEvenTrips, roiPercent };
+}
+
+/// Full-screen module: intro card (fuel efficiency + price source), the
+/// list of saved prospective projects, and — once 2 or more exist — the
+/// side-by-side comparison grid. Reached from a button in the "Trợ Lý" tab
+/// and returns there via renderAll()+restoreMainScroll(), matching every
+/// other full-screen drill-down in the app (openPartnerDetail, etc).
+function renderProjectAppraisal(){
+  const app = document.getElementById('app');
+  const fuelPerKm = historicalAvgFuelPerKm();
+  const fuelPrice = currentFuelUnitPriceForAppraisal();
+  const projects = state.siteAppraisals || [];
+  const metricsById = {};
+  projects.forEach(p=>{ metricsById[p.id] = computeAppraisalMetrics(p); });
+
+  let bestId = null;
+  projects.forEach(p=>{
+    const m = metricsById[p.id];
+    if(m.grossProfitPerTrip>0 && (bestId===null || m.grossProfitPerTrip>metricsById[bestId].grossProfitPerTrip)) bestId = p.id;
+  });
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="appraisalBackBtn">← Quay Lại Trợ Lý</button>
+    </section>
+
+    <section class="group">
+      <h3>🧮 Thẩm Định &amp; So Sánh Công Trình Trước Khi Nhận</h3>
+      <div class="card">
+        <div class="summary-row"><span>Mức tiêu hao dầu trung bình thực tế (toàn bộ lịch sử)</span><span class="val">${fuelPerKm>0?fuelPerKm.toFixed(2)+' lít/km':'Chưa có dữ liệu'}</span></div>
+        <div class="summary-row"><span>Đơn giá dầu dùng để mô phỏng</span><span class="val">${fuelPrice>0?fmtVND(fuelPrice)+'/lít':'Chưa có'}</span></div>
+      </div>
+      <div class="hint" style="margin-top:8px;">Đơn giá lấy từ mục "Đơn giá dầu hiện tại" trong Cài Đặt; nếu Ông Chủ chưa nhập, app tự lấy đơn giá dầu của ca gần nhất đã ghi. ${fuelPrice===0?'Hiện chưa có đơn giá nào — vào tab "⚙️ Cài Đặt" để nhập trước khi mô phỏng.':''}</div>
+    </section>
+
+    <section class="group">
+      <h3>Danh Sách Công Trình Dự Kiến</h3>
+      <div id="appraisalListWrap"></div>
+      <button class="btn btn-accent btn-block" id="addAppraisalBtn" style="margin-top:10px;">+ Thêm Công Trình Dự Kiến</button>
+    </section>
+
+    ${projects.length>=2 ? `
+    <section class="group">
+      <h3>⚖️ So Sánh Song Song</h3>
+      <div class="hint" style="margin-bottom:10px;">Công trình viền xanh có lãi gộp/chuyến cao nhất trong danh sách — cơ sở để Ông Chủ ưu tiên nhận việc.</div>
+      <div class="appraisal-compare">
+        ${projects.map(p=>{
+          const m = metricsById[p.id];
+          return `
+          <div class="compare-card ${p.id===bestId?'best':''}">
+            <h4>${escapeHtml(p.name||'(chưa đặt tên)')}${p.id===bestId?' <span class="rating-badge good">Đề xuất</span>':''}</h4>
+            <div class="compare-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
+            <div class="compare-row"><span>Chi phí dầu/chuyến</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+            <div class="compare-row"><span>Lãi gộp/chuyến</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+            <div class="compare-row"><span>Số chuyến hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn'}</span></div>
+            <div class="compare-row"><span>ROI/chuyến</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </section>` : ''}
+  `;
+
+  renderAppraisalList(metricsById);
+  document.getElementById('appraisalBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('addAppraisalBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null));
+}
+
+/// Renders the project cards into #appraisalListWrap — split out from
+/// renderProjectAppraisal() so add/edit/delete can refresh just this list
+/// without re-computing the whole comparison grid twice.
+function renderAppraisalList(metricsById){
+  const wrap = document.getElementById('appraisalListWrap');
+  if(!wrap) return;
+  const projects = state.siteAppraisals || [];
+  if(projects.length===0){
+    wrap.innerHTML = '<div class="empty"><div class="big">🏗️</div>Chưa có công trình dự kiến nào.<br>Bấm nút bên dưới để thêm.</div>';
+    return;
+  }
+  wrap.innerHTML = projects.map(p=>{
+    const m = metricsById[p.id] || computeAppraisalMetrics(p);
+    return `
+    <div class="card appraisal-project-card" data-id="${p.id}">
+      <div class="driver-row">
+        <strong>${escapeHtml(p.name||'(chưa đặt tên)')}</strong>
+        <span>
+          <button class="link-btn editAppraisalBtn" data-id="${p.id}">Sửa</button>
+          <button class="link-btn delAppraisalBtn" data-id="${p.id}" style="color:var(--loss);">Xoá</button>
+        </span>
+      </div>
+      <div class="hint" style="margin:6px 0;">${m.kmPerTrip.toLocaleString('vi-VN')} km/chuyến (khứ hồi) · ${(Number(p.loadPerTrip)||0).toLocaleString('vi-VN')} tấn/khối mỗi chuyến · Giá cước ${p.priceIncludesVat?'đã có VAT':'chưa VAT'}</div>
+      <div class="summary-row"><span>Doanh thu thuần ước tính/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
+      <div class="summary-row"><span>Chi phí dầu ước tính/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+      <div class="summary-row"><span>Tiền luật đường dọc tuyến/chuyến</span><span class="val">${fmtVND(m.roadFeePerTrip)}</span></div>
+      <div class="summary-row total"><span>LỢI NHUẬN GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+      <div class="summary-row"><span>Chi phí cố định dự kiến phân bổ</span><span class="val">${fmtVND(m.fixedCostAllocated)}</span></div>
+      <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được với cơ cấu giá này'}</span></div>
+      <div class="summary-row"><span>ROI/chuyến (lãi gộp ÷ chi phí biến đổi)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('.editAppraisalBtn').forEach(btn=>btn.addEventListener('click', e=>{ e.stopPropagation(); openProjectAppraisalEditor(btn.dataset.id); }));
+  wrap.querySelectorAll('.delAppraisalBtn').forEach(btn=>btn.addEventListener('click', async e=>{
+    e.stopPropagation();
+    if(confirm('Xoá công trình dự kiến này khỏi bảng so sánh?')){
+      state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==btn.dataset.id);
+      await saveSiteAppraisals();
+      renderProjectAppraisal();
+      showToast('Đã xoá.');
+    }
+  }));
+}
+
+/// Add/edit screen for ONE prospective project — the 7 input fields from
+/// spec plus a live "Mô Phỏng Nhanh" preview that recomputes on every
+/// keystroke via computeAppraisalMetrics(), so Ông Chủ sees the impact
+/// immediately instead of only after saving.
+function openProjectAppraisalEditor(id){
+  const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
+  const draft = existing ? {...existing} : {
+    id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
+    priceIncludesVat:false, cargoUnitPrice:0, fixedCostAllocated:0, roadFeeEstimate:0
+  };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Thêm'} Công Trình Dự Kiến</h3>
+      <div class="card">
+        <div class="field">
+          <label>Tên công trình dự kiến</label>
+          <input type="text" id="ap_name" value="${escapeHtml(draft.name)}" placeholder="VD: Công trình Khu Công Nghiệp X">
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>Số km lượt đi</label>
+            <input type="number" inputmode="decimal" id="ap_kmGo" placeholder="0" value="${blankIfZero(draft.kmOneWay)}">
+          </div>
+          <div class="field">
+            <label>Số km lượt về</label>
+            <input type="number" inputmode="decimal" id="ap_kmBack" placeholder="0" value="${blankIfZero(draft.kmReturn)}">
+          </div>
+        </div>
+        <div class="field">
+          <label>Khối lượng / tải trọng dự kiến mỗi chuyến (tấn hoặc khối)</label>
+          <input type="number" inputmode="decimal" id="ap_load" placeholder="0" value="${blankIfZero(draft.loadPerTrip)}">
+        </div>
+        <div class="field">
+          <label>Giá cước</label>
+          <div class="seg" id="ap_vatToggle">
+            <button data-val="0" class="${!draft.priceIncludesVat?'active':''}">Giá cước chưa VAT</button>
+            <button data-val="1" class="${draft.priceIncludesVat?'active':''}">Giá cước có VAT</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Đơn giá cước (đ / tấn hoặc đ / khối, theo lựa chọn VAT ở trên)</label>
+          <input type="text" inputmode="decimal" id="ap_cargoPrice">
+        </div>
+        <div class="field">
+          <label>Chi phí cố định dự kiến phân bổ cho công trình</label>
+          <input type="text" inputmode="decimal" id="ap_fixedCost">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Tiền luật đường / chi phí dọc tuyến dự kiến (mỗi chuyến)</label>
+          <input type="text" inputmode="decimal" id="ap_roadFee">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Mô Phỏng Nhanh</h3>
+      <div class="card" id="ap_preview"></div>
+      <div class="hint" style="margin-top:8px;">Dựa trên mức tiêu hao dầu trung bình thực tế ${historicalAvgFuelPerKm().toFixed(2)} lít/km và đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít hiện đang dùng để mô phỏng (sửa ở tab Cài Đặt).</div>
+    </section>
+
+    <section class="group" style="display:flex; gap:10px;">
+      ${existing ? '<button class="btn btn-danger" id="delAppraisalEditBtn">Xoá</button>' : ''}
+      <button class="btn btn-ghost" id="cancelAppraisalBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="saveAppraisalBtn">Lưu</button>
+    </section>
+  `;
+
+  const updatePreview = ()=>{
+    const m = computeAppraisalMetrics(draft);
+    document.getElementById('ap_preview').innerHTML = `
+      <div class="summary-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
+      <div class="summary-row"><span>Chi phí dầu ước tính/chuyến</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+      <div class="summary-row total"><span>LỢI NHUẬN GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+      <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được'}</span></div>
+      <div class="summary-row"><span>ROI/chuyến (lãi gộp ÷ chi phí biến đổi)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+    `;
+  };
+
+  document.getElementById('ap_name').addEventListener('input', e=>{ draft.name=e.target.value; });
+  document.getElementById('ap_kmGo').addEventListener('input', e=>{ draft.kmOneWay=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_kmBack').addEventListener('input', e=>{ draft.kmReturn=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_load').addEventListener('input', e=>{ draft.loadPerTrip=Number(e.target.value)||0; updatePreview(); });
+  document.querySelectorAll('#ap_vatToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      draft.priceIncludesVat = btn.dataset.val==='1';
+      document.querySelectorAll('#ap_vatToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+      updatePreview();
+    });
+  });
+  attachMoneyInput(document.getElementById('ap_cargoPrice'), draft.cargoUnitPrice, v=>{ draft.cargoUnitPrice=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_fixedCost'), draft.fixedCostAllocated, v=>{ draft.fixedCostAllocated=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_roadFee'), draft.roadFeeEstimate, v=>{ draft.roadFeeEstimate=v; updatePreview(); });
+  updatePreview();
+
+  document.getElementById('saveAppraisalBtn').addEventListener('click', async ()=>{
+    if(!draft.name.trim()){ showToast('Nhập tên công trình dự kiến trước.'); return; }
+    const idx = state.siteAppraisals.findIndex(p=>p.id===draft.id);
+    if(idx>=0) state.siteAppraisals[idx]=draft; else state.siteAppraisals.push(draft);
+    await saveSiteAppraisals();
+    renderProjectAppraisal();
+    showToast('Đã lưu công trình dự kiến.');
+  });
+  document.getElementById('cancelAppraisalBtn').addEventListener('click', renderProjectAppraisal);
+  const delBtn = document.getElementById('delAppraisalEditBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá công trình dự kiến này?')){
+      state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==draft.id);
+      await saveSiteAppraisals();
+      renderProjectAppraisal();
+      showToast('Đã xoá.');
+    }
+  });
 }
 
 // ========================= RESULTS / DASHBOARD TAB =========================
@@ -3026,10 +3338,11 @@ function renderResults(){
           <div class="formula-label">Số chuyến tối thiểu để hoà vốn trong kỳ</div>
           <div class="formula-value">${breakEven.breakEvenTrips} chuyến</div>
         </div>
+        <div class="hint" style="margin-top:2px;">Số chuyến tối thiểu để hoà vốn trong kỳ = Tổng chi phí cố định ÷ Lãi gộp bình quân mỗi chuyến = ${fmtVND(breakEven.fixedCost)} ÷ ${fmtVND(breakEven.marginPerTrip)} = ${breakEven.breakEvenTrips} chuyến.</div>
         <div class="formula-divider"></div>
         <div class="formula-block">
           <div class="formula-label">Thực tế đã chạy trong kỳ</div>
-          <div class="formula-value" style="color:${breakEven.surplusTrips>=0?'var(--profit)':'var(--loss)'}">${breakEven.actualTrips} chuyến (${breakEven.surplusTrips>=0?'dư':'thiếu'} ${Math.abs(breakEven.surplusTrips)})</div>
+          <div class="formula-value"><span style="color:var(--profit)">${breakEven.actualTrips} chuyến</span>${breakEven.surplusTrips<0 ? ` <span style="color:var(--loss)">(thiếu ${Math.abs(breakEven.surplusTrips)} chuyến)</span>` : breakEven.surplusTrips>0 ? ` <span style="color:var(--profit)">(dư ${breakEven.surplusTrips} chuyến)</span>` : ''}</div>
         </div>
         `}
       </div>
@@ -3862,6 +4175,21 @@ function renderSettings(){
     </section>
 
     <section class="group">
+      <h3>🧮 Thông Số Mô Phỏng Thẩm Định Công Trình</h3>
+      <div class="hint" style="margin-bottom:10px;">Dùng riêng cho mục "🧮 Thẩm Định Công Trình" ở tab Trợ Lý — không ảnh hưởng tới đơn giá dầu ghi nhận trên từng ca thực tế.</div>
+      <div class="card">
+        <div class="field">
+          <label>Đơn giá dầu hiện tại (đ/lít)</label>
+          <input type="text" inputmode="decimal" id="s_currentFuelPrice">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Thuế suất VAT (%)</label>
+          <input type="number" inputmode="decimal" id="s_vatRate" value="${Number(s.vatRatePercent)||0}">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
       <div id="documentListWrap"></div>
@@ -3919,7 +4247,7 @@ function renderSettings(){
       <div class="card">
         ${STATUS_OPTIONS.map(st=>renderPolicyBlock(st)).join('<div style="height:14px"></div>')}
       </div>
-      <div class="hint" style="margin-top:8px;">Bảo Trì / Sửa Chữa và Nằm Bãi hiện đang tạm để giống Nghỉ Mưa (vẫn trả đủ 3 khoản). Mày có thể tự bật/tắt từng khoản ở đây bất cứ lúc nào.</div>
+      <div class="hint" style="margin-top:8px;">Bảo Trì / Sửa Chữa và Nằm Bãi hiện đang tạm để giống Nghỉ Mưa (vẫn trả đủ 3 khoản). Ông Chủ có thể tự bật/tắt từng khoản ở đây bất cứ lúc nào.</div>
     </section>
 
     <section class="group">
@@ -3941,11 +4269,12 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn">Lưu Cài Đặt</button>
   `;
 
-  const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget, roadFee: s.monthlyFixedRoadFee };
+  const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget, roadFee: s.monthlyFixedRoadFee, currentFuelPrice: s.currentFuelUnitPrice };
   attachMoneyInput(document.getElementById('s_salary'), sVals.salary, v=>sVals.salary=v);
   attachMoneyInput(document.getElementById('s_food'), sVals.food, v=>sVals.food=v);
   attachMoneyInput(document.getElementById('s_housing'), sVals.housing, v=>sVals.housing=v);
   attachMoneyInput(document.getElementById('s_roadFee'), sVals.roadFee, v=>sVals.roadFee=v);
+  attachMoneyInput(document.getElementById('s_currentFuelPrice'), sVals.currentFuelPrice, v=>sVals.currentFuelPrice=v);
 
   const changeKeyBtn = document.getElementById('changeGeminiKeyBtn');
   if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
@@ -3958,6 +4287,8 @@ function renderSettings(){
     s.defaultDailyFoodAllowance = sVals.food;
     s.defaultMonthlyHousingBudget = sVals.housing;
     s.monthlyFixedRoadFee = sVals.roadFee;
+    s.currentFuelUnitPrice = sVals.currentFuelPrice;
+    s.vatRatePercent = Number(document.getElementById('s_vatRate').value)||0;
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
@@ -3991,7 +4322,8 @@ function renderSettings(){
     if(confirm('Khôi phục toàn bộ Cài Đặt về mặc định gốc? (Không xoá dữ liệu ca/tài xế)')){
       state.settings = { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
         defaultMonthlyBaseSalary: 15000000, defaultDailyFoodAllowance: 150000, defaultMonthlyHousingBudget: 5000000,
-        monthlyFixedRoadFee: 25000000, geminiApiKey: state.settings.geminiApiKey };
+        monthlyFixedRoadFee: 25000000, geminiApiKey: state.settings.geminiApiKey,
+        currentFuelUnitPrice: state.settings.currentFuelUnitPrice, vatRatePercent: 10 };
       await saveSettings();
       renderAll(); showToast('Đã khôi phục cài đặt gốc.');
     }
