@@ -134,33 +134,8 @@
   .switch input:checked + .track:before{ transform:translateX(18px); }
   .link-btn{ background:none; border:none; color:var(--accent); font-weight:700; font-size:14px; padding:6px 0; }
 
-  .inbox-drop{
-    border:2px dashed var(--border); border-radius:16px; padding:28px 16px; text-align:center;
-    color:var(--ink-soft); margin-bottom:14px; background:var(--surface);
-  }
-  .inbox-drop .big{ font-size:34px; margin-bottom:8px; }
-  .inbox-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
-  .inbox-thumb{ position:relative; border-radius:12px; overflow:hidden; aspect-ratio:1; background:var(--bg); border:1px solid var(--border); }
-  .inbox-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
-  .inbox-thumb .badge{
-    position:absolute; left:4px; bottom:4px; font-size:10px; font-weight:700; padding:3px 7px;
-    border-radius:20px; color:#fff; background:var(--ink-soft);
-  }
-  .inbox-thumb .badge.odometer{ background:#2E7D32; }
-  .inbox-thumb .badge.fuel{ background:var(--accent); }
-  .inbox-thumb .badge.maintenance{ background:#7B3FA0; }
-  .inbox-thumb .badge.driverReport{ background:#1976D2; }
-  .inbox-thumb .badge.unknown{ background:#9AA0A6; }
-  .inbox-thumb .badge.processing{ background:#5B6472; }
-  .inbox-thumb .rm{
-    position:absolute; top:4px; right:4px; width:22px; height:22px; border-radius:50%;
-    background:rgba(0,0,0,0.55); color:#fff; border:none; font-size:13px; line-height:22px; text-align:center; padding:0;
-  }
-  .inbox-extract-card{ font-size:12px; }
-  .inbox-extract-card .kv{ display:flex; justify-content:space-between; padding:3px 0; }
-
-  .site-detail-row, .partner-detail-row{ cursor:pointer; }
-  .site-detail-row:active, .partner-detail-row:active{ opacity:0.7; }
+  .site-detail-row, .partner-detail-row, .repair-detail-row{ cursor:pointer; }
+  .site-detail-row:active, .partner-detail-row:active, .repair-detail-row:active{ opacity:0.7; }
 
   .rating-badge{ display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; }
   .rating-badge.good{ background:var(--profit-soft); color:var(--profit); }
@@ -192,7 +167,6 @@
   .appraisal-compare .compare-row{ display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:3px 0; }
   .appraisal-compare .compare-row .val{ font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; }
 
-  .repair-day-item{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border); }
 
   /// The HOWO truck's horizontal position and wheel spin are now driven
   /// entirely from JS (see startTruckRun()) using the Web Animations API
@@ -299,14 +273,12 @@
   <div class="toast" id="toast"></div>
   <nav class="tabbar">
     <button data-tab="shifts" class="active"><span class="ic">📋</span>Ca Làm Việc</button>
-    <button data-tab="inbox"><span class="ic">📥</span>Hộp Nhận</button>
     <button data-tab="strategy"><span class="ic">🧭</span>Trợ Lý</button>
     <button data-tab="drivers"><span class="ic">👤</span>Tài Xế</button>
     <button data-tab="results"><span class="ic">📊</span>Kết Quả</button>
     <button data-tab="settings"><span class="ic">⚙️</span>Cài Đặt</button>
   </nav>
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
-  <input type="file" id="inboxFileInput" accept="image/*" multiple style="display:none;">
 </div>
 <datalist id="siteNamesList"></datalist>
 <div id="modalRoot"></div>
@@ -413,7 +385,6 @@ let state = {
   searchDate: null,
   resultsRange: null,
   resultsRoadFeeOverride: null, // if set, overrides settings.monthlyFixedRoadFee for the current results period
-  inboxImages: [], // {id, dataUrl, status:'processing'|'done'|'error', category, rawText, extracted}
   sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
@@ -589,12 +560,12 @@ function computeShiftIssues(sh){
     issues.push('Có đổ dầu nhưng chưa nhập đơn giá dầu');
   }
 
-  const policy = state.settings.costPolicies[sh.status];
-  const expectsTrips = policy ? policy.operations : true;
+  // Note: a ca with NO công trình/chuyến at all (xe chạy ra rồi phải quay
+  // đầu về vì mưa gió, sự cố...) is intentionally NOT flagged here — chỉ
+  // ODO / nhiên liệu / tài xế mới là các trường bắt buộc phải có. Nếu Ông
+  // Chủ đã nhập công trình thì các trường con bên trong công trình đó vẫn
+  // được kiểm tra như cũ.
   const siteLogs = sh.siteLogs || [];
-  if(expectsTrips && siteLogs.length===0){
-    issues.push('Ca có vận hành nhưng chưa nhập công trình / chuyến nào');
-  }
   siteLogs.forEach((s,idx)=>{
     const label = s.siteName ? `"${s.siteName}"` : `Công trình #${idx+1}`;
     if(!s.siteName) issues.push(`Công trình #${idx+1} chưa nhập tên công trình`);
@@ -954,8 +925,6 @@ function renderHeader(){
     }
   } else if(state.currentTab==='drivers'){
     title.textContent='Tài Xế'; sub.textContent=state.drivers.length+' tài xế';
-  } else if(state.currentTab==='inbox'){
-    title.textContent='Hộp Nhận Dữ Liệu'; sub.textContent='Nạp ảnh, app tự đọc';
   } else if(state.currentTab==='strategy'){
     title.textContent='Trợ Lý Chiến Lược'; sub.textContent='Phân tích sâu bằng AI';
   } else if(state.currentTab==='results'){
@@ -1717,305 +1686,6 @@ async function callGeminiWithRetry(attemptFn, onRetry){
       await new Promise(resolve=>setTimeout(resolve, waitMs));
     }
   }
-}
-
-const INBOX_CATEGORY_LABELS = {
-  odometer: 'Ảnh Đồng Hồ Km',
-  fuel: 'Hoá Đơn Dầu',
-  maintenance: 'Hoá Đơn Sửa Chữa',
-  driverReport: 'Báo Cáo Tài Xế',
-  unknown: 'Chưa Rõ Loại'
-};
-const GEMINI_VALID_CATEGORIES = ['odometer','fuel','maintenance','driverReport','unknown'];
-
-/// Builds the instruction sent to Gemini alongside each image. Includes
-/// the live driver roster so the model can match a name it reads in a
-/// chat screenshot against an EXACT existing driver record, rather than
-/// inventing a new spelling.
-function buildGeminiInboxPrompt(driversList){
-  const names = driversList.map(d=>d.name).join(', ') || '(chưa có tài xế nào)';
-  return `Bạn là trợ lý xử lý dữ liệu vận hành cho một xe ben HOWO 4 chân. Phân tích kỹ bức ảnh được cung cấp và xác định nó thuộc loại nào trong các loại sau:
-- "odometer": ảnh chụp đồng hồ công tơ mét / màn hình hiển thị số km trên xe
-- "fuel": hoá đơn mua xăng/dầu
-- "maintenance": hoá đơn sửa chữa, thay thế phụ tùng, bảo dưỡng xe (thay nhớt, vá lốp, sửa máy...)
-- "driverReport": ảnh chụp màn hình tin nhắn (ví dụ Zalo) tài xế báo cáo ca làm việc, số chuyến, công trình
-- "unknown": không thuộc loại nào ở trên, hoặc ảnh không đọc được
-
-Danh sách tên tài xế đang có trong hệ thống: ${names}
-
-CHỈ trả về DUY NHẤT một object JSON hợp lệ đúng cấu trúc dưới đây — không kèm lời giải thích, không dùng markdown, không có chữ nào khác ngoài JSON:
-{
-  "category": "odometer" | "fuel" | "maintenance" | "driverReport" | "unknown",
-  "odoEnd": <số nguyên số km đọc được, hoặc null>,
-  "fuelAddedLiters": <số lít đổ thêm, có thể là số thập phân, hoặc null>,
-  "totalAmount": <tổng số tiền trên hoá đơn (VND, số nguyên), hoặc null>,
-  "suggestedFuelUnitPrice": <đơn giá dầu ước tính = totalAmount / fuelAddedLiters nếu tính được, hoặc null>,
-  "maintenanceItemsText": <mô tả ngắn gọn danh mục sửa chữa/phụ tùng đọc được, hoặc null>,
-  "matchedDriverName": <PHẢI khớp CHÍNH XÁC một trong các tên tài xế liệt kê ở trên, hoặc null nếu không chắc chắn>,
-  "totalTrips": <tổng số chuyến đọc được từ báo cáo, số nguyên, hoặc null>,
-  "shiftType": "day" | "night" | null,
-  "siteNameGuess": <tên công trình đọc được nếu có, hoặc null>,
-  "rawSummary": "<tóm tắt 1 câu ngắn gọn bằng tiếng Việt về nội dung ảnh>"
-}`;
-}
-
-/// Converts a data: URL image into the { mimeType, base64Data } pair
-/// Gemini's inline_data field expects.
-function splitDataUrl(dataUrl){
-  const m = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if(!m) return null;
-  return { mimeType: m[1], base64Data: m[2] };
-}
-
-/// Sends one image + the classification/extraction prompt to the Gemini
-/// API and returns the parsed structured JSON result. This is the entire
-/// "GeminiManager" — a single focused network call, since JS has no
-/// native SDK requirement the way Swift would.
-async function callGeminiVision(dataUrl, promptText, onRetry){
-  const apiKey = (state.settings.geminiApiKey || '').trim();
-  if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
-
-  const parts = splitDataUrl(dataUrl);
-  if(!parts){ const e = new Error('Ảnh không đúng định dạng.'); e.code='BAD_IMAGE'; throw e; }
-
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const requestBody = {
-    contents: [{
-      parts: [
-        { text: promptText },
-        { inline_data: { mime_type: parts.mimeType, data: parts.base64Data } }
-      ]
-    }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
-  };
-
-  return callGeminiWithRetry(async ()=>{
-    let response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-    } catch(networkErr) {
-      const e = new Error('Không kết nối được tới Gemini — kiểm tra mạng.'); e.code='NETWORK'; throw e;
-    }
-
-    if(!response.ok){
-      let detail = '';
-      try{ detail = (await response.json()).error?.message || ''; }catch(e){ /* ignore parse failure */ }
-      const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
-    }
-
-    const payload = await response.json();
-    const textOut = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
-
-    try {
-      return JSON.parse(textOut);
-    } catch(parseErr) {
-      const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e;
-    }
-  }, onRetry);
-}
-
-/// Processes one queued inbox image end-to-end: send to Gemini → store the
-/// structured result on the image entry → re-render.
-async function processInboxImage(entry){
-  try{
-    const prompt = buildGeminiInboxPrompt(state.drivers);
-    const result = await callGeminiVision(entry.dataUrl, prompt, (attempt)=>{
-      entry.retryAttempt = attempt;
-      if(state.currentTab==='inbox') renderInbox();
-    });
-    entry.category = GEMINI_VALID_CATEGORIES.includes(result.category) ? result.category : 'unknown';
-    entry.extracted = result;
-    entry.status = 'done';
-    entry.retryAttempt = null;
-  }catch(e){
-    entry.status = 'error';
-    entry.errorMessage = e.message || 'Không phân tích được ảnh này.';
-  }
-  if(state.currentTab==='inbox') renderInbox();
-}
-
-/// Merges every successfully-processed image's extracted fields into ONE
-/// combined draft shift (since a single shift is usually documented by
-/// several photos: odo + fuel receipt + driver report together), seeds a
-/// new draft via the normal odo/fuel-inheritance path, then opens the
-/// existing Shift Form for the person to review and correct before saving.
-function buildDraftShiftFromInbox(){
-  const doneImages = state.inboxImages.filter(im=>im.status==='done');
-  if(doneImages.length===0){ showToast('Chưa có ảnh nào phân tích xong.'); return; }
-
-  let driverId = null, shiftTypeGuess = 'day', odoEndGuess = null, fuelAddedGuess = null,
-      fuelUnitPriceGuess = null, maintenanceAmount = 0, maintenanceNotes = [], driverReportTripsTotal = null,
-      siteNameGuess = '', summaryNotes = [];
-
-  for(const im of doneImages){
-    const ex = im.extracted || {};
-    if(im.category==='odometer' && ex.odoEnd) odoEndGuess = ex.odoEnd;
-    if(im.category==='fuel'){
-      if(ex.fuelAddedLiters) fuelAddedGuess = ex.fuelAddedLiters;
-      if(ex.suggestedFuelUnitPrice) fuelUnitPriceGuess = ex.suggestedFuelUnitPrice;
-    }
-    if(im.category==='maintenance'){
-      if(ex.totalAmount) maintenanceAmount += ex.totalAmount;
-      if(ex.maintenanceItemsText) maintenanceNotes.push(ex.maintenanceItemsText);
-    }
-    if(im.category==='driverReport'){
-      if(ex.matchedDriverName){
-        const matched = state.drivers.find(d=>d.name===ex.matchedDriverName);
-        if(matched) driverId = matched.id;
-      }
-      if(ex.shiftType==='day' || ex.shiftType==='night') shiftTypeGuess = ex.shiftType;
-      if(ex.totalTrips) driverReportTripsTotal = ex.totalTrips;
-      if(ex.siteNameGuess) siteNameGuess = ex.siteNameGuess;
-    }
-    if(ex.rawSummary) summaryNotes.push(`[${INBOX_CATEGORY_LABELS[im.category]||im.category}] ${ex.rawSummary}`);
-  }
-
-  const dateStr = todayLocalDateStr();
-  const driver = driverId ? driverById(driverId) : (state.drivers[0] || null);
-  if(!driver){ showToast('Hãy thêm tài xế trước ở tab "Tài Xế".'); return; }
-
-  const prev = findPreviousShift(dateStr, shiftTypeGuess, null);
-  const policy = state.settings.costPolicies.active;
-
-  const draft = {
-    id: uid('shift'),
-    isNew: true,
-    date: dateStr,
-    shiftType: shiftTypeGuess,
-    driverId: driver.id,
-    driverNameSnapshot: driver.name,
-    status: 'active',
-    odoStart: prev ? prev.odoEnd : 0,
-    odoEnd: odoEndGuess !== null ? odoEndGuess : 0,
-    fuelStart: prev ? prev.fuelEnd : 0,
-    fuelEnd: 0,
-    fuelAdded: fuelAddedGuess !== null ? fuelAddedGuess : 0,
-    fuelUnitPrice: fuelUnitPriceGuess !== null ? fuelUnitPriceGuess : 0,
-    baseSalaryAllocation: policy.baseSalary ? dailyBaseSalary(driver) : 0,
-    foodAllowance: policy.food ? driver.dailyFoodAllowance : 0,
-    housingAllocation: policy.housing ? dailyHousing(driver, dateStr) : 0,
-    incidentalCost: maintenanceAmount,
-    incidentalNotes: maintenanceNotes.length ? ('[Đọc từ hoá đơn] ' + maintenanceNotes.join(' | ')) : '',
-    advanceAmount: 0,
-    notes: summaryNotes.length ? summaryNotes.join(' | ').slice(0,600) : '',
-    siteLogs: driverReportTripsTotal ? [{ siteName: siteNameGuess||'', volumePerTrip:0, materialUnitPrice:0, trips:driverReportTripsTotal, driverWagePerTrip:0, wageQualifyingTripsOverride:null }] : []
-  };
-
-  state.draftShift = draft;
-  state.currentTab = 'shifts';
-  state.view = 'form';
-  state.inboxImages = []; // clear the inbox batch once turned into a draft
-  renderAll();
-  showToast('Đã tạo dự thảo từ ảnh — kiểm tra kỹ rồi bấm Lưu Ca Này.');
-}
-
-function handleInboxFiles(fileList){
-  const files = Array.from(fileList || []);
-  files.forEach(file=>{
-    const reader = new FileReader();
-    reader.onload = () => {
-      const entry = { id: uid('img'), dataUrl: reader.result, status: 'processing', category: null, extracted: {}, errorMessage: '', retryAttempt: null };
-      state.inboxImages.push(entry);
-      if(state.currentTab==='inbox') renderInbox();
-      processInboxImage(entry);
-    };
-    reader.readAsDataURL(file);
-  });
-  if(state.currentTab==='inbox') renderInbox();
-}
-
-function removeInboxImage(id){
-  state.inboxImages = state.inboxImages.filter(im=>im.id!==id);
-  renderInbox();
-}
-
-function renderInbox(){
-  const app = document.getElementById('app');
-  const images = state.inboxImages;
-  const doneCount = images.filter(im=>im.status==='done').length;
-  const hasKey = !!(state.settings.geminiApiKey || '').trim();
-
-  app.innerHTML = `
-    ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới đọc ảnh được.</div>` : ''}
-    <section class="group">
-      <div class="inbox-drop" id="inboxDropZone">
-        <div class="big">📥</div>
-        <div style="font-weight:700; margin-bottom:4px;">Nạp Ảnh Vào Đây</div>
-        <div style="font-size:12px;">Ảnh đồng hồ Km, hoá đơn dầu, hoá đơn sửa chữa, ảnh chụp màn hình Zalo báo cáo của tài xế — chọn được nhiều ảnh cùng lúc cho 1 ca.</div>
-        <button class="btn btn-accent" id="inboxPickBtn" style="margin-top:14px;">+ Chọn Ảnh</button>
-      </div>
-    </section>
-
-    ${images.length>0 ? `
-    <section class="group">
-      <h3>Ảnh Đã Nạp (${images.length})</h3>
-      <div class="inbox-grid">
-        ${images.map(im=>`
-          <div class="inbox-thumb" data-id="${im.id}">
-            <img src="${im.dataUrl}">
-            <span class="badge ${im.status==='processing'?'processing':(im.category||'unknown')}">
-              ${im.status==='processing' ? (im.retryAttempt ? `Đang thử lại (${im.retryAttempt})...` : 'Đang phân tích...') : (im.status==='error' ? 'Lỗi' : INBOX_CATEGORY_LABELS[im.category||'unknown'])}
-            </span>
-            <button class="rm" data-id="${im.id}">✕</button>
-          </div>
-        `).join('')}
-      </div>
-      ${images.filter(im=>im.status==='done').map(im=>renderInboxExtractCard(im)).join('')}
-      ${images.filter(im=>im.status==='error').map(im=>`<div class="card inbox-extract-card"><div class="hint" style="color:var(--loss);">${escapeHtml(im.errorMessage||'Lỗi không rõ.')}</div></div>`).join('')}
-    </section>
-
-    <section class="group">
-      <button class="btn btn-accent btn-block" id="buildDraftBtn" ${doneCount===0?'disabled':''}>
-        📝 Tạo Dự Thảo Ca Làm Việc (${doneCount} ảnh đã đọc xong)
-      </button>
-      <div class="hint" style="margin-top:8px;">App đọc ảnh bằng AI nên có thể sai — dự thảo tạo ra CHỈ LÀ GỢI Ý, Ông Chủ luôn phải kiểm tra và sửa lại trước khi bấm Lưu Ca Này.</div>
-    </section>
-    ` : ''}
-  `;
-
-  document.getElementById('inboxPickBtn').addEventListener('click', ()=>{
-    document.getElementById('inboxFileInput').click();
-  });
-  document.querySelectorAll('.inbox-thumb .rm').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{ e.stopPropagation(); removeInboxImage(btn.dataset.id); });
-  });
-  const buildBtn = document.getElementById('buildDraftBtn');
-  if(buildBtn) buildBtn.addEventListener('click', buildDraftShiftFromInbox);
-}
-
-function renderInboxExtractCard(im){
-  const ex = im.extracted || {};
-  let rows = '';
-  if(im.category==='odometer'){
-    rows = `<div class="kv"><span>Số Km đọc được</span><span>${ex.odoEnd ?? '(không đọc được)'}</span></div>`;
-  } else if(im.category==='fuel'){
-    rows = `
-      <div class="kv"><span>Số lít đổ</span><span>${ex.fuelAddedLiters ?? '(không đọc được)'}</span></div>
-      <div class="kv"><span>Tổng tiền hoá đơn</span><span>${ex.totalAmount ? fmtVND(ex.totalAmount) : '(không đọc được)'}</span></div>
-      <div class="kv"><span>Đơn giá gợi ý</span><span>${ex.suggestedFuelUnitPrice ? fmtVND(ex.suggestedFuelUnitPrice) : '—'}</span></div>`;
-  } else if(im.category==='maintenance'){
-    rows = `
-      <div class="kv"><span>Tổng tiền hoá đơn</span><span>${ex.totalAmount ? fmtVND(ex.totalAmount) : '(không đọc được)'}</span></div>
-      <div class="hint" style="margin-top:4px;">${escapeHtml(ex.maintenanceItemsText||'(không đọc được danh mục)')}</div>`;
-  } else if(im.category==='driverReport'){
-    rows = `
-      <div class="kv"><span>Tài xế nhận diện</span><span>${escapeHtml(ex.matchedDriverName || '(không khớp tên nào)')}</span></div>
-      <div class="kv"><span>Tổng số chuyến đọc được</span><span>${ex.totalTrips ?? '(không đọc được)'}</span></div>
-      <div class="kv"><span>Ca</span><span>${ex.shiftType ? shiftTypeLabel(ex.shiftType) : '(không rõ)'}</span></div>
-      <div class="kv"><span>Công trình đọc được</span><span>${escapeHtml(ex.siteNameGuess || '—')}</span></div>`;
-  } else {
-    rows = `<div class="hint">Không nhận diện được loại ảnh này — vẫn có thể đọc thủ công.</div>`;
-  }
-  return `<div class="card inbox-extract-card">
-    <div style="font-weight:700; margin-bottom:6px;">${INBOX_CATEGORY_LABELS[im.category||'unknown']}</div>
-    ${rows}
-    ${ex.rawSummary ? `<div class="hint" style="margin-top:6px; font-style:italic;">${escapeHtml(ex.rawSummary)}</div>` : ''}
-  </div>`;
 }
 
 // ========================= STRATEGY ASSISTANT (7/30-DAY AI ANALYSIS) =========================
@@ -3986,37 +3656,30 @@ function renderRepairList(repairsHere){
     wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa có khoản sửa chữa nào trong kỳ này.</div>';
     return;
   }
-  const byDate = {};
-  for(const r of repairsHere){
-    if(!byDate[r.date]) byDate[r.date] = [];
-    byDate[r.date].push(r);
-  }
-  const dates = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
-  wrap.innerHTML = dates.map(date=>{
-    const items = byDate[date];
-    const dayTotal = items.reduce((s,r)=>s+(Number(r.amount)||0),0);
-    return `
-    <div class="card" style="padding:12px 14px;">
-      <div class="driver-row">
-        <strong>${formatDateVN(date)}</strong>
-        <span class="hint">${fmtVND(dayTotal)}</span>
-      </div>
-      ${items.map(r=>{
-        const resp = r.responsibility || 'owner_full';
-        const respDriver = resp!=='owner_full' ? driverById(r.responsibleDriverId) : null;
-        return `
-        <div class="repair-day-item" data-id="${r.id}">
-          <div>
-            <div style="font-weight:600; font-size:13px;">${escapeHtml(r.item||'(chưa ghi hạng mục)')}${resp!=='owner_full' ? `<span class="resp-badge ${resp}">${resp==='driver_full'?'Tài xế chịu 100%':'Tài xế chịu '+fmtVND(repairDriverResponsibleAmount(r))}${respDriver?': '+escapeHtml(respDriver.name):''}</span>` : ''}</div>
-            <div class="hint">${r.invoiceCode ? escapeHtml(r.invoiceCode)+' · ' : ''}${fmtVND(r.amount)}</div>
-          </div>
-          <button class="link-btn editRepairBtn" data-id="${r.id}">Sửa</button>
-        </div>
-      `;}).join('')}
-    </div>`;
-  }).join('');
-  wrap.querySelectorAll('.editRepairBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>openRepairEditor(btn.dataset.id));
+  const sorted = [...repairsHere].sort((a,b)=>b.date.localeCompare(a.date));
+  const total = sorted.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  wrap.innerHTML = `
+    <div class="card dash-wrap" style="padding:0; margin-bottom:8px;">
+      <table class="dash">
+        <thead><tr><th>Ngày</th><th style="text-align:left;">Hạng Mục</th><th>Số Tiền</th></tr></thead>
+        <tbody>
+          ${sorted.map(r=>{
+            const resp = r.responsibility || 'owner_full';
+            const respDriver = resp!=='owner_full' ? driverById(r.responsibleDriverId) : null;
+            return `
+            <tr class="repair-detail-row" data-id="${r.id}">
+              <td>${formatDateVN(r.date)}</td>
+              <td style="text-align:left; font-weight:400; color:var(--ink);">${escapeHtml(r.item||'(chưa ghi hạng mục)')}${r.invoiceCode ? ` · ${escapeHtml(r.invoiceCode)}` : ''}${resp!=='owner_full' ? `<span class="resp-badge ${resp}">${resp==='driver_full'?'Tài xế chịu 100%':'Tài xế chịu '+fmtVND(repairDriverResponsibleAmount(r))}${respDriver?': '+escapeHtml(respDriver.name):''}</span>` : ''}</td>
+              <td>${fmtVND(r.amount)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="hint">${sorted.length} khoản sửa chữa/khấu hao trong kỳ này — tổng ${fmtVND(total)}.</div>
+  `;
+  wrap.querySelectorAll('.repair-detail-row').forEach(tr=>{
+    tr.addEventListener('click', ()=>openRepairEditor(tr.dataset.id));
   });
 }
 
@@ -4569,8 +4232,6 @@ function renderAll(){
     if(state.view==='form') renderShiftForm(); else renderShiftList();
   } else if(state.currentTab==='drivers'){
     renderDrivers();
-  } else if(state.currentTab==='inbox'){
-    renderInbox();
   } else if(state.currentTab==='strategy'){
     renderStrategy();
   } else if(state.currentTab==='results'){
@@ -4599,11 +4260,6 @@ document.getElementById('restoreFileInput').addEventListener('change', e=>{
   const file = e.target.files && e.target.files[0];
   handleRestoreFile(file);
   e.target.value = ''; // allow re-selecting the same file later
-});
-
-document.getElementById('inboxFileInput').addEventListener('change', e=>{
-  handleInboxFiles(e.target.files);
-  e.target.value = ''; // allow re-selecting the same file(s) later
 });
 
 // App initialization is driven by startApp() above, called immediately
