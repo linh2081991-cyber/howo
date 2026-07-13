@@ -1604,6 +1604,7 @@ function renderDrivers(){
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--loss)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
+          <button class="btn btn-ghost btn-block viewDriverDetailBtn" data-id="${d.id}" style="margin-top:10px;">📊 Xem Chi Tiết Vận Hành →</button>
         </div>
       `).join('')}
     </section>
@@ -1637,6 +1638,9 @@ function renderDrivers(){
 
   document.querySelectorAll('.editDriverBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>openEditDriver(btn.dataset.id));
+  });
+  document.querySelectorAll('.viewDriverDetailBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverDetail(btn.dataset.id); });
   });
 }
 
@@ -1712,6 +1716,160 @@ function openEditDriver(id){
       renderAll(); showToast('Đã xoá tài xế.');
     }
   });
+}
+
+// ========================= DRIVER OPERATION DETAIL =========================
+// Read-only "hồ sơ vận hành" screen for ONE driver: ngày làm / ngày nghỉ
+// theo từng trạng thái, cộng với TOÀN BỘ dòng tiền liên quan đến tài xế đó
+// trong kỳ đã chọn. Mọi con số ở đây đọc lại đúng các hàm/getters đã có sẵn
+// (shiftTotalTripWage, driverResponsibleRepairTotalInRange, dailyBaseSalary...)
+// — dùng chung công thức với sheet "Lương Tài Xế" khi xuất Excel
+// (buildDriverPayrollRows), nên số liệu ở đây và số liệu xuất ra luôn khớp
+// nhau. Màn hình này chỉ ĐỌC dữ liệu, không sửa bất kỳ ca/sửa chữa nào.
+function openDriverDetail(driverId){
+  const driver = driverById(driverId);
+  if(!driver){ renderAll(); return; }
+  const app = document.getElementById('app');
+
+  if(!state.driverDetailRange) state.driverDetailRange = currentMonthRange();
+  const { from, to } = state.driverDetailRange;
+
+  const inRange = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
+  const activeShifts = inRange.filter(sh=>sh.status==='active');
+  const activeDates = new Set(activeShifts.map(sh=>sh.date));
+  const totalTrips = activeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalKm = activeShifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+  const totalRevenue = activeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
+
+  // Only real statuses the app actually has (STATUS_OPTIONS) — no invented
+  // categories like "Nghỉ Lễ" that don't exist elsewhere in the app.
+  const offStatusCounts = STATUS_OPTIONS.filter(s=>s.key!=='active').map(s=>({
+    label: s.label,
+    count: inRange.filter(sh=>sh.status===s.key).length
+  }));
+
+  // ---- Cash flow: same formula as buildDriverPayrollRows(), scoped to
+  // this driver + the period picked on this screen. Math core untouched. ----
+  const baseSalary = inRange.reduce((s,sh)=>s+(sh.baseSalaryAllocation||0),0);
+  const tripWage = inRange.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  const food = inRange.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
+  const housing = inRange.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
+  const advance = inRange.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
+  const tip = (driver.tipPerTrip||0) * totalTrips;
+  const repairDeduction = driverResponsibleRepairTotalInRange(driverId, from, to);
+  const netPay = baseSalary + tripWage + food + tip - advance - repairDeduction;
+
+  const advanceRecords = inRange.filter(sh=>(sh.advanceAmount||0)>0).sort((a,b)=>b.date.localeCompare(a.date));
+  const repairRecords = state.repairs.filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to &&
+    (r.responsibility==='driver_full' || r.responsibility==='custom')).sort((a,b)=>b.date.localeCompare(a.date));
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="driverDetailBackBtn">← Quay Lại Tài Xế</button>
+    </section>
+
+    <section class="group">
+      <div class="card">
+        <div class="driver-cv-head" style="margin-bottom:0;">
+          <div class="driver-cv-avatar">${escapeHtml((driver.name||'?').trim().charAt(0).toUpperCase())}</div>
+          <div style="flex:1;">
+            <div class="driver-cv-name">${escapeHtml(driver.name)}</div>
+            <div class="hint">${driver.isActive===false ? 'Ngừng hoạt động' : 'Đang hoạt động'}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Khoảng Thời Gian</h3>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button class="btn btn-ghost btn-sm" id="dd_thisMonth" style="flex:1;">Tháng Này</button>
+        <button class="btn btn-ghost btn-sm" id="dd_lastMonth" style="flex:1;">Tháng Trước</button>
+        <button class="btn btn-ghost btn-sm" id="dd_allTime" style="flex:1;">Toàn Thời Gian</button>
+      </div>
+      <div class="date-range" style="margin-bottom:0;">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="dd_from" value="${from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="dd_to" value="${to}">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📋 Nhật Ký Vận Hành Trong Kỳ</h3>
+      <div class="card">
+        <div class="driver-cv-grid">
+          <div class="driver-cv-item"><span class="k">Số Ca Hoạt Động</span><span class="v">${activeShifts.length} ca</span></div>
+          <div class="driver-cv-item"><span class="k">Số Ngày Có Ca Hoạt Động</span><span class="v">${activeDates.size} ngày</span></div>
+          <div class="driver-cv-item"><span class="k">Tổng Số Chuyến</span><span class="v">${totalTrips} chuyến</span></div>
+          <div class="driver-cv-item"><span class="k">Tổng Km Đã Chạy</span><span class="v">${Math.round(totalKm).toLocaleString('vi-VN')} km</span></div>
+          <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Doanh Thu Tạo Ra Trong Kỳ</span><span class="v">${fmtVND(totalRevenue)}</span></div>
+          ${offStatusCounts.map(s=>`
+            <div class="driver-cv-item"><span class="k">${escapeHtml(s.label)}</span><span class="v">${s.count} ca</span></div>
+          `).join('')}
+        </div>
+        ${inRange.length===0 ? '<div class="hint" style="margin-top:8px;">Không có ca nào được ghi nhận cho tài xế này trong kỳ đã chọn.</div>' : ''}
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>💵 Dòng Tiền Liên Quan Đến Tài Xế</h3>
+      <div class="card">
+        <div class="summary-row"><span>Lương cứng phân bổ</span><span class="val">${fmtVND(baseSalary)}</span></div>
+        <div class="summary-row"><span>Tổng lương chuyến</span><span class="val">${fmtVND(tripWage)}</span></div>
+        <div class="summary-row"><span>Tiền ăn</span><span class="val">${fmtVND(food)}</span></div>
+        <div class="summary-row"><span>Tiền tip/thưởng</span><span class="val">${fmtVND(tip)}</span></div>
+        <div class="summary-row"><span>− Ứng lương/Đền bù</span><span class="val" style="color:${advance>0?'var(--loss)':'inherit'}">${fmtVND(advance)}</span></div>
+        <div class="summary-row"><span>− Trừ do hỏng hóc</span><span class="val" style="color:${repairDeduction>0?'var(--loss)':'inherit'}">${fmtVND(repairDeduction)}</span></div>
+        <div class="summary-row total"><span>LƯƠNG THỰC NHẬN</span><span class="val" style="color:${netPay>=0?'var(--profit)':'var(--loss)'}">${fmtVND(netPay)}</span></div>
+        <div class="hint" style="margin-top:8px;">Tiền nhà + điện nước (Cty trả riêng, không tính vào lương): ${fmtVND(housing)}. Ông Chủ đổi khoảng thời gian ở trên để xem lại kỳ khác bất cứ lúc nào.</div>
+      </div>
+    </section>
+
+    ${advanceRecords.length>0 ? `
+    <section class="group">
+      <h3>📤 Ứng Lương / Đền Bù Trong Kỳ</h3>
+      <div class="card" style="padding:0;">
+        ${advanceRecords.map(sh=>`
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); font-size:13px;">
+            <span>${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}${sh.advanceRecipientName?' · '+escapeHtml(sh.advanceRecipientName):''}</span>
+            <span style="font-weight:700; white-space:nowrap;">${fmtVND(sh.advanceAmount)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </section>` : ''}
+
+    ${repairRecords.length>0 ? `
+    <section class="group">
+      <h3>🔧 Trừ Do Hỏng Hóc Trong Kỳ</h3>
+      <div class="card" style="padding:0;">
+        ${repairRecords.map(r=>`
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); font-size:13px;">
+            <span>${formatDateVN(r.date)} · ${escapeHtml(r.item||'(chưa ghi hạng mục)')}</span>
+            <span style="font-weight:700; white-space:nowrap; color:var(--loss);">${fmtVND(repairDriverResponsibleAmount(r))}</span>
+          </div>
+        `).join('')}
+      </div>
+    </section>` : ''}
+  `;
+
+  document.getElementById('driverDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('dd_thisMonth').addEventListener('click', ()=>{ state.driverDetailRange = currentMonthRange(); openDriverDetail(driverId); });
+  document.getElementById('dd_lastMonth').addEventListener('click', ()=>{
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), 0);
+    const toLocalISO = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    state.driverDetailRange = { from: toLocalISO(first), to: toLocalISO(last) };
+    openDriverDetail(driverId);
+  });
+  document.getElementById('dd_allTime').addEventListener('click', ()=>{ state.driverDetailRange = { from: ALL_TIME_FROM, to: ALL_TIME_TO }; openDriverDetail(driverId); });
+  document.getElementById('dd_from').addEventListener('change', e=>{ state.driverDetailRange = { from: e.target.value, to }; openDriverDetail(driverId); });
+  document.getElementById('dd_to').addEventListener('change', e=>{ state.driverDetailRange = { from, to: e.target.value }; openDriverDetail(driverId); });
 }
 
 // ========================= SMART INBOX: GOOGLE GEMINI API =========================
