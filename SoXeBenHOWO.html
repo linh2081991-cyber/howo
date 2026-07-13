@@ -413,7 +413,12 @@ let state = {
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [], // {id, siteName, totalContractValue, notes}
-  siteAppraisals: [] // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice, fixedCostAllocated, roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift} — prospective-project appraisal module, fully isolated from shift logs
+  siteAppraisals: [] // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice,
+  // wagePerTripEstimate (đ/chuyến), foodPerTripEstimate (đ/chuyến),
+  // fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly, fixedLoanMonthly,
+  // fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly (tất cả đ/tháng),
+  // roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift}
+  // — prospective-project appraisal module, fully isolated from shift logs
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -2333,42 +2338,64 @@ function historicalAvgFoodPerShift(){
 function computeAppraisalMetrics(p){
   const fuelPerKm = historicalAvgFuelPerKm();
   const fuelPrice = currentFuelUnitPriceForAppraisal();
-  const avgWagePerTrip = historicalAvgWagePerTrip();
-  const avgFoodPerShift = historicalAvgFoodPerShift();
+  // Số TB thực tế toàn đội xe — giữ lại CHỈ để hiển thị tham khảo (gợi ý
+  // điền mặc định khi tạo công trình mới) — KHÔNG còn dùng trực tiếp
+  // trong công thức lãi gộp/chuyến nữa. Từ nay lương chuyến + tiền ăn là
+  // số Ông Chủ tự nhập riêng cho từng công trình (ap_wagePerTrip /
+  // ap_foodPerTrip) để hạch toán đúng đặc thù công trình đó.
+  const avgWagePerTripReal = historicalAvgWagePerTrip();
+  const avgFoodPerShiftReal = historicalAvgFoodPerShift();
 
   const kmPerTrip = (Number(p.kmOneWay)||0) + (Number(p.kmReturn)||0);
   const fuelLitersPerTrip = fuelPerKm * kmPerTrip;
-  const fuelCostPerTrip = fuelLitersPerTrip * fuelPrice;
+  const fuelCostPerTrip = fuelLitersPerTrip * fuelPrice; // "chi phí dầu thực tế" — tiêu hao TB thực tế × đơn giá hiện hành
 
   const grossCargoRevenuePerTrip = (Number(p.loadPerTrip)||0) * (Number(p.cargoUnitPrice)||0);
   const vatRate = (Number(state.settings.vatRatePercent)||0)/100;
   const netRevenuePerTrip = p.priceIncludesVat ? grossCargoRevenuePerTrip/(1+vatRate) : grossCargoRevenuePerTrip;
 
-  // Chi phí biến đổi/chuyến: dầu + lương chuyến (KHÔNG gồm luật đường —
-  // luật đường là chi phí cố định theo tháng, xem bên dưới).
-  const variableCostPerTrip = fuelCostPerTrip + avgWagePerTrip;
+  const tripsPerShift = Math.max(0, Number(p.estimatedTripsPerShift)||0);
+  const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||0;
+  const monthlyTripsEstimate = (tripsPerShift>0 && standardWorkDays>0) ? tripsPerShift*standardWorkDays : 0;
+
+  // ----- Chi phí biến đổi/chuyến (đúng yêu cầu: dầu + lương chuyến + tiền
+  // ăn + tiền luật đường), lấy trực tiếp từ các trường Ông Chủ tự nhập -----
+  const wagePerTrip = Number(p.wagePerTripEstimate)||0;
+  const foodPerTrip = Number(p.foodPerTripEstimate)||0;
+  const roadFeeMonthly = Number(p.roadFeeEstimate)||0;
+  // Tiền luật đường đóng THEO THÁNG ngoài đời thật, nên quy đổi về tương
+  // đương mỗi chuyến bằng số chuyến ước tính chạy được cả tháng (số
+  // chuyến/ca × ngày công chuẩn) — chỉ quy đổi được khi đã nhập đủ 2 số
+  // này, nếu chưa thì tạm để 0 (sẽ nêu rõ ở hasRoadFeeBasis).
+  const roadFeePerTripEquivalent = monthlyTripsEstimate>0 ? roadFeeMonthly/monthlyTripsEstimate : 0;
+
+  const variableCostPerTrip = fuelCostPerTrip + wagePerTrip + foodPerTrip + roadFeePerTripEquivalent;
+  // LỢI NHUẬN GỘP/CHUYẾN = Doanh thu thuần chưa VAT − (dầu + lương chuyến + tiền ăn + luật đường)
   const grossProfitPerTrip = netRevenuePerTrip - variableCostPerTrip;
 
-  const tripsPerShift = Math.max(0, Number(p.estimatedTripsPerShift)||0);
-  // Lãi gộp/ca = lãi gộp cộng dồn các chuyến trong ca, trừ tiền ăn/ca
-  // (tiền ăn KHÔNG nhân theo số chuyến).
-  const grossProfitPerShift = tripsPerShift>0 ? (tripsPerShift*grossProfitPerTrip - avgFoodPerShift) : null;
+  // Lãi gộp/ca = lãi gộp/chuyến (đã gồm đủ tiền ăn + luật đường quy đổi)
+  // nhân số chuyến/ca — không trừ thêm lần nào nữa để tránh tính trùng.
+  const grossProfitPerShift = tripsPerShift>0 ? (tripsPerShift*grossProfitPerTrip) : null;
 
-  // Chi phí cố định/tháng: chi phí cố định phân bổ CỘNG tiền luật đường —
-  // cả hai đều là khoản đóng cả tháng, không nhân theo chuyến/ca.
-  const roadFeeMonthly = Number(p.roadFeeEstimate)||0;
-  const fixedCostAllocated = Number(p.fixedCostAllocated)||0;
-  const fixedCostMonthly = fixedCostAllocated + roadFeeMonthly;
+  // ----- Chi phí CỐ ĐỊNH dự kiến phân bổ cho công trình (đóng THEO
+  // THÁNG, không nhân theo chuyến) — liệt kê đủ các khoản mục cố định
+  // app đang theo dõi cho cả đội xe (lương cứng, nhà ở, sửa chữa/khấu
+  // hao) cộng thêm gốc+lãi vay ngân hàng, bảo hiểm, đăng kiểm/đăng ký và
+  // một dòng "khác" dự phòng. Tiền luật đường KHÔNG cộng vào đây nữa vì
+  // đã quy đổi thẳng vào lãi gộp/chuyến ở trên (tránh tính trùng 2 lần).
+  const fixedBaseSalaryMonthly = Number(p.fixedBaseSalaryMonthly)||0;
+  const fixedHousingMonthly = Number(p.fixedHousingMonthly)||0;
+  const fixedDepreciationMonthly = Number(p.fixedDepreciationMonthly)||0;
+  const fixedLoanMonthly = Number(p.fixedLoanMonthly)||0;
+  const fixedInsuranceMonthly = Number(p.fixedInsuranceMonthly)||0;
+  const fixedRegistrationMonthly = Number(p.fixedRegistrationMonthly)||0;
+  const fixedOtherMonthly = Number(p.fixedOtherMonthly)||0;
+  const fixedCostMonthly = fixedBaseSalaryMonthly + fixedHousingMonthly + fixedDepreciationMonthly
+    + fixedLoanMonthly + fixedInsuranceMonthly + fixedRegistrationMonthly + fixedOtherMonthly;
 
-  // Quy đổi tiền ăn/ca về tương đương mỗi chuyến (chỉ quy đổi được khi
-  // đã biết số chuyến/ca) để "số chuyến hoà vốn" phản ánh đúng TOÀN BỘ
-  // chi phí biến đổi thực tế, không chỉ riêng dầu + lương chuyến.
-  const foodPerTripEquivalent = tripsPerShift>0 ? avgFoodPerShift/tripsPerShift : 0;
-  const effectiveMarginPerTrip = grossProfitPerTrip - foodPerTripEquivalent;
-  const breakEvenTrips = effectiveMarginPerTrip>0 ? Math.ceil(fixedCostMonthly/effectiveMarginPerTrip) : null;
+  const breakEvenTrips = grossProfitPerTrip>0 ? Math.ceil(fixedCostMonthly/grossProfitPerTrip) : null;
   const breakEvenShifts = (breakEvenTrips!==null && tripsPerShift>0) ? Math.ceil(breakEvenTrips/tripsPerShift) : null;
 
-  const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||0;
   const feasible = (breakEvenShifts!==null && standardWorkDays>0) ? (breakEvenShifts<=standardWorkDays) : null;
   const shortfallShifts = (feasible===false) ? (breakEvenShifts-standardWorkDays) : 0;
 
@@ -2379,16 +2406,19 @@ function computeAppraisalMetrics(p){
   const roiPercent = (fixedCostMonthly>0 && projectedMonthlyProfit!==null)
     ? (projectedMonthlyProfit/fixedCostMonthly*100) : null;
 
-  // Cờ cảnh báo: chưa đủ lịch sử vận hành để tính lương chuyến/tiền ăn
-  // trung bình — nếu = 0 mà đội xe THỰC TẾ có phát sinh 2 khoản này, số
-  // liệu mô phỏng đang bị thiếu chi phí, dễ khiến quyết định sai.
-  const hasWageBasis = avgWagePerTrip>0;
-  const hasFoodBasis = avgFoodPerShift>0;
+  // Cờ cảnh báo: Ông Chủ chưa tự nhập lương chuyến/tiền ăn riêng cho công
+  // trình này — nếu để trống (=0) thì lãi gộp/chuyến đang bị TÍNH CAO HƠN
+  // thực tế vì thiếu 2 khoản chi phí quan trọng.
+  const hasWageBasis = wagePerTrip>0;
+  const hasFoodBasis = foodPerTrip>0;
+  const hasRoadFeeBasis = monthlyTripsEstimate>0;
 
-  return { fuelPerKm, fuelPrice, avgWagePerTrip, avgFoodPerShift, hasWageBasis, hasFoodBasis,
+  return { fuelPerKm, fuelPrice, avgWagePerTripReal, avgFoodPerShiftReal, hasWageBasis, hasFoodBasis, hasRoadFeeBasis,
            kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip, grossCargoRevenuePerTrip, netRevenuePerTrip,
+           wagePerTrip, foodPerTrip, roadFeePerTripEquivalent, monthlyTripsEstimate,
            variableCostPerTrip, grossProfitPerTrip, tripsPerShift, grossProfitPerShift,
-           roadFeeMonthly, fixedCostAllocated, fixedCostMonthly, foodPerTripEquivalent, effectiveMarginPerTrip,
+           roadFeeMonthly, fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly,
+           fixedLoanMonthly, fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly, fixedCostMonthly,
            breakEvenTrips, breakEvenShifts, standardWorkDays, feasible, shortfallShifts,
            projectedMonthlyProfit, roiPercent };
 }
@@ -2434,11 +2464,11 @@ function renderProjectAppraisal(){
     <section class="group">
       <h3>🧮 Thẩm Định &amp; So Sánh Công Trình Trước Khi Nhận</h3>
       <div class="card">
-        <div class="hint" style="margin-bottom:8px;">Các thông số dưới đây lấy trực tiếp từ số liệu vận hành thực tế của đội xe (đã loại ca gần nhất còn thiếu dữ liệu) — dùng làm căn cứ mô phỏng, không phải số áng chừng.</div>
+        <div class="hint" style="margin-bottom:8px;">Các thông số dưới đây lấy trực tiếp từ số liệu vận hành thực tế của đội xe (đã loại ca gần nhất còn thiếu dữ liệu) — dùng làm SỐ GỢI Ý mặc định khi thêm công trình mới. Mức tiêu hao dầu vẫn tự động áp cho mọi công trình; riêng lương chuyến và tiền ăn, Ông Chủ tự nhập/sửa lại riêng cho từng công trình ở màn hình Thêm/Sửa để phản ánh đúng đặc thù công trình đó.</div>
         <div class="summary-row"><span>Mức tiêu hao dầu trung bình thực tế</span><span class="val">${fuelPerKm>0?fuelPerKm.toFixed(2)+' lít/km':'Chưa có dữ liệu'}</span></div>
-        <div class="summary-row"><span>Lương chuyến trung bình thực tế</span><span class="val">${avgWagePerTrip>0?fmtVND(avgWagePerTrip)+'/chuyến':'Chưa có dữ liệu'}</span></div>
-        <div class="summary-row"><span>Tiền ăn trung bình thực tế</span><span class="val">${avgFoodPerShift>0?fmtVND(avgFoodPerShift)+'/ca':'Chưa có dữ liệu'}</span></div>
-        ${(avgWagePerTrip<=0 || avgFoodPerShift<=0) ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Chưa đủ lịch sử vận hành để tính ${avgWagePerTrip<=0?'lương chuyến':''}${(avgWagePerTrip<=0 && avgFoodPerShift<=0)?' và ':''}${avgFoodPerShift<=0?'tiền ăn':''} trung bình — mô phỏng bên dưới đang tạm tính các khoản này bằng 0, lãi gộp có thể đang bị TÍNH CAO HƠN thực tế.</div>` : ''}
+        <div class="summary-row"><span>Lương chuyến trung bình thực tế (số gợi ý)</span><span class="val">${avgWagePerTrip>0?fmtVND(avgWagePerTrip)+'/chuyến':'Chưa có dữ liệu'}</span></div>
+        <div class="summary-row"><span>Tiền ăn trung bình thực tế (số gợi ý)</span><span class="val">${avgFoodPerShift>0?fmtVND(avgFoodPerShift)+'/ca':'Chưa có dữ liệu'}</span></div>
+        ${(avgWagePerTrip<=0 || avgFoodPerShift<=0) ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Chưa đủ lịch sử vận hành để gợi ý ${avgWagePerTrip<=0?'lương chuyến':''}${(avgWagePerTrip<=0 && avgFoodPerShift<=0)?' và ':''}${avgFoodPerShift<=0?'tiền ăn':''} trung bình — hãy tự nhập tay các khoản này khi thêm công trình.</div>` : ''}
       </div>
       <div class="card" style="margin-top:8px;">
         <div class="field">
@@ -2471,7 +2501,7 @@ function renderProjectAppraisal(){
           <div class="compare-card ${p.id===bestId?'best':''}">
             <h4>${escapeHtml(p.name||'(chưa đặt tên)')}${p.id===bestId?' <span class="rating-badge good">Đề xuất</span>':''}</h4>
             <div class="compare-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
-            <div class="compare-row"><span>Dầu + lương chuyến/chuyến</span><span class="val">${fmtVND(m.variableCostPerTrip)}</span></div>
+            <div class="compare-row"><span>Dầu+lương chuyến+ăn+luật đường/chuyến</span><span class="val">${fmtVND(m.variableCostPerTrip)}</span></div>
             <div class="compare-row"><span>Lãi gộp/chuyến</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
             <div class="compare-row"><span>Số chuyến/ca dự tính</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
             <div class="compare-row"><span>Số chuyến hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn'}</span></div>
@@ -2547,13 +2577,14 @@ function renderAppraisalList(metricsById){
       </div>
       <div class="hint" style="margin:6px 0;">${m.kmPerTrip.toLocaleString('vi-VN')} km/chuyến (khứ hồi) · ${(Number(p.loadPerTrip)||0).toLocaleString('vi-VN')} tấn/khối mỗi chuyến · Giá cước ${p.priceIncludesVat?'đã có VAT':'chưa VAT'}</div>
       <div class="summary-row"><span>Doanh thu thuần ước tính/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
-      <div class="summary-row"><span>Chi phí dầu ước tính/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
-      <div class="summary-row"><span>Lương chuyến (TB thực tế)</span><span class="val">${fmtVND(m.avgWagePerTrip)}</span></div>
+      <div class="summary-row"><span>Chi phí dầu thực tế/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+      <div class="summary-row"><span>Lương chuyến dự kiến</span><span class="val">${fmtVND(m.wagePerTrip)}</span></div>
+      <div class="summary-row"><span>Tiền ăn dự kiến/chuyến</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
+      <div class="summary-row"><span>Tiền luật đường quy đổi/chuyến</span><span class="val">${fmtVND(m.roadFeePerTripEquivalent)}</span></div>
       <div class="summary-row total"><span>LỢI NHUẬN GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
       <div class="summary-row"><span>Số chuyến dự tính chạy được/ca</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
-      <div class="summary-row"><span>Tiền ăn/ca (TB thực tế)</span><span class="val">${fmtVND(m.avgFoodPerShift)}</span></div>
       <div class="summary-row"><span>LỢI NHUẬN GỘP / CA</span><span class="val" style="color:${m.grossProfitPerShift!==null&&m.grossProfitPerShift>=0?'var(--profit)':'var(--loss)'}">${m.grossProfitPerShift!==null?fmtVND(m.grossProfitPerShift):'— (chưa nhập số chuyến/ca)'}</span></div>
-      <div class="summary-row"><span>Chi phí cố định/tháng (phân bổ + luật đường)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
+      <div class="summary-row"><span>Chi phí cố định/tháng (lương cứng+nhà+khấu hao+vay+bảo hiểm+đăng kiểm+khác)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
       <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được với cơ cấu giá này'}</span></div>
       <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'Chưa đủ dữ liệu (cần nhập số chuyến/ca)'}</span></div>
       <div class="summary-row"><span>So với ngày công chuẩn (${m.standardWorkDays} ca/tháng)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
@@ -2579,9 +2610,31 @@ function renderAppraisalList(metricsById){
 /// immediately instead of only after saving.
 function openProjectAppraisalEditor(id){
   const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
-  const draft = existing ? {...existing} : {
+  const draft = existing ? {
+    ...existing,
+    wagePerTripEstimate: existing.wagePerTripEstimate!=null ? existing.wagePerTripEstimate : 0,
+    foodPerTripEstimate: existing.foodPerTripEstimate!=null ? existing.foodPerTripEstimate : 0,
+    fixedBaseSalaryMonthly: existing.fixedBaseSalaryMonthly||0,
+    fixedHousingMonthly: existing.fixedHousingMonthly||0,
+    fixedDepreciationMonthly: existing.fixedDepreciationMonthly||0,
+    fixedLoanMonthly: existing.fixedLoanMonthly||0,
+    fixedInsuranceMonthly: existing.fixedInsuranceMonthly||0,
+    fixedRegistrationMonthly: existing.fixedRegistrationMonthly||0,
+    // Công trình tạo TRƯỚC bản cập nhật này có thể chỉ có field cũ
+    // "fixedCostAllocated" (một cục gộp chung, không tách khoản mục) —
+    // chuyển nguyên giá trị đó sang dòng "Chi phí cố định khác" để KHÔNG
+    // làm mất dữ liệu Ông Chủ đã nhập từ trước.
+    fixedOtherMonthly: existing.fixedOtherMonthly!=null ? existing.fixedOtherMonthly : (existing.fixedCostAllocated||0)
+  } : {
     id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
-    priceIncludesVat:false, cargoUnitPrice:0, fixedCostAllocated:0,
+    priceIncludesVat:false, cargoUnitPrice:0,
+    // Lương chuyến gợi ý sẵn bằng số TB thực tế toàn đội xe cho nhanh —
+    // Ông Chủ vẫn sửa lại tự do cho khớp đặc thù công trình này. Tiền ăn
+    // để trống vì còn phụ thuộc số chuyến/ca dự kiến, chưa quy đổi được.
+    wagePerTripEstimate: Math.round(historicalAvgWagePerTrip()),
+    foodPerTripEstimate: 0,
+    fixedBaseSalaryMonthly: 0, fixedHousingMonthly: 0, fixedDepreciationMonthly: 0,
+    fixedLoanMonthly: 0, fixedInsuranceMonthly: 0, fixedRegistrationMonthly: 0, fixedOtherMonthly: 0,
     // Tiền luật đường mặc định lấy đúng mức đang đóng thật ở Cài Đặt
     // (đóng theo THÁNG) — Ông Chủ vẫn sửa được riêng cho công trình này
     // nếu dự tính khác đi.
@@ -2627,14 +2680,68 @@ function openProjectAppraisalEditor(id){
           <label>Đơn giá cước (đ / tấn hoặc đ / khối, theo lựa chọn VAT ở trên)</label>
           <input type="text" inputmode="decimal" id="ap_cargoPrice">
         </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>👷 Thông Số Lái Xe</h3>
+      <div class="card">
         <div class="field">
-          <label>Chi phí cố định dự kiến phân bổ cho công trình (lương cứng + nhà + sửa chữa/khấu hao, theo THÁNG)</label>
-          <input type="text" inputmode="decimal" id="ap_fixedCost">
+          <label>Lương cứng dự kiến phân bổ cho công trình (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_baseSalary">
         </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Lương chuyến dự kiến (đ/chuyến)</label>
+          <input type="text" inputmode="decimal" id="ap_wagePerTrip">
+          <div class="hint">Gợi ý ban đầu lấy bằng lương chuyến TB thực tế toàn đội xe (${fmtVND(historicalAvgWagePerTrip())}/chuyến) — sửa lại nếu công trình này trả khác.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🍚 Tiền Ăn</h3>
+      <div class="card">
+        <div class="field" style="margin-bottom:0;">
+          <label>Tiền ăn ca dự kiến phân bổ cho mỗi chuyến (đ/chuyến)</label>
+          <input type="text" inputmode="decimal" id="ap_foodPerTrip">
+          <div class="hint">Tiền ăn TB thực tế toàn đội xe hiện là ${fmtVND(historicalAvgFoodPerShift())}/ca — nếu công trình này dự tính chạy được N chuyến/ca, lấy số đó chia N rồi nhập vào đây cho đúng mỗi chuyến.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🏗️ Chi Phí Cố Định Dự Kiến Phân Bổ Cho Công Trình (đóng theo THÁNG)</h3>
+      <div class="card">
+        <div class="field">
+          <label>Nhà ở / phụ cấp nhà dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_housing">
+        </div>
+        <div class="field">
+          <label>Khấu hao xe dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_depreciation">
+        </div>
+        <div class="field">
+          <label>Trả gốc + lãi vay ngân hàng dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_loan">
+        </div>
+        <div class="field">
+          <label>Bảo hiểm xe dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_insurance">
+        </div>
+        <div class="field">
+          <label>Đăng kiểm / đăng ký / phù hiệu vận tải dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_registration">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Chi phí cố định khác dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_otherFixed">
+        </div>
+      </div>
+      <div class="card" style="margin-top:8px;">
         <div class="field" style="margin-bottom:0;">
           <label>Tiền luật đường dự kiến (đóng theo THÁNG — mặc định lấy từ Cài Đặt)</label>
           <input type="text" inputmode="decimal" id="ap_roadFee">
-          <div class="hint">Tiền luật đường là khoản đóng cả tháng, KHÔNG nhân theo số chuyến — sửa ở đây nếu công trình này dự tính đóng khác mức đang đóng chung.</div>
+          <div class="hint">Tiền luật đường là khoản đóng cả tháng — app tự quy đổi về tương đương mỗi chuyến (dựa trên số chuyến/ca dự tính × ngày công chuẩn) để trừ thẳng vào lãi gộp/chuyến bên dưới, không cộng trùng vào chi phí cố định/tháng.</div>
         </div>
       </div>
     </section>
@@ -2657,23 +2764,33 @@ function openProjectAppraisalEditor(id){
     document.getElementById('ap_preview').innerHTML = `
       <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">MỖI CHUYẾN</div>
       <div class="summary-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
-      <div class="summary-row"><span>− Chi phí dầu (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
-      <div class="summary-row"><span>− Lương chuyến (TB thực tế)</span><span class="val">${fmtVND(m.avgWagePerTrip)}</span></div>
+      <div class="summary-row"><span>− Chi phí dầu thực tế (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+      <div class="summary-row"><span>− Lương chuyến dự kiến</span><span class="val">${fmtVND(m.wagePerTrip)}</span></div>
+      <div class="summary-row"><span>− Tiền ăn dự kiến/chuyến</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
+      <div class="summary-row"><span>− Tiền luật đường quy đổi/chuyến</span><span class="val">${fmtVND(m.roadFeePerTripEquivalent)}</span></div>
       <div class="summary-row total"><span>LÃI GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+      ${(!m.hasWageBasis || !m.hasFoodBasis) ? `<div class="hint" style="color:var(--loss); margin-top:4px;">⚠️ Chưa nhập ${!m.hasWageBasis?'lương chuyến':''}${(!m.hasWageBasis && !m.hasFoodBasis)?' và ':''}${!m.hasFoodBasis?'tiền ăn':''} dự kiến — lãi gộp/chuyến ở trên đang bị TÍNH CAO HƠN thực tế vì thiếu chi phí.</div>` : ''}
+      ${!m.hasRoadFeeBasis && m.roadFeeMonthly>0 ? `<div class="hint" style="color:var(--loss); margin-top:4px;">⚠️ Chưa nhập "Số chuyến dự tính/ca" nên chưa quy đổi được tiền luật đường về mỗi chuyến — lãi gộp/chuyến đang tạm bỏ qua khoản này.</div>` : ''}
 
       <div class="formula-divider" style="margin:10px 0;"></div>
       <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">MỖI CA (${m.tripsPerShift>0?m.tripsPerShift+' chuyến/ca':'chưa nhập số chuyến/ca'})</div>
       ${m.tripsPerShift>0 ? `
       <div class="summary-row"><span>${m.tripsPerShift} chuyến × ${fmtVND(m.grossProfitPerTrip)}</span><span class="val">${fmtVND(m.tripsPerShift*m.grossProfitPerTrip)}</span></div>
-      <div class="summary-row"><span>− Tiền ăn/ca (TB thực tế)</span><span class="val">${fmtVND(m.avgFoodPerShift)}</span></div>
       <div class="summary-row total"><span>LÃI GỘP / CA</span><span class="val" style="color:${m.grossProfitPerShift>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerShift)}</span></div>
       ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được trong 1 ca" ở trên để tính lãi/ca, số ca hoà vốn và lợi nhuận dự kiến/tháng.</div>`}
 
       <div class="formula-divider" style="margin:10px 0;"></div>
       <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">HOÀ VỐN &amp; KHẢ THI TRONG THÁNG</div>
-      <div class="summary-row"><span>Chi phí cố định/tháng (phân bổ + luật đường)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
-      ${m.breakEvenTrips===null ? `<div class="hint" style="color:var(--loss);">Lãi gộp/chuyến hiện đang ≤ 0 (đã trừ dầu + lương chuyến${m.tripsPerShift>0?' + tiền ăn quy đổi':''}) — KHÔNG thể hoà vốn với cơ cấu giá này dù chạy bao nhiêu chuyến. Cần thương lượng lại đơn giá cước.</div>` : `
-      <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.fixedCostMonthly.toLocaleString('vi-VN')} ÷ ${Math.round(m.effectiveMarginPerTrip).toLocaleString('vi-VN')} = <strong>${m.breakEvenTrips} chuyến</strong></span></div>
+      <div class="summary-row"><span>Lương cứng</span><span class="val">${fmtVND(m.fixedBaseSalaryMonthly)}</span></div>
+      <div class="summary-row"><span>Nhà ở</span><span class="val">${fmtVND(m.fixedHousingMonthly)}</span></div>
+      <div class="summary-row"><span>Khấu hao xe</span><span class="val">${fmtVND(m.fixedDepreciationMonthly)}</span></div>
+      <div class="summary-row"><span>Gốc + lãi vay ngân hàng</span><span class="val">${fmtVND(m.fixedLoanMonthly)}</span></div>
+      <div class="summary-row"><span>Bảo hiểm</span><span class="val">${fmtVND(m.fixedInsuranceMonthly)}</span></div>
+      <div class="summary-row"><span>Đăng kiểm/đăng ký</span><span class="val">${fmtVND(m.fixedRegistrationMonthly)}</span></div>
+      <div class="summary-row"><span>Chi phí cố định khác</span><span class="val">${fmtVND(m.fixedOtherMonthly)}</span></div>
+      <div class="summary-row total"><span>Tổng chi phí cố định/tháng</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
+      ${m.breakEvenTrips===null ? `<div class="hint" style="color:var(--loss); margin-top:6px;">Lãi gộp/chuyến hiện đang ≤ 0 (đã trừ dầu + lương chuyến + tiền ăn + luật đường) — KHÔNG thể hoà vốn với cơ cấu giá này dù chạy bao nhiêu chuyến. Cần thương lượng lại đơn giá cước.</div>` : `
+      <div class="summary-row" style="margin-top:6px;"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.fixedCostMonthly.toLocaleString('vi-VN')} ÷ ${Math.round(m.grossProfitPerTrip).toLocaleString('vi-VN')} = <strong>${m.breakEvenTrips} chuyến</strong></span></div>
       ${m.breakEvenShifts!==null ? `
       <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips} ÷ ${m.tripsPerShift} = <strong>${m.breakEvenShifts} ca</strong></span></div>
       <div class="summary-row"><span>Ngày công chuẩn/tháng (Cài Đặt)</span><span class="val">${m.standardWorkDays} ca</span></div>
@@ -2698,7 +2815,15 @@ function openProjectAppraisalEditor(id){
     });
   });
   attachMoneyInput(document.getElementById('ap_cargoPrice'), draft.cargoUnitPrice, v=>{ draft.cargoUnitPrice=v; updatePreview(); });
-  attachMoneyInput(document.getElementById('ap_fixedCost'), draft.fixedCostAllocated, v=>{ draft.fixedCostAllocated=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_baseSalary'), draft.fixedBaseSalaryMonthly, v=>{ draft.fixedBaseSalaryMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_wagePerTrip'), draft.wagePerTripEstimate, v=>{ draft.wagePerTripEstimate=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_foodPerTrip'), draft.foodPerTripEstimate, v=>{ draft.foodPerTripEstimate=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_depreciation'), draft.fixedDepreciationMonthly, v=>{ draft.fixedDepreciationMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_loan'), draft.fixedLoanMonthly, v=>{ draft.fixedLoanMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_insurance'), draft.fixedInsuranceMonthly, v=>{ draft.fixedInsuranceMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_registration'), draft.fixedRegistrationMonthly, v=>{ draft.fixedRegistrationMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_otherFixed'), draft.fixedOtherMonthly, v=>{ draft.fixedOtherMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_roadFee'), draft.roadFeeEstimate, v=>{ draft.roadFeeEstimate=v; updatePreview(); });
   updatePreview();
 
@@ -2742,12 +2867,12 @@ let activeAppraisalTruckRun = null;
 /// force a pick whenever the projects are too close to call or there's
 /// only one project to look at — this is the actual mechanism behind
 /// "không được tự ý quyết định khi chưa chắc chắn".
-function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice, avgWagePerTrip, avgFoodPerShift){
-  return `Mày là Chuyên gia Thẩm định & Tư vấn Vận tải xe ben (nhiều năm kinh nghiệm ngành vận tải vật liệu xây dựng, tư duy thận trọng, không phán đoán cảm tính). Dưới đây là số liệu MÔ PHỎNG các công trình dự kiến — CHƯA nhận chạy — đã được tính sẵn bằng công thức kế toán chính xác của app (không cần và không được tính lại), dựa trên số liệu vận hành thực tế trung bình toàn đội xe: tiêu hao dầu ${fuelPerKm.toFixed(2)} lít/km, đơn giá dầu ${fmtVND(fuelPrice)}/lít, lương chuyến ${fmtVND(avgWagePerTrip)}/chuyến, tiền ăn ${fmtVND(avgFoodPerShift)}/ca:
+function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice){
+  return `Mày là Chuyên gia Thẩm định & Tư vấn Vận tải xe ben (nhiều năm kinh nghiệm ngành vận tải vật liệu xây dựng, tư duy thận trọng, không phán đoán cảm tính). Dưới đây là số liệu MÔ PHỎNG các công trình dự kiến — CHƯA nhận chạy — đã được tính sẵn bằng công thức kế toán chính xác của app (không cần và không được tính lại). Mức tiêu hao dầu dùng chung cho mọi công trình là ${fuelPerKm.toFixed(2)} lít/km với đơn giá dầu ${fmtVND(fuelPrice)}/lít (đây là số thực tế của đội xe); còn lương chuyến, tiền ăn/chuyến, tiền luật đường quy đổi/chuyến và chi phí cố định/tháng là số Ông Chủ tự ước tính riêng cho TỪNG công trình (đã có sẵn trong dữ liệu bên dưới):
 
 ${JSON.stringify(payload, null, 2)}
 
-Nhiệm vụ: đọc đúng các số liệu trên (doanh thu thuần/chuyến, chi phí dầu, lương chuyến, lãi gộp/chuyến, lãi gộp/ca, chi phí cố định/tháng đã gồm tiền luật đường, số chuyến VÀ số ca hoà vốn, có khả thi trong 1 tháng hay không so với ngày công chuẩn, lợi nhuận dự kiến/tháng, ROI/tháng) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào. Lưu ý: "lợi nhuận dự kiến/tháng" và "khả thi trong tháng" là căn cứ quyết định quan trọng hơn lãi gộp/chuyến đơn lẻ — công trình lãi/chuyến cao nhưng không đủ ca trong tháng để hoà vốn vẫn là một rủi ro cần nêu rõ. Nếu một công trình có "soChuyenDuTinhMoiCa" là null (chưa nhập), PHẢI nêu rõ đây là thiếu sót dữ liệu khiến chưa đánh giá được tính khả thi trong tháng của công trình đó.
+Nhiệm vụ: đọc đúng các số liệu trên (doanh thu thuần/chuyến, chi phí dầu thực tế, lương chuyến dự kiến, tiền ăn dự kiến, tiền luật đường quy đổi/chuyến, lãi gộp/chuyến đã trừ đủ 4 khoản này, lãi gộp/ca, chi phí cố định/tháng, số chuyến VÀ số ca hoà vốn, có khả thi trong 1 tháng hay không so với ngày công chuẩn, lợi nhuận dự kiến/tháng, ROI/tháng) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào. Lưu ý: "lợi nhuận dự kiến/tháng" và "khả thi trong tháng" là căn cứ quyết định quan trọng hơn lãi gộp/chuyến đơn lẻ — công trình lãi/chuyến cao nhưng không đủ ca trong tháng để hoà vốn vẫn là một rủi ro cần nêu rõ. Nếu một công trình có "soChuyenDuTinhMoiCa" là null (chưa nhập), PHẢI nêu rõ đây là thiếu sót dữ liệu khiến chưa đánh giá được tính khả thi trong tháng của công trình đó.
 
 Chỉ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
 {
@@ -2779,8 +2904,6 @@ async function runAppraisalAnalysis(){
     }
     const fuelPerKm = historicalAvgFuelPerKm();
     const fuelPrice = currentFuelUnitPriceForAppraisal();
-    const avgWagePerTrip = historicalAvgWagePerTrip();
-    const avgFoodPerShift = historicalAvgFoodPerShift();
     const payload = projects.map(p=>{
       const m = computeAppraisalMetrics(p);
       return {
@@ -2789,11 +2912,12 @@ async function runAppraisalAnalysis(){
         khoiLuongMoiChuyen: Number(p.loadPerTrip)||0,
         giaCuocDaCoVat: !!p.priceIncludesVat,
         doanhThuThuanMoiChuyen: Math.round(m.netRevenuePerTrip),
-        chiPhiDauMoiChuyen: Math.round(m.fuelCostPerTrip),
-        luongChuyenTrungBinhThucTe: Math.round(m.avgWagePerTrip),
+        chiPhiDauThucTeMoiChuyen: Math.round(m.fuelCostPerTrip),
+        luongChuyenDuKienMoiChuyen: Math.round(m.wagePerTrip),
+        tienAnDuKienMoiChuyen: Math.round(m.foodPerTrip),
+        tienLuatDuongQuyDoiMoiChuyen: Math.round(m.roadFeePerTripEquivalent),
         laiGopMoiChuyen: Math.round(m.grossProfitPerTrip),
         soChuyenDuTinhMoiCa: m.tripsPerShift || null,
-        tienAnTrungBinhMoiCa: Math.round(m.avgFoodPerShift),
         laiGopMoiCa: m.grossProfitPerShift!==null ? Math.round(m.grossProfitPerShift) : null,
         chiPhiCoDinhMoiThang: Math.round(m.fixedCostMonthly),
         soChuyenHoaVon: m.breakEvenTrips,
@@ -2804,7 +2928,7 @@ async function runAppraisalAnalysis(){
         roiPhanTramMoiThang: m.roiPercent!==null ? +m.roiPercent.toFixed(1) : null
       };
     });
-    const prompt = buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice, avgWagePerTrip, avgFoodPerShift);
+    const prompt = buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice);
     const result = await callGeminiText(prompt, (attempt)=>{
       if(attempt>=3){
         const hintEl = document.getElementById('appraisalRetryHint');
