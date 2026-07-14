@@ -95,6 +95,14 @@
   .field{ margin-bottom:14px; }
   .field label{ display:block; font-size:13px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; }
   .field .hint{ font-size:11px; color:var(--ink-soft); margin-top:4px; }
+  /// Prominent ODO-driven / fuel-consumed stat chip — replaces the old
+  /// plain-text .hint under "Đồng Hồ Km" / "Nhiên Liệu" so hai số quan
+  /// trọng nhất của 1 ca (Số ODO chạy, Dầu tiêu hao) nổi bật ngay khi
+  /// Ông Chủ đang nhập liệu, thay vì chìm lẫn vào chữ xám nhỏ.
+  .stat-highlight{ display:flex; align-items:center; gap:9px; margin-top:9px; padding:10px 12px; background:var(--accent-soft); border-radius:10px; }
+  .stat-highlight .ic{ font-size:18px; line-height:1; }
+  .stat-highlight .lbl{ font-size:12.5px; color:var(--ink); font-weight:600; }
+  .stat-highlight .val{ font-size:15.5px; font-weight:800; color:var(--accent); margin-left:auto; white-space:nowrap; }
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
     border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
@@ -1353,7 +1361,7 @@ function renderShiftForm(){
             <input type="number" inputmode="decimal" id="f_odoEnd" placeholder="0" value="${blankIfZero(sh.odoEnd)}">
           </div>
         </div>
-        <div class="hint" id="odoDrivenHint"></div>
+        <div class="stat-highlight" id="odoDrivenHint"></div>
       </div>
     </section>
 
@@ -1380,7 +1388,7 @@ function renderShiftForm(){
             <input type="text" inputmode="decimal" id="f_fuelPrice">
           </div>
         </div>
-        <div class="hint" id="fuelHint"></div>
+        <div class="stat-highlight" id="fuelHint"></div>
       </div>
     </section>
 
@@ -1410,16 +1418,6 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Tiền Tip/Thưởng Thực Tế</h3>
-      <div class="card">
-        <div class="field" style="margin-bottom:0;">
-          <label>Số tiền tip/thưởng thực tế tháng này</label>
-          <input type="text" inputmode="decimal" id="f_actualTip">
-        </div>
-      </div>
-    </section>
-
-    <section class="group">
       <h3>Chi Phí Phát Sinh</h3>
       <div class="card">
         <div class="field">
@@ -1434,7 +1432,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Ứng Lương / Đền Bù</h3>
+      <h3>Ứng Lương</h3>
       <div class="card">
         <div class="field">
           <label>Số tiền ứng</label>
@@ -1561,14 +1559,13 @@ function updateSummary(){
     <div class="summary-row"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="summary-row"><span>Tiền dầu tiêu hao</span><span class="val">${fmtVND(shiftFuelCost(sh))}</span></div>
     <div class="summary-row"><span>Lương chuyến</span><span class="val">${fmtVND(shiftTotalTripWage(sh))}</span></div>
-    <div class="summary-row"><span>Tiền tip/thưởng thực tế</span><span class="val">${fmtVND(shiftTipCost(sh))}</span></div>
     <div class="summary-row"><span>Tổng chi phí</span><span class="val">${fmtVND(cost)}</span></div>
     <div class="summary-row total"><span>Lợi nhuận ròng</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
   const odoHint=document.getElementById('odoDrivenHint');
-  if(odoHint) odoHint.textContent = `Odo chạy: ${shiftOdoDriven(sh).toLocaleString('vi-VN')} km`;
+  if(odoHint) odoHint.innerHTML = `<span class="ic">🛣️</span><span class="lbl">Số ODO chạy</span><span class="val">${shiftOdoDriven(sh).toLocaleString('vi-VN')} km</span>`;
   const fuelHint=document.getElementById('fuelHint');
-  if(fuelHint) fuelHint.textContent = `Dầu tiêu hao: ${shiftFuelConsumed(sh).toLocaleString('vi-VN')} lít · Tiền dầu: ${fmtVND(shiftFuelCost(sh))}`;
+  if(fuelHint) fuelHint.innerHTML = `<span class="ic">⛽</span><span class="lbl">Dầu tiêu hao</span><span class="val">${shiftFuelConsumed(sh).toLocaleString('vi-VN')} lít · ${fmtVND(shiftFuelCost(sh))}</span>`;
 }
 
 function bindFormEvents(){
@@ -1610,7 +1607,6 @@ function bindFormEvents(){
   attachMoneyInput(document.getElementById('f_baseSalary'), sh.baseSalaryAllocation, v=>{ sh.baseSalaryAllocation=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_food'), sh.foodAllowance, v=>{ sh.foodAllowance=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_housing'), sh.housingAllocation, v=>{ sh.housingAllocation=v; updateSummary(); });
-  attachMoneyInput(document.getElementById('f_actualTip'), sh.actualTip, v=>{ sh.actualTip=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_incidental'), sh.incidentalCost, v=>{ sh.incidentalCost=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_advance'), sh.advanceAmount, v=>{ sh.advanceAmount=v; updateSummary(); });
 
@@ -3938,7 +3934,7 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>Sổ Chi Phí Sửa Chữa / Khấu Hao</h3>
+      <h3>Sổ Chi Phí Sửa Chữa</h3>
       <div id="repairListWrap"></div>
       <button class="btn btn-ghost btn-block" id="addRepairBtn">+ Thêm Khoản Sửa Chữa</button>
     </section>
