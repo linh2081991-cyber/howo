@@ -72,23 +72,38 @@
   }
   .shift-issue-btn:active{ opacity:0.7; }
   .shift-card .profit{ font-size:17px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:8px; }
-  /// Danh sách Ca Làm Việc chia 2 cột theo tài xế (mỗi cột = 1 tài xế,
-  /// giữ nguyên thứ tự mới nhất → cũ nhất bên trong từng cột) để Ông Chủ
-  /// so sánh song song hoạt động của 2 tài xế thay vì phải lướt 1 danh
-  /// sách dài lẫn lộn. Co giãn đều khi có 1-2 cột; tự cuộn ngang nếu có
-  /// từ 3 cột trở lên (trường hợp tài xế cũ đã nghỉ vẫn còn ca lịch sử).
-  .shift-columns{ display:flex; gap:10px; align-items:flex-start; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
-  .shift-column{ flex:1 1 0; min-width:158px; }
-  .shift-column-head{ display:flex; align-items:baseline; justify-content:space-between; gap:6px; padding:2px 4px 8px 4px; border-bottom:1.5px solid var(--border); margin-bottom:10px; }
-  .shift-column-head .name{ font-weight:800; font-size:14px; color:var(--ink); }
-  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  /// Danh sách Ca Làm Việc chia ĐÚNG 2 cột 50/50 theo chiều ngang màn
+  /// hình (mỗi cột = 1 tài xế, giữ nguyên thứ tự mới nhất → cũ nhất bên
+  /// trong từng cột) để Ông Chủ nhìn thấy song song toàn bộ hoạt động
+  /// của từng người trong 1 màn hình, không cần cuộn ngang. Dùng CSS
+  /// Grid 2 cột cố định (không phải flex co giãn) nên luôn đúng 50/50
+  /// dù có bao nhiêu tài xế; nếu chỉ có 1 tài xế, cột đó giãn hết chiều
+  /// rộng (.full-width); nếu có từ 3 tài xế trở lên, các cột dư tự động
+  /// xuống hàng dưới, vẫn giữ đúng khung 2 cột.
+  .shift-columns{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; }
+  .shift-column{ min-width:0; background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--col-accent, var(--accent)); border-radius:var(--radius); padding:10px; }
+  .shift-column.full-width{ grid-column:1 / -1; }
+  /// Tên tài xế được "làm nổi bật" bằng avatar tròn màu riêng theo cột
+  /// (chữ cái đầu tên) + chữ đậm cỡ lớn hơn hẳn phần dữ liệu bên dưới.
+  .shift-column-head{ display:flex; align-items:center; gap:8px; padding:2px 2px 10px 2px; border-bottom:1.5px solid var(--border); margin-bottom:10px; }
+  .shift-column-head .avatar{ width:32px; height:32px; border-radius:50%; background:var(--col-accent, var(--accent)); color:#fff; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .shift-column-head .head-text{ flex:1; min-width:0; }
+  .shift-column-head .name{ font-weight:800; font-size:15.5px; color:var(--ink); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; display:block; margin-top:1px; }
   .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
-  .shift-column .shift-card{ margin-bottom:10px; }
+  .shift-column .shift-card{ margin-bottom:10px; border-radius:12px; }
   .shift-column .shift-card .body{ padding:11px 10px; }
-  .shift-column .shift-card .date{ font-size:13px; }
+  .shift-column .shift-card .date{ font-size:12.5px; }
   .shift-column .shift-card .tag{ font-size:10px; padding:2px 7px; }
   .shift-column .shift-card .profit{ font-size:15px; margin-top:6px; }
   .shift-column .shift-issue-btn{ font-size:9.5px; padding:3px 8px 3px 6px; }
+  /// Khối "trường dữ liệu tương ứng" bên dưới mỗi ca: Km chạy, dầu tiêu
+  /// hao, doanh thu — trình bày dạng nhãn/giá trị 2 cột cho khoa học,
+  /// dễ quét mắt, tất cả đều lấy từ các hàm tính sẵn có (không tính lại).
+  .shift-card-fields{ display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
+  .shift-card-fields .field-item{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .shift-card-fields .field-item .lbl{ font-size:9.5px; color:var(--ink-soft); white-space:nowrap; }
+  .shift-card-fields .field-item .val{ font-size:12.5px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
   .empty .big{ font-size:38px; margin-bottom:10px; }
 
@@ -1079,6 +1094,13 @@ function renderShiftCard(sh){
   const profit=shiftNetProfit(sh);
   const positive = profit>=0;
   const issues = computeShiftIssues(sh);
+  // Các trường dữ liệu tương ứng hiển thị dưới mỗi ca — chỉ ĐỌC lại kết
+  // quả từ các hàm tính sẵn có (shiftOdoDriven, shiftFuelConsumed,
+  // shiftTotalRevenue), không tính toán mới, để Ông Chủ thấy tổng quan
+  // đầy đủ của từng ca mà không cần bấm vào xem chi tiết.
+  const km = shiftOdoDriven(sh);
+  const fuel = shiftFuelConsumed(sh);
+  const revenue = shiftTotalRevenue(sh);
   return `
     <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
       <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
@@ -1091,8 +1113,22 @@ function renderShiftCard(sh){
           </div>
         </div>
         <div class="profit" style="color:${positive?'var(--profit)':'var(--loss)'}">${positive?'+':''}${fmtVND(profit)}</div>
+        <div class="shift-card-fields">
+          <div class="field-item"><span class="lbl">Số Km chạy</span><span class="val">${km.toLocaleString('vi-VN')} km</span></div>
+          <div class="field-item"><span class="lbl">Dầu tiêu hao</span><span class="val">${fuel.toLocaleString('vi-VN')} lít</span></div>
+          <div class="field-item" style="grid-column:1 / -1;"><span class="lbl">Doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
+        </div>
       </div>
     </div>`;
+}
+/// Bảng màu xoay vòng theo thứ tự cột (không phụ thuộc dữ liệu tài xế)
+/// dùng cho viền trên + avatar của mỗi cột, để 2 cột luôn phân biệt rõ
+/// bằng màu sắc dù tên tài xế trùng chữ cái đầu.
+const DRIVER_COLUMN_PALETTE = ['#E8720C','#2563A8','#1F7A4D','#8A4FBF','#B23A2E','#0E7C86'];
+function driverColumnAccent(index){ return DRIVER_COLUMN_PALETTE[index % DRIVER_COLUMN_PALETTE.length]; }
+function driverInitial(name){
+  const n = (name||'').trim();
+  return n ? n.charAt(0).toUpperCase() : '?';
 }
 function renderShiftList(){
   const app=document.getElementById('app');
@@ -1144,13 +1180,22 @@ function renderShiftList(){
   const cardsHtml = list.length===0
     ? `<div class="empty"><div class="big">📅</div>Không có ca nào vào ngày ${state.searchDate?formatDateVN(state.searchDate):''}.</div>`
     : `<div class="shift-columns">
-        ${driverColumns.map(col=>`
-          <div class="shift-column">
-            <div class="shift-column-head"><span class="name">${escapeHtml(col.name)}</span><span class="count">${col.shifts.length} ca</span></div>
+        ${driverColumns.map((col,idx)=>{
+          const accent = driverColumnAccent(idx);
+          const wideClass = driverColumns.length===1 ? ' full-width' : '';
+          return `
+          <div class="shift-column${wideClass}" style="--col-accent:${accent}">
+            <div class="shift-column-head">
+              <span class="avatar">${escapeHtml(driverInitial(col.name))}</span>
+              <span class="head-text">
+                <span class="name">${escapeHtml(col.name)}</span>
+                <span class="count">${col.shifts.length} ca</span>
+              </span>
+            </div>
             ${col.shifts.length===0
               ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':''}.</div>`
               : col.shifts.map(renderShiftCard).join('')}
-          </div>`).join('')}
+          </div>`;}).join('')}
       </div>`;
 
   app.innerHTML = warningsBannerHtml + searchBarHtml + cardsHtml;
