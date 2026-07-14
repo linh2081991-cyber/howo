@@ -72,6 +72,23 @@
   }
   .shift-issue-btn:active{ opacity:0.7; }
   .shift-card .profit{ font-size:17px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:8px; }
+  /// Danh sách Ca Làm Việc chia 2 cột theo tài xế (mỗi cột = 1 tài xế,
+  /// giữ nguyên thứ tự mới nhất → cũ nhất bên trong từng cột) để Ông Chủ
+  /// so sánh song song hoạt động của 2 tài xế thay vì phải lướt 1 danh
+  /// sách dài lẫn lộn. Co giãn đều khi có 1-2 cột; tự cuộn ngang nếu có
+  /// từ 3 cột trở lên (trường hợp tài xế cũ đã nghỉ vẫn còn ca lịch sử).
+  .shift-columns{ display:flex; gap:10px; align-items:flex-start; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+  .shift-column{ flex:1 1 0; min-width:158px; }
+  .shift-column-head{ display:flex; align-items:baseline; justify-content:space-between; gap:6px; padding:2px 4px 8px 4px; border-bottom:1.5px solid var(--border); margin-bottom:10px; }
+  .shift-column-head .name{ font-weight:800; font-size:14px; color:var(--ink); }
+  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
+  .shift-column .shift-card{ margin-bottom:10px; }
+  .shift-column .shift-card .body{ padding:11px 10px; }
+  .shift-column .shift-card .date{ font-size:13px; }
+  .shift-column .shift-card .tag{ font-size:10px; padding:2px 7px; }
+  .shift-column .shift-card .profit{ font-size:15px; margin-top:6px; }
+  .shift-column .shift-issue-btn{ font-size:9.5px; padding:3px 8px 3px 6px; }
   .empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
   .empty .big{ font-size:38px; margin-bottom:10px; }
 
@@ -1018,6 +1035,57 @@ function renderHeader(){
 }
 
 // ========================= SHIFT LIST =========================
+/// Gộp một danh sách ca (đã lọc + sắp xếp sẵn) thành các CỘT theo tài
+/// xế — mỗi cột đại diện đúng 1 tài xế, tiêu đề cột là tên tài xế đó,
+/// bên trong giữ nguyên thứ tự ca đã truyền vào (mới nhất trước, y hệt
+/// danh sách gộp cũ) để Ông Chủ nhìn thấy rõ song song hoạt động của
+/// từng người. Cột được "mồi" sẵn theo đúng thứ tự hồ sơ Tài Xế hiện có
+/// (kể cả khi tài xế đó chưa có ca nào trong khoảng đang lọc, để cột
+/// không bị nhảy vị trí khi đổi ngày tìm kiếm); ca của tài xế đã bị xoá
+/// khỏi hồ sơ vẫn được gom vào 1 cột riêng theo tên đã lưu lúc ghi ca
+/// (driverNameSnapshot), xếp sau cùng, để không mất dữ liệu lịch sử.
+function groupShiftsIntoDriverColumns(list){
+  const columns = [];
+  const indexByKey = new Map();
+  function ensureColumn(key, name){
+    if(!indexByKey.has(key)){
+      indexByKey.set(key, columns.length);
+      columns.push({ key, name, shifts: [] });
+    }
+    return columns[indexByKey.get(key)];
+  }
+  state.drivers.forEach(d=>ensureColumn(d.id, d.name||'(chưa đặt tên)'));
+  list.forEach(sh=>{
+    const d = driverById(sh.driverId);
+    const key = d ? d.id : ('_orphan_'+(sh.driverNameSnapshot||'chưa chọn tài xế'));
+    const name = d ? d.name : (sh.driverNameSnapshot || '(chưa chọn tài xế)');
+    ensureColumn(key, name).shifts.push(sh);
+  });
+  // Chỉ giữ cột của tài xế hiện có (kể cả 0 ca, để layout ổn định) hoặc
+  // cột "tài xế cũ" có ít nhất 1 ca thật — không hiện cột rỗng vô ích.
+  return columns.filter(c=>c.shifts.length>0 || state.drivers.some(d=>d.id===c.key));
+}
+/// Card 1 ca dùng chung cho cả layout cột — bỏ dòng "Tài xế: ..." so với
+/// bản gộp cũ vì tên tài xế giờ đã là tiêu đề cột, tránh lặp lại 2 lần.
+function renderShiftCard(sh){
+  const profit=shiftNetProfit(sh);
+  const positive = profit>=0;
+  const issues = computeShiftIssues(sh);
+  return `
+    <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
+      <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
+      <div class="body">
+        <div class="row1">
+          <span class="date">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}</span>
+          <div class="row1-right">
+            <span class="tag" style="${statusColorStyle(sh.status)}">${statusLabel(sh.status)}</span>
+            ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
+          </div>
+        </div>
+        <div class="profit" style="color:${positive?'var(--profit)':'var(--loss)'}">${positive?'+':''}${fmtVND(profit)}</div>
+      </div>
+    </div>`;
+}
 function renderShiftList(){
   const app=document.getElementById('app');
 
@@ -1063,29 +1131,19 @@ function renderShiftList(){
   if(state.searchDate){ list = list.filter(sh=>sh.date===state.searchDate); }
   list.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
 
+  const driverColumns = groupShiftsIntoDriverColumns(list);
+
   const cardsHtml = list.length===0
     ? `<div class="empty"><div class="big">📅</div>Không có ca nào vào ngày ${state.searchDate?formatDateVN(state.searchDate):''}.</div>`
-    : list.map(sh=>{
-        const profit=shiftNetProfit(sh);
-        const positive = profit>=0;
-        const driverName = driverById(sh.driverId)?.name || sh.driverNameSnapshot || '(chưa chọn tài xế)';
-        const issues = computeShiftIssues(sh);
-        return `
-          <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
-            <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
-            <div class="body">
-              <div class="row1">
-                <span class="date">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}</span>
-                <div class="row1-right">
-                  <span class="tag" style="${statusColorStyle(sh.status)}">${statusLabel(sh.status)}</span>
-                  ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
-                </div>
-              </div>
-              <div class="driver">Tài xế: ${escapeHtml(driverName)}</div>
-              <div class="profit" style="color:${positive?'var(--profit)':'var(--loss)'}">${positive?'+':''}${fmtVND(profit)}</div>
-            </div>
-          </div>`;
-      }).join('');
+    : `<div class="shift-columns">
+        ${driverColumns.map(col=>`
+          <div class="shift-column">
+            <div class="shift-column-head"><span class="name">${escapeHtml(col.name)}</span><span class="count">${col.shifts.length} ca</span></div>
+            ${col.shifts.length===0
+              ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':''}.</div>`
+              : col.shifts.map(renderShiftCard).join('')}
+          </div>`).join('')}
+      </div>`;
 
   app.innerHTML = warningsBannerHtml + searchBarHtml + cardsHtml;
   bindSearchBar();
@@ -1334,10 +1392,9 @@ function renderShiftForm(){
       <h3>Tiền Tip/Thưởng Thực Tế</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
-          <label>Số tiền tip/thưởng thực tế của ca này</label>
+          <label>Số tiền tip/thưởng thực tế tháng này</label>
           <input type="text" inputmode="decimal" id="f_actualTip">
         </div>
-        <div class="hint">Đây là số tiền THẬT đã chi cho ca này (mỗi cung đường tip khác nhau). Mức "Tip/thưởng mỗi chuyến" ở hồ sơ tài xế chỉ để tham khảo, không dùng để tính chi phí.</div>
       </div>
     </section>
 
@@ -1786,6 +1843,12 @@ function openDriverDetail(driverId){
   const totalTrips = activeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
   const totalKm = activeShifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
   const totalRevenue = activeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
+  // Lợi nhuận RÒNG mà tài xế này tạo ra trong kỳ — cộng dồn đúng
+  // shiftNetProfit() (hàm lãi/lỗ gốc, không đụng vào) của từng ca hoạt
+  // động, để Ông Chủ so sánh thẳng "tài xế nào đang kiếm tiền tốt hơn"
+  // ngay cạnh doanh thu, thay vì chỉ nhìn doanh thu (số to nhưng chưa
+  // trừ chi phí).
+  const totalNetProfit = activeShifts.reduce((s,sh)=>s+shiftNetProfit(sh),0);
 
   // Only real statuses the app actually has (STATUS_OPTIONS) — no invented
   // categories like "Nghỉ Lễ" that don't exist elsewhere in the app.
@@ -1856,7 +1919,8 @@ function openDriverDetail(driverId){
           <div class="driver-cv-item"><span class="k">Số Ngày Có Ca Hoạt Động</span><span class="v">${activeDates.size} ngày</span></div>
           <div class="driver-cv-item"><span class="k">Tổng Số Chuyến</span><span class="v">${totalTrips} chuyến</span></div>
           <div class="driver-cv-item"><span class="k">Tổng Km Đã Chạy</span><span class="v">${Math.round(totalKm).toLocaleString('vi-VN')} km</span></div>
-          <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Doanh Thu Tạo Ra Trong Kỳ</span><span class="v">${fmtVND(totalRevenue)}</span></div>
+          <div class="driver-cv-item"><span class="k">Doanh Thu Tạo Ra Trong Kỳ</span><span class="v">${fmtVND(totalRevenue)}</span></div>
+          <div class="driver-cv-item"><span class="k">Lợi Nhuận Ròng Tạo Ra Trong Kỳ</span><span class="v" style="color:${totalNetProfit>=0?'var(--profit)':'var(--loss)'}">${totalNetProfit>=0?'+':''}${fmtVND(totalNetProfit)}</span></div>
           ${offStatusCounts.map(s=>`
             <div class="driver-cv-item"><span class="k">${escapeHtml(s.label)}</span><span class="v">${s.count} ca</span></div>
           `).join('')}
@@ -2313,6 +2377,34 @@ function historicalAvgFoodPerShift(){
   const total = shifts.reduce((s,sh)=>s+(Number(sh.foodAllowance)||0),0);
   return total/shifts.length;
 }
+/// Chi phí cố định THẬT, quy về mỗi THÁNG, lấy thẳng từ dữ liệu Ông Chủ
+/// đã có sẵn trong app (không phải số áng chừng) — dùng để TỰ ĐỘNG điền
+/// sẵn 3 mục khó đoán nhất khi thêm công trình dự kiến mới:
+///  - Lương cứng: cộng dồn monthlyBaseSalary của TẤT CẢ tài xế đang hoạt
+///    động (đúng số mỗi tháng thực trả, đọc thẳng từ hồ sơ tài xế).
+///  - Nhà ở: tương tự, cộng dồn monthlyHousingBudget.
+///  - Khấu hao/sửa chữa: lấy TOÀN BỘ sổ Sửa Chữa/Khấu Hao (chỉ phần chủ
+///    xe chịu, đã trừ phần tài xế đền bù — đúng theo repairDriverResponsibleAmount
+///    hiện có) rồi chia cho số tháng thực tế trải dài từ khoản ghi đầu
+///    tiên tới khoản mới nhất, ra mức TRUNG BÌNH/THÁNG thực tế.
+/// Đây chỉ là SỐ GỢI Ý MẶC ĐỊNH — Ông Chủ vẫn sửa lại tự do cho từng
+/// công trình như bình thường, không có gì bị khoá cứng.
+function historicalMonthlyFixedCostReal(){
+  const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
+  const baseSalaryMonthly = activeDrivers.reduce((s,d)=>s+(Number(d.monthlyBaseSalary)||0),0);
+  const housingMonthly = activeDrivers.reduce((s,d)=>s+(Number(d.monthlyHousingBudget)||0),0);
+
+  let depreciationMonthly = 0;
+  if(state.repairs.length>0){
+    const sorted = [...state.repairs].sort((a,b)=>a.date.localeCompare(b.date));
+    const ownerTotal = sorted.reduce((s,r)=>s+((Number(r.amount)||0)-repairDriverResponsibleAmount(r)),0);
+    const firstMs = new Date(sorted[0].date).getTime();
+    const lastMs = new Date(sorted[sorted.length-1].date).getTime();
+    const monthsSpan = Math.max(1, (lastMs-firstMs)/(1000*60*60*24*30.44));
+    depreciationMonthly = Math.max(0, ownerTotal)/monthsSpan;
+  }
+  return { baseSalaryMonthly, housingMonthly, depreciationMonthly };
+}
 /// Core simulation for ONE prospective project. Everything downstream
 /// (list cards, side-by-side comparison, live preview in the editor) is
 /// rendered from this single function so all three views can never drift
@@ -2433,7 +2525,6 @@ function renderProjectAppraisal(){
   const app = document.getElementById('app');
   const fuelPerKm = historicalAvgFuelPerKm();
   const fuelPrice = currentFuelUnitPriceForAppraisal();
-  const avgWagePerTrip = historicalAvgWagePerTrip();
   const avgFoodPerShift = historicalAvgFoodPerShift();
   const projects = state.siteAppraisals || [];
   const metricsById = {};
@@ -2464,11 +2555,10 @@ function renderProjectAppraisal(){
     <section class="group">
       <h3>🧮 Thẩm Định &amp; So Sánh Công Trình Trước Khi Nhận</h3>
       <div class="card">
-        <div class="hint" style="margin-bottom:8px;">Các thông số dưới đây lấy trực tiếp từ số liệu vận hành thực tế của đội xe (đã loại ca gần nhất còn thiếu dữ liệu) — dùng làm SỐ GỢI Ý mặc định khi thêm công trình mới. Mức tiêu hao dầu vẫn tự động áp cho mọi công trình; riêng lương chuyến và tiền ăn, Ông Chủ tự nhập/sửa lại riêng cho từng công trình ở màn hình Thêm/Sửa để phản ánh đúng đặc thù công trình đó.</div>
+        <div class="hint" style="margin-bottom:8px;">Các thông số dưới đây lấy trực tiếp từ số liệu vận hành thực tế của đội xe (đã loại ca gần nhất còn thiếu dữ liệu) — dùng làm SỐ GỢI Ý mặc định khi thêm công trình mới. Mức tiêu hao dầu vẫn tự động áp cho mọi công trình; riêng tiền ăn, Ông Chủ tự nhập/sửa lại riêng cho từng công trình ở màn hình Thêm/Sửa để phản ánh đúng đặc thù công trình đó. Lương chuyến luôn do Ông Chủ tự nhập tay vì phụ thuộc từng cung đường, không lấy số bình quân.</div>
         <div class="summary-row"><span>Mức tiêu hao dầu trung bình thực tế</span><span class="val">${fuelPerKm>0?fuelPerKm.toFixed(2)+' lít/km':'Chưa có dữ liệu'}</span></div>
-        <div class="summary-row"><span>Lương chuyến trung bình thực tế (số gợi ý)</span><span class="val">${avgWagePerTrip>0?fmtVND(avgWagePerTrip)+'/chuyến':'Chưa có dữ liệu'}</span></div>
         <div class="summary-row"><span>Tiền ăn trung bình thực tế (số gợi ý)</span><span class="val">${avgFoodPerShift>0?fmtVND(avgFoodPerShift)+'/ca':'Chưa có dữ liệu'}</span></div>
-        ${(avgWagePerTrip<=0 || avgFoodPerShift<=0) ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Chưa đủ lịch sử vận hành để gợi ý ${avgWagePerTrip<=0?'lương chuyến':''}${(avgWagePerTrip<=0 && avgFoodPerShift<=0)?' và ':''}${avgFoodPerShift<=0?'tiền ăn':''} trung bình — hãy tự nhập tay các khoản này khi thêm công trình.</div>` : ''}
+        ${avgFoodPerShift<=0 ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Chưa đủ lịch sử vận hành để gợi ý tiền ăn trung bình — hãy tự nhập tay khoản này khi thêm công trình.</div>` : ''}
       </div>
       <div class="card" style="margin-top:8px;">
         <div class="field">
@@ -2609,6 +2699,11 @@ function renderAppraisalList(metricsById){
 /// keystroke via computeAppraisalMetrics(), so Ông Chủ sees the impact
 /// immediately instead of only after saving.
 function openProjectAppraisalEditor(id){
+  // Số liệu CHI PHÍ CỐ ĐỊNH THẬT hiện tại của đội xe (đọc lại mỗi lần mở
+  // màn hình này) — dùng làm số gợi ý điền sẵn cho công trình MỚI, và
+  // dùng làm số tham chiếu hiển thị dưới mỗi ô ngay cả khi Sửa công
+  // trình cũ, để Ông Chủ luôn biết "số thật hiện giờ" là bao nhiêu.
+  const realFixed = historicalMonthlyFixedCostReal();
   const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
   const draft = existing ? {
     ...existing,
@@ -2625,22 +2720,31 @@ function openProjectAppraisalEditor(id){
     // chuyển nguyên giá trị đó sang dòng "Chi phí cố định khác" để KHÔNG
     // làm mất dữ liệu Ông Chủ đã nhập từ trước.
     fixedOtherMonthly: existing.fixedOtherMonthly!=null ? existing.fixedOtherMonthly : (existing.fixedCostAllocated||0)
-  } : {
-    id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
-    priceIncludesVat:false, cargoUnitPrice:0,
-    // Lương chuyến gợi ý sẵn bằng số TB thực tế toàn đội xe cho nhanh —
-    // Ông Chủ vẫn sửa lại tự do cho khớp đặc thù công trình này. Tiền ăn
-    // để trống vì còn phụ thuộc số chuyến/ca dự kiến, chưa quy đổi được.
-    wagePerTripEstimate: Math.round(historicalAvgWagePerTrip()),
-    foodPerTripEstimate: 0,
-    fixedBaseSalaryMonthly: 0, fixedHousingMonthly: 0, fixedDepreciationMonthly: 0,
-    fixedLoanMonthly: 0, fixedInsuranceMonthly: 0, fixedRegistrationMonthly: 0, fixedOtherMonthly: 0,
-    // Tiền luật đường mặc định lấy đúng mức đang đóng thật ở Cài Đặt
-    // (đóng theo THÁNG) — Ông Chủ vẫn sửa được riêng cho công trình này
-    // nếu dự tính khác đi.
-    roadFeeEstimate: Number(state.settings.monthlyFixedRoadFee)||0,
-    estimatedTripsPerShift: 0
-  };
+  } : (()=>{
+    return {
+      id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
+      priceIncludesVat:false, cargoUnitPrice:0,
+      // Lương chuyến: để TRỐNG, luôn do Ông Chủ tự điền tay vì phụ thuộc
+      // từng cung đường — không còn lấy số gợi ý từ lịch sử vận hành nữa.
+      wagePerTripEstimate: 0,
+      foodPerTripEstimate: 0,
+      // Lương cứng / Nhà ở / Khấu hao-sửa chữa: tự động điền sẵn bằng
+      // đúng số liệu THẬT đang có trong app (xem historicalMonthlyFixedCostReal)
+      // để Ông Chủ đỡ phải áng chừng — vẫn sửa lại tự do nếu công trình
+      // này cần thêm/bớt nhân sự hoặc chi phí khác đi.
+      fixedBaseSalaryMonthly: Math.round(realFixed.baseSalaryMonthly),
+      fixedHousingMonthly: Math.round(realFixed.housingMonthly),
+      fixedDepreciationMonthly: Math.round(realFixed.depreciationMonthly),
+      // Vay ngân hàng / Bảo hiểm / Đăng kiểm / Khác: app hiện chưa có sổ
+      // riêng theo dõi các khoản này theo tháng nên vẫn để Ông Chủ tự nhập.
+      fixedLoanMonthly: 0, fixedInsuranceMonthly: 0, fixedRegistrationMonthly: 0, fixedOtherMonthly: 0,
+      // Tiền luật đường mặc định lấy đúng mức đang đóng thật ở Cài Đặt
+      // (đóng theo THÁNG) — Ông Chủ vẫn sửa được riêng cho công trình này
+      // nếu dự tính khác đi.
+      roadFeeEstimate: Number(state.settings.monthlyFixedRoadFee)||0,
+      estimatedTripsPerShift: 0
+    };
+  })();
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -2689,11 +2793,12 @@ function openProjectAppraisalEditor(id){
         <div class="field">
           <label>Lương cứng dự kiến phân bổ cho công trình (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_baseSalary">
+          <div class="hint">Tự động điền sẵn bằng tổng lương cứng THẬT/tháng của toàn bộ tài xế đang hoạt động (${fmtVND(realFixed.baseSalaryMonthly)}) — sửa lại nếu công trình này cần thêm/bớt người.</div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Lương chuyến dự kiến (đ/chuyến)</label>
           <input type="text" inputmode="decimal" id="ap_wagePerTrip">
-          <div class="hint">Gợi ý ban đầu lấy bằng lương chuyến TB thực tế toàn đội xe (${fmtVND(historicalAvgWagePerTrip())}/chuyến) — sửa lại nếu công trình này trả khác.</div>
+          <div class="hint">Ông Chủ tự nhập tay số này vì lương chuyến phụ thuộc từng cung đường, không lấy số bình quân từ nơi khác.</div>
         </div>
       </div>
     </section>
@@ -2715,22 +2820,27 @@ function openProjectAppraisalEditor(id){
         <div class="field">
           <label>Nhà ở / phụ cấp nhà dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_housing">
+          <div class="hint">Tự động điền sẵn bằng tổng tiền nhà THẬT/tháng của toàn bộ tài xế đang hoạt động (${fmtVND(realFixed.housingMonthly)}) — sửa lại nếu khác.</div>
         </div>
         <div class="field">
           <label>Khấu hao xe dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_depreciation">
+          <div class="hint">Tự động điền sẵn bằng mức khấu hao/sửa chữa THẬT trung bình mỗi tháng, tính từ toàn bộ sổ Sửa Chữa/Khấu Hao đã ghi (${fmtVND(realFixed.depreciationMonthly)}/tháng) — sửa lại nếu dự kiến khác.</div>
         </div>
         <div class="field">
           <label>Trả gốc + lãi vay ngân hàng dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_loan">
+          <div class="hint">App chưa có sổ riêng theo dõi khoản này — Ông Chủ tự nhập tay.</div>
         </div>
         <div class="field">
           <label>Bảo hiểm xe dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_insurance">
+          <div class="hint">App chưa có sổ riêng theo dõi khoản này — Ông Chủ tự nhập tay.</div>
         </div>
         <div class="field">
           <label>Đăng kiểm / đăng ký / phù hiệu vận tải dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_registration">
+          <div class="hint">App chưa có sổ riêng theo dõi khoản này — Ông Chủ tự nhập tay.</div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Chi phí cố định khác dự kiến (đ/tháng)</label>
@@ -2749,7 +2859,7 @@ function openProjectAppraisalEditor(id){
     <section class="group">
       <h3>Mô Phỏng Nhanh</h3>
       <div class="card" id="ap_preview"></div>
-      <div class="hint" style="margin-top:8px;">Dầu ${historicalAvgFuelPerKm().toFixed(2)} lít/km · Đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít · Lương chuyến TB ${fmtVND(historicalAvgWagePerTrip())}/chuyến · Tiền ăn TB ${fmtVND(historicalAvgFoodPerShift())}/ca — toàn bộ lấy từ số liệu vận hành thực tế (sửa đơn giá dầu/VAT ở đầu trang "Thẩm Định Công Trình" trong tab Trợ Lý).</div>
+      <div class="hint" style="margin-top:8px;">Dầu ${historicalAvgFuelPerKm().toFixed(2)} lít/km · Đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít · Tiền ăn TB ${fmtVND(historicalAvgFoodPerShift())}/ca — lấy từ số liệu vận hành thực tế (sửa đơn giá dầu/VAT ở đầu trang "Thẩm Định Công Trình" trong tab Trợ Lý). Riêng lương chuyến do Ông Chủ tự nhập tay theo từng công trình.</div>
     </section>
 
     <section class="group" style="display:flex; gap:10px;">
