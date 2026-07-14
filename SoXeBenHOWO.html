@@ -77,18 +77,27 @@
   /// so sánh song song hoạt động của 2 tài xế thay vì phải lướt 1 danh
   /// sách dài lẫn lộn. Co giãn đều khi có 1-2 cột; tự cuộn ngang nếu có
   /// từ 3 cột trở lên (trường hợp tài xế cũ đã nghỉ vẫn còn ca lịch sử).
-  .shift-columns{ display:flex; gap:10px; align-items:flex-start; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
-  .shift-column{ flex:1 1 0; min-width:158px; }
-  .shift-column-head{ display:flex; align-items:baseline; justify-content:space-between; gap:6px; padding:2px 4px 8px 4px; border-bottom:1.5px solid var(--border); margin-bottom:10px; }
+  .shift-columns{ display:flex; gap:8px; align-items:flex-start; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+  .shift-column{ flex:1 1 0; min-width:150px; }
+  .shift-column-head{ display:flex; align-items:baseline; justify-content:space-between; gap:6px; padding:2px 4px 8px 4px; border-bottom:1.5px solid var(--border); margin-bottom:8px; }
   .shift-column-head .name{ font-weight:800; font-size:14px; color:var(--ink); }
   .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
   .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
-  .shift-column .shift-card{ margin-bottom:10px; }
-  .shift-column .shift-card .body{ padding:11px 10px; }
-  .shift-column .shift-card .date{ font-size:13px; }
-  .shift-column .shift-card .tag{ font-size:10px; padding:2px 7px; }
-  .shift-column .shift-card .profit{ font-size:15px; margin-top:6px; }
-  .shift-column .shift-issue-btn{ font-size:9.5px; padding:3px 8px 3px 6px; }
+  .shift-column .shift-card{ margin-bottom:8px; }
+  .shift-column .shift-card .body{ padding:8px 9px; }
+  .shift-column .shift-card .date{ font-size:12.5px; }
+  .shift-column .shift-card .profit{ font-size:15px; margin-top:5px; }
+  /// Micro status badge (dot + short abbreviation) thay cho pill trạng thái
+  /// to bản cũ — giữ đúng bảng màu của statusColorStyle() (không đổi hàm
+  /// đó, chỉ đọc lại màu tương ứng) nhưng nén xuống 1 chấm tròn nhỏ để
+  /// không chiếm bề ngang vốn đã hẹp khi chia 2 cột.
+  .status-chip{ display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700; color:var(--ink-soft); white-space:nowrap; }
+  .status-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  /// Nút cảnh báo trong cột: nén thành icon tam giác vàng + chữ ngắn gọn,
+  /// đặt tinh tế ngay dưới status-chip (row1-right vốn đã là cột dọc).
+  .shift-column .shift-issue-btn{
+    font-size:9.5px; padding:3px 7px 3px 5px; background:#FEF3C7; color:#92400E;
+  }
   .empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
   .empty .big{ font-size:38px; margin-bottom:10px; }
 
@@ -864,6 +873,20 @@ function blankIfZero(v){
   return (!n || n===0) ? '' : v;
 }
 function statusLabel(key){ return (STATUS_OPTIONS.find(s=>s.key===key)||{}).label || key; }
+/// Chữ viết tắt siêu ngắn cho status-chip (chấm tròn) trong layout 2 cột —
+/// chỉ dùng cho micro badge này, không đụng tới statusLabel() vì hàm đó
+/// vẫn được dùng nguyên văn ở form chọn trạng thái và nơi khác.
+function statusShortLabel(key){
+  const map = { active:'Hoạt động', weatherOff:'Nghỉ mưa', onLeave:'Nghỉ phép', maintenance:'Sửa chữa', idle:'Nằm bãi' };
+  return map[key] || statusLabel(key);
+}
+/// Màu chấm tròn micro badge — lấy đúng bảng màu statusColorStyle() (không
+/// sửa hàm đó) để 1 trạng thái luôn ra cùng 1 màu dù hiển thị dạng pill to
+/// (nơi khác) hay chấm nhỏ (ở đây).
+function statusDotColor(key){
+  const map = { active:'#2F8F5B', onLeave:'#B23A2E', weatherOff:'#6B7280', maintenance:'#B8860B', idle:'#B8860B' };
+  return map[key] || '#6B7280';
+}
 /// Màu nền riêng cho từng trạng thái ca trong Danh Sách Ca, chữ trắng trên
 /// nền màu — tông trầm/hài hoà (không sặc sỡ) nhưng đủ tương phản để chữ
 /// trắng luôn dễ đọc và mỗi trạng thái dễ nhận diện ngay từ xa:
@@ -1078,8 +1101,8 @@ function renderShiftCard(sh){
         <div class="row1">
           <span class="date">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}</span>
           <div class="row1-right">
-            <span class="tag" style="${statusColorStyle(sh.status)}">${statusLabel(sh.status)}</span>
-            ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
+            <span class="status-chip"><span class="status-dot" style="background:${statusDotColor(sh.status)}"></span>${statusShortLabel(sh.status)}</span>
+            ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠ Thiếu dữ liệu</button>` : ''}
           </div>
         </div>
         <div class="profit" style="color:${positive?'var(--profit)':'var(--loss)'}">${positive?'+':''}${fmtVND(profit)}</div>
