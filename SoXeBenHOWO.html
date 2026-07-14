@@ -1821,9 +1821,6 @@ function openEditDriver(id){
   attachMoneyInput(document.getElementById('ed_housing'), edVals.housing, v=>edVals.housing=v);
   attachMoneyInput(document.getElementById('ed_tip'), edVals.tip, v=>edVals.tip=v);
   document.getElementById('saveDriverBtn').addEventListener('click', async ()=>{
-    const allocationFieldsChanged = (d.monthlyBaseSalary !== edVals.salary)
-      || (d.dailyFoodAllowance !== edVals.food)
-      || (d.monthlyHousingBudget !== edVals.housing);
     d.name = document.getElementById('ed_name').value.trim() || d.name;
     d.monthlyBaseSalary = edVals.salary;
     d.dailyFoodAllowance = edVals.food;
@@ -1833,9 +1830,15 @@ function openEditDriver(id){
     d.licenseInfo = document.getElementById('ed_license').value.trim();
     d.healthStatus = document.getElementById('ed_health').value.trim();
     await saveDrivers();
-    if(allocationFieldsChanged){
+    // Luôn tính lại (không điều kiện) để không bao giờ lỡ bỏ sót việc áp
+    // dụng số mới lên ca cũ — recalcDriverShiftAllocations() tự đọc đúng
+    // 3 số vừa lưu ở trên, nên chạy lại vẫn an toàn/idempotent kể cả khi
+    // Ông Chủ chỉ sửa CCCD/bằng lái mà không đổi số tiền nào.
+    try {
       recalcDriverShiftAllocations(d.id);
       await saveShifts();
+    } catch(e) {
+      showToast('Đã lưu tài xế nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
     }
     renderAll(); showToast('Đã lưu thông tin tài xế.');
   });
