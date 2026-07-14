@@ -1253,6 +1253,27 @@ function reapplyCostPolicyToDraft(){
   sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
 }
 
+/// Khi Ông Chủ sửa Lương cứng/tháng, Tiền ăn/ngày hoặc Tiền nhà/tháng của
+/// MỘT tài xế ở màn hình Sửa Tài Xế, tính lại 3 khoản phân bổ tương ứng
+/// (baseSalaryAllocation, foodAllowance, housingAllocation) cho TOÀN BỘ
+/// ca ĐÃ LƯU của đúng tài xế đó — mọi thời điểm, quá khứ lẫn hiện tại —
+/// theo số tiền MỚI vừa sửa. Dùng lại đúng công thức gốc đã có sẵn
+/// (dailyBaseSalary, dailyHousing) và đúng chính sách chi phí theo trạng
+/// thái ca (costPolicies[sh.status]) — y hệt logic reapplyCostPolicyToDraft()
+/// đang dùng cho ca mới — nên KHÔNG đụng vào bất kỳ hàm tính toán gốc nào.
+/// Các ca của tài xế KHÁC không bị ảnh hưởng.
+function recalcDriverShiftAllocations(driverId){
+  const driver = driverById(driverId);
+  if(!driver) return;
+  state.shifts.forEach(sh=>{
+    if(sh.driverId!==driverId) return;
+    const policy = state.settings.costPolicies[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
+    sh.baseSalaryAllocation = policy.baseSalary ? dailyBaseSalary(driver) : 0;
+    sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
+    sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
+  });
+}
+
 /// Recomputes Odo Start / Fuel Start inheritance from the chronologically
 /// previous shift, based on the CURRENT date + shift type selected in the
 /// form. Only applies to a brand-new (never-saved) shift — re-opening an
@@ -1800,6 +1821,9 @@ function openEditDriver(id){
   attachMoneyInput(document.getElementById('ed_housing'), edVals.housing, v=>edVals.housing=v);
   attachMoneyInput(document.getElementById('ed_tip'), edVals.tip, v=>edVals.tip=v);
   document.getElementById('saveDriverBtn').addEventListener('click', async ()=>{
+    const allocationFieldsChanged = (d.monthlyBaseSalary !== edVals.salary)
+      || (d.dailyFoodAllowance !== edVals.food)
+      || (d.monthlyHousingBudget !== edVals.housing);
     d.name = document.getElementById('ed_name').value.trim() || d.name;
     d.monthlyBaseSalary = edVals.salary;
     d.dailyFoodAllowance = edVals.food;
@@ -1809,6 +1833,10 @@ function openEditDriver(id){
     d.licenseInfo = document.getElementById('ed_license').value.trim();
     d.healthStatus = document.getElementById('ed_health').value.trim();
     await saveDrivers();
+    if(allocationFieldsChanged){
+      recalcDriverShiftAllocations(d.id);
+      await saveShifts();
+    }
     renderAll(); showToast('Đã lưu thông tin tài xế.');
   });
   document.getElementById('cancelEditDriverBtn').addEventListener('click', renderAll);
