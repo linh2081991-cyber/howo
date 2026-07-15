@@ -83,13 +83,15 @@
   .shift-columns{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; }
   .shift-column{ min-width:0; background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--col-accent, var(--accent)); border-radius:var(--radius); padding:10px; }
   .shift-column.full-width{ grid-column:1 / -1; }
-  /// Tên tài xế được "làm nổi bật" bằng avatar tròn màu riêng theo cột
-  /// (chữ cái đầu tên) + chữ đậm cỡ lớn hơn hẳn phần dữ liệu bên dưới.
-  .shift-column-head{ display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); }
-  .shift-column-head .avatar{ width:42px; height:42px; border-radius:50%; background:var(--col-accent, var(--accent)); color:#fff; font-weight:800; font-size:17px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.25); }
-  .shift-column-head .head-text{ flex:1; min-width:0; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; row-gap:0; }
-  .shift-column-head .name{ font-weight:900; font-size:16.5px; letter-spacing:-0.01em; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
-  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; font-weight:600; }
+  /// Tên tài xế được "làm nổi bật" bằng icon tài xế (thay cho avatar tròn
+  /// chữ cái đầu cũ) đặt trong khung vuông bo góc màu riêng theo cột, cạnh
+  /// khối chữ: tên IN HOA đậm nổi bật + số ca hoạt động nhỏ gọn bên dưới.
+  .shift-column-head{ display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:14px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); }
+  .shift-column-head .avatar{ width:48px; height:48px; border-radius:14px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--col-accent, var(--accent)); background:linear-gradient(135deg, color-mix(in srgb, var(--col-accent, var(--accent)) 20%, #fff), color-mix(in srgb, var(--col-accent, var(--accent)) 7%, #fff)); border:1px solid color-mix(in srgb, var(--col-accent, var(--accent)) 30%, transparent); box-shadow:0 2px 8px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.6); }
+  .shift-column-head .avatar svg{ width:30px; height:30px; display:block; overflow:visible; }
+  .shift-column-head .head-text{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:2px; }
+  .shift-column-head .name{ font-weight:800; font-size:17px; letter-spacing:0; color:#222222; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .shift-column-head .count{ font-size:11.5px; color:#666666; white-space:nowrap; font-weight:600; }
   .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
   .shift-column .shift-card{ margin-bottom:10px; border-radius:12px; }
   .shift-column .shift-card .body{ padding:11px 10px; }
@@ -1183,6 +1185,19 @@ function driverInitial(name){
   const n = (name||'').trim();
   return n ? n.charAt(0).toUpperCase() : '?';
 }
+/// Icon SVG tài xế (thay cho avatar tròn chữ cái đầu cũ) — hình vẽ gốc,
+/// đơn giản, dùng currentColor để tự nhuộm theo màu accent riêng của mỗi
+/// cột tài xế (đặt màu qua CSS .avatar{ color:var(--col-accent) }).
+function driverAvatarIcon(){
+  return `<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path d="M9 22c0-8.284 6.716-15 15-15s15 6.716 15 15v1H9v-1z" fill="currentColor"/>
+    <rect x="7" y="21" width="34" height="4.5" rx="2.25" fill="currentColor"/>
+    <circle cx="35.5" cy="20" r="2.2" fill="#fff"/>
+    <circle cx="24" cy="29.5" r="10.5" fill="#FFD7B0"/>
+    <path d="M7 47c0-9.665 7.611-17.5 17-17.5S41 37.335 41 47" fill="currentColor"/>
+    <path d="M19 36.5l5 4.5 5-4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </svg>`;
+}
 function renderShiftList(){
   const app=document.getElementById('app');
 
@@ -1239,10 +1254,10 @@ function renderShiftList(){
           return `
           <div class="shift-column${wideClass}" style="--col-accent:${accent}">
             <div class="shift-column-head">
-              <span class="avatar">${escapeHtml(driverInitial(col.name))}</span>
+              <span class="avatar">${driverAvatarIcon()}</span>
               <span class="head-text">
                 <span class="name">${escapeHtml(col.name)}</span>
-                <span class="count">${col.shifts.length} ca</span>
+                <span class="count">${col.shifts.length} ca hoạt động</span>
               </span>
             </div>
             ${col.shifts.length===0
