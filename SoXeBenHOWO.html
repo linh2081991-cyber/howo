@@ -85,11 +85,11 @@
   .shift-column.full-width{ grid-column:1 / -1; }
   /// Tên tài xế được "làm nổi bật" bằng avatar tròn màu riêng theo cột
   /// (chữ cái đầu tên) + chữ đậm cỡ lớn hơn hẳn phần dữ liệu bên dưới.
-  .shift-column-head{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:12px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); }
-  .shift-column-head .avatar{ width:40px; height:40px; border-radius:50%; background:var(--col-accent, var(--accent)); color:#fff; font-weight:800; font-size:16px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 7px rgba(0,0,0,0.22); }
-  .shift-column-head .head-text{ flex:1; min-width:0; }
-  .shift-column-head .name{ font-weight:900; font-size:16px; letter-spacing:-0.01em; color:var(--ink); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; display:block; margin-top:2px; }
+  .shift-column-head{ display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); }
+  .shift-column-head .avatar{ width:42px; height:42px; border-radius:50%; background:var(--col-accent, var(--accent)); color:#fff; font-weight:800; font-size:17px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.25); }
+  .shift-column-head .head-text{ flex:1; min-width:0; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; row-gap:0; }
+  .shift-column-head .name{ font-weight:900; font-size:16.5px; letter-spacing:-0.01em; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; font-weight:600; }
   .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
   .shift-column .shift-card{ margin-bottom:10px; border-radius:12px; }
   .shift-column .shift-card .body{ padding:11px 10px; }
