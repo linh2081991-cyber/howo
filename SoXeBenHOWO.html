@@ -85,11 +85,11 @@
   .shift-column.full-width{ grid-column:1 / -1; }
   /// Tên tài xế được "làm nổi bật" bằng avatar tròn màu riêng theo cột
   /// (chữ cái đầu tên) + chữ đậm cỡ lớn hơn hẳn phần dữ liệu bên dưới.
-  .shift-column-head{ display:flex; align-items:center; gap:8px; padding:2px 2px 10px 2px; border-bottom:1.5px solid var(--border); margin-bottom:10px; }
-  .shift-column-head .avatar{ width:32px; height:32px; border-radius:50%; background:var(--col-accent, var(--accent)); color:#fff; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .shift-column-head{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:12px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); }
+  .shift-column-head .avatar{ width:40px; height:40px; border-radius:50%; background:var(--col-accent, var(--accent)); color:#fff; font-weight:800; font-size:16px; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 2px 7px rgba(0,0,0,0.22); }
   .shift-column-head .head-text{ flex:1; min-width:0; }
-  .shift-column-head .name{ font-weight:800; font-size:15.5px; color:var(--ink); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; display:block; margin-top:1px; }
+  .shift-column-head .name{ font-weight:900; font-size:16px; letter-spacing:-0.01em; color:var(--ink); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .shift-column-head .count{ font-size:11px; color:var(--ink-soft); white-space:nowrap; display:block; margin-top:2px; }
   .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
   .shift-column .shift-card{ margin-bottom:10px; border-radius:12px; }
   .shift-column .shift-card .body{ padding:11px 10px; }
@@ -474,9 +474,9 @@ let state = {
   // roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift}
   // — prospective-project appraisal module, fully isolated from shift logs
   monthlyBonuses: [] // {id, driverId, yearMonth:'YYYY-MM', amount, note} — tiền tip/thưởng
-  // CUỐI THÁNG của tài xế, khác với actualTip (nhập theo TỪNG CA). Mỗi
-  // driverId+yearMonth chỉ nên có 1 dòng; cộng vào LƯƠNG THỰC NHẬN của
-  // đúng tháng đó ở màn hình Chi Tiết Vận Hành Tài Xế và khi xuất Excel.
+  // CUỐI THÁNG của tài xế. Mỗi driverId+yearMonth chỉ nên có 1 dòng; cộng
+  // vào LƯƠNG THỰC NHẬN của đúng tháng đó ở màn hình Chi Tiết Vận Hành
+  // Tài Xế và khi xuất Excel.
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -963,16 +963,9 @@ function shiftFuelConsumed(sh){ return Math.max(0, ((Number(sh.fuelStart)||0)+(N
 function shiftFuelCost(sh){ return shiftFuelConsumed(sh) * (Number(sh.fuelUnitPrice)||0); }
 function shiftTotalRevenue(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteRevenue(s),0); }
 function shiftTotalTripWage(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteWageTotal(s),0); }
-/// Tiền tip/thưởng THỰC TẾ của riêng ca này (Ông Chủ nhập tay theo đúng
-/// cung đường đã chạy trong ca — mỗi cung đường tip khác nhau nên KHÔNG
-/// thể suy ra từ mức tip/chuyến bình quân ở hồ sơ tài xế). Giá trị
-/// `driver.tipPerTrip` ở hồ sơ tài xế chỉ mang tính THAM KHẢO hiển thị,
-/// không dùng để tính toán ở đây hay bất kỳ đâu khác trong chi phí thật.
-function shiftTipCost(sh){ return Number(sh.actualTip)||0; }
 function shiftTotalCost(sh){
   return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
-       + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
-       + shiftTipCost(sh);
+       + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0);
 }
 function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); }
 
@@ -1016,13 +1009,12 @@ function driverResponsibleRepairTotalInRange(driverId, from, to){
     .reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
 }
 
-// ---- Monthly Tip/Bonus (thưởng cuối tháng) — separate from actualTip ----
-// actualTip (shiftTipCost) is entered PER CA because the amount varies by
-// route/day. A monthly bonus, by contrast, is normally decided and paid
-// ONCE at the end of a driver's monthly work cycle (thưởng cuối tháng),
-// so it is stored as ONE record per driverId + yearMonth ('YYYY-MM'),
-// not spread across shifts. It is purely ADDITIVE income on top of the
-// existing payroll formula — never redefines baseSalary/tripWage/food/tip.
+// ---- Monthly Tip/Bonus (thưởng cuối tháng) ----
+// A monthly bonus is normally decided and paid ONCE at the end of a
+// driver's monthly work cycle (thưởng cuối tháng), so it is stored as
+// ONE record per driverId + yearMonth ('YYYY-MM'), not spread across
+// shifts. It is purely ADDITIVE income on top of the existing payroll
+// formula — never redefines baseSalary/tripWage/food.
 function monthsInRange(from, to){
   const start = new Date(from+'T00:00:00');
   const end = new Date(to+'T00:00:00');
@@ -1344,7 +1336,6 @@ function startNewShift(){
     baseSalaryAllocation: policy.baseSalary ? dailyBaseSalary(driver) : 0,
     foodAllowance: policy.food ? driver.dailyFoodAllowance : 0,
     housingAllocation: policy.housing ? dailyHousing(driver, dateStr) : 0,
-    actualTip: 0,
     incidentalCost: 0,
     incidentalNotes: '',
     advanceAmount: 0,
@@ -1895,7 +1886,7 @@ function openEditDriver(id){
         <div class="field">
           <label>Tiền tip/thưởng mỗi chuyến (chỉ để tham khảo)</label>
           <input type="text" inputmode="decimal" id="ed_tip">
-          <div class="hint">Số này KHÔNG được dùng để tính chi phí hay lương thực nhận — vì tip thật khác nhau theo từng cung đường. Tiền tip thật được nhập trực tiếp ở từng ca (mục "Tiền Tip/Thưởng Thực Tế" trong form Ca Làm Việc).</div>
+          <div class="hint">Số này KHÔNG được dùng để tính chi phí hay lương thực nhận — chỉ hiển thị tham khảo trên hồ sơ tài xế.</div>
         </div>
         <div class="field">
           <label>Số CCCD</label>
@@ -1997,17 +1988,13 @@ function openDriverDetail(driverId){
   const food = inRange.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const housing = inRange.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
   const advance = inRange.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
-  // Tiền tip/thưởng THỰC TẾ cộng dồn từ đúng số liệu Ông Chủ đã nhập ở
-  // từng ca (không dùng driver.tipPerTrip — đó chỉ là số tham khảo hiển
-  // thị ở hồ sơ tài xế, vì tip thật khác nhau theo từng cung đường/ca).
-  const tip = inRange.reduce((s,sh)=>s+shiftTipCost(sh),0);
   const repairDeduction = driverResponsibleRepairTotalInRange(driverId, from, to);
-  // Tiền tip/thưởng CUỐI THÁNG — khác actualTip (theo từng ca): đây là 1
-  // khoản chốt một lần cho cả tháng, cộng thêm vào lương thực nhận của
-  // đúng (các) tháng mà kỳ đang xem đi qua.
+  // Tiền tip/thưởng CUỐI THÁNG: đây là 1 khoản chốt một lần cho cả
+  // tháng, cộng thêm vào lương thực nhận của đúng (các) tháng mà kỳ
+  // đang xem đi qua.
   const monthsSpanned = monthsInRange(from, to);
   const monthlyBonus = driverMonthlyBonusTotalInRange(driverId, from, to);
-  const netPay = baseSalary + tripWage + food + tip + monthlyBonus - advance - repairDeduction;
+  const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
 
   const advanceRecords = inRange.filter(sh=>(sh.advanceAmount||0)>0).sort((a,b)=>b.date.localeCompare(a.date));
   const repairRecords = state.repairs.filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to &&
@@ -2076,7 +2063,6 @@ function openDriverDetail(driverId){
         <div class="summary-row"><span>Lương cứng phân bổ</span><span class="val">${fmtVND(baseSalary)}</span></div>
         <div class="summary-row"><span>Tổng lương chuyến</span><span class="val">${fmtVND(tripWage)}</span></div>
         <div class="summary-row"><span>Tiền ăn</span><span class="val">${fmtVND(food)}</span></div>
-        <div class="summary-row"><span>Tiền tip/thưởng (theo ca)</span><span class="val">${fmtVND(tip)}</span></div>
         <div class="summary-row"><span>Tiền tip/thưởng cuối tháng</span><span class="val">${fmtVND(monthlyBonus)}</span></div>
         <div class="summary-row"><span>− Ứng lương/Đền bù</span><span class="val" style="color:${advance>0?'var(--loss)':'inherit'}">${fmtVND(advance)}</span></div>
         <div class="summary-row"><span>− Trừ do hỏng hóc</span><span class="val" style="color:${repairDeduction>0?'var(--loss)':'inherit'}">${fmtVND(repairDeduction)}</span></div>
@@ -2088,7 +2074,7 @@ function openDriverDetail(driverId){
     <section class="group">
       <h3>🎁 Tiền Tip/Thưởng Cuối Tháng</h3>
       <div class="card">
-        <div class="hint" style="margin-bottom:10px;">Khoản này KHÁC với "Tiền tip/thưởng (theo ca)" ở trên — đây là khoản thưởng chốt MỘT LẦN vào cuối chu kỳ làm việc của một tháng cho tài xế này. Mỗi tháng chỉ nên lưu 1 dòng; lưu lại sẽ cập nhật đè lên số đã lưu của đúng tháng đó.</div>
+        <div class="hint" style="margin-bottom:10px;">Đây là khoản thưởng chốt MỘT LẦN vào cuối chu kỳ làm việc của một tháng cho tài xế này. Mỗi tháng chỉ nên lưu 1 dòng; lưu lại sẽ cập nhật đè lên số đã lưu của đúng tháng đó.</div>
         <div class="field">
           <label>Tháng thưởng</label>
           <input type="month" id="mb_month" value="${defaultYearMonth}">
@@ -3406,7 +3392,7 @@ function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal, otherFixe
   // hiểm xe + Đăng kiểm/Đăng ký/Phù hiệu vận tải (Cài Đặt) — cộng thêm
   // vào chi phí cố định, cùng cách roadFee đã được cộng từ trước.
   const fixedCost = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.housingAllocation)||0),0) + roadFee + repairTotal + otherFixedMonthly;
-  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0)+shiftTipCost(sh),0);
+  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0),0);
   const grossProfit = totalRevenue - variableCost;
 
   const base = { dayTrips, nightTrips, dayRevenue, nightRevenue, totalTrips, totalRevenue, fixedCost, variableCost, grossProfit, roadFee, repairTotal, otherFixedMonthly };
@@ -3448,7 +3434,7 @@ Tổng doanh thu = ${fmtVND(be.dayRevenue)} + ${fmtVND(be.nightRevenue)} = ${fmt
 
     <div class="modal-step">
       <div class="st-title">Bước 3 — Tách chi phí BIẾN ĐỔI (tăng/giảm theo số chuyến)</div>
-      <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, tiền tip/thưởng thực tế của ca (mỗi cung đường khác nhau), và chi phí phát sinh lặt vặt trong ca.</div>
+      <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, và chi phí phát sinh lặt vặt trong ca.</div>
       <div class="st-formula">Chi phí biến đổi (cả kỳ) = ${fmtVND(be.variableCost)}
 Chi phí biến đổi bình quân / chuyến = ${fmtVND(be.variableCost)} ÷ ${be.totalTrips} = ${be.avgVariableCostPerTrip!==undefined?fmtVND(be.avgVariableCostPerTrip):'—'}</div>
     </div>
@@ -4091,7 +4077,7 @@ function renderResults(){
 
       <div class="card">
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu) = <strong>${fmtVND(breakEven.fixedCost)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Tổng chi phí biến đổi thực tế (dầu + lương chuyến + tiền ăn + tip/thưởng thực tế + phát sinh) = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Tổng chi phí biến đổi thực tế (dầu + lương chuyến + tiền ăn + phát sinh) = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div style="font-weight:800; font-size:15.5px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi) = ${fmtVND(breakEven.grossProfit)}</div>
       </div>
@@ -5174,7 +5160,7 @@ function buildOperationLogRows(){
     'Chỉ Số Dầu Đầu','Chỉ Số Dầu Cuối','Dầu Đổ Thêm (Lít)','Dầu Tiêu Hao (Lít)','Đơn Giá Dầu/Lít','Tiền Dầu Tiêu Hao',
     'Công Trình','Khối Lượng/Chuyến','Đơn Giá Vật Liệu','Số Chuyến','Thành Tiền (Doanh Thu Công Trình)',
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến Tổng',
-    'Tổng Doanh Thu Ca','Lương Cứng Phân Bổ','Tiền Ăn','Tiền Tip/Thưởng Thực Tế','Tiền Nhà+Điện Nước',
+    'Tổng Doanh Thu Ca','Lương Cứng Phân Bổ','Tiền Ăn','Tiền Nhà+Điện Nước',
     'Chi Phí Phát Sinh','Ghi Chú Phát Sinh','Ứng Lương/Đền Bù','Người Nhận Ứng','Ghi Chú Ca',
     'Tổng Chi Phí Ca','Lợi Nhuận Ròng Ca'];
   const rows = [header];
@@ -5184,7 +5170,7 @@ function buildOperationLogRows(){
     const shared = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), driverName, statusLabel(sh.status),
       sh.odoStart||0, sh.odoEnd||0, shiftOdoDriven(sh), sh.fuelStart||0, sh.fuelEnd||0, sh.fuelAdded||0, shiftFuelConsumed(sh),
       sh.fuelUnitPrice||0, shiftFuelCost(sh)];
-    const trailing = [shiftTotalRevenue(sh), sh.baseSalaryAllocation||0, sh.foodAllowance||0, shiftTipCost(sh), sh.housingAllocation||0,
+    const trailing = [shiftTotalRevenue(sh), sh.baseSalaryAllocation||0, sh.foodAllowance||0, sh.housingAllocation||0,
       sh.incidentalCost||0, sh.incidentalNotes||'', sh.advanceAmount||0, sh.advanceRecipientName||'',
       sh.notes||'', shiftTotalCost(sh), shiftNetProfit(sh)];
     if((sh.siteLogs||[]).length===0){
@@ -5206,14 +5192,14 @@ function buildOperationLogRows(){
 /// LƯƠNG THỰC NHẬN = lương cứng + lương chuyến + tiền ăn − ứng lương.
 /// (Verified against the original spreadsheet's driver payroll formula.)
 function buildDriverPayrollRows(from, to){
-  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tổng Tiền Tip/Thưởng (Theo Ca)','Tiền Tip/Thưởng Cuối Tháng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','Trừ Do Hỏng Hóc','LƯƠNG THỰC NHẬN'];
+  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tiền Tip/Thưởng Cuối Tháng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','Trừ Do Hỏng Hóc','LƯƠNG THỰC NHẬN'];
   const rows = [header];
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
   const byDriver = {};
   for(const sh of inRange){
     const driver = driverById(sh.driverId);
     const name = driver?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
-    if(!byDriver[name]) byDriver[name] = { driverId: driver?.id || null, shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0, tip:0 };
+    if(!byDriver[name]) byDriver[name] = { driverId: driver?.id || null, shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0 };
     const b = byDriver[name];
     b.shifts += 1;
     b.baseSalary += sh.baseSalaryAllocation||0;
@@ -5221,9 +5207,6 @@ function buildDriverPayrollRows(from, to){
     b.food += sh.foodAllowance||0;
     b.housing += sh.housingAllocation||0;
     b.advance += sh.advanceAmount||0;
-    // Tiền tip/thưởng THỰC TẾ của từng ca (không dùng driver.tipPerTrip —
-    // số đó chỉ mang tính tham khảo hiển thị ở hồ sơ tài xế).
-    b.tip += shiftTipCost(sh);
   }
   Object.keys(byDriver).sort().forEach(name=>{
     const b = byDriver[name];
@@ -5231,8 +5214,8 @@ function buildDriverPayrollRows(from, to){
     // Tiền tip/thưởng CUỐI THÁNG — cộng thêm (additive), không đụng tới
     // công thức LƯƠNG THỰC NHẬN gốc, chỉ thêm 1 số hạng mới vào tổng.
     const monthlyBonus = b.driverId ? driverMonthlyBonusTotalInRange(b.driverId, from, to) : 0;
-    const netPay = b.baseSalary + b.tripWage + b.food + b.tip + monthlyBonus - b.advance - repairDeduction;
-    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(b.tip), Math.round(monthlyBonus), Math.round(b.housing), Math.round(b.advance), Math.round(repairDeduction), Math.round(netPay)]);
+    const netPay = b.baseSalary + b.tripWage + b.food + monthlyBonus - b.advance - repairDeduction;
+    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(monthlyBonus), Math.round(b.housing), Math.round(b.advance), Math.round(repairDeduction), Math.round(netPay)]);
   });
   if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','','','','']);
   return rows;
