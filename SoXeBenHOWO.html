@@ -573,12 +573,32 @@ function computeDocumentWarnings(){
     .sort((a,b)=>a.daysLeft-b.daysLeft);
 }
 
-/// Latest known odometer reading across every logged shift — the "current
-/// km" used to compute how far each maintenance item still has to go.
+/// Latest RECORDED odometer reading across every logged shift — the "current
+/// km" used to compute how far each maintenance item still has to go. Only
+/// shifts where odoEnd has actually been filled in count; an in-progress
+/// shift saved without odoEnd yet must never drag this back down to 0.
 function currentOdometer(){
-  if(state.shifts.length===0) return 0;
-  const sorted = [...state.shifts].sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
-  return sorted[0].odoEnd || 0;
+  const withOdo = state.shifts.filter(sh=>Number(sh.odoEnd)>0);
+  if(withOdo.length===0) return 0;
+  const sorted = [...withOdo].sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  return Number(sorted[0].odoEnd)||0;
+}
+
+/// Real average km/day the truck has actually been driven recently — used to
+/// translate "còn bao nhiêu km" into "khoảng ngày nào". Uses the last
+/// `windowDays` of logged shifts; if that window is too thin (mới bắt đầu
+/// dùng app), falls back to the full shift history instead of guessing.
+function fleetAvgKmPerDayRecent(windowDays){
+  const cutoff = new Date(todayLocalDateStr()+'T00:00:00');
+  cutoff.setDate(cutoff.getDate()-windowDays);
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+  let sample = state.shifts.filter(sh=>sh.date>=cutoffStr);
+  if(sample.length<4) sample = state.shifts;
+  if(sample.length===0) return 0;
+  const totalKm = sample.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+  const dates = sample.map(sh=>sh.date).sort();
+  const spanDays = Math.max(1, Math.round((new Date(dates[dates.length-1]+'T00:00:00') - new Date(dates[0]+'T00:00:00'))/86400000) + 1);
+  return totalKm / spanDays;
 }
 
 function computeMaintenanceStatus(schedule){
@@ -590,7 +610,19 @@ function computeMaintenanceStatus(schedule){
   else if(kmRemaining<=300) urgency = { label:`Còn ${kmRemaining} km — GẤP`, className:'risk' };
   else if(kmRemaining<=1000) urgency = { label:`Còn ${kmRemaining} km`, className:'warn' };
   else urgency = { label:`Còn ${kmRemaining} km`, className:'good' };
-  return { ...schedule, currentOdo: current, nextDueOdo, kmRemaining, urgency };
+
+  // Dự đoán khoảng ngày tới hạn, dựa trên tốc độ chạy thực tế gần đây —
+  // không đủ dữ liệu (chưa có ca nào) thì để null, không đoán bừa.
+  const avgKmPerDay = fleetAvgKmPerDayRecent(30);
+  let predictedDueDate = null;
+  if(kmRemaining>0 && avgKmPerDay>0){
+    const daysAhead = Math.ceil(kmRemaining/avgKmPerDay);
+    const d = new Date(todayLocalDateStr()+'T00:00:00');
+    d.setDate(d.getDate()+daysAhead);
+    predictedDueDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  return { ...schedule, currentOdo: current, nextDueOdo, kmRemaining, urgency, avgKmPerDay: Math.round(avgKmPerDay), predictedDueDate };
 }
 
 /// Every maintenance item within 1000km of being due (or already overdue),
@@ -4671,18 +4703,20 @@ function openDocumentEditor(id){
 function renderMaintenanceList(){
   const wrap = document.getElementById('maintenanceListWrap');
   if(!wrap) return;
+  const odoHeader = `<div class="stat-highlight"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>`;
   if(state.maintenanceSchedules.length===0){
-    wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa có hạng mục bảo dưỡng nào.</div>';
+    wrap.innerHTML = odoHeader + '<div class="hint" style="margin-top:10px;">Chưa có hạng mục bảo dưỡng nào.</div>';
     return;
   }
   const statuses = state.maintenanceSchedules.map(computeMaintenanceStatus).sort((a,b)=>a.kmRemaining-b.kmRemaining);
-  wrap.innerHTML = statuses.map(m=>`
-    <div class="card" data-id="${m.id}" style="padding:12px 14px;">
+  wrap.innerHTML = odoHeader + statuses.map(m=>`
+    <div class="card" data-id="${m.id}" style="padding:12px 14px; margin-top:10px;">
       <div class="driver-row">
         <strong>${escapeHtml(m.name)}</strong>
         <button class="link-btn editMaintenanceBtn" data-id="${m.id}">Sửa</button>
       </div>
       <div class="hint">Chu kỳ ${m.intervalKm.toLocaleString('vi-VN')}km · Làm gần nhất ở Km ${Number(m.lastDoneOdo).toLocaleString('vi-VN')} (${formatDateVN(m.lastDoneDate)}) · <span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span></div>
+      ${m.predictedDueDate ? `<div class="hint">📅 Dự kiến đến hạn: <strong>${formatDateVN(m.predictedDueDate)}</strong> (bình quân xe chạy thực tế ~${m.avgKmPerDay.toLocaleString('vi-VN')} km/ngày)</div>` : ''}
       ${m.notes ? `<div class="hint">${escapeHtml(m.notes)}</div>` : ''}
     </div>
   `).join('');
@@ -4720,7 +4754,7 @@ function openMaintenanceEditor(id){
           <input type="text" id="maint_notes" value="${escapeHtml(draft.notes)}">
         </div>
       </div>
-      <div class="hint" style="margin-top:8px;">Odo hiện tại của xe (theo ca gần nhất đã ghi): ${currentOdometer().toLocaleString('vi-VN')} km.</div>
+      <div class="stat-highlight" style="margin-top:8px;"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing ? '<button class="btn btn-danger" id="delMaintenanceBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelMaintenanceBtn">Huỷ</button>
@@ -4948,7 +4982,7 @@ function renderSettings(){
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <div class="hint" style="margin-bottom:10px;">Nhập chu kỳ (ví dụ thay dầu mỗi 5.000km) và lần làm gần nhất — app tự tính còn bao nhiêu km nữa tới hạn dựa trên Odo mới nhất Ông Chủ ghi.</div>
+      <div class="hint" style="margin-bottom:10px;">Nhập chu kỳ (ví dụ thay dầu mỗi 5.000km) và lần làm gần nhất — app tự tính còn bao nhiêu km nữa tới hạn dựa trên ODO mới nhất Ông Chủ ghi, đồng thời dự đoán khoảng ngày phải bảo dưỡng dựa trên tốc độ chạy thực tế gần đây.</div>
       <div id="maintenanceListWrap"></div>
       <button class="btn btn-ghost btn-block" id="addMaintenanceBtn">+ Thêm Hạng Mục Bảo Dưỡng</button>
     </section>
