@@ -1707,9 +1707,9 @@ function updateSummary(){
     <div class="summary-row total"><span>Lợi nhuận ròng</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
   const odoHint=document.getElementById('odoDrivenHint');
-  if(odoHint) odoHint.innerHTML = `<span class="ic">🛣️</span><span class="lbl">Số ODO chạy</span><span class="val">${shiftOdoDriven(sh).toLocaleString('vi-VN')} km</span>`;
+  if(odoHint) odoHint.innerHTML = `<span class="ic">🛣️</span><span class="lbl">Số ODO chạy&nbsp;</span><span class="val">${shiftOdoDriven(sh).toLocaleString('vi-VN')} km</span>`;
   const fuelHint=document.getElementById('fuelHint');
-  if(fuelHint) fuelHint.innerHTML = `<span class="ic">⛽</span><span class="lbl">Dầu tiêu hao</span><span class="val">${shiftFuelConsumed(sh).toLocaleString('vi-VN')} lít · ${fmtVND(shiftFuelCost(sh))}</span>`;
+  if(fuelHint) fuelHint.innerHTML = `<span class="ic">⛽</span><span class="lbl">Dầu tiêu hao&nbsp;</span><span class="val">${shiftFuelConsumed(sh).toLocaleString('vi-VN')} lít · ${fmtVND(shiftFuelCost(sh))}</span>`;
 }
 
 function bindFormEvents(){
@@ -4703,7 +4703,7 @@ function openDocumentEditor(id){
 function renderMaintenanceList(){
   const wrap = document.getElementById('maintenanceListWrap');
   if(!wrap) return;
-  const odoHeader = `<div class="stat-highlight"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>`;
+  const odoHeader = `<div class="stat-highlight"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>`;
   if(state.maintenanceSchedules.length===0){
     wrap.innerHTML = odoHeader + '<div class="hint" style="margin-top:10px;">Chưa có hạng mục bảo dưỡng nào.</div>';
     return;
@@ -4754,7 +4754,7 @@ function openMaintenanceEditor(id){
           <input type="text" id="maint_notes" value="${escapeHtml(draft.notes)}">
         </div>
       </div>
-      <div class="stat-highlight" style="margin-top:8px;"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>
+      <div class="stat-highlight" style="margin-top:8px;"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing ? '<button class="btn btn-danger" id="delMaintenanceBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelMaintenanceBtn">Huỷ</button>
