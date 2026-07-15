@@ -396,7 +396,7 @@ const HOWO_TRUCK_HTML = `
 /// so callers never need to null-check before use.
 function startTruckRun(container){
   const truckEl = container ? container.querySelector('.howo-truck-run') : null;
-  if(!truckEl) return { finish: ()=>Promise.resolve() };
+  if(!truckEl) return { retry: ()=>{}, finish: ()=>Promise.resolve() };
 
   container.querySelectorAll('.howo-wheel').forEach(wheelEl=>{
     wheelEl.animate(
@@ -405,19 +405,48 @@ function startTruckRun(container){
     );
   });
 
-  const approach = truckEl.animate(
-    [
-      { left:'-4px',              offset:0    },
-      { left:'calc(55% - 20px)',  offset:0.35 },
-      { left:'calc(80% - 25px)',  offset:0.7  },
-      { left:'calc(97% - 30px)',  offset:1    }
-    ],
-    { duration:45000, easing:'cubic-bezier(0,.6,.25,1)', fill:'forwards' }
-  );
+  let approach = null;
+
+  /// Plays ONE forward lap: -4px eased up to ~97% of the track over a
+  /// generous 45s window, then HOLDS there (fill:'forwards') for as long
+  /// as the current attempt actually takes. Called once up front for
+  /// attempt #1, and again from retry() for every attempt after that —
+  /// so each Gemini attempt gets exactly one forward lap, instead of one
+  /// silent continuous hold that hides how many attempts actually ran.
+  function playApproach(){
+    approach = truckEl.animate(
+      [
+        { left:'-4px',              offset:0    },
+        { left:'calc(55% - 20px)',  offset:0.35 },
+        { left:'calc(80% - 25px)',  offset:0.7  },
+        { left:'calc(97% - 30px)',  offset:1    }
+      ],
+      { duration:45000, easing:'cubic-bezier(0,.6,.25,1)', fill:'forwards' }
+    );
+  }
+  playApproach();
 
   return {
+    /// Called by callGeminiWithRetry's onRetry the instant an attempt has
+    /// just failed and a new one is about to start: the truck visibly
+    /// runs BACK from wherever it currently sits to the starting line,
+    /// then immediately begins a brand-new forward lap for the next
+    /// attempt. One retry = one back-then-forward loop, so the number of
+    /// loops Ông Chủ sees always matches the number of retry attempts.
+    retry(){
+      if(approach) approach.cancel();
+      const currentLeft = getComputedStyle(truckEl).left;
+      const retreat = truckEl.animate(
+        [ { left: currentLeft }, { left:'-4px' } ],
+        { duration:500, easing:'ease-in', fill:'forwards' }
+      );
+      retreat.finished.catch(()=>{}).then(()=>{ retreat.cancel(); playApproach(); });
+    },
+    /// Called once the retry chain finally succeeds: snaps the current
+    /// lap to its 97% end state and plays one short 260ms hop to 100%,
+    /// so the truck finishes AT THE MOMENT the real result arrives.
     finish(){
-      approach.finish();
+      if(approach) approach.finish();
       const arrival = truckEl.animate(
         [{ left:'calc(97% - 30px)' }, { left:'calc(100% - 58px)' }],
         { duration:260, easing:'ease-in', fill:'forwards' }
@@ -2403,10 +2432,15 @@ async function runStrategyAnalysis(){
     }
     const prompt = buildStrategyPrompt(summary);
     const result = await callGeminiText(prompt, (attempt)=>{
-      // Silent for the first couple of attempts — the truck itself is
-      // already the "still working" cue. Only after a retry chain runs
-      // long enough to look suspicious does a status line appear, so
-      // Ông Chủ never wonders if the app has frozen.
+      // Every retry: the truck itself runs back to the starting line and
+      // launches a fresh forward lap, so Ông Chủ can see exactly how many
+      // attempts have run just by counting loops, in sync with the real
+      // analysis attempts — not just a text hint.
+      if(activeStrategyTruckRun) activeStrategyTruckRun.retry();
+      // Status text stays silent for the first couple of attempts — the
+      // truck loop itself is already the "still working" cue. Only after
+      // a retry chain runs long enough to look suspicious does a status
+      // line appear, so Ông Chủ never wonders if the app has frozen.
       if(attempt>=3){
         const hintEl = document.getElementById('strategyRetryHint');
         if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
