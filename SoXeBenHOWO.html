@@ -2535,11 +2535,22 @@ function aggregateStrategyData(from, to){
     name: s.name, revenue: Math.round(s.revenue), trips: s.trips, revenuePerTrip: Math.round(s.revenuePerTrip)
   }));
 
-  const sortedRepairs = [...state.repairs].sort((a,b)=>b.date.localeCompare(a.date));
-  const lastRepair = sortedRepairs[0] || null;
-  const kmSinceLastRepair = lastRepair
-    ? Math.round(state.shifts.filter(sh=>sh.date>lastRepair.date).reduce((s,sh)=>s+shiftOdoDriven(sh),0))
-    : Math.round(state.shifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0));
+  // Lịch Bảo Dưỡng Định Kỳ (Cài Đặt) là nguồn ĐÚNG cho tư vấn bảo dưỡng —
+  // mỗi hạng mục (dầu máy, lốp, xích...) đã có sẵn km còn lại tính riêng,
+  // không lẫn với các khoản sửa chữa không liên quan vận hành.
+  const maintenanceScheduleStatus = state.maintenanceSchedules.map(computeMaintenanceStatus).map(m=>({
+    name: m.name, intervalKm: m.intervalKm, lastDoneOdo: m.lastDoneOdo, lastDoneDate: m.lastDoneDate,
+    currentOdo: m.currentOdo, kmRemaining: m.kmRemaining, predictedDueDate: m.predictedDueDate
+  }));
+  // Sổ Sửa Chữa lọc CHỈ giữ khoản có liên quan vận hành thực tế (dầu,
+  // lốp, máy, phanh, xích...) — bỏ qua khoản không liên quan bảo dưỡng
+  // (vd lắp còi hơi, trang trí...) để không bị dùng nhầm làm căn cứ.
+  const MAINTENANCE_RELEVANT_KEYWORDS = ['dầu','nhớt','lốp','vỏ xe','vỏ (','xích','phanh','thắng','máy','động cơ','ắc quy','bình điện','bố ','nhông','đĩa','bơm','lọc gió','lọc dầu','lọc nhiên liệu','bạc đạn','vòng bi','hộp số','ly hợp','côn','giảm xóc','phuộc','bánh xe','trục','nước làm mát','két nước','dây curoa','curoa'];
+  const relevantRecentRepairs = [...state.repairs]
+    .filter(r => MAINTENANCE_RELEVANT_KEYWORDS.some(kw => (r.item||'').toLowerCase().includes(kw)))
+    .sort((a,b)=>b.date.localeCompare(a.date))
+    .slice(0,5)
+    .map(r=>({ date:r.date, item:r.item, amount:Math.round(Number(r.amount)||0) }));
 
   const gTotal = computeResultsGroup(inRange);
 
@@ -2570,9 +2581,8 @@ function aggregateStrategyData(from, to){
     siteRanking,
     upcomingDocumentExpirations,
     financialSnapshot,
-    lastRepairDate: lastRepair ? lastRepair.date : null,
-    lastRepairItem: lastRepair ? lastRepair.item : null,
-    kmSinceLastRepair
+    maintenanceScheduleStatus,
+    relevantRecentRepairs
   };
 }
 
@@ -2603,7 +2613,7 @@ Hãy phân tích và CHỈ trả về DUY NHẤT một object JSON đúng cấu 
   "marketOutlook": { "note": "<góc nhìn chuyên gia thị trường: giá cước/chuyến hiện tại có hợp lý không, xu hướng, có nên tìm thêm công trình/đàm phán lại giá không>" },
   "legalComplianceNotes": { "note": "<góc nhìn chuyên gia pháp lý dựa trên upcomingDocumentExpirations: giấy tờ nào cần gia hạn gấp, rủi ro gì nếu chậm trễ>" },
   "financialStrategyNotes": { "note": "<góc nhìn chuyên gia kế toán dựa trên financialSnapshot + grossProfit: cơ cấu chi phí cố định có ổn không, đề xuất gì để cải thiện dòng tiền>" },
-  "maintenanceSuggestion": { "note": "<đề xuất lịch bảo dưỡng lốp/xích/máy dựa trên số km đã chạy kể từ lần sửa chữa gần nhất>" },
+  "maintenanceSuggestion": { "note": "<đề xuất bảo dưỡng dựa TRƯỚC HẾT vào summary.maintenanceScheduleStatus (mỗi hạng mục dầu/lốp/xích... đã có sẵn kmRemaining/predictedDueDate tính riêng — nêu rõ hạng mục nào sắp tới hạn), có thể tham khảo thêm summary.relevantRecentRepairs (đã lọc chỉ còn sửa chữa liên quan vận hành thực tế). TUYỆT ĐỐI không dùng khoản sửa chữa không liên quan bảo dưỡng vận hành (vd lắp còi hơi, trang trí...) làm căn cứ, kể cả khi đó là khoản mới nhất trong sổ.>" },
   "generalInsights": [ "<nhận định tổng hợp 1 — tổng hoà cả 4 góc nhìn trên, cái nhìn tổng thể nhất>", "<nhận định tổng hợp 2>", "<nhận định tổng hợp 3>" ]
 }
 Chỉ đưa nhận xét dựa trên số liệu thực tế ở trên, không suy đoán số liệu không có. Nếu không đủ dữ liệu cho 1 mục (vd chưa có giấy tờ nào sắp hết hạn), để "note" là chuỗi rỗng — nhưng KHÔNG được bỏ trống mảng siteAnalysis/driverAnalysis nếu summary có dữ liệu.`;
