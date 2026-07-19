@@ -156,9 +156,14 @@
   /// còn input ngày thật vẫn nằm dưới, trong suốt, phủ kín để chạm vào đâu
   /// cũng mở đúng lịch chọn ngày gốc của iOS như cũ — chỉ đổi phần NHÌN
   /// THẤY, không đổi cách chọn ngày.
-  .date-display-wrap{ position:relative; height:44px; }
-  .date-display-text{ display:flex; align-items:center; width:100%; height:100%; box-sizing:border-box; font-size:16px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); }
-  .date-display-wrap input[type=date]{ position:absolute; inset:0; width:100%; height:100%; opacity:0; margin:0; padding:0; border:none; }
+  .date-display-text{ display:flex; align-items:center; width:100%; height:44px; box-sizing:border-box; font-size:16px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit; cursor:pointer; text-align:left; }
+  /// Input ngày thật giờ không còn đè lên trên bất cứ thứ gì — bị đưa hẳn
+  /// ra ngoài màn hình + pointer-events:none nên KHÔNG THỂ nhận chạm ở
+  /// bất kỳ đâu, dù to hay nhỏ, dù iOS có mở rộng vùng chạm của control
+  /// gốc ra sao. Lịch chỉ mở khi JS chủ động gọi .showPicker() lúc bấm
+  /// đúng vào nút hiển thị ngày — không còn phụ thuộc trình duyệt định
+  /// vị đúng vùng chạm invisible nữa.
+  .date-hidden-input{ position:absolute; opacity:0; pointer-events:none; width:1px; height:1px; overflow:hidden; }
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
     border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
@@ -4887,10 +4892,8 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
-          <div class="date-display-wrap">
-            <span class="date-display-text" id="sp_dateDisplay">${formatDateVN(draft.date)}</span>
-            <input type="date" id="sp_date" value="${draft.date}">
-          </div>
+          <button type="button" class="date-display-text" id="sp_dateDisplay">${formatDateVN(draft.date)}</button>
+          <input type="date" id="sp_date" class="date-hidden-input" value="${draft.date}" tabindex="-1">
         </div>
         <div class="field">
           <label>Chủ công trình / Nhà thầu</label>
@@ -4913,6 +4916,11 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     </section>
   `;
   attachMoneyInput(document.getElementById('sp_amount'), draft.amount, v=>draft.amount=v);
+  document.getElementById('sp_dateDisplay').addEventListener('click', ()=>{
+    const dateInput = document.getElementById('sp_date');
+    if(typeof dateInput.showPicker === 'function'){ try{ dateInput.showPicker(); return; }catch(_ignored){} }
+    dateInput.focus();
+  });
   document.getElementById('sp_date').addEventListener('change', e=>{
     if(e.target.value) document.getElementById('sp_dateDisplay').textContent = formatDateVN(e.target.value);
   });
