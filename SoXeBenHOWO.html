@@ -131,6 +131,26 @@
   .stat-highlight .ic{ font-size:18px; line-height:1; flex-shrink:0; }
   .stat-highlight .lbl{ font-size:12.5px; color:var(--ink); font-weight:600; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .stat-highlight .val{ font-size:15.5px; font-weight:800; color:var(--accent); white-space:nowrap; flex-shrink:0; font-variant-numeric:tabular-nums; }
+  /// Km-driven inside the ODO stat chip is now an editable number, not just
+  /// display text — kept visually identical to the old .val text (same
+  /// size/weight/color) but as a real <input>, so it can be typed into
+  /// directly (GPS-based km) and drive Odo cuối ca in reverse.
+  .stat-highlight input.val-input{
+    width:64px; flex-shrink:0; text-align:right; font-size:15.5px; font-weight:800;
+    color:var(--accent); font-variant-numeric:tabular-nums; border:none; background:transparent;
+    padding:0; border-radius:0;
+  }
+  .stat-highlight .val-suffix{ font-size:15.5px; font-weight:800; color:var(--accent); flex-shrink:0; margin-left:2px; }
+  /// Ô "Ngày nhận tiền" (Ghi Nhận Khoản Thu) riêng: input[type=date] gốc
+  /// trên iOS Safari PWA không theo font-size CSS của app, tự phóng to chữ
+  /// ("ngày 18 thg 7, 2026") khác hẳn các ô còn lại. Sửa bằng cách hiện 1
+  /// khối text thường (đúng size/style app, dd/mm/yyyy gọn) đè lên trên,
+  /// còn input ngày thật vẫn nằm dưới, trong suốt, phủ kín để chạm vào đâu
+  /// cũng mở đúng lịch chọn ngày gốc của iOS như cũ — chỉ đổi phần NHÌN
+  /// THẤY, không đổi cách chọn ngày.
+  .date-display-wrap{ position:relative; }
+  .date-display-text{ display:block; width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); box-sizing:border-box; }
+  .date-display-wrap input[type=date]{ position:absolute; inset:0; width:100%; height:100%; opacity:0; margin:0; padding:0; border:none; }
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
     border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
@@ -1483,7 +1503,7 @@ function startNewShift(){
     fuelStart: prev ? prev.fuelEnd : 0,
     fuelEnd: 0,
     fuelAdded: 0,
-    fuelUnitPrice: 0,
+    fuelUnitPrice: latestKnownFuelUnitPrice(), // ca sau tự lấy đơn giá dầu của lần đổ gần nhất, đỡ phải gõ lại tay mỗi ca
     baseSalaryAllocation: policy.baseSalary ? dailyBaseSalary(driver) : 0,
     foodAllowance: policy.food ? driver.dailyFoodAllowance : 0,
     housingAllocation: policy.housing ? dailyHousing(driver, dateStr) : 0,
@@ -1609,7 +1629,12 @@ function renderShiftForm(){
             <input type="number" inputmode="decimal" id="f_odoEnd" placeholder="0" value="${blankIfZero(sh.odoEnd)}">
           </div>
         </div>
-        <div class="stat-highlight" id="odoDrivenHint"></div>
+        <div class="stat-highlight" id="odoDrivenHint">
+          <span class="ic">🛣️</span>
+          <span class="lbl">Số ODO chạy trong ca&nbsp;</span>
+          <input type="number" inputmode="decimal" id="f_kmDriven" class="val-input" placeholder="0" value="${blankIfZero(shiftOdoDriven(sh))}">
+          <span class="val-suffix">&nbsp;km</span>
+        </div>
       </div>
     </section>
 
@@ -1810,8 +1835,12 @@ function updateSummary(){
     <div class="summary-row"><span>Tổng chi phí</span><span class="val">${fmtVND(cost)}</span></div>
     <div class="summary-row total"><span>Lợi nhuận ròng</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
-  const odoHint=document.getElementById('odoDrivenHint');
-  if(odoHint) odoHint.innerHTML = `<span class="ic">🛣️</span><span class="lbl">Số ODO chạy&nbsp;</span><span class="val">${shiftOdoDriven(sh).toLocaleString('vi-VN')} km</span>`;
+  // Số ODO chạy trong ca is now an editable input (#f_kmDriven), not
+  // rebuilt HTML — only push the computed value in when Ông Chủ ISN'T
+  // actively typing into it himself (otherwise every keystroke on Odo
+  // đầu/cuối would also stomp on whatever he's mid-typing here).
+  const kmDrivenInput=document.getElementById('f_kmDriven');
+  if(kmDrivenInput && document.activeElement!==kmDrivenInput) kmDrivenInput.value = blankIfZero(shiftOdoDriven(sh));
   const fuelHint=document.getElementById('fuelHint');
   if(fuelHint) fuelHint.innerHTML = `<span class="ic">⛽</span><span class="lbl">Dầu tiêu hao&nbsp;</span><span class="val">${shiftFuelConsumed(sh).toLocaleString('vi-VN')} lít · ${fmtVND(shiftFuelCost(sh))}</span>`;
 }
@@ -1849,6 +1878,18 @@ function bindFormEvents(){
 
   const bindNum=(id,field)=>document.getElementById(id).addEventListener('input', e=>{ sh[field]=Number(e.target.value); updateSummary(); });
   bindNum('f_odoStart','odoStart'); bindNum('f_odoEnd','odoEnd');
+  // Reverse direction: Ông Chủ gõ thẳng "Số ODO chạy trong ca" (đọc từ GPS)
+  // thay vì đọc đồng hồ công tơ mét — Odo cuối ca tự suy ra = Odo đầu ca +
+  // số km này. updateSummary() bên trong bindNum('f_odoEnd',...) ở trên
+  // vẫn là đường tính xuôi bình thường; đây chỉ thêm đường tính NGƯỢC,
+  // không đổi công thức gốc shiftOdoDriven() ở đâu cả.
+  document.getElementById('f_kmDriven').addEventListener('input', e=>{
+    const km = Number(e.target.value)||0;
+    sh.odoEnd = (Number(sh.odoStart)||0) + km;
+    const odoEndInput = document.getElementById('f_odoEnd');
+    if(odoEndInput) odoEndInput.value = blankIfZero(sh.odoEnd);
+    updateSummary();
+  });
   bindNum('f_fuelStart','fuelStart'); bindNum('f_fuelEnd','fuelEnd');
   bindNum('f_fuelAdded','fuelAdded');
   attachMoneyInput(document.getElementById('f_fuelPrice'), sh.fuelUnitPrice, v=>{ sh.fuelUnitPrice=v; updateSummary(); });
@@ -4491,7 +4532,7 @@ function openPartnerDetail(partnerName){
   renderSitePaymentList(allPayments, partnerName);
 
   document.getElementById('partnerDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>openAddSitePaymentForPartner(partnerName));
+  document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openAddSitePaymentForPartner(partnerName); });
   app.querySelectorAll('.site-detail-row[data-site]').forEach(row=>{
     row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO); });
   });
@@ -4603,7 +4644,7 @@ function renderSitePaymentList(payments, partnerName){
     </div>
   `).join('');
   wrap.querySelectorAll('.editSitePaymentBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>openSitePaymentEditor(btn.dataset.id, null, null, null, partnerName));
+    btn.addEventListener('click', ()=>{ saveMainScroll(); openSitePaymentEditor(btn.dataset.id, null, null, null, partnerName); });
   });
 }
 
@@ -4643,7 +4684,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
   const resolvedSiteName = existing ? existing.siteName : siteName;
   const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'' };
-  const goBack = () => openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName);
+  const goBack = () => { openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -4651,7 +4692,10 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
-          <input type="date" id="sp_date" value="${draft.date}">
+          <div class="date-display-wrap">
+            <span class="date-display-text" id="sp_dateDisplay">${formatDateVN(draft.date)}</span>
+            <input type="date" id="sp_date" value="${draft.date}">
+          </div>
         </div>
         <div class="field">
           <label>Chủ công trình / Nhà thầu</label>
@@ -4674,6 +4718,9 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     </section>
   `;
   attachMoneyInput(document.getElementById('sp_amount'), draft.amount, v=>draft.amount=v);
+  document.getElementById('sp_date').addEventListener('change', e=>{
+    if(e.target.value) document.getElementById('sp_dateDisplay').textContent = formatDateVN(e.target.value);
+  });
 
   document.getElementById('saveSitePaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('sp_date').value || draft.date;
