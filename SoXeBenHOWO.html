@@ -2543,6 +2543,22 @@ function aggregateStrategyData(from, to){
 
   const gTotal = computeResultsGroup(inRange);
 
+  // Giấy tờ xe/tài xế sắp hết hạn trong 30 ngày tới — nguyên liệu thật
+  // cho góc nhìn "chuyên gia pháp lý" (không suy đoán, lấy đúng dữ liệu
+  // đã có ở Cài Đặt → Giấy Tờ Xe & Tài Xế).
+  const upcomingDocumentExpirations = computeDocumentWarnings().map(d=>({
+    type: d.type, driverName: d.driverName, daysLeft: d.daysLeft
+  }));
+
+  // Snapshot chi phí cố định THÁNG HIỆN TẠI — nguyên liệu cho góc nhìn
+  // "chuyên gia kế toán - tài chính" (đúng số đang dùng ở tab Kết Quả,
+  // không phải số ước lượng riêng).
+  const todayYM = todayLocalDateStr();
+  const financialSnapshot = {
+    roadFeeThisMonth: Math.round(roadFeeForRange(todayYM, todayYM)),
+    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
+  };
+
   return {
     periodDays, from, to,
     totalRevenue: Math.round(gTotal.revenue),
@@ -2552,30 +2568,45 @@ function aggregateStrategyData(from, to){
     totalTrips: gTotal.totalTrips,
     driverStats,
     siteRanking,
+    upcomingDocumentExpirations,
+    financialSnapshot,
     lastRepairDate: lastRepair ? lastRepair.date : null,
     lastRepairItem: lastRepair ? lastRepair.item : null,
     kmSinceLastRepair
   };
 }
 
-/// The Vietnamese "system prompt" the person specified, adapted for the
-/// 7/30-day aggregate view instead of a single shift. Forces strict JSON
-/// output so the result can be rendered as organized cards, not a wall of
-/// text.
+/// Hội đồng 4 chuyên gia thay vì 1 vai duy nhất trước đây — và JSON trả
+/// về không còn giới hạn "chỉ 1 công trình tốt nhất + 1 tệ nhất" nữa, mà
+/// bắt buộc liệt kê ĐỦ MỌI công trình + MỌI tài xế đang có trong
+/// summary.siteRanking / summary.driverStats (dù 2 hay 20 cái cũng phải
+/// đủ), đúng yêu cầu "liệt kê tất cả, dữ liệu phải luôn theo cập nhật
+/// mới nhất". Vẫn ép trả JSON thuần để render thành card có tổ chức,
+/// không phải 1 khối chữ.
 function buildStrategyPrompt(summary){
-  return `Mày là Chuyên gia Kế toán và Tối ưu hoá vận tải xe ben HOWO 4 chân. Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính toán chính xác bằng công thức kế toán, không cần tính lại) trong khoảng ${summary.periodDays} ngày, từ ${summary.from} đến ${summary.to}:
+  return `Mày đang đóng vai 1 HỘI ĐỒNG 4 CHUYÊN GIA cùng tư vấn cho chủ 1 đội xe ben HOWO 4 chân tại Việt Nam, gồm:
+1. Chuyên gia điều hành doanh nghiệp Logistics — nhìn vận hành, hiệu suất tài xế, hiệu suất công trình.
+2. Chuyên gia thị trường vận tải — nhìn giá cước, xu hướng, cơ hội/rủi ro thị trường.
+3. Chuyên gia pháp lý / luật vận tải — nhìn giấy tờ, hạn đăng kiểm/đăng ký/phù hiệu, rủi ro pháp lý.
+4. Chuyên gia kế toán - tài chính — nhìn chi phí cố định, dòng tiền, cơ cấu lợi nhuận.
+
+Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính chính xác bằng công thức kế toán của app, không cần tính lại), trong khoảng ${summary.periodDays} ngày, từ ${summary.from} đến ${summary.to} — đây là dữ liệu CẬP NHẬT MỚI NHẤT tính đến thời điểm phân tích:
 
 ${JSON.stringify(summary, null, 2)}
 
-Hãy phân tích số liệu trên và CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
+YÊU CẦU BẮT BUỘC: "siteAnalysis" phải có ĐỦ từng công trình xuất hiện trong summary.siteRanking (không được bỏ sót, không giới hạn số lượng, không chỉ chọn tốt nhất/tệ nhất). "driverAnalysis" phải có ĐỦ từng tài xế xuất hiện trong summary.driverStats. Nếu 1 công trình hay tài xế không có gì đặc biệt để nói, vẫn phải có mặt với ghi chú ngắn kiểu "Hoạt động bình thường, chưa có gì bất thường".
+
+Hãy phân tích và CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
 {
-  "fuelEfficiencyWarnings": [ { "driverName": "<tên tài xế>", "note": "<nhận xét ngắn gọn, ví dụ tài xế này đang hao dầu/km cao hơn bình thường hay không, nêu số liệu cụ thể>" } ],
-  "topProfitSite": { "siteName": "<tên công trình doanh thu/chuyến cao nhất>", "note": "<vì sao nên ưu tiên>" },
-  "bottomProfitSite": { "siteName": "<tên công trình doanh thu/chuyến thấp nhất>", "note": "<lưu ý gì>" },
+  "siteAnalysis": [ { "siteName": "<đúng tên công trình trong siteRanking>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<nhận xét cụ thể theo số liệu, góc điều hành logistics>" } ],
+  "driverAnalysis": [ { "driverName": "<đúng tên tài xế trong driverStats>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<nhận xét hao dầu/km, số ca, hiệu suất>" } ],
+  "marketOutlook": { "note": "<góc nhìn chuyên gia thị trường: giá cước/chuyến hiện tại có hợp lý không, xu hướng, có nên tìm thêm công trình/đàm phán lại giá không>" },
+  "legalComplianceNotes": { "note": "<góc nhìn chuyên gia pháp lý dựa trên upcomingDocumentExpirations: giấy tờ nào cần gia hạn gấp, rủi ro gì nếu chậm trễ>" },
+  "financialStrategyNotes": { "note": "<góc nhìn chuyên gia kế toán dựa trên financialSnapshot + grossProfit: cơ cấu chi phí cố định có ổn không, đề xuất gì để cải thiện dòng tiền>" },
   "maintenanceSuggestion": { "note": "<đề xuất lịch bảo dưỡng lốp/xích/máy dựa trên số km đã chạy kể từ lần sửa chữa gần nhất>" },
-  "generalInsights": [ "<nhận xét thực tế 1>", "<nhận xét thực tế 2>", "<nhận xét thực tế 3>" ]
+  "generalInsights": [ "<nhận định tổng hợp 1 — tổng hoà cả 4 góc nhìn trên, cái nhìn tổng thể nhất>", "<nhận định tổng hợp 2>", "<nhận định tổng hợp 3>" ]
 }
-Chỉ đưa nhận xét dựa trên số liệu thực tế ở trên, không suy đoán số liệu không có. Nếu không đủ dữ liệu để nhận xét mục nào, để giá trị đó là chuỗi rỗng hoặc mảng rỗng.`;
+Chỉ đưa nhận xét dựa trên số liệu thực tế ở trên, không suy đoán số liệu không có. Nếu không đủ dữ liệu cho 1 mục (vd chưa có giấy tờ nào sắp hết hạn), để "note" là chuỗi rỗng — nhưng KHÔNG được bỏ trống mảng siteAnalysis/driverAnalysis nếu summary có dữ liệu.`;
 }
 
 /// Text-only Gemini call (no image) — same API, just omits the inline_data
@@ -2694,10 +2725,12 @@ function renderStrategy(){
   const app = document.getElementById('app');
   const sa = state.strategyAnalysis;
   if(!sa.from || !sa.to){
-    sa.to = todayLocalDateStr();
-    const d = new Date(sa.to+'T00:00:00');
-    d.setDate(d.getDate()-6);
-    sa.from = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    // Trước đây mặc định 7 ngày gần nhất — dễ bị lọt mất công trình nếu
+    // đúng lúc đó công trình đó không chạy ngày nào trong 7 ngày (thực tế
+    // nhiều công trình chỉ chạy 10-15 ngày rồi đổi cung). Đổi mặc định
+    // sang CẢ THÁNG HIỆN TẠI, đồng bộ với tab Kết Quả, để không bỏ sót.
+    const r = currentMonthRange();
+    sa.from = r.from; sa.to = r.to;
   }
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
 
@@ -2749,33 +2782,51 @@ function renderStrategy(){
 }
 
 function renderStrategyResult(result){
-  const fuelWarnings = Array.isArray(result.fuelEfficiencyWarnings) ? result.fuelEfficiencyWarnings : [];
+  const ratingBadgeClass = r => r==='tot' ? 'good' : r==='can_chu_y' ? 'watch' : 'ok';
+  const ratingLabel = r => r==='tot' ? 'Tốt' : r==='can_chu_y' ? 'Cần Chú Ý' : 'Bình Thường';
+  const siteAnalysis = Array.isArray(result.siteAnalysis) ? result.siteAnalysis : [];
+  const driverAnalysis = Array.isArray(result.driverAnalysis) ? result.driverAnalysis : [];
   const insights = Array.isArray(result.generalInsights) ? result.generalInsights : [];
   return `
     <section class="group">
-      <h3>⛽ Cảnh Báo Hao Dầu Theo Tài Xế</h3>
-      ${fuelWarnings.length===0 ? '<div class="hint">Không có cảnh báo nào đáng chú ý.</div>' : fuelWarnings.map(w=>`
+      <h3>🏗️ Từng Công Trình (Góc Điều Hành Logistics)</h3>
+      ${siteAnalysis.length===0 ? '<div class="hint">Chưa có công trình nào trong kỳ này.</div>' : siteAnalysis.map(s=>`
         <div class="card">
-          <div style="font-weight:700; margin-bottom:4px;">${escapeHtml(w.driverName||'')}</div>
-          <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(w.note||'')}</div>
+          <div class="driver-row" style="margin-bottom:4px;">
+            <strong>${escapeHtml(s.siteName||'')}</strong>
+            <span class="rating-badge ${ratingBadgeClass(s.rating)}">${ratingLabel(s.rating)}</span>
+          </div>
+          <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(s.note||'')}</div>
         </div>
       `).join('')}
     </section>
 
     <section class="group">
-      <h3>🏆 Công Trình Hiệu Quả Nhất</h3>
-      <div class="card">
-        <div style="font-weight:700; margin-bottom:4px; color:var(--profit);">${escapeHtml(result.topProfitSite?.siteName||'(chưa rõ)')}</div>
-        <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.topProfitSite?.note||'')}</div>
-      </div>
+      <h3>👤 Từng Tài Xế (Hao Dầu &amp; Hiệu Suất)</h3>
+      ${driverAnalysis.length===0 ? '<div class="hint">Chưa có tài xế nào trong kỳ này.</div>' : driverAnalysis.map(d=>`
+        <div class="card">
+          <div class="driver-row" style="margin-bottom:4px;">
+            <strong>${escapeHtml(d.driverName||'')}</strong>
+            <span class="rating-badge ${ratingBadgeClass(d.rating)}">${ratingLabel(d.rating)}</span>
+          </div>
+          <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(d.note||'')}</div>
+        </div>
+      `).join('')}
     </section>
 
     <section class="group">
-      <h3>⚠️ Công Trình Cần Xem Lại</h3>
-      <div class="card">
-        <div style="font-weight:700; margin-bottom:4px; color:var(--loss);">${escapeHtml(result.bottomProfitSite?.siteName||'(chưa rõ)')}</div>
-        <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.bottomProfitSite?.note||'')}</div>
-      </div>
+      <h3>📊 Góc Nhìn Thị Trường Vận Tải</h3>
+      <div class="card"><div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.marketOutlook?.note||'Chưa đủ dữ liệu.')}</div></div>
+    </section>
+
+    <section class="group">
+      <h3>📋 Góc Nhìn Pháp Lý / Giấy Tờ</h3>
+      <div class="card"><div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.legalComplianceNotes?.note||'Chưa có giấy tờ nào cần chú ý.')}</div></div>
+    </section>
+
+    <section class="group">
+      <h3>💰 Góc Nhìn Kế Toán - Tài Chính</h3>
+      <div class="card"><div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.financialStrategyNotes?.note||'Chưa đủ dữ liệu.')}</div></div>
     </section>
 
     <section class="group">
@@ -2786,7 +2837,7 @@ function renderStrategyResult(result){
     </section>
 
     <section class="group">
-      <h3>🧭 Nhận Xét Chung</h3>
+      <h3>🧭 Nhận Định Tổng Thể (Tổng Hoà 4 Góc Nhìn)</h3>
       ${insights.length===0 ? '<div class="hint">Không có nhận xét thêm.</div>' : insights.map(txt=>`
         <div class="card" style="display:flex; gap:10px; align-items:flex-start;">
           <div>💡</div>
@@ -4280,6 +4331,14 @@ function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, ro
     if(best.revenuePerTrip > 0 && worst.revenuePerTrip < best.revenuePerTrip*0.7){
       insights.push({icon:'🏗️', title:'Chênh lệch hiệu quả giữa các công trình', text:`"${best.name}" đang cho doanh thu/chuyến cao nhất (${fmtVND(best.revenuePerTrip)}), trong khi "${worst.name}" thấp hơn nhiều (${fmtVND(worst.revenuePerTrip)}). Nếu được chọn, nên ưu tiên nhận thêm việc ở công trình có doanh thu/chuyến cao.`});
     }
+  }
+
+  // 4. Full roster of every site recognized in this period — so it's
+  // never ambiguous whether a newly-added site is being picked up (kèm
+  // riêng để tránh mỗi khi có thêm công trình mới, Ông Chủ lại tưởng app
+  // chỉ "nhận diện" đúng 2 công trình được nhắc ở mục 3 phía trên).
+  if(siteRanking.length > 0){
+    insights.push({icon:'📋', title:`Đang nhận diện ${siteRanking.length} công trình trong kỳ này`, text: siteRanking.map(s=>s.name).join(', ')});
   }
 
   return insights;
