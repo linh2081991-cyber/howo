@@ -110,6 +110,14 @@
   .shift-column .shift-card .tag{ font-size:10px; padding:2px 7px; }
   .shift-column .shift-card .profit{ font-size:15px; margin-top:6px; }
   .shift-column .shift-issue-btn{ font-size:9.5px; padding:3px 8px 3px 6px; }
+  /// Tab lớn theo tài xế (thay cho layout 2 cột song song cũ) — tái dùng
+  /// nguyên style .shift-column-head (avatar + tên + số ca) nhưng biến
+  /// thành nút bấm được, xếp hàng ngang, cuộn ngang nếu nhiều hơn 2 tài
+  /// xế. Bấm vào tab nào thì chỉ hiện đúng danh sách ca của tài xế đó.
+  .driver-tabbar{ display:flex; gap:10px; overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:12px; padding-bottom:2px; }
+  .driver-tabbar::-webkit-scrollbar{ display:none; }
+  .driver-tab{ flex:1 1 0; min-width:158px; margin-bottom:0; border:1.5px solid var(--border); cursor:pointer; text-align:left; font:inherit; -webkit-appearance:none; appearance:none; opacity:0.6; transition:box-shadow .15s, border-color .15s, opacity .15s; }
+  .driver-tab.active{ border-color:var(--col-accent, var(--accent)); box-shadow:0 3px 10px rgba(0,0,0,0.10); opacity:1; }
   /// Khối "trường dữ liệu tương ứng" bên dưới mỗi ca: Km chạy, dầu tiêu
   /// hao, doanh thu — trình bày dạng nhãn/giá trị 2 cột cho khoa học,
   /// dễ quét mắt, tất cả đều lấy từ các hàm tính sẵn có (không tính lại).
@@ -148,8 +156,8 @@
   /// còn input ngày thật vẫn nằm dưới, trong suốt, phủ kín để chạm vào đâu
   /// cũng mở đúng lịch chọn ngày gốc của iOS như cũ — chỉ đổi phần NHÌN
   /// THẤY, không đổi cách chọn ngày.
-  .date-display-wrap{ position:relative; }
-  .date-display-text{ display:block; width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); box-sizing:border-box; }
+  .date-display-wrap{ position:relative; height:44px; }
+  .date-display-text{ display:flex; align-items:center; width:100%; height:100%; box-sizing:border-box; font-size:16px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); }
   .date-display-wrap input[type=date]{ position:absolute; inset:0; width:100%; height:100%; opacity:0; margin:0; padding:0; border:none; }
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
@@ -537,7 +545,7 @@ let state = {
   loaded: false,
   searchDate: null,
   resultsRange: null,
-  resultsRoadFeeOverride: null, // if set, overrides settings.monthlyFixedRoadFee for the current results period
+  resultsRoadFeeOverride: null, // nếu có gõ đè, ưu tiên số này hơn số tính từ Tiền Luật Đường Theo Tháng cho kỳ đang xem
   sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' — which screen is showing inside the "Trợ Lý" tab right now
@@ -847,7 +855,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -857,7 +865,8 @@ async function loadAll(){
       sharedDataRef('maintenanceSchedules').get(),
       sharedDataRef('siteContracts').get(),
       sharedDataRef('siteAppraisals').get(),
-      sharedDataRef('monthlyBonuses').get()
+      sharedDataRef('monthlyBonuses').get(),
+      sharedDataRef('roadFeeByMonth').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -868,6 +877,7 @@ async function loadAll(){
     const contractData = contractSnap.exists ? contractSnap.data() : null;
     const appraisalData = appraisalSnap.exists ? appraisalSnap.data() : null;
     const bonusData = bonusSnap.exists ? bonusSnap.data() : null;
+    const roadFeeData = roadFeeSnap.exists ? roadFeeSnap.data() : null;
     state.drivers = dData && Array.isArray(dData.list) ? dData.list : [];
     state.shifts = sData && Array.isArray(sData.list) ? sData.list : [];
     state.repairs = rData && Array.isArray(rData.list) ? rData.list : [];
@@ -877,6 +887,7 @@ async function loadAll(){
     state.siteContracts = contractData && Array.isArray(contractData.list) ? contractData.list : [];
     state.siteAppraisals = appraisalData && Array.isArray(appraisalData.list) ? appraisalData.list : [];
     state.monthlyBonuses = bonusData && Array.isArray(bonusData.list) ? bonusData.list : [];
+    state.roadFeeByMonth = roadFeeData && Array.isArray(roadFeeData.list) ? roadFeeData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -895,6 +906,42 @@ async function saveShifts(){
 async function saveRepairs(){
   try { await sharedDataRef('repairs').set({ list: state.repairs }); }
   catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa — kiểm tra mạng.'); }
+}
+async function saveRoadFeeByMonth(){
+  try { await sharedDataRef('roadFeeByMonth').set({ list: state.roadFeeByMonth }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường — kiểm tra mạng.'); }
+}
+// "2026-07" -> "7/2026" để hiện nhãn gọn cho từng dòng trong danh sách.
+function monthLabelVN(ym){
+  const [y,m] = String(ym).split('-');
+  return `${Number(m)}/${y}`;
+}
+// Liệt kê mọi tháng (dạng "YYYY-MM") mà khoảng ngày [from,to] có chạm
+// vào — dùng để cộng dồn đúng những tháng liên quan khi Ông Chủ lọc 1
+// khoảng ngày bất kỳ trong tab Kết Quả (đa số trường hợp chỉ ra đúng 1
+// tháng, vì khoảng mặc định luôn là "cả tháng hiện tại").
+function monthsBetween(from, to){
+  const months = [];
+  let y = Number(from.slice(0,4)), m = Number(from.slice(5,7));
+  const ey = Number(to.slice(0,4)), em = Number(to.slice(5,7));
+  let guard = 0;
+  while((y<ey || (y===ey && m<=em)) && guard<240){
+    months.push(`${y}-${String(m).padStart(2,'0')}`);
+    m++; if(m>12){ m=1; y++; }
+    guard++;
+  }
+  return months;
+}
+// Tổng tiền luật đường thực đóng trong khoảng [from,to] — cộng dồn từng
+// khoản THÁNG đã ghi trong state.roadFeeByMonth (mỗi tháng 1 số duy
+// nhất, do Ông Chủ tự cộng các lần đóng lẻ trong tháng đó rồi gõ vào).
+// Tháng nào chưa ghi số thì tính là 0, không suy đoán/kế thừa từ tháng
+// khác.
+function roadFeeForRange(from, to){
+  return monthsBetween(from, to).reduce((sum, ym)=>{
+    const e = state.roadFeeByMonth.find(x=>x.month===ym);
+    return sum + (e ? (Number(e.amount)||0) : 0);
+  }, 0);
 }
 async function saveSitePayments(){
   try { await sharedDataRef('sitePayments').set({ list: state.sitePayments }); }
@@ -996,6 +1043,7 @@ function exportBackupFile(){
     maintenanceSchedules: state.maintenanceSchedules,
     siteContracts: state.siteContracts,
     monthlyBonuses: state.monthlyBonuses,
+    roadFeeByMonth: state.roadFeeByMonth,
     settings: state.settings
   };
   const json = JSON.stringify(backup, null, 2);
@@ -1032,10 +1080,11 @@ async function handleRestoreFile(file){
     state.maintenanceSchedules = Array.isArray(backup.maintenanceSchedules) ? backup.maintenanceSchedules : [];
     state.siteContracts = Array.isArray(backup.siteContracts) ? backup.siteContracts : [];
     state.monthlyBonuses = Array.isArray(backup.monthlyBonuses) ? backup.monthlyBonuses : [];
+    state.roadFeeByMonth = Array.isArray(backup.roadFeeByMonth) ? backup.roadFeeByMonth : [];
     if(backup.settings) state.settings = Object.assign(state.settings, backup.settings);
     await saveDrivers(); await saveShifts(); await saveRepairs(); await saveSitePayments();
     await saveDocuments(); await saveMaintenanceSchedules(); await saveSiteContracts(); await saveSettings();
-    await saveMonthlyBonuses();
+    await saveMonthlyBonuses(); await saveRoadFeeByMonth();
     renderAll();
     showToast('Đã phục hồi dữ liệu thành công.');
   }catch(e){
@@ -1401,31 +1450,54 @@ function renderShiftList(){
 
   const driverColumns = groupShiftsIntoDriverColumns(list);
 
-  const cardsHtml = list.length===0
-    ? `<div class="empty"><div class="big">📅</div>Không có ca nào vào ngày ${state.searchDate?formatDateVN(state.searchDate):''}.</div>`
-    : `<div class="shift-columns">
-        ${driverColumns.map((col,idx)=>{
-          const accent = driverColumnAccent(idx);
-          const wideClass = driverColumns.length===1 ? ' full-width' : '';
-          return `
-          <div class="shift-column${wideClass}" style="--col-accent:${accent}">
-            <div class="shift-column-head">
-              <span class="avatar">${driverAvatarIcon()}</span>
-              <span class="head-text">
-                <span class="name">${escapeHtml(col.name)}</span>
-                <span class="count">${col.shifts.length} ca hoạt động</span>
-              </span>
-            </div>
-            ${col.shifts.length===0
-              ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':''}.</div>`
-              : col.shifts.map(renderShiftCard).join('')}
-          </div>`;}).join('')}
-      </div>`;
+  // Tab đang chọn — nếu tài xế đang chọn không còn xuất hiện trong danh
+  // sách hiện tại (vd vừa lọc theo 1 ngày mà tài xế đó không có ca), tự
+  // rơi về tab đầu tiên để không bao giờ hiện màn hình trống vô lý.
+  if(!driverColumns.some(c=>c.key===state.shiftDriverTab)){
+    state.shiftDriverTab = driverColumns.length>0 ? driverColumns[0].key : null;
+  }
+  const activeIdx = driverColumns.findIndex(c=>c.key===state.shiftDriverTab);
+  const activeColumn = activeIdx>=0 ? driverColumns[activeIdx] : null;
+  const activeAccent = driverColumnAccent(activeIdx<0?0:activeIdx);
 
-  app.innerHTML = warningsBannerHtml + searchBarHtml + cardsHtml;
+  const tabBarHtml = driverColumns.length===0 ? '' : `
+    <div class="driver-tabbar">
+      ${driverColumns.map((col,idx)=>{
+        const accent = driverColumnAccent(idx);
+        const active = col.key===state.shiftDriverTab;
+        return `
+        <button class="driver-tab shift-column-head${active?' active':''}" data-key="${escapeHtml(col.key)}" style="--col-accent:${accent}">
+          <span class="avatar">${driverAvatarIcon()}</span>
+          <span class="head-text">
+            <span class="name">${escapeHtml(col.name)}</span>
+            <span class="count">${col.shifts.length} ca hoạt động</span>
+          </span>
+        </button>`;
+      }).join('')}
+    </div>`;
+
+  const cardsHtml = !activeColumn ? `<div class="empty"><div class="big">📅</div>Không có ca nào vào ngày ${state.searchDate?formatDateVN(state.searchDate):''}.</div>` : `
+    <div class="shift-column full-width" style="--col-accent:${activeAccent}">
+      ${activeColumn.shifts.length===0
+        ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':''}.</div>`
+        : activeColumn.shifts.map(renderShiftCard).join('')}
+    </div>`;
+
+  app.innerHTML = warningsBannerHtml + searchBarHtml + tabBarHtml + cardsHtml;
   bindSearchBar();
   bindWarningsBanner();
   bindShiftIssueButtons();
+  bindDriverTabs();
+}
+/// Bấm 1 tab tài xế -> chỉ đổi tab đang chọn rồi vẽ lại toàn bộ danh
+/// sách ca (renderShiftList tự lọc đúng cột theo state.shiftDriverTab).
+function bindDriverTabs(){
+  document.querySelectorAll('.driver-tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.shiftDriverTab = btn.dataset.key;
+      renderShiftList();
+    });
+  });
 }
 /// Tapping the badge jumps straight into the shift (same destination as
 /// tapping the card) but first toasts the single most relevant issue —
@@ -3128,10 +3200,10 @@ function openProjectAppraisalEditor(id){
       // Vay ngân hàng / Bảo hiểm / Đăng kiểm / Khác: app hiện chưa có sổ
       // riêng theo dõi các khoản này theo tháng nên vẫn để Ông Chủ tự nhập.
       fixedLoanMonthly: 0, fixedInsuranceMonthly: 0, fixedRegistrationMonthly: 0, fixedOtherMonthly: 0,
-      // Tiền luật đường mặc định lấy đúng mức đang đóng thật ở Cài Đặt
-      // (đóng theo THÁNG) — Ông Chủ vẫn sửa được riêng cho công trình này
-      // nếu dự tính khác đi.
-      roadFeeEstimate: Number(state.settings.monthlyFixedRoadFee)||0,
+      // Tiền luật đường mặc định lấy đúng mức đang đóng thật của THÁNG
+      // HIỆN TẠI (Cài Đặt → Tiền Luật Đường Theo Tháng) — Ông Chủ vẫn sửa
+      // được riêng cho công trình này nếu dự tính khác đi.
+      roadFeeEstimate: roadFeeForRange(todayLocalDateStr(), todayLocalDateStr()),
       estimatedTripsPerShift: 0
     };
   })();
@@ -3601,6 +3673,66 @@ function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal, otherFixe
   if(marginPerTrip<=0) return { ...base, avgRevenuePerTrip, avgVariableCostPerTrip, breakEvenTrips:null, note:'Doanh thu/chuyến hiện đang thấp hơn chi phí biến đổi/chuyến — không thể hoà vốn với cơ cấu giá hiện tại, dù chạy bao nhiêu chuyến.' };
   const breakEvenTrips = Math.ceil(fixedCost/marginPerTrip);
   return { ...base, avgRevenuePerTrip, avgVariableCostPerTrip, marginPerTrip, breakEvenTrips, actualTrips: totalTrips, surplusTrips: totalTrips-breakEvenTrips, note:null };
+}
+
+// ================= DỰ ĐOÁN HOÀ VỐN CẢ THÁNG (mới, tách riêng) =================
+// KHÔNG đụng gì tới computeBreakEvenDetailed() ở trên — hàm đó vẫn tính
+// đúng điểm hoà vốn CỦA KỲ ĐANG XEM như cũ, giữ nguyên 100%. Hàm dưới
+// đây tính thêm 1 MỤC TIÊU riêng, ỔN ĐỊNH cho CẢ THÁNG hiện tại:
+//   - Chi phí cố định: lấy THẲNG số THÁNG gốc trong hồ sơ tài xế (lương
+//     cứng + tiền nhà + tiền ăn quy theo ngày công chuẩn) — KHÔNG cộng
+//     dồn theo từng ca đã ghi, nên số này đứng yên suốt tháng, không
+//     nhảy theo số ngày đã trôi qua như bên khối "Trong Kỳ". Tiền luật
+//     đường lấy đúng tháng hiện tại từ Cài Đặt → Tiền Luật Đường Theo Tháng.
+//   - Lãi gộp bình quân/chuyến: lấy từ dữ liệu THỰC TẾ N ngày gần nhất
+//     (marginWindowDays = 10 hoặc 30, Ông Chủ tự chọn) — KHÔNG gồm tiền
+//     ăn trong biến phí ở đây (đã dời sang cột cố định phía trên, tránh
+//     tính 2 lần).
+function computeMonthlyBreakEvenProjection(marginWindowDays){
+  const s = state.settings;
+  const workDays = Number(s.standardWorkDaysPerMonth)||28;
+  const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
+
+  const monthlySalary = activeDrivers.reduce((sum,d)=>sum+(Number(d.monthlyBaseSalary)||0),0);
+  const monthlyHousing = activeDrivers.reduce((sum,d)=>sum+(Number(d.monthlyHousingBudget)||0),0);
+  const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
+  const today = todayLocalDateStr();
+  const monthlyRoadFee = roadFeeForRange(today, today);
+  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
+
+  const toDate = today;
+  const fromDateObj = new Date(); fromDateObj.setDate(fromDateObj.getDate()-(marginWindowDays-1));
+  const fromDate = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth()+1).padStart(2,'0')}-${String(fromDateObj.getDate()).padStart(2,'0')}`;
+  const excludedShiftIds = getExcludedRecentShiftIds();
+  const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id));
+  const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
+  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0),0);
+
+  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost };
+  if(totalTrips===0) return { ...base, breakEvenTrips:null, note:`Chưa có chuyến nào trong ${marginWindowDays} ngày gần nhất để tính lãi gộp bình quân.` };
+  const marginPerTrip = (totalRevenue-variableCost)/totalTrips;
+  if(marginPerTrip<=0) return { ...base, marginPerTrip, breakEvenTrips:null, note:'Doanh thu/chuyến đang thấp hơn chi phí biến đổi/chuyến trong khoảng này — chưa thể hoà vốn dù chạy bao nhiêu chuyến.' };
+  const breakEvenTrips = Math.ceil(fixedCost/marginPerTrip);
+
+  // Chiếu tốc độ chạy thực tế (chuyến/ngày, bình quân cửa sổ N ngày) ra
+  // hết những ngày còn lại của tháng — để biết có khả năng đạt hoà vốn
+  // hay không, và còn thiếu bao nhiêu chuyến.
+  const tripsPerDay = totalTrips/marginWindowDays;
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  const dayOfMonth = now.getDate();
+  const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
+  const tripsSoFarThisMonth = state.shifts.filter(sh=>sh.date.slice(0,7)===today.slice(0,7) && !excludedShiftIds.has(sh.id))
+    .reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const projectedTotalTripsThisMonth = tripsSoFarThisMonth + tripsPerDay*daysRemaining;
+  const remainingTripsNeeded = Math.max(0, breakEvenTrips - tripsSoFarThisMonth);
+  const neededPacePerRemainingDay = daysRemaining>0 ? remainingTripsNeeded/daysRemaining : null;
+  const onTrackToHitBreakEven = projectedTotalTripsThisMonth >= breakEvenTrips;
+
+  return { ...base, marginPerTrip, breakEvenTrips, tripsPerDay, daysInMonth, dayOfMonth, daysRemaining,
+    tripsSoFarThisMonth, projectedTotalTripsThisMonth, remainingTripsNeeded, neededPacePerRemainingDay, onTrackToHitBreakEven, note:null };
 }
 
 /// Renders the full plain-language accounting walkthrough shown inside the
@@ -4158,7 +4290,7 @@ function renderResults(){
 
   const repairsHere = repairsInRange(from, to);
   const repairTotal = repairsHere.reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const roadFee = state.resultsRoadFeeOverride!==null ? state.resultsRoadFeeOverride : state.settings.monthlyFixedRoadFee;
+  const roadFee = state.resultsRoadFeeOverride!==null ? state.resultsRoadFeeOverride : roadFeeForRange(from, to);
   // Chi phí cố định hàng tháng khác — Khấu hao xe dự kiến + Gốc/lãi vay
   // ngân hàng + Bảo hiểm xe + Đăng kiểm/Đăng ký/Phù hiệu vận tải (Cài Đặt).
   // Trước đây các khoản này KHÔNG hề được cộng vào bất kỳ công thức tài
@@ -4194,6 +4326,7 @@ function renderResults(){
   const insights = generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, from, to, siteRanking});
   const financialWarnings = computeFinancialWarnings({ gTotal, finalNetProfit, repairTotal, roadFee, otherFixedMonthly, inRangeShifts:inRange, missingFuelPriceShifts, missingFuelPriceLiters, from, to });
   const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal, otherFixedMonthly);
+  const monthlyProjection = computeMonthlyBreakEvenProjection(state.resultsMarginWindowDays===10 ? 10 : 30);
   const costTrend = computeCostPerKmTrend(6);
 
   app.innerHTML = `
@@ -4302,6 +4435,62 @@ function renderResults(){
       </div>
       <button class="btn btn-ghost btn-block" id="breakEvenDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
       <div class="hint" style="margin-top:8px;">Số chuyến tối thiểu cần chạy trong kỳ để doanh thu bù đủ chi phí cố định — chạy nhiều hơn số này mới bắt đầu có lãi thật.</div>
+    </section>
+
+    <section class="group">
+      <h3>🎯 Dự Đoán Hoà Vốn Cả Tháng ${monthLabelVN(todayLocalDateStr().slice(0,7))}</h3>
+      <div class="hint" style="margin-bottom:10px;">Khác với "Điểm Hoà Vốn Trong Kỳ" ở trên (đổi theo từng ngày đã ghi) — đây là 1 MỤC TIÊU ỔN ĐỊNH cho cả tháng, không nhảy số theo ngày, để Ông Chủ có cái nhìn tổng thể và mục tiêu vận hành rõ ràng.</div>
+
+      <div class="seg" id="marginWindowToggle">
+        <button data-val="10" class="${monthlyProjection.marginWindowDays===10?'active':''}">Bình quân 10 ngày gần nhất</button>
+        <button data-val="30" class="${monthlyProjection.marginWindowDays===30?'active':''}">Bình quân 30 ngày gần nhất</button>
+      </div>
+
+      <div class="card" style="margin-top:10px;">
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định cả tháng (lương cứng ${fmtVND(monthlyProjection.monthlySalary)} + tiền nhà ${fmtVND(monthlyProjection.monthlyHousing)} + tiền ăn ${fmtVND(monthlyProjection.monthlyFood)} + luật đường tháng này ${fmtVND(monthlyProjection.monthlyRoadFee)} + khấu hao/vay/bảo hiểm/đăng kiểm ${fmtVND(monthlyProjection.otherFixedMonthly)}) = <strong>${fmtVND(monthlyProjection.fixedCost)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Lấy từ số THÁNG gốc trong hồ sơ tài xế đang hoạt động — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
+      </div>
+
+      <div class="card" style="margin-top:10px;">
+        ${monthlyProjection.breakEvenTrips===null ? `<div class="hint">${escapeHtml(monthlyProjection.note)}</div>` : `
+        <div class="be-formula">
+          <div class="be-frac">
+            <div class="fr-num">Chi phí cố định cả tháng<strong>${fmtVND(monthlyProjection.fixedCost)}</strong></div>
+            <div class="fr-line"></div>
+            <div class="fr-den">Lãi gộp BQ/chuyến (${monthlyProjection.marginWindowDays} ngày gần nhất)<strong>${fmtVND(monthlyProjection.marginPerTrip)}</strong></div>
+          </div>
+          <div class="be-eq-sign">=</div>
+          <div class="be-result">
+            <div class="val">${monthlyProjection.breakEvenTrips}</div>
+            <div class="lbl">chuyến cần cho cả tháng</div>
+          </div>
+        </div>
+        <div class="formula-divider"></div>
+        <div class="summary-row">
+          <span>Đã chạy từ đầu tháng đến nay</span>
+          <span class="val" style="color:var(--profit); font-weight:800;">${monthlyProjection.tripsSoFarThisMonth} chuyến</span>
+        </div>
+        <div class="summary-row">
+          <span>Tốc độ hiện tại (BQ ${monthlyProjection.marginWindowDays} ngày gần nhất)</span>
+          <span class="val">${monthlyProjection.tripsPerDay.toFixed(1)} chuyến/ngày</span>
+        </div>
+        <div class="formula-divider"></div>
+        <div class="summary-row">
+          <span>Dự kiến cả tháng nếu giữ đúng tốc độ này</span>
+          <span class="val" style="color:${monthlyProjection.onTrackToHitBreakEven?'var(--profit)':'var(--loss)'}; font-weight:800;">${Math.round(monthlyProjection.projectedTotalTripsThisMonth)} chuyến ${monthlyProjection.onTrackToHitBreakEven ? '✓ Đạt hoà vốn' : '⚠️ Chưa đạt'}</span>
+        </div>
+        ${monthlyProjection.remainingTripsNeeded>0 ? `
+        <div class="summary-row">
+          <span>Còn thiếu để hoà vốn cả tháng</span>
+          <span class="val" style="color:var(--loss); font-weight:800;">${monthlyProjection.remainingTripsNeeded} chuyến${monthlyProjection.daysRemaining>0 ? ` (còn ${monthlyProjection.daysRemaining} ngày — cần ${monthlyProjection.neededPacePerRemainingDay.toFixed(1)} chuyến/ngày)` : ' — đã hết ngày của tháng'}</span>
+        </div>` : `
+        <div class="summary-row">
+          <span>Đã đủ chuyến hoà vốn cả tháng</span>
+          <span class="val" style="color:var(--profit); font-weight:800;">✓ Dư ${Math.max(0, monthlyProjection.tripsSoFarThisMonth - monthlyProjection.breakEvenTrips)} chuyến</span>
+        </div>`}
+        `}
+      </div>
+      <div class="hint" style="margin-top:8px;">Mục tiêu này dùng để lên kế hoạch vận hành cho cả tháng — không thay thế "Điểm Hoà Vốn Trong Kỳ" ở trên, chỉ bổ sung góc nhìn tổng thể.</div>
     </section>
 
     <section class="group">
@@ -4419,6 +4608,12 @@ function renderResults(){
   });
   document.getElementById('addRepairBtn').addEventListener('click', ()=>openRepairEditor(null));
   document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal(breakEven));
+  document.querySelectorAll('#marginWindowToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.resultsMarginWindowDays = Number(btn.dataset.val);
+      renderAll();
+    });
+  });
   const goCompleteBtn = document.getElementById('goCompletePendingShiftsBtn');
   if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
@@ -5154,12 +5349,18 @@ function renderSettings(){
     </section>
 
     <section class="group">
+      <h3>Tiền Luật Đường Theo Tháng</h3>
+      <div class="hint" style="margin-bottom:10px;">Mỗi tháng chi phí luật đường khác nhau tuỳ cung đường chạy trong tháng đó. Gõ đúng TỔNG số tiền thực đã đóng trong tháng (kể cả các khoản đóng thêm khi đổi cung, đã trừ phần được giảm do trùng đơn vị luật cũ) — cả app sẽ lấy đúng số của từng tháng này để tính toán.</div>
+      <div class="card" id="roadFeeMonthListWrap"></div>
+      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
+        <input type="month" id="rf_newMonth" style="flex:1;">
+        <button class="btn btn-ghost" id="addRoadFeeMonthBtn">+ Thêm Tháng</button>
+      </div>
+    </section>
+
+    <section class="group">
       <h3>Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
       <div class="card">
-        <div class="field">
-          <label>Chi phí luật đường / tháng (mặc định gợi ý khi xem Kết Quả)</label>
-          <input type="text" inputmode="decimal" id="s_roadFee">
-        </div>
         <div class="field">
           <label>Khấu hao xe dự kiến / tháng</label>
           <input type="text" inputmode="decimal" id="s_depreciation">
@@ -5231,16 +5432,56 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:24px;">Lưu Cài Đặt</button>
   `;
 
-  const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget, roadFee: s.monthlyFixedRoadFee,
+  const sVals = { salary: s.defaultMonthlyBaseSalary, food: s.defaultDailyFoodAllowance, housing: s.defaultMonthlyHousingBudget,
     depreciation: s.monthlyVehicleDepreciation||0, loan: s.monthlyLoanPayment||0, insurance: s.monthlyInsurance||0, registration: s.monthlyRegistrationFee||0 };
   attachMoneyInput(document.getElementById('s_salary'), sVals.salary, v=>sVals.salary=v);
   attachMoneyInput(document.getElementById('s_food'), sVals.food, v=>sVals.food=v);
   attachMoneyInput(document.getElementById('s_housing'), sVals.housing, v=>sVals.housing=v);
-  attachMoneyInput(document.getElementById('s_roadFee'), sVals.roadFee, v=>sVals.roadFee=v);
   attachMoneyInput(document.getElementById('s_depreciation'), sVals.depreciation, v=>sVals.depreciation=v);
   attachMoneyInput(document.getElementById('s_loan'), sVals.loan, v=>sVals.loan=v);
   attachMoneyInput(document.getElementById('s_insurance'), sVals.insurance, v=>sVals.insurance=v);
   attachMoneyInput(document.getElementById('s_registration'), sVals.registration, v=>sVals.registration=v);
+
+  // Tiền Luật Đường Theo Tháng — luôn có sẵn 1 dòng cho tháng hiện tại để
+  // gõ ngay, không bắt Ông Chủ phải bấm "+ Thêm Tháng" trước. Giá trị gõ
+  // vào từng dòng chỉ nằm tạm ở đây (rfVals), chỉ thực sự lưu khi bấm
+  // "Lưu Cài Đặt" — giống hệt cách mọi ô khác trên màn Cài Đặt đang hoạt động.
+  const curYM = todayLocalDateStr().slice(0,7);
+  if(!state.roadFeeByMonth.some(e=>e.month===curYM)){
+    state.roadFeeByMonth.push({ id: uid('roadfee'), month: curYM, amount: 0 });
+  }
+  const rfVals = {};
+  function renderRoadFeeMonthList(){
+    const wrap = document.getElementById('roadFeeMonthListWrap');
+    if(!wrap) return;
+    const sorted = [...state.roadFeeByMonth].sort((a,b)=>b.month.localeCompare(a.month));
+    wrap.innerHTML = sorted.map((e,i)=>`
+      <div class="field" style="${i===sorted.length-1?'margin-bottom:0;':''}">
+        <label>Tiền Luật Tháng ${monthLabelVN(e.month)}
+          <button type="button" class="link-btn" data-del-roadfee="${e.id}" style="float:right; padding:0; color:var(--loss);">Xoá</button>
+        </label>
+        <input type="text" inputmode="decimal" id="rf_${e.id}">
+      </div>`).join('');
+    sorted.forEach(e=>{
+      rfVals[e.id] = e.amount;
+      attachMoneyInput(document.getElementById(`rf_${e.id}`), e.amount, v=>rfVals[e.id]=v);
+    });
+    document.querySelectorAll('[data-del-roadfee]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        state.roadFeeByMonth = state.roadFeeByMonth.filter(x=>x.id!==btn.dataset.delRoadfee);
+        renderRoadFeeMonthList();
+      });
+    });
+  }
+  renderRoadFeeMonthList();
+  document.getElementById('addRoadFeeMonthBtn').addEventListener('click', ()=>{
+    const picked = document.getElementById('rf_newMonth').value;
+    if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
+    if(state.roadFeeByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
+    state.roadFeeByMonth.push({ id: uid('roadfee'), month: picked, amount: 0 });
+    document.getElementById('rf_newMonth').value='';
+    renderRoadFeeMonthList();
+  });
 
   const changeKeyBtn = document.getElementById('changeGeminiKeyBtn');
   if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
@@ -5252,11 +5493,12 @@ function renderSettings(){
     s.defaultMonthlyBaseSalary = sVals.salary;
     s.defaultDailyFoodAllowance = sVals.food;
     s.defaultMonthlyHousingBudget = sVals.housing;
-    s.monthlyFixedRoadFee = sVals.roadFee;
     s.monthlyVehicleDepreciation = sVals.depreciation;
     s.monthlyLoanPayment = sVals.loan;
     s.monthlyInsurance = sVals.insurance;
     s.monthlyRegistrationFee = sVals.registration;
+    state.roadFeeByMonth.forEach(e=>{ if(rfVals[e.id]!==undefined) e.amount = rfVals[e.id]; });
+    await saveRoadFeeByMonth();
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
