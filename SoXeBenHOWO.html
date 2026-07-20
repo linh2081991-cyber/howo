@@ -2952,6 +2952,51 @@ function historicalMonthlyFixedCostReal(){
   }
   return { baseSalaryMonthly, housingMonthly, depreciationMonthly };
 }
+/// Trả GỐC + LÃI vay ngân hàng theo phương pháp "DƯ NỢ GIẢM DẦN" — cách
+/// tính phổ biến nhất mà ngân hàng VN áp dụng cho vay mua xe tải/xe ben
+/// (khác với vay trả góp đều — annuity — thường chỉ dùng cho vay tiêu
+/// dùng cá nhân):
+///   • GỐC trả ĐỀU mỗi tháng = Số tiền vay ÷ Thời hạn vay (tháng)
+///   • LÃI mỗi tháng tính trên DƯ NỢ CÒN LẠI đầu tháng đó × (lãi suất
+///     năm ÷ 12) — nên lãi (và tổng gốc+lãi) GIẢM DẦN qua từng tháng,
+///     đúng đặc điểm Ông Chủ mô tả, khác hẳn một con số cố định áng chừng.
+/// Đây là công cụ MÔ PHỎNG riêng cho module Thẩm Định (isolated) — không
+/// đụng tới bất kỳ hàm P&L/hoà vốn gốc nào của app. Kết quả trả ra chỉ để
+/// GỢI Ý điền vào ô "Trả gốc + lãi vay ngân hàng dự kiến (đ/tháng)" sẵn
+/// có — Ông Chủ vẫn có thể tự sửa tay số cuối cùng như trước.
+function computeLoanAmortization(p){
+  const principal = Number(p.loanAmount)||0;
+  const annualRatePercent = Number(p.loanAnnualRatePercent)||0;
+  const termMonths = Math.max(0, Math.round(Number(p.loanTermMonths)||0));
+  const monthsElapsed = Math.max(0, Math.min(termMonths, Math.round(Number(p.loanMonthsElapsed)||0)));
+  if(principal<=0 || termMonths<=0){
+    return { valid:false, principal, annualRatePercent, termMonths, monthsElapsed,
+             principalPerMonth:0, monthlyRate:0, currentMonthIndex:monthsElapsed+1,
+             balanceStart:0, interestThisMonth:0, totalThisMonth:0, avgRemainingMonthly:0 };
+  }
+  const principalPerMonth = principal/termMonths;
+  const monthlyRate = annualRatePercent/100/12;
+  // Dư nợ còn lại NGAY ĐẦU tháng hiện tại (sau khi đã trả monthsElapsed kỳ gốc trước đó).
+  const balanceStart = Math.max(0, principal - principalPerMonth*monthsElapsed);
+  const interestThisMonth = balanceStart*monthlyRate;
+  const totalThisMonth = principalPerMonth + interestThisMonth;
+  // Bình quân số tiền phải trả/tháng cho PHẦN KỲ VAY CÒN LẠI (từ tháng
+  // hiện tại tới hết hạn) — cộng dồn đúng lãi từng tháng trên dư nợ giảm
+  // dần thực tế (không phải ước lượng), để Ông Chủ có lựa chọn dùng một
+  // con số ỔN ĐỊNH hơn cho suốt vòng đời công trình thay vì số tháng này
+  // (vốn sẽ còn giảm tiếp ở các tháng sau).
+  const remainingMonths = termMonths - monthsElapsed;
+  let totalRemainingPayment = 0;
+  for(let i=0; i<remainingMonths; i++){
+    const bal = Math.max(0, principal - principalPerMonth*(monthsElapsed+i));
+    totalRemainingPayment += principalPerMonth + bal*monthlyRate;
+  }
+  const avgRemainingMonthly = remainingMonths>0 ? totalRemainingPayment/remainingMonths : 0;
+  return { valid:true, principal, annualRatePercent, termMonths, monthsElapsed,
+           principalPerMonth, monthlyRate, currentMonthIndex:monthsElapsed+1,
+           balanceStart, interestThisMonth, totalThisMonth, avgRemainingMonthly };
+}
+
 /// Core simulation for ONE prospective project. Everything downstream
 /// (list cards, side-by-side comparison, live preview in the editor) is
 /// rendered from this single function so all three views can never drift
@@ -2995,7 +3040,17 @@ function computeAppraisalMetrics(p){
 
   const tripsPerShift = Math.max(0, Number(p.estimatedTripsPerShift)||0);
   const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||0;
-  const monthlyTripsEstimate = (tripsPerShift>0 && standardWorkDays>0) ? tripsPerShift*standardWorkDays : 0;
+  // QUAN TRỌNG: xe chạy đủ CẢ 2 CA/NGÀY (Ca Ngày + Ca Đêm — đúng số lượng
+  // SHIFT_TYPES thật của app, ứng với 2 lái xe hiện có), KHÔNG PHẢI 1
+  // ca/ngày như công thức cũ. Toàn bộ chi phí cố định bên dưới (lương
+  // cứng, nhà ở, vay ngân hàng...) vốn đã là tổng GỘP CHO CẢ THÁNG VÀ CẢ
+  // 2 LÁI XE, nên sản lượng (số chuyến) dùng để so sánh với chi phí đó
+  // cũng phải quy đổi theo đúng CẢ 2 CA — nếu chỉ nhân theo số ngày công
+  // (coi như 1 ca/ngày) thì sản lượng cả tháng bị đánh giá THẤP ĐÚNG BẰNG
+  // 1/2 thực tế, khiến "số ca hoà vốn" và "khả thi trong tháng" sai lệch.
+  const shiftsPerDay = SHIFT_TYPES.length; // = 2 (Ca Ngày + Ca Đêm)
+  const totalShiftSlotsPerMonth = standardWorkDays * shiftsPerDay;
+  const monthlyTripsEstimate = (tripsPerShift>0 && totalShiftSlotsPerMonth>0) ? tripsPerShift*totalShiftSlotsPerMonth : 0;
 
   // ----- Chi phí biến đổi/chuyến (đúng yêu cầu: dầu + lương chuyến + tiền
   // ăn + tiền luật đường), lấy trực tiếp từ các trường Ông Chủ tự nhập -----
@@ -3035,13 +3090,14 @@ function computeAppraisalMetrics(p){
   const breakEvenTrips = grossProfitPerTrip>0 ? Math.ceil(fixedCostMonthly/grossProfitPerTrip) : null;
   const breakEvenShifts = (breakEvenTrips!==null && tripsPerShift>0) ? Math.ceil(breakEvenTrips/tripsPerShift) : null;
 
-  const feasible = (breakEvenShifts!==null && standardWorkDays>0) ? (breakEvenShifts<=standardWorkDays) : null;
-  const shortfallShifts = (feasible===false) ? (breakEvenShifts-standardWorkDays) : 0;
+  const feasible = (breakEvenShifts!==null && totalShiftSlotsPerMonth>0) ? (breakEvenShifts<=totalShiftSlotsPerMonth) : null;
+  const shortfallShifts = (feasible===false) ? (breakEvenShifts-totalShiftSlotsPerMonth) : 0;
 
-  // Lợi nhuận dự kiến/tháng nếu chạy đủ ngày công chuẩn đã cấu hình ở
-  // Cài Đặt — con số quyết định cuối cùng, không chỉ dừng ở "lãi/chuyến".
-  const projectedMonthlyProfit = (grossProfitPerShift!==null && standardWorkDays>0)
-    ? (standardWorkDays*grossProfitPerShift - fixedCostMonthly) : null;
+  // Lợi nhuận dự kiến/tháng nếu chạy đủ TỔNG SỐ CA CẢ THÁNG (ngày công
+  // chuẩn × 2 ca Ngày+Đêm) — con số quyết định cuối cùng, không chỉ dừng
+  // ở "lãi/chuyến".
+  const projectedMonthlyProfit = (grossProfitPerShift!==null && totalShiftSlotsPerMonth>0)
+    ? (totalShiftSlotsPerMonth*grossProfitPerShift - fixedCostMonthly) : null;
   const roiPercent = (fixedCostMonthly>0 && projectedMonthlyProfit!==null)
     ? (projectedMonthlyProfit/fixedCostMonthly*100) : null;
 
@@ -3058,7 +3114,7 @@ function computeAppraisalMetrics(p){
            variableCostPerTrip, grossProfitPerTrip, tripsPerShift, grossProfitPerShift,
            roadFeeMonthly, fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly,
            fixedLoanMonthly, fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly, fixedCostMonthly,
-           breakEvenTrips, breakEvenShifts, standardWorkDays, feasible, shortfallShifts,
+           breakEvenTrips, breakEvenShifts, standardWorkDays, shiftsPerDay, totalShiftSlotsPerMonth, feasible, shortfallShifts,
            projectedMonthlyProfit, roiPercent };
 }
 
@@ -3143,7 +3199,7 @@ function renderProjectAppraisal(){
             <div class="compare-row"><span>Số chuyến/ca dự tính</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
             <div class="compare-row"><span>Số chuyến hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn'}</span></div>
             <div class="compare-row"><span>Số ca hoà vốn / tháng</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'—'}</span></div>
-            <div class="compare-row"><span>Khả thi (so ngày công chuẩn ${m.standardWorkDays} ca)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+            <div class="compare-row"><span>Khả thi (so tổng ${m.totalShiftSlotsPerMonth} ca/tháng)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
             <div class="compare-row"><span>Lợi nhuận dự kiến/tháng</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
             <div class="compare-row"><span>ROI/tháng</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
           </div>`;
@@ -3224,8 +3280,8 @@ function renderAppraisalList(metricsById){
       <div class="summary-row"><span>Chi phí cố định/tháng (lương cứng+nhà+khấu hao+vay+bảo hiểm+đăng kiểm+khác)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
       <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được với cơ cấu giá này'}</span></div>
       <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'Chưa đủ dữ liệu (cần nhập số chuyến/ca)'}</span></div>
-      <div class="summary-row"><span>So với ngày công chuẩn (${m.standardWorkDays} ca/tháng)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
-      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ngày công chuẩn)</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
+      <div class="summary-row"><span>So với tổng số ca cả tháng (${m.standardWorkDays} ngày × 2 ca = ${m.totalShiftSlotsPerMonth} ca)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.totalShiftSlotsPerMonth} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
       <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
     </div>`;
   }).join('');
@@ -3262,6 +3318,14 @@ function openProjectAppraisalEditor(id){
     fixedLoanMonthly: existing.fixedLoanMonthly||0,
     fixedInsuranceMonthly: existing.fixedInsuranceMonthly||0,
     fixedRegistrationMonthly: existing.fixedRegistrationMonthly||0,
+    // Chi tiết vay ngân hàng (số tiền vay + lãi suất + thời hạn + số
+    // tháng đã trả) — công trình tạo TRƯỚC bản cập nhật này chưa có các
+    // trường này, mặc định về 0 (không ảnh hưởng fixedLoanMonthly cũ đã
+    // lưu, Ông Chủ vẫn dùng số cũ bình thường cho tới khi tự bấm tính lại).
+    loanAmount: existing.loanAmount||0,
+    loanAnnualRatePercent: existing.loanAnnualRatePercent||0,
+    loanTermMonths: existing.loanTermMonths||0,
+    loanMonthsElapsed: existing.loanMonthsElapsed||0,
     // Công trình tạo TRƯỚC bản cập nhật này có thể chỉ có field cũ
     // "fixedCostAllocated" (một cục gộp chung, không tách khoản mục) —
     // chuyển nguyên giá trị đó sang dòng "Chi phí cố định khác" để KHÔNG
@@ -3285,6 +3349,7 @@ function openProjectAppraisalEditor(id){
       // Vay ngân hàng / Bảo hiểm / Đăng kiểm / Khác: app hiện chưa có sổ
       // riêng theo dõi các khoản này theo tháng nên vẫn để Ông Chủ tự nhập.
       fixedLoanMonthly: 0, fixedInsuranceMonthly: 0, fixedRegistrationMonthly: 0, fixedOtherMonthly: 0,
+      loanAmount: 0, loanAnnualRatePercent: 0, loanTermMonths: 0, loanMonthsElapsed: 0,
       // Tiền luật đường mặc định lấy đúng mức đang đóng thật của THÁNG
       // HIỆN TẠI (Cài Đặt → Tiền Luật Đường Theo Tháng) — Ông Chủ vẫn sửa
       // được riêng cho công trình này nếu dự tính khác đi.
@@ -3316,9 +3381,9 @@ function openProjectAppraisalEditor(id){
           <input type="number" inputmode="decimal" id="ap_load" placeholder="0" value="${blankIfZero(draft.loadPerTrip)}">
         </div>
         <div class="field">
-          <label>Số chuyến dự tính chạy được trong 1 ca</label>
+          <label>Số chuyến dự tính chạy được / ca (áp dụng cho cả Ca Ngày lẫn Ca Đêm)</label>
           <input type="number" inputmode="decimal" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
-          <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế — đây là chỉ số quyết định công trình cần bao nhiêu CA mới hoà vốn, không chỉ bao nhiêu chuyến.</div>
+          <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế. Xe chạy đủ 2 ca/ngày (Ca Ngày + Ca Đêm, đúng 2 lái xe hiện có) nên app TỰ NHÂN ĐÔI số này khi tính sản lượng cả tháng — Ông Chủ chỉ cần nhập số chuyến của MỘT ca, không cần cộng sẵn cho cả 2 ca.</div>
         </div>
         <div class="field">
           <label>Giá cước</label>
@@ -3377,7 +3442,32 @@ function openProjectAppraisalEditor(id){
         <div class="field">
           <label>Trả gốc + lãi vay ngân hàng dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_loan">
-          <div class="hint">App chưa có sổ riêng theo dõi khoản này — Ông Chủ tự nhập tay.</div>
+          <div class="hint">Số tiền cuối cùng dùng vào chi phí cố định — có thể tự gõ tay, hoặc dùng công cụ tính tự động ngay bên dưới rồi bấm 1 trong 2 nút "Dùng số..." để tự điền vào đây.</div>
+        </div>
+        <div class="card" style="margin:8px 0; background:var(--bg);">
+          <div style="font-weight:700; font-size:14px; margin-bottom:2px;">🧮 Công Cụ Tính Gốc + Lãi Tự Động (Dư Nợ Giảm Dần)</div>
+          <div class="hint" style="margin-bottom:8px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định như số Ông Chủ tự áng chừng ở trên.</div>
+          <div class="two-col">
+            <div class="field">
+              <label>Số tiền vay ngân hàng (đ)</label>
+              <input type="text" inputmode="decimal" id="ap_loanAmount">
+            </div>
+            <div class="field">
+              <label>Lãi suất vay (%/năm)</label>
+              <input type="number" inputmode="decimal" id="ap_loanRate" placeholder="0" value="${blankIfZero(draft.loanAnnualRatePercent)}">
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="field">
+              <label>Thời hạn vay (tháng)</label>
+              <input type="number" inputmode="numeric" id="ap_loanTerm" placeholder="0" value="${blankIfZero(draft.loanTermMonths)}">
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Đã vay được (số tháng đã trả)</label>
+              <input type="number" inputmode="numeric" id="ap_loanElapsed" placeholder="0" value="${blankIfZero(draft.loanMonthsElapsed)}">
+            </div>
+          </div>
+          <div id="ap_loanFormula" style="margin-top:8px;"></div>
         </div>
         <div class="field">
           <label>Bảo hiểm xe dự kiến (đ/tháng)</label>
@@ -3450,11 +3540,12 @@ function openProjectAppraisalEditor(id){
       <div class="summary-row" style="margin-top:6px;"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.fixedCostMonthly.toLocaleString('vi-VN')} ÷ ${Math.round(m.grossProfitPerTrip).toLocaleString('vi-VN')} = <strong>${m.breakEvenTrips} chuyến</strong></span></div>
       ${m.breakEvenShifts!==null ? `
       <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips} ÷ ${m.tripsPerShift} = <strong>${m.breakEvenShifts} ca</strong></span></div>
-      <div class="summary-row"><span>Ngày công chuẩn/tháng (Cài Đặt)</span><span class="val">${m.standardWorkDays} ca</span></div>
-      <div class="summary-row total"><span>KẾT LUẬN KHẢ THI</span><span class="val">${m.feasible ? `<span class="rating-badge good">Khả thi — dư ${m.standardWorkDays-m.breakEvenShifts} ca</span>` : `<span class="rating-badge warn">Không khả thi trong 1 tháng — thiếu ${m.shortfallShifts} ca</span>`}</span></div>
-      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.standardWorkDays} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
+      <div class="summary-row"><span>Ngày công chuẩn/tháng (Cài Đặt)</span><span class="val">${m.standardWorkDays} ngày</span></div>
+      <div class="summary-row"><span>Tổng số ca cả tháng (xe chạy 2 ca/ngày: Ngày + Đêm)</span><span class="val">${m.standardWorkDays} × ${m.shiftsPerDay} = <strong>${m.totalShiftSlotsPerMonth} ca</strong></span></div>
+      <div class="summary-row total"><span>KẾT LUẬN KHẢ THI</span><span class="val">${m.feasible ? `<span class="rating-badge good">Khả thi — dư ${m.totalShiftSlotsPerMonth-m.breakEvenShifts} ca</span>` : `<span class="rating-badge warn">Không khả thi trong 1 tháng — thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.totalShiftSlotsPerMonth} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
       <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
-      ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được trong 1 ca" để quy đổi ra số CA hoà vốn và kiểm tra có khả thi trong 1 tháng hay không.</div>`}
+      ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được / ca" để quy đổi ra số CA hoà vốn và kiểm tra có khả thi trong 1 tháng hay không.</div>`}
       `}
     `;
   };
@@ -3478,6 +3569,48 @@ function openProjectAppraisalEditor(id){
   attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_depreciation'), draft.fixedDepreciationMonthly, v=>{ draft.fixedDepreciationMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_loan'), draft.fixedLoanMonthly, v=>{ draft.fixedLoanMonthly=v; updatePreview(); });
+
+  // ---- Công cụ tính Gốc+Lãi vay ngân hàng theo dư nợ giảm dần (isolated,
+  // chỉ ảnh hưởng tới đúng ô "Trả gốc+lãi vay ngân hàng dự kiến" ở trên
+  // khi Ông Chủ chủ động bấm 1 trong 2 nút áp dụng — không tự ý ghi đè). ----
+  const renderLoanFormula = ()=>{
+    const la = computeLoanAmortization(draft);
+    const box = document.getElementById('ap_loanFormula');
+    if(!box) return;
+    if(!la.valid){
+      box.innerHTML = `<div class="hint">Nhập đủ "Số tiền vay ngân hàng" và "Thời hạn vay (tháng)" để app tự tính công thức gốc+lãi giảm dần.</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="summary-row"><span>Gốc trả đều/tháng</span><span class="val">${fmtVND(la.principal)} ÷ ${la.termMonths} tháng = <strong>${fmtVND(la.principalPerMonth)}</strong></span></div>
+      <div class="summary-row"><span>Dư nợ đầu tháng thứ ${la.currentMonthIndex}</span><span class="val">${fmtVND(la.balanceStart)}</span></div>
+      <div class="summary-row"><span>Lãi tháng thứ ${la.currentMonthIndex}</span><span class="val">${fmtVND(la.balanceStart)} × (${la.annualRatePercent}%/năm ÷ 12 tháng) = <strong>${fmtVND(la.interestThisMonth)}</strong></span></div>
+      <div class="summary-row total"><span>GỐC + LÃI THÁNG THỨ ${la.currentMonthIndex}</span><span class="val">${fmtVND(la.principalPerMonth)} + ${fmtVND(la.interestThisMonth)} = <strong>${fmtVND(la.totalThisMonth)}</strong></span></div>
+      <div class="summary-row"><span>Bình quân/tháng cho ${la.termMonths-la.monthsElapsed} tháng còn lại</span><span class="val">${fmtVND(la.avgRemainingMonthly)}</span></div>
+      <div class="hint" style="margin-top:6px;">Số tiền phải trả sẽ tiếp tục GIẢM DẦN mỗi tháng sau vì lãi tính trên dư nợ còn lại — dùng "số tháng này" nếu muốn số đúng cho hiện tại, hoặc "số bình quân" nếu muốn 1 con số ổn định dùng suốt vòng đời công trình.</div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button type="button" class="btn btn-ghost btn-sm" id="applyLoanCurrentBtn" style="flex:1;">Dùng số tháng này</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="applyLoanAvgBtn" style="flex:1;">Dùng số bình quân cả kỳ</button>
+      </div>`;
+    document.getElementById('applyLoanCurrentBtn').addEventListener('click', ()=>{
+      draft.fixedLoanMonthly = Math.round(la.totalThisMonth);
+      document.getElementById('ap_loan').value = draft.fixedLoanMonthly.toLocaleString('vi-VN');
+      updatePreview();
+      showToast('Đã điền số gốc+lãi THÁNG NÀY vào ô chi phí cố định.');
+    });
+    document.getElementById('applyLoanAvgBtn').addEventListener('click', ()=>{
+      draft.fixedLoanMonthly = Math.round(la.avgRemainingMonthly);
+      document.getElementById('ap_loan').value = draft.fixedLoanMonthly.toLocaleString('vi-VN');
+      updatePreview();
+      showToast('Đã điền số gốc+lãi BÌNH QUÂN cả kỳ vào ô chi phí cố định.');
+    });
+  };
+  attachMoneyInput(document.getElementById('ap_loanAmount'), draft.loanAmount, v=>{ draft.loanAmount=v; renderLoanFormula(); });
+  document.getElementById('ap_loanRate').addEventListener('input', e=>{ draft.loanAnnualRatePercent=Number(e.target.value)||0; renderLoanFormula(); });
+  document.getElementById('ap_loanTerm').addEventListener('input', e=>{ draft.loanTermMonths=Number(e.target.value)||0; renderLoanFormula(); });
+  document.getElementById('ap_loanElapsed').addEventListener('input', e=>{ draft.loanMonthsElapsed=Number(e.target.value)||0; renderLoanFormula(); });
+  renderLoanFormula();
+
   attachMoneyInput(document.getElementById('ap_insurance'), draft.fixedInsuranceMonthly, v=>{ draft.fixedInsuranceMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_registration'), draft.fixedRegistrationMonthly, v=>{ draft.fixedRegistrationMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_otherFixed'), draft.fixedOtherMonthly, v=>{ draft.fixedOtherMonthly=v; updatePreview(); });
@@ -3529,7 +3662,7 @@ function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice){
 
 ${JSON.stringify(payload, null, 2)}
 
-Nhiệm vụ: đọc đúng các số liệu trên (doanh thu thuần/chuyến, chi phí dầu thực tế, lương chuyến dự kiến, tiền ăn dự kiến, tiền luật đường quy đổi/chuyến, lãi gộp/chuyến đã trừ đủ 4 khoản này, lãi gộp/ca, chi phí cố định/tháng, số chuyến VÀ số ca hoà vốn, có khả thi trong 1 tháng hay không so với ngày công chuẩn, lợi nhuận dự kiến/tháng, ROI/tháng) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào. Lưu ý: "lợi nhuận dự kiến/tháng" và "khả thi trong tháng" là căn cứ quyết định quan trọng hơn lãi gộp/chuyến đơn lẻ — công trình lãi/chuyến cao nhưng không đủ ca trong tháng để hoà vốn vẫn là một rủi ro cần nêu rõ. Nếu một công trình có "soChuyenDuTinhMoiCa" là null (chưa nhập), PHẢI nêu rõ đây là thiếu sót dữ liệu khiến chưa đánh giá được tính khả thi trong tháng của công trình đó.
+Nhiệm vụ: đọc đúng các số liệu trên (doanh thu thuần/chuyến, chi phí dầu thực tế, lương chuyến dự kiến, tiền ăn dự kiến, tiền luật đường quy đổi/chuyến, lãi gộp/chuyến đã trừ đủ 4 khoản này, lãi gộp/ca, chi phí cố định/tháng, số chuyến VÀ số ca hoà vốn, có khả thi trong 1 tháng hay không so với "tongSoCaCaThangXeChay2CaNgayDem" — tức TỔNG SỐ CA cả tháng khi xe chạy đủ CẢ Ca Ngày lẫn Ca Đêm mỗi ngày công (không phải chỉ so với số ngày công chuẩn), lợi nhuận dự kiến/tháng, ROI/tháng) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào. Lưu ý: "lợi nhuận dự kiến/tháng" và "khả thi trong tháng" là căn cứ quyết định quan trọng hơn lãi gộp/chuyến đơn lẻ — công trình lãi/chuyến cao nhưng không đủ ca trong tháng để hoà vốn vẫn là một rủi ro cần nêu rõ. Nếu một công trình có "soChuyenDuTinhMoiCa" là null (chưa nhập), PHẢI nêu rõ đây là thiếu sót dữ liệu khiến chưa đánh giá được tính khả thi trong tháng của công trình đó.
 
 Chỉ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
 {
@@ -3580,6 +3713,7 @@ async function runAppraisalAnalysis(){
         soChuyenHoaVon: m.breakEvenTrips,
         soCaHoaVon: m.breakEvenShifts,
         ngayCongChuanMoiThang: m.standardWorkDays,
+        tongSoCaCaThangXeChay2CaNgayDem: m.totalShiftSlotsPerMonth,
         khaThiTrongThang: m.feasible,
         loiNhuanDuKienMoiThang: m.projectedMonthlyProfit!==null ? Math.round(m.projectedMonthlyProfit) : null,
         roiPhanTramMoiThang: m.roiPercent!==null ? +m.roiPercent.toFixed(1) : null
