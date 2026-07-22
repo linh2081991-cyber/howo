@@ -1371,17 +1371,25 @@ function groupShiftsIntoDriverColumns(list){
 // Nhãn hiển thị dưới tên tài xế ở mỗi tab cột — TRƯỚC ĐÂY ghi "${col.shifts.length}
 // ca hoạt động", nhưng col.shifts gồm CẢ ca Nghỉ Phép/Nghỉ Mưa/Bảo Trì/Nằm Bãi
 // (mọi trạng thái), nên nhãn "hoạt động" là SAI — không dùng được để đối chiếu
-// lương thực tế. Thay bằng đúng 2 số theo bản chất tài chính:
-//  - "ca lương": đếm ca có sh.baseSalaryAllocation > 0 — đây là con số SNAPSHOT
-//    thật đã lưu tại thời điểm ghi ca (theo costPolicies[status].baseSalary lúc
-//    đó), tức đúng ca ĐÃ được tính lương cứng thật, không suy diễn lại.
-//  - "nghỉ phép": đếm đúng ca có status==='onLeave'.
+// lương thực tế. Thay bằng đúng 3 rổ, LUÔN cộng lại vừa đúng tổng số ca của cột
+// (không rổ nào bị "lọt khe" như bản 2-rổ trước — 1 ca không phải Nghỉ Phép
+// nhưng lại có chính sách Lương Cứng=tắt ở Cài Đặt sẽ rơi vào đúng rổ thứ 3):
+//  - "ca lương": đếm ca có sh.baseSalaryAllocation > 0 — SNAPSHOT thật đã lưu
+//    tại thời điểm ghi ca (theo costPolicies[status].baseSalary lúc đó).
+//  - "phép": đếm đúng ca có status==='onLeave'.
+//  - "khác (không lương)": phần còn lại — ca có trạng thái khác Nghỉ Phép
+//    nhưng vẫn không được tính lương cứng (VD Nghỉ Mưa/Bảo Trì/Nằm Bãi nếu
+//    Ông Chủ tắt Lương Cứng cho trạng thái đó ở Cài Đặt). Chỉ hiện rổ này khi
+//    >0, để bình thường badge vẫn gọn 2 số như cũ.
 // Dùng chung cho cả Danh Sách Ca hiện tại lẫn màn Xem Lại Tháng Cũ, để 2 nơi
 // luôn khớp nhau tuyệt đối, áp dụng đồng nhất cho mọi tháng về sau.
 function driverColumnCountsLabel(shifts){
   const paidCount = shifts.filter(sh=>(Number(sh.baseSalaryAllocation)||0)>0).length;
   const onLeaveCount = shifts.filter(sh=>sh.status==='onLeave').length;
-  return `${paidCount} ca lương · ${onLeaveCount} phép`;
+  const otherUnpaidCount = shifts.length - paidCount - onLeaveCount;
+  return otherUnpaidCount>0
+    ? `${paidCount} ca lương · ${onLeaveCount} phép · ${otherUnpaidCount} khác (không lương)`
+    : `${paidCount} ca lương · ${onLeaveCount} phép`;
 }
 /// Card 1 ca dùng chung cho cả layout cột — bỏ dòng "Tài xế: ..." so với
 /// bản gộp cũ vì tên tài xế giờ đã là tiêu đề cột, tránh lặp lại 2 lần.
