@@ -550,6 +550,8 @@ let state = {
   draftShift: null,
   loaded: false,
   searchDate: null,
+  shiftArchiveMonth: null, // null = xem Danh Sách Ca bình thường (tháng hiện tại); "YYYY-MM" = đang xem lại 1 tháng cũ (chỉ đọc)
+  shiftArchiveDriverTab: null, // tab tài xế đang chọn RIÊNG cho màn xem lại tháng cũ — tách biệt với state.shiftDriverTab của Danh Sách Ca bình thường
   resultsRange: null,
   resultsRoadFeeOverride: null, // nếu có gõ đè, ưu tiên số này hơn số tính từ Tiền Luật Đường Theo Tháng cho kỳ đang xem
   sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
@@ -1313,6 +1315,9 @@ function renderHeader(){
       back.className='btn btn-ghost btn-sm'; back.textContent='Đóng';
       back.onclick=()=>{ state.view='list'; state.draftShift=null; renderAll(); };
       action.appendChild(back);
+    } else if(state.shiftArchiveMonth){
+      title.textContent = 'Tháng ' + monthLabelVN(state.shiftArchiveMonth);
+      sub.textContent = 'Xem lại — chỉ đọc';
     } else {
       title.textContent='Ca Làm Việc';
       sub.textContent = state.shifts.length + ' ca đã ghi';
@@ -1362,6 +1367,21 @@ function groupShiftsIntoDriverColumns(list){
   // Chỉ giữ cột của tài xế hiện có (kể cả 0 ca, để layout ổn định) hoặc
   // cột "tài xế cũ" có ít nhất 1 ca thật — không hiện cột rỗng vô ích.
   return columns.filter(c=>c.shifts.length>0 || state.drivers.some(d=>d.id===c.key));
+}
+// Nhãn hiển thị dưới tên tài xế ở mỗi tab cột — TRƯỚC ĐÂY ghi "${col.shifts.length}
+// ca hoạt động", nhưng col.shifts gồm CẢ ca Nghỉ Phép/Nghỉ Mưa/Bảo Trì/Nằm Bãi
+// (mọi trạng thái), nên nhãn "hoạt động" là SAI — không dùng được để đối chiếu
+// lương thực tế. Thay bằng đúng 2 số theo bản chất tài chính:
+//  - "ca lương": đếm ca có sh.baseSalaryAllocation > 0 — đây là con số SNAPSHOT
+//    thật đã lưu tại thời điểm ghi ca (theo costPolicies[status].baseSalary lúc
+//    đó), tức đúng ca ĐÃ được tính lương cứng thật, không suy diễn lại.
+//  - "nghỉ phép": đếm đúng ca có status==='onLeave'.
+// Dùng chung cho cả Danh Sách Ca hiện tại lẫn màn Xem Lại Tháng Cũ, để 2 nơi
+// luôn khớp nhau tuyệt đối, áp dụng đồng nhất cho mọi tháng về sau.
+function driverColumnCountsLabel(shifts){
+  const paidCount = shifts.filter(sh=>(Number(sh.baseSalaryAllocation)||0)>0).length;
+  const onLeaveCount = shifts.filter(sh=>sh.status==='onLeave').length;
+  return `${paidCount} ca lương · ${onLeaveCount} phép`;
 }
 /// Card 1 ca dùng chung cho cả layout cột — bỏ dòng "Tài xế: ..." so với
 /// bản gộp cũ vì tên tài xế giờ đã là tiêu đề cột, tránh lặp lại 2 lần.
@@ -1440,15 +1460,21 @@ function renderShiftList(){
 
   // Search bar is deliberately date-picker-only (no free-text/realtime
   // filter-as-you-type) — tapping ANYWHERE on the bar opens the native
-  // lịch (calendar) so Ông Chủ chọn đúng 1 ngày muốn xem lại. Để trống
-  // vẫn hiển thị toàn bộ ca theo thứ tự mới nhất như bình thường.
+  // lịch (calendar) so Ông Chủ chọn đúng 1 ngày muốn xem lại. Ô này luôn
+  // tìm XUYÊN SUỐT toàn bộ lịch sử (không bị giới hạn theo tháng đang
+  // xem) vì mục đích là tra cứu nhanh 1 ngày bất kỳ khi có khúc mắc.
   const searchBarHtml = `
     <div class="search-bar" id="shiftSearchBar">
       <span class="ic">🔍</span>
       <input type="date" id="searchDateInput" value="${state.searchDate||''}">
       ${state.searchDate ? '<button id="clearSearchBtn">Xoá</button>' : ''}
     </div>
-    <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)}.` : 'Bấm để mở lịch chọn 1 ngày cụ thể — để trống sẽ xem tất cả ca, mới nhất trước.'}</div>`;
+    <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)} (xuyên suốt mọi tháng).` : 'Bấm để tìm nhanh đúng 1 ngày bất kỳ — để trống sẽ xem ca của THÁNG NÀY, mới nhất trước.'}</div>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <input type="month" id="shiftArchiveMonthPicker" style="flex:1;">
+      <button class="btn btn-ghost" id="viewOtherMonthBtn">+ Thêm Tháng Mới</button>
+    </div>
+    <div class="search-bar-hint" style="margin-top:4px;">Xem lại nguyên 1 tháng đã qua (VD Tháng 7 khi đang ở Tháng 8) — màn xem lại chỉ đọc, không sửa/xoá được.</div>`;
 
   if(state.shifts.length===0){
     app.innerHTML = warningsBannerHtml + searchBarHtml + `
@@ -1456,11 +1482,20 @@ function renderShiftList(){
       <div class="empty"><div class="big">🚛</div>Chưa có ca nào được ghi.<br>Bấm "+ Ca Mới" ở góc trên để bắt đầu.</div>`;
     bindSearchBar();
     bindWarningsBanner();
+    bindArchiveMonthPicker();
     return;
   }
 
+  // Mặc định (chưa gõ ngày tìm kiếm) chỉ hiện ca của THÁNG HIỆN TẠI —
+  // đúng bản chất "trang làm việc của tháng hiện tại". Gõ tìm 1 ngày cụ
+  // thể sẽ PHÁ VỠ giới hạn này, tìm xuyên suốt mọi tháng như trước giờ.
   let list = [...state.shifts];
-  if(state.searchDate){ list = list.filter(sh=>sh.date===state.searchDate); }
+  if(state.searchDate){
+    list = list.filter(sh=>sh.date===state.searchDate);
+  } else {
+    const curYM = todayLocalDateStr().slice(0,7);
+    list = list.filter(sh=>sh.date.slice(0,7)===curYM);
+  }
   list.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
 
   const driverColumns = groupShiftsIntoDriverColumns(list);
@@ -1485,16 +1520,16 @@ function renderShiftList(){
           <span class="avatar">${driverAvatarIcon()}</span>
           <span class="head-text">
             <span class="name">${escapeHtml(col.name)}</span>
-            <span class="count">${col.shifts.length} ca hoạt động</span>
+            <span class="count">${driverColumnCountsLabel(col.shifts)}</span>
           </span>
         </button>`;
       }).join('')}
     </div>`;
 
-  const cardsHtml = !activeColumn ? `<div class="empty"><div class="big">📅</div>Không có ca nào vào ngày ${state.searchDate?formatDateVN(state.searchDate):''}.</div>` : `
+  const cardsHtml = !activeColumn ? `<div class="empty"><div class="big">📅</div>Không có ca nào ${state.searchDate?('vào ngày '+formatDateVN(state.searchDate)):('trong Tháng '+monthLabelVN(todayLocalDateStr().slice(0,7)))}.</div>` : `
     <div class="shift-column full-width" style="--col-accent:${activeAccent}">
       ${activeColumn.shifts.length===0
-        ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':''}.</div>`
+        ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':' trong tháng này'}.</div>`
         : activeColumn.shifts.map(renderShiftCard).join('')}
     </div>`;
 
@@ -1503,6 +1538,7 @@ function renderShiftList(){
   bindWarningsBanner();
   bindShiftIssueButtons();
   bindDriverTabs();
+  bindArchiveMonthPicker();
 }
 /// Bấm 1 tab tài xế -> chỉ đổi tab đang chọn rồi vẽ lại toàn bộ danh
 /// sách ca (renderShiftList tự lọc đúng cột theo state.shiftDriverTab).
@@ -1548,6 +1584,94 @@ function bindSearchBar(){
 function bindWarningsBanner(){
   const btn = document.getElementById('warningsGoToSettingsBtn');
   if(btn) btn.addEventListener('click', ()=>{ state.currentTab='settings'; renderAll(); });
+}
+// Bấm "+ Thêm Tháng Mới": đọc tháng đã chọn ở ô lịch Tháng/Năm (giống hệt
+// kiểu "+ Thêm Tháng" bên Cài Đặt → Tiền Luật Đường Theo Tháng đã dùng ổn
+// định sẵn), rồi chuyển sang màn Xem Lại Tháng Cũ (chỉ đọc).
+function bindArchiveMonthPicker(){
+  const btn = document.getElementById('viewOtherMonthBtn');
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    const picked = document.getElementById('shiftArchiveMonthPicker').value;
+    if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
+    state.shiftArchiveMonth = picked;
+    state.shiftArchiveDriverTab = null;
+    renderAll();
+    restoreMainScroll();
+  });
+}
+/// Màn hình xem lại NGUYÊN 1 THÁNG cũ — dùng lại NGUYÊN VẸN renderShiftCard()
+/// và groupShiftsIntoDriverColumns() (không sửa 1 dòng nào của 2 hàm đó) nên
+/// hiển thị/chỉ số từng ca giống hệt Danh Sách Ca hiện tại. Khác duy nhất:
+/// CHỈ XEM — khoá sửa/xoá bằng cách chặn sự kiện click ở giai đoạn "capture"
+/// trên khung bọc ngoài, TRƯỚC KHI nó kịp lan tới onclick="openShift(...)"
+/// đã gắn sẵn trong mỗi thẻ ca (nên không cần đụng/sao chép lại renderShiftCard).
+/// Nút "Quay Lại" luôn xoá state.shiftArchiveMonth rồi renderAll() — tự động
+/// đưa về đúng trang mặc định của THÁNG HIỆN TẠI, không phải tháng vừa xem.
+function renderShiftMonthArchive(){
+  const app = document.getElementById('app');
+  const ym = state.shiftArchiveMonth;
+  const backBtnHtml = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="shiftArchiveBackBtn">← Quay Lại Tháng Hiện Tại</button>
+    </section>
+    <div class="hint" style="margin:0 0 10px;">Đang xem lại Tháng ${monthLabelVN(ym)} — CHỈ XEM, không sửa/xoá được ở màn này.</div>`;
+
+  const list = state.shifts.filter(sh=>sh.date.slice(0,7)===ym)
+    .sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+
+  if(list.length===0){
+    app.innerHTML = backBtnHtml + `<div class="empty"><div class="big">📅</div>Không có ca nào trong Tháng ${monthLabelVN(ym)}.</div>`;
+    document.getElementById('shiftArchiveBackBtn').addEventListener('click', ()=>{
+      state.shiftArchiveMonth = null; renderAll(); restoreMainScroll();
+    });
+    return;
+  }
+
+  const driverColumns = groupShiftsIntoDriverColumns(list);
+  if(!driverColumns.some(c=>c.key===state.shiftArchiveDriverTab)){
+    state.shiftArchiveDriverTab = driverColumns.length>0 ? driverColumns[0].key : null;
+  }
+  const activeIdx = driverColumns.findIndex(c=>c.key===state.shiftArchiveDriverTab);
+  const activeColumn = activeIdx>=0 ? driverColumns[activeIdx] : null;
+  const activeAccent = driverColumnAccent(activeIdx<0?0:activeIdx);
+
+  const tabBarHtml = driverColumns.length===0 ? '' : `
+    <div class="driver-tabbar">
+      ${driverColumns.map((col,idx)=>{
+        const accent = driverColumnAccent(idx);
+        const active = col.key===state.shiftArchiveDriverTab;
+        return `
+        <button class="driver-tab shift-column-head${active?' active':''}" data-key="${escapeHtml(col.key)}" style="--col-accent:${accent}">
+          <span class="avatar">${driverAvatarIcon()}</span>
+          <span class="head-text">
+            <span class="name">${escapeHtml(col.name)}</span>
+            <span class="count">${driverColumnCountsLabel(col.shifts)}</span>
+          </span>
+        </button>`;
+      }).join('')}
+    </div>`;
+
+  const cardsHtml = !activeColumn ? `<div class="empty"><div class="big">📅</div>Không có ca nào.</div>` : `
+    <div class="shift-column full-width" style="--col-accent:${activeAccent}" id="shiftArchiveCardsWrap">
+      ${activeColumn.shifts.length===0
+        ? `<div class="shift-column-empty">Chưa có ca nào.</div>`
+        : activeColumn.shifts.map(renderShiftCard).join('')}
+    </div>`;
+
+  app.innerHTML = backBtnHtml + tabBarHtml + cardsHtml;
+
+  document.getElementById('shiftArchiveBackBtn').addEventListener('click', ()=>{
+    state.shiftArchiveMonth = null; renderAll(); restoreMainScroll();
+  });
+  document.querySelectorAll('.driver-tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.shiftArchiveDriverTab = btn.dataset.key;
+      renderShiftMonthArchive();
+    });
+  });
+  const cardsWrap = document.getElementById('shiftArchiveCardsWrap');
+  if(cardsWrap) cardsWrap.addEventListener('click', e=>e.stopPropagation(), true);
 }
 function formatDateVN(dateStr){
   const [y,m,d]=dateStr.split('-');
@@ -5995,7 +6119,9 @@ function renderAll(){
   renderHeader();
   refreshSiteDatalist();
   if(state.currentTab==='shifts'){
-    if(state.view==='form') renderShiftForm(); else renderShiftList();
+    if(state.view==='form') renderShiftForm();
+    else if(state.shiftArchiveMonth) renderShiftMonthArchive();
+    else renderShiftList();
   } else if(state.currentTab==='drivers'){
     renderDrivers();
   } else if(state.currentTab==='strategy'){
