@@ -1602,6 +1602,9 @@ function bindArchiveMonthPicker(){
   btn.addEventListener('click', ()=>{
     const picked = document.getElementById('shiftArchiveMonthPicker').value;
     if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
+    if(picked===todayLocalDateStr().slice(0,7)){
+      showToast('Đây là tháng hiện tại — vẫn xem ở màn chính, sửa/xoá bình thường.');
+    }
     state.shiftArchiveMonth = picked;
     state.shiftArchiveDriverTab = null;
     renderAll();
@@ -6124,6 +6127,14 @@ function exportCSV(){
 
 function renderAll(){
   recomputeBankLoanMonthlyPayment(); // luôn làm mới Gốc+Lãi/tháng theo đúng dư nợ giảm dần hôm nay TRƯỚC khi bất kỳ tab nào (Kết Quả, Trợ Lý...) đọc state.settings.monthlyLoanPayment
+  // Tháng đang "xem lại" (chỉ đọc) mà lại trùng đúng THÁNG HIỆN TẠI THẬT —
+  // dù do Ông Chủ lỡ chọn ngay tháng hiện tại ở "+ Thêm Tháng Mới", hay do
+  // đồng hồ vừa sang tháng mới trong lúc màn này đang mở — luôn coi là
+  // KHÔNG còn ở chế độ xem lại nữa, trả về đúng màn chính sửa/xoá được bình
+  // thường. Chỉ tháng nào THỰC SỰ đã qua mới bị khoá chỉ-xem.
+  if(state.shiftArchiveMonth && state.shiftArchiveMonth===todayLocalDateStr().slice(0,7)){
+    state.shiftArchiveMonth = null;
+  }
   renderHeader();
   refreshSiteDatalist();
   if(state.currentTab==='shifts'){
