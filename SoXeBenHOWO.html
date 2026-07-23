@@ -1388,6 +1388,17 @@ function groupShiftsIntoDriverColumns(list){
   // cột "tài xế cũ" có ít nhất 1 ca thật — không hiện cột rỗng vô ích.
   return columns.filter(c=>c.shifts.length>0 || state.drivers.some(d=>d.id===c.key));
 }
+// Rổ đếm ca DÙNG CHUNG cho MỌI nơi cần "bao nhiêu ca của tài xế X" — badge
+// dưới tên tài xế (Danh Sách Ca + Xem Lại Tháng Cũ) VÀ cột "Số Ca" trong
+// file Excel "Lương Tài Xế" đều gọi đúng hàm này, để không bao giờ lệch
+// nhau nữa (bug cũ: Excel từng tự đếm riêng kiểu "b.shifts+=1" bất kể
+// trạng thái, ra số khác hẳn badge trên app).
+function computeDriverShiftCounts(shifts){
+  const paidCount = shifts.filter(sh=>(Number(sh.baseSalaryAllocation)||0)>0).length;
+  const onLeaveCount = shifts.filter(sh=>sh.status==='onLeave').length;
+  const otherUnpaidCount = shifts.length - paidCount - onLeaveCount;
+  return { paidCount, onLeaveCount, otherUnpaidCount, total: shifts.length };
+}
 // Nhãn hiển thị dưới tên tài xế ở mỗi tab cột — TRƯỚC ĐÂY ghi "${col.shifts.length}
 // ca hoạt động", nhưng col.shifts gồm CẢ ca Nghỉ Phép/Nghỉ Mưa/Bảo Trì/Nằm Bãi
 // (mọi trạng thái), nên nhãn "hoạt động" là SAI — không dùng được để đối chiếu
@@ -1404,12 +1415,10 @@ function groupShiftsIntoDriverColumns(list){
 // Dùng chung cho cả Danh Sách Ca hiện tại lẫn màn Xem Lại Tháng Cũ, để 2 nơi
 // luôn khớp nhau tuyệt đối, áp dụng đồng nhất cho mọi tháng về sau.
 function driverColumnCountsLabel(shifts){
-  const paidCount = shifts.filter(sh=>(Number(sh.baseSalaryAllocation)||0)>0).length;
-  const onLeaveCount = shifts.filter(sh=>sh.status==='onLeave').length;
-  const otherUnpaidCount = shifts.length - paidCount - onLeaveCount;
-  return otherUnpaidCount>0
-    ? `${paidCount} ca lương · ${onLeaveCount} phép · ${otherUnpaidCount} khác (không lương)`
-    : `${paidCount} ca lương · ${onLeaveCount} phép`;
+  const c = computeDriverShiftCounts(shifts);
+  return c.otherUnpaidCount>0
+    ? `${c.paidCount} ca lương · ${c.onLeaveCount} phép · ${c.otherUnpaidCount} khác (không lương)`
+    : `${c.paidCount} ca lương · ${c.onLeaveCount} phép`;
 }
 /// Card 1 ca dùng chung cho cả layout cột — bỏ dòng "Tài xế: ..." so với
 /// bản gộp cũ vì tên tài xế giờ đã là tiêu đề cột, tránh lặp lại 2 lần.
@@ -6167,16 +6176,16 @@ function buildOperationLogRows(){
 /// LƯƠNG THỰC NHẬN = lương cứng + lương chuyến + tiền ăn − ứng lương.
 /// (Verified against the original spreadsheet's driver payroll formula.)
 function buildDriverPayrollRows(from, to){
-  const header = ['Tài Xế','Số Ca Chạy','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tiền Tip/Thưởng Cuối Tháng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','Trừ Do Hỏng Hóc','LƯƠNG THỰC NHẬN'];
+  const header = ['Tài Xế','Số Ca Tính Lương','Số Ca Nghỉ Phép','Số Ca Khác (Không Lương)','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tiền Tip/Thưởng Cuối Tháng','Tổng Tiền Nhà (Cty Trả, Không Tính Vào Lương)','Ứng Lương/Đền Bù','Trừ Do Hỏng Hóc','LƯƠNG THỰC NHẬN'];
   const rows = [header];
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
   const byDriver = {};
   for(const sh of inRange){
     const driver = driverById(sh.driverId);
     const name = driver?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
-    if(!byDriver[name]) byDriver[name] = { driverId: driver?.id || null, shifts:0, baseSalary:0, tripWage:0, food:0, housing:0, advance:0 };
+    if(!byDriver[name]) byDriver[name] = { driverId: driver?.id || null, shiftsList:[], baseSalary:0, tripWage:0, food:0, housing:0, advance:0 };
     const b = byDriver[name];
-    b.shifts += 1;
+    b.shiftsList.push(sh);
     b.baseSalary += sh.baseSalaryAllocation||0;
     b.tripWage += shiftTotalTripWage(sh);
     b.food += sh.foodAllowance||0;
@@ -6185,14 +6194,15 @@ function buildDriverPayrollRows(from, to){
   }
   Object.keys(byDriver).sort().forEach(name=>{
     const b = byDriver[name];
+    const counts = computeDriverShiftCounts(b.shiftsList); // dùng đúng hàm badge trên app đang dùng — không tự đếm riêng nữa
     const repairDeduction = b.driverId ? driverResponsibleRepairTotalInRange(b.driverId, from, to) : 0;
     // Tiền tip/thưởng CUỐI THÁNG — cộng thêm (additive), không đụng tới
     // công thức LƯƠNG THỰC NHẬN gốc, chỉ thêm 1 số hạng mới vào tổng.
     const monthlyBonus = b.driverId ? driverMonthlyBonusTotalInRange(b.driverId, from, to) : 0;
     const netPay = b.baseSalary + b.tripWage + b.food + monthlyBonus - b.advance - repairDeduction;
-    rows.push([name, b.shifts, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(monthlyBonus), Math.round(b.housing), Math.round(b.advance), Math.round(repairDeduction), Math.round(netPay)]);
+    rows.push([name, counts.paidCount, counts.onLeaveCount, counts.otherUnpaidCount, Math.round(b.baseSalary), Math.round(b.tripWage), Math.round(b.food), Math.round(monthlyBonus), Math.round(b.housing), Math.round(b.advance), Math.round(repairDeduction), Math.round(netPay)]);
   });
-  if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','','','','']);
+  if(rows.length===1) rows.push(['(Không có ca nào trong kỳ này)','','','','','','','','','','','']);
   return rows;
 }
 
@@ -6255,7 +6265,7 @@ function downloadWorkbook(from, to, resultsData, filenamePrefix){
 
   const payrollRows = buildDriverPayrollRows(from, to);
   const wsPayroll = XLSX.utils.aoa_to_sheet(payrollRows);
-  applyAccountingFormat(wsPayroll, [1,2,3,4,5,6,7,8,9], 1);
+  applyAccountingFormat(wsPayroll, [1,2,3,4,5,6,7,8,9,10,11], 1);
   autoFitColumns(wsPayroll, payrollRows);
   XLSX.utils.book_append_sheet(wb, wsPayroll, 'Luong Tai Xe');
 
