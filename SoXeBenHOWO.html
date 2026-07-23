@@ -149,30 +149,21 @@
     padding:0; border-radius:0;
   }
   .stat-highlight .val-suffix{ font-size:15.5px; font-weight:800; color:var(--accent); flex-shrink:0; margin-left:2px; }
-  /// Ô "Ngày nhận tiền" (Ghi Nhận Khoản Thu) riêng: input[type=date] gốc
-  /// trên iOS Safari PWA không theo font-size CSS của app, tự phóng to chữ
-  /// ("ngày 18 thg 7, 2026") khác hẳn các ô còn lại. Sửa bằng cách hiện 1
-  /// khối text thường (đúng size/style app, dd/mm/yyyy gọn) đè lên trên,
-  /// còn input ngày thật vẫn nằm dưới, trong suốt, phủ kín để chạm vào đâu
-  /// cũng mở đúng lịch chọn ngày gốc của iOS như cũ — chỉ đổi phần NHÌN
-  /// THẤY, không đổi cách chọn ngày.
-  .date-display-text{ display:flex; align-items:center; width:100%; height:44px; box-sizing:border-box; font-size:16px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit; cursor:pointer; text-align:left; }
-  /// Input ngày thật giờ không còn đè lên trên bất cứ thứ gì — bị đưa hẳn
-  /// ra ngoài màn hình + pointer-events:none nên KHÔNG THỂ nhận chạm ở
-  /// bất kỳ đâu, dù to hay nhỏ, dù iOS có mở rộng vùng chạm của control
-  /// gốc ra sao. Lịch chỉ mở khi JS chủ động gọi .showPicker() lúc bấm
-  /// đúng vào nút hiển thị ngày — không còn phụ thuộc trình duyệt định
-  /// vị đúng vùng chạm invisible nữa.
-  /// BUG THẬT đã xác nhận: input[type=date]{...} (dòng ngay dưới) có độ ưu
-  /// tiên CSS cao hơn 1 class đơn .date-hidden-input (attribute+element >
-  /// class), nên GHI ĐÈ mất width/border/background của .date-hidden-input
-  /// — khiến input ngày thật hiện nguyên hình to đùng trên iPhone thay vì
-  /// ẩn đi. Sửa bằng cách tăng độ ưu tiên (input.date-hidden-input[type=date])
-  /// VÀ đẩy hẳn ra ngoài khung nhìn bằng toạ độ âm thật sự (left/top:-9999px)
-  /// thay vì chỉ dựa vào width:1px — bền hơn trước các hành vi native-control
-  /// đặc thù của WebKit.
-  input.date-hidden-input[type=date]{ position:absolute; left:-9999px; top:-9999px; opacity:0; pointer-events:none; width:1px; height:1px; overflow:hidden; border:none; background:transparent; padding:0; }
-  .date-hidden-input{ position:absolute; left:-9999px; top:-9999px; opacity:0; pointer-events:none; width:1px; height:1px; overflow:hidden; }
+  /// Ô ngày kiểu "text đẹp đè lên input ngày thật" — dùng cho Ngày Nhận
+  /// Tiền, Ngày Giải Ngân, Áp Dụng Từ Ngày... input[type=date] gốc trên
+  /// iOS Safari PWA không theo font-size CSS của app (tự phóng to chữ dạng
+  /// "ngày 18 thg 7, 2026"), nên hiện 1 khối text thường (đúng size/style
+  /// app, dd/mm/yyyy gọn) ĐÈ LÊN TRÊN để nhìn cho đẹp — còn input ngày thật
+  /// vẫn NẰM ĐÚNG NGUYÊN VỊ TRÍ, trong suốt tuyệt đối (opacity:0) nhưng vẫn
+  /// full kích thước + vẫn nhận chạm bình thường, để chạm vào bất kỳ đâu
+  /// trong khung đều trúng thẳng input gốc và bật đúng lịch chọn ngày gốc
+  /// của iOS — KHÔNG cần JS gọi .showPicker() (đã thử đưa input ra hẳn
+  /// ngoài màn hình + gọi showPicker() bằng JS, nhưng lịch bật lên cũng bị
+  /// định vị lệch ra ngoài màn hình luôn, không hiện — nên bỏ cách đó).
+  .date-overlay-wrap{ position:relative; }
+  .date-overlay-wrap .date-display-text{ pointer-events:none; }
+  .date-overlay-wrap input[type=date]{ position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:none; background:transparent; opacity:0; }
+  .date-display-text{ display:flex; align-items:center; width:100%; height:44px; box-sizing:border-box; font-size:16px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit; text-align:left; }
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
     border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
@@ -5163,8 +5154,10 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
-          <button type="button" class="date-display-text" id="sp_dateDisplay">${formatDateVN(draft.date)}</button>
-          <input type="date" id="sp_date" class="date-hidden-input" value="${draft.date}" tabindex="-1">
+          <div class="date-overlay-wrap">
+            <div class="date-display-text" id="sp_dateDisplay">${formatDateVN(draft.date)}</div>
+            <input type="date" id="sp_date" value="${draft.date}">
+          </div>
         </div>
         <div class="field">
           <label>Chủ công trình / Nhà thầu</label>
@@ -5187,11 +5180,6 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     </section>
   `;
   attachMoneyInput(document.getElementById('sp_amount'), draft.amount, v=>draft.amount=v);
-  document.getElementById('sp_dateDisplay').addEventListener('click', ()=>{
-    const dateInput = document.getElementById('sp_date');
-    if(typeof dateInput.showPicker === 'function'){ try{ dateInput.showPicker(); return; }catch(_ignored){} }
-    dateInput.focus();
-  });
   document.getElementById('sp_date').addEventListener('change', e=>{
     if(e.target.value) document.getElementById('sp_dateDisplay').textContent = formatDateVN(e.target.value);
   });
@@ -5777,8 +5765,10 @@ function renderSettings(){
         <div class="two-col" style="margin-bottom:0;">
           <div class="field">
             <label>Ngày giải ngân</label>
-            <button type="button" class="date-display-text" id="s_loanDateDisplay">${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate) ? formatDateVN(state.settings.bankLoan.disbursementDate) : 'Chọn ngày'}</button>
-            <input type="date" id="s_loanDate" class="date-hidden-input" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}" tabindex="-1">
+            <div class="date-overlay-wrap">
+              <div class="date-display-text" id="s_loanDateDisplay">${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate) ? formatDateVN(state.settings.bankLoan.disbursementDate) : 'Chọn ngày'}</div>
+              <input type="date" id="s_loanDate" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}">
+            </div>
           </div>
           <div class="field">
             <label>Ngày đến hạn đóng lãi hàng tháng</label>
@@ -5793,11 +5783,21 @@ function renderSettings(){
           <div class="hint">Ngân hàng thường đổi lãi theo từng giai đoạn (VD năm đầu 1 mức, năm 2 mức khác) — thêm 1 dòng mới mỗi khi có thông báo đổi lãi, các dòng cũ giữ nguyên để app tự biết mức nào áp dụng đúng thời điểm nào.</div>
         </div>
         <div id="loanRateScheduleListWrap"></div>
-        <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
-          <button type="button" class="date-display-text" id="loanRateNewDateDisplay" style="flex:1;">Áp dụng từ ngày</button>
-          <input type="date" id="loanRateNewDate" class="date-hidden-input" tabindex="-1">
-          <input type="number" inputmode="decimal" id="loanRateNewValue" placeholder="%/năm" style="width:96px;">
-          <button class="btn btn-ghost" id="addLoanRateBtn">+ Thêm</button>
+        <div class="field" style="margin-top:10px;">
+          <label>Áp dụng từ ngày</label>
+          <div class="date-overlay-wrap">
+            <div class="date-display-text" id="loanRateNewDateDisplay">Chọn ngày</div>
+            <input type="date" id="loanRateNewDate">
+          </div>
+        </div>
+        <div class="two-col" style="margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;">
+            <label>Mức lãi (%/năm)</label>
+            <input type="number" inputmode="decimal" id="loanRateNewValue" placeholder="VD 10.2">
+          </div>
+          <div class="field" style="margin-bottom:0; display:flex; flex-direction:column; justify-content:flex-end;">
+            <button class="btn btn-accent btn-block" id="addLoanRateBtn">+ Thêm Mức Lãi</button>
+          </div>
         </div>
       </div>
       <div class="card" id="loanAmortizationPreview" style="margin-top:8px;"></div>
@@ -5934,20 +5934,10 @@ function renderSettings(){
   attachMoneyInput(document.getElementById('s_loanPrincipal'), loanDraft.principal, v=>{ loanDraft.principal=v; renderLoanPreview(); });
   document.getElementById('s_loanTerm').addEventListener('input', e=>{ loanDraft.termMonths = Number(e.target.value)||0; renderLoanPreview(); });
   document.getElementById('s_loanDueDay').addEventListener('input', e=>{ loanDraft.dueDayOfMonth = Number(e.target.value)||20; });
-  document.getElementById('s_loanDateDisplay').addEventListener('click', ()=>{
-    const dateInput = document.getElementById('s_loanDate');
-    if(typeof dateInput.showPicker === 'function'){ try{ dateInput.showPicker(); return; }catch(_ignored){} }
-    dateInput.focus();
-  });
   document.getElementById('s_loanDate').addEventListener('change', e=>{
     loanDraft.disbursementDate = e.target.value || null;
     document.getElementById('s_loanDateDisplay').textContent = e.target.value ? formatDateVN(e.target.value) : 'Chọn ngày';
     renderLoanPreview();
-  });
-  document.getElementById('loanRateNewDateDisplay').addEventListener('click', ()=>{
-    const dateInput = document.getElementById('loanRateNewDate');
-    if(typeof dateInput.showPicker === 'function'){ try{ dateInput.showPicker(); return; }catch(_ignored){} }
-    dateInput.focus();
   });
   document.getElementById('loanRateNewDate').addEventListener('change', e=>{
     if(e.target.value) document.getElementById('loanRateNewDateDisplay').textContent = formatDateVN(e.target.value);
@@ -5959,7 +5949,7 @@ function renderSettings(){
     if(!(v>=0)){ showToast('Nhập đúng mức lãi (%/năm).'); return; }
     loanDraft.rateSchedule.push({ id: uid('loanrate'), effectiveFrom: d, ratePercent: v });
     document.getElementById('loanRateNewDate').value='';
-    document.getElementById('loanRateNewDateDisplay').textContent='Áp dụng từ ngày';
+    document.getElementById('loanRateNewDateDisplay').textContent='Chọn ngày';
     document.getElementById('loanRateNewValue').value='';
     renderLoanRateScheduleList();
     renderLoanPreview();
