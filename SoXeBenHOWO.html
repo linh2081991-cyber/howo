@@ -5765,10 +5765,7 @@ function renderSettings(){
         <div class="two-col" style="margin-bottom:0;">
           <div class="field">
             <label>Ngày giải ngân</label>
-            <div class="date-overlay-wrap">
-              <div class="date-display-text" id="s_loanDateDisplay">${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate) ? formatDateVN(state.settings.bankLoan.disbursementDate) : 'Chọn ngày'}</div>
-              <input type="date" id="s_loanDate" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}">
-            </div>
+            <input type="date" id="s_loanDate" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}">
           </div>
           <div class="field">
             <label>Ngày đến hạn đóng lãi hàng tháng</label>
@@ -5785,10 +5782,7 @@ function renderSettings(){
         <div id="loanRateScheduleListWrap"></div>
         <div class="field" style="margin-top:10px;">
           <label>Áp dụng từ ngày</label>
-          <div class="date-overlay-wrap">
-            <div class="date-display-text" id="loanRateNewDateDisplay">Chọn ngày</div>
-            <input type="date" id="loanRateNewDate">
-          </div>
+          <input type="date" id="loanRateNewDate">
         </div>
         <div class="two-col" style="margin-bottom:0;">
           <div class="field" style="margin-bottom:0;">
@@ -5884,6 +5878,9 @@ function renderSettings(){
       if(!r.hasBasis){
         wrap.innerHTML = `<div class="hint" style="margin:0;">Nhập đủ Số tiền vay, Thời hạn vay, Ngày giải ngân và ít nhất 1 mức lãi ở Lộ Trình Lãi Suất để app tự tính Gốc+Lãi hàng tháng theo dư nợ giảm dần.</div>`;
       } else {
+        const schedule = computeFullLoanSchedule(loanDraft);
+        const interestPaidSoFar = schedule.filter(row=>row.periodIndex < r.elapsedMonths).reduce((sum,row)=>sum+row.interest, 0);
+        const interestTotalLife = schedule.reduce((sum,row)=>sum+row.interest, 0);
         wrap.innerHTML = `
           <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${r.annualRatePercent.toFixed(2)}%/năm</span></div>
           <div class="summary-row"><span>Đã vay được (tự tính từ Ngày Giải Ngân)</span><span class="val">${r.elapsedMonths} / ${r.termMonths} tháng</span></div>
@@ -5898,6 +5895,9 @@ function renderSettings(){
           <div class="summary-row total"><span>TỔNG GỐC + LÃI PHẢI TRẢ KỲ NÀY</span><span class="val" style="font-weight:800;">${fmtVND(r.totalPaymentCurrent)}</span></div>
           <div class="hint" style="margin-top:6px;">Số này tự động dùng làm "Gốc + lãi vay ngân hàng/tháng" cho toàn bộ app — sẽ tự đổi đúng theo từng kỳ thực tế (số ngày khác nhau mỗi tháng), Ông Chủ không cần vào đây sửa tay hàng tháng.</div>
           `}
+          <div class="formula-divider" style="margin:10px 0;"></div>
+          <div class="summary-row"><span>💰 Tiền lãi đã trả tính đến nay (${r.elapsedMonths} kỳ)</span><span class="val">${fmtVND(interestPaidSoFar)}</span></div>
+          <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
         `;
       }
     }
@@ -5936,11 +5936,7 @@ function renderSettings(){
   document.getElementById('s_loanDueDay').addEventListener('input', e=>{ loanDraft.dueDayOfMonth = Number(e.target.value)||20; });
   document.getElementById('s_loanDate').addEventListener('change', e=>{
     loanDraft.disbursementDate = e.target.value || null;
-    document.getElementById('s_loanDateDisplay').textContent = e.target.value ? formatDateVN(e.target.value) : 'Chọn ngày';
     renderLoanPreview();
-  });
-  document.getElementById('loanRateNewDate').addEventListener('change', e=>{
-    if(e.target.value) document.getElementById('loanRateNewDateDisplay').textContent = formatDateVN(e.target.value);
   });
   document.getElementById('addLoanRateBtn').addEventListener('click', ()=>{
     const d = document.getElementById('loanRateNewDate').value;
@@ -5949,7 +5945,6 @@ function renderSettings(){
     if(!(v>=0)){ showToast('Nhập đúng mức lãi (%/năm).'); return; }
     loanDraft.rateSchedule.push({ id: uid('loanrate'), effectiveFrom: d, ratePercent: v });
     document.getElementById('loanRateNewDate').value='';
-    document.getElementById('loanRateNewDateDisplay').textContent='Chọn ngày';
     document.getElementById('loanRateNewValue').value='';
     renderLoanRateScheduleList();
     renderLoanPreview();
