@@ -1424,6 +1424,16 @@ function driverColumnCountsLabel(shifts){
     ? `${c.paidCount} ca lương · ${c.onLeaveCount} phép · ${c.otherUnpaidCount} khác (không lương)`
     : `${c.paidCount} ca lương · ${c.onLeaveCount} phép`;
 }
+// Huy hiệu Online/Offline trên tab tài xế ở Ca Làm Việc — dùng chung đúng
+// class .driver-cv-status đã có sẵn ở tab Tài Xế (cùng màu, cùng kiểu chấm
+// tròn) để đồng nhất toàn app. "col.key" có thể là ID tài xế thật, hoặc
+// key "_orphan_..." của 1 tài xế đã bị XOÁ hẳn (không phải Ngừng Hoạt Động)
+// — trường hợp đó cũng coi là Offline vì chắc chắn không còn làm việc.
+function driverOnlineStatusHtml(driverKey){
+  const d = driverById(driverKey);
+  const isOnline = !!d && d.isActive!==false;
+  return `<span class="driver-cv-status ${isOnline?'on':'off'}"><span class="dot"></span>${isOnline?'Online':'Offline'}</span>`;
+}
 /// Card 1 ca dùng chung cho cả layout cột — bỏ dòng "Tài xế: ..." so với
 /// bản gộp cũ vì tên tài xế giờ đã là tiêu đề cột, tránh lặp lại 2 lần.
 function renderShiftCard(sh){
@@ -1568,6 +1578,7 @@ function renderShiftList(){
           <span class="avatar">${driverAvatarIcon()}</span>
           <span class="head-text">
             <span class="name">${escapeHtml(col.name)}</span>
+            ${driverOnlineStatusHtml(col.key)}
             <span class="count">${driverColumnCountsLabel(col.shifts)}</span>
           </span>
         </button>`;
@@ -1706,6 +1717,7 @@ function renderShiftMonthArchive(){
           <span class="avatar">${driverAvatarIcon()}</span>
           <span class="head-text">
             <span class="name">${escapeHtml(col.name)}</span>
+            ${driverOnlineStatusHtml(col.key)}
             <span class="count">${driverColumnCountsLabel(col.shifts)}</span>
           </span>
         </button>`;
