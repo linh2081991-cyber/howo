@@ -3177,7 +3177,7 @@ function historicalMonthlyFixedCostReal(){
     const monthsSpan = Math.max(1, (lastMs-firstMs)/(1000*60*60*24*30.44));
     depreciationMonthly = Math.max(0, ownerTotal)/monthsSpan;
   }
-  return { baseSalaryMonthly, housingMonthly, depreciationMonthly };
+  return { baseSalaryMonthly, housingMonthly, depreciationMonthly, activeDriverCount: activeDrivers.length };
 }
 /// Core simulation for ONE prospective project. Everything downstream
 /// (list cards, side-by-side comparison, live preview in the editor) is
@@ -3222,7 +3222,16 @@ function computeAppraisalMetrics(p){
 
   const tripsPerShift = Math.max(0, Number(p.estimatedTripsPerShift)||0);
   const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||0;
-  const monthlyTripsEstimate = (tripsPerShift>0 && standardWorkDays>0) ? tripsPerShift*standardWorkDays : 0;
+  // Cơ Cấu Ca Chạy: công trình này có cho phép chạy CẢ 2 CA/NGÀY (Ngày +
+  // Đêm) hay CHỈ 1 CA/NGÀY (VD công trình giới hạn giờ, chỉ nhận 1 ca).
+  // Mặc định "single" — giữ đúng hành vi cũ (không đổi kết quả các công
+  // trình đã lưu trước khi có tính năng này). "double" nhân đôi đúng
+  // NGƯỠNG NĂNG LỰC/THÁNG (56 thay vì 28) — không phải nhân đôi bừa vào
+  // lợi nhuận, mà để phép nhân tự nhiên rơi ra từ đúng công thức bên dưới.
+  const shiftStructure = p.shiftStructure==='double' ? 'double' : 'single';
+  const shiftsPerDay = shiftStructure==='double' ? 2 : 1;
+  const capacityShifts = standardWorkDays * shiftsPerDay; // Ngưỡng năng lực/tháng: 28 (1 ca) hoặc 56 (2 ca)
+  const monthlyTripsEstimate = (tripsPerShift>0 && capacityShifts>0) ? tripsPerShift*capacityShifts : 0;
 
   // ----- Chi phí biến đổi/chuyến (đúng yêu cầu: dầu + lương chuyến + tiền
   // ăn + tiền luật đường), lấy trực tiếp từ các trường Ông Chủ tự nhập -----
@@ -3230,9 +3239,10 @@ function computeAppraisalMetrics(p){
   const foodPerTrip = Number(p.foodPerTripEstimate)||0;
   const roadFeeMonthly = Number(p.roadFeeEstimate)||0;
   // Tiền luật đường đóng THEO THÁNG ngoài đời thật, nên quy đổi về tương
-  // đương mỗi chuyến bằng số chuyến ước tính chạy được cả tháng (số
-  // chuyến/ca × ngày công chuẩn) — chỉ quy đổi được khi đã nhập đủ 2 số
-  // này, nếu chưa thì tạm để 0 (sẽ nêu rõ ở hasRoadFeeBasis).
+  // đương mỗi chuyến bằng TỔNG số chuyến ước tính chạy được cả tháng (đã
+  // tính đủ theo Cơ Cấu Ca Chạy ở trên — 2 ca thì tổng chuyến/tháng nhiều
+  // hơn, mỗi chuyến gánh ít tiền luật đường hơn) — chỉ quy đổi được khi đã
+  // nhập đủ 2 số này, nếu chưa thì tạm để 0 (sẽ nêu rõ ở hasRoadFeeBasis).
   const roadFeePerTripEquivalent = monthlyTripsEstimate>0 ? roadFeeMonthly/monthlyTripsEstimate : 0;
 
   const variableCostPerTrip = fuelCostPerTrip + wagePerTrip + foodPerTrip + roadFeePerTripEquivalent;
@@ -3262,13 +3272,16 @@ function computeAppraisalMetrics(p){
   const breakEvenTrips = grossProfitPerTrip>0 ? Math.ceil(fixedCostMonthly/grossProfitPerTrip) : null;
   const breakEvenShifts = (breakEvenTrips!==null && tripsPerShift>0) ? Math.ceil(breakEvenTrips/tripsPerShift) : null;
 
-  const feasible = (breakEvenShifts!==null && standardWorkDays>0) ? (breakEvenShifts<=standardWorkDays) : null;
-  const shortfallShifts = (feasible===false) ? (breakEvenShifts-standardWorkDays) : 0;
+  const feasible = (breakEvenShifts!==null && capacityShifts>0) ? (breakEvenShifts<=capacityShifts) : null;
+  const shortfallShifts = (feasible===false) ? (breakEvenShifts-capacityShifts) : 0;
 
-  // Lợi nhuận dự kiến/tháng nếu chạy đủ ngày công chuẩn đã cấu hình ở
-  // Cài Đặt — con số quyết định cuối cùng, không chỉ dừng ở "lãi/chuyến".
-  const projectedMonthlyProfit = (grossProfitPerShift!==null && standardWorkDays>0)
-    ? (standardWorkDays*grossProfitPerShift - fixedCostMonthly) : null;
+  // Lợi nhuận dự kiến/tháng nếu chạy đủ Ngưỡng Năng Lực/Tháng (28 ca nếu
+  // 1 ca/ngày, 56 ca nếu 2 ca/ngày) — con số quyết định cuối cùng, không
+  // chỉ dừng ở "lãi/chuyến". Chọn "2 Ca/Ngày" khiến số này tự nhân đôi so
+  // với "1 Ca/Ngày" (giả định lãi gộp/ca như nhau ở cả 2 ca).
+  const monthlyGrossProfitAtCapacity = (grossProfitPerShift!==null && capacityShifts>0) ? capacityShifts*grossProfitPerShift : null;
+  const projectedMonthlyProfit = (monthlyGrossProfitAtCapacity!==null)
+    ? (monthlyGrossProfitAtCapacity - fixedCostMonthly) : null;
   const roiPercent = (fixedCostMonthly>0 && projectedMonthlyProfit!==null)
     ? (projectedMonthlyProfit/fixedCostMonthly*100) : null;
 
@@ -3283,6 +3296,7 @@ function computeAppraisalMetrics(p){
            kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip, grossCargoRevenuePerTrip, netRevenuePerTrip,
            wagePerTrip, foodPerTrip, roadFeePerTripEquivalent, monthlyTripsEstimate,
            variableCostPerTrip, grossProfitPerTrip, tripsPerShift, grossProfitPerShift,
+           shiftStructure, shiftsPerDay, capacityShifts, monthlyGrossProfitAtCapacity,
            roadFeeMonthly, fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly,
            fixedLoanMonthly, fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly, fixedCostMonthly,
            breakEvenTrips, breakEvenShifts, standardWorkDays, feasible, shortfallShifts,
@@ -3321,6 +3335,28 @@ function renderProjectAppraisal(){
     }
   }
 
+  // Tổng Hợp Khi Chạy Song Song (VD ca sáng chạy công trình A, ca tối chạy
+  // công trình B) — KHÔNG được cộng đơn giản 2 "Lợi nhuận dự kiến/tháng"
+  // lại, vì mỗi công trình đang tự trừ ĐỦ chi phí xe dùng chung (vay ngân
+  // hàng, bảo hiểm, đăng kiểm, khấu hao) — cộng lại sẽ trừ trùng các khoản
+  // đó 2 lần. Cách đúng: cộng lãi gộp/tháng + lương cứng/nhà ở của TỪNG dự
+  // án (vì đúng là 2 người khác nhau, cộng đủ), nhưng chi phí xe dùng
+  // chung chỉ lấy đúng 1 lần (từ dự án đầu tiên được chọn — các dự án đều
+  // tự động lấy cùng 1 nguồn thật từ Cài Đặt/thực tế đội xe nên các số này
+  // vốn giống nhau, không cần cộng dồn).
+  appraisalCompareSelection = new Set([...appraisalCompareSelection].filter(id=>projects.some(p=>p.id===id)));
+  const selectedForCombo = projects.filter(p=>appraisalCompareSelection.has(p.id));
+  let comboSummary = null;
+  if(selectedForCombo.length>=2){
+    const ms = selectedForCombo.map(p=>metricsById[p.id]);
+    const missingBasis = ms.some(m=>m.monthlyGrossProfitAtCapacity===null);
+    const totalGrossProfit = ms.reduce((s,m)=>s+(m.monthlyGrossProfitAtCapacity||0),0);
+    const totalStaffCost = ms.reduce((s,m)=>s+m.fixedBaseSalaryMonthly+m.fixedHousingMonthly,0);
+    const sharedVehicleCost = ms[0].fixedDepreciationMonthly + ms[0].fixedLoanMonthly + ms[0].fixedInsuranceMonthly + ms[0].fixedRegistrationMonthly + ms[0].fixedOtherMonthly;
+    comboSummary = { names: selectedForCombo.map(p=>p.name||'(chưa đặt tên)'), missingBasis, totalGrossProfit, totalStaffCost, sharedVehicleCost,
+      netProfit: totalGrossProfit - totalStaffCost - sharedVehicleCost };
+  }
+
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="appraisalBackBtn">← Quay Lại</button>
@@ -3357,25 +3393,41 @@ function renderProjectAppraisal(){
     ${projects.length>=2 ? `
     <section class="group">
       <h3>⚖️ So Sánh Song Song</h3>
-      <div class="hint" style="margin-bottom:10px;">Công trình viền xanh có lãi gộp/chuyến cao nhất trong danh sách — cơ sở để Ông Chủ ưu tiên nhận việc.</div>
+      <div class="hint" style="margin-bottom:10px;">Công trình viền xanh có lãi gộp/chuyến cao nhất trong danh sách — cơ sở để Ông Chủ ưu tiên nhận việc. Tick "Đang chạy đồng thời" ở ≥2 công trình (VD ca sáng chạy công trình này, ca tối chạy công trình khác) để xem đúng lợi nhuận THỰC khi cả 2 cùng chạy 1 lúc, không trừ trùng chi phí xe.</div>
       <div class="appraisal-compare">
         ${projects.map(p=>{
           const m = metricsById[p.id];
           return `
           <div class="compare-card ${p.id===bestId?'best':''}">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">
+              <input type="checkbox" class="ap-compare-select" data-id="${p.id}" ${appraisalCompareSelection.has(p.id)?'checked':''}> Đang chạy đồng thời
+            </label>
             <h4>${escapeHtml(p.name||'(chưa đặt tên)')}${p.id===bestId?' <span class="rating-badge good">Đề xuất</span>':''}</h4>
+            <div class="compare-row"><span>Cơ cấu ca chạy</span><span class="val">${m.shiftsPerDay} ca/ngày</span></div>
             <div class="compare-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
             <div class="compare-row"><span>Dầu+lương chuyến+ăn+luật đường/chuyến</span><span class="val">${fmtVND(m.variableCostPerTrip)}</span></div>
             <div class="compare-row"><span>Lãi gộp/chuyến</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
             <div class="compare-row"><span>Số chuyến/ca dự tính</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
             <div class="compare-row"><span>Số chuyến hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn'}</span></div>
             <div class="compare-row"><span>Số ca hoà vốn / tháng</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'—'}</span></div>
-            <div class="compare-row"><span>Khả thi (so ngày công chuẩn ${m.standardWorkDays} ca)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+            <div class="compare-row"><span>Khả thi (so ngưỡng ${m.capacityShifts} ca)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
             <div class="compare-row"><span>Lợi nhuận dự kiến/tháng</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
             <div class="compare-row"><span>ROI/tháng</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
           </div>`;
         }).join('')}
       </div>
+      ${comboSummary ? `
+      <div class="card" style="margin-top:10px;">
+        <h4 style="margin-top:0;">📊 Tổng Hợp Khi Chạy Song Song</h4>
+        <div class="hint" style="margin-bottom:8px;">${comboSummary.names.map(escapeHtml).join(' + ')}</div>
+        ${comboSummary.missingBasis ? `<div class="hint" style="color:var(--loss);">⚠️ Có công trình chưa nhập đủ "Số chuyến dự tính/ca" — tổng lãi gộp dưới đây đang tạm bỏ qua công trình đó (tính là 0).</div>` : ''}
+        <div class="summary-row"><span>Tổng lãi gộp/tháng (cộng từng dự án)</span><span class="val">${fmtVND(comboSummary.totalGrossProfit)}</span></div>
+        <div class="summary-row"><span>− Lương cứng + Nhà ở (cộng từng dự án)</span><span class="val">${fmtVND(comboSummary.totalStaffCost)}</span></div>
+        <div class="summary-row"><span>− Chi phí xe dùng chung (vay + bảo hiểm + đăng kiểm + khấu hao — CHỈ trừ 1 lần)</span><span class="val">${fmtVND(comboSummary.sharedVehicleCost)}</span></div>
+        <div class="formula-divider" style="margin:8px 0;"></div>
+        <div class="summary-row total"><span>LỢI NHUẬN THỰC/THÁNG (chạy song song)</span><span class="val" style="color:${comboSummary.netProfit>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtVND(comboSummary.netProfit)}</span></div>
+        <div class="hint" style="margin-top:6px;">Nếu 2 công trình đi CHUNG 1 tuyến (cùng mức tiền luật đường), vào sửa 1 trong 2 công trình và đặt Tiền luật đường dự kiến = 0 để tránh cộng trùng khoản này.</div>
+      </div>` : ''}
     </section>` : ''}
 
     ${projects.length>=1 ? `
@@ -3403,6 +3455,12 @@ function renderProjectAppraisal(){
   }
   document.getElementById('appraisalBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addAppraisalBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null));
+  document.querySelectorAll('.ap-compare-select').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) appraisalCompareSelection.add(cb.dataset.id); else appraisalCompareSelection.delete(cb.dataset.id);
+      renderProjectAppraisal();
+    });
+  });
   const runBtn = document.getElementById('runAppraisalAnalysisBtn');
   if(runBtn) runBtn.addEventListener('click', runAppraisalAnalysis);
 
@@ -3451,8 +3509,9 @@ function renderAppraisalList(metricsById){
       <div class="summary-row"><span>Chi phí cố định/tháng (lương cứng+nhà+khấu hao+vay+bảo hiểm+đăng kiểm+khác)</span><span class="val">${fmtVND(m.fixedCostMonthly)}</span></div>
       <div class="summary-row"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không hoà vốn được với cơ cấu giá này'}</span></div>
       <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenShifts!==null?m.breakEvenShifts+' ca':'Chưa đủ dữ liệu (cần nhập số chuyến/ca)'}</span></div>
-      <div class="summary-row"><span>So với ngày công chuẩn (${m.standardWorkDays} ca/tháng)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
-      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ngày công chuẩn)</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
+      <div class="summary-row"><span>Cơ cấu ca chạy</span><span class="val">${m.shiftsPerDay} ca/ngày</span></div>
+      <div class="summary-row"><span>So với ngưỡng năng lực (${m.capacityShifts} ca/tháng)</span><span class="val">${m.feasible===null?'—':m.feasible?'<span class="rating-badge good">Khả thi</span>':`<span class="rating-badge warn">Thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.capacityShifts} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit!==null&&m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${m.projectedMonthlyProfit!==null?fmtVND(m.projectedMonthlyProfit):'—'}</span></div>
       <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
     </div>`;
   }).join('');
@@ -3492,8 +3551,16 @@ function openProjectAppraisalEditor(id){
     // "fixedCostAllocated" (một cục gộp chung, không tách khoản mục) —
     // chuyển nguyên giá trị đó sang dòng "Chi phí cố định khác" để KHÔNG
     // làm mất dữ liệu Ông Chủ đã nhập từ trước.
-    fixedOtherMonthly: existing.fixedOtherMonthly!=null ? existing.fixedOtherMonthly : (existing.fixedCostAllocated||0)
+    fixedOtherMonthly: existing.fixedOtherMonthly!=null ? existing.fixedOtherMonthly : (existing.fixedCostAllocated||0),
+    // Công trình cũ (trước khi có Cơ Cấu Ca Chạy) mặc định "single" — giữ
+    // đúng NGƯỠNG NĂNG LỰC/THÁNG cũ (28 ca), không đổi kết quả đã lưu.
+    // fixedStaffAutoManaged=false: KHÔNG bao giờ tự ghi đè Lương Cứng/Nhà Ở
+    // đã có sẵn của công trình cũ, dù Ông Chủ có bấm đổi công tắc sau này —
+    // vì số cũ có thể đã được Ông Chủ tự tay chỉnh, không được mất.
+    shiftStructure: existing.shiftStructure==='double' ? 'double' : 'single',
+    fixedStaffAutoManaged: false
   } : (()=>{
+    const activeDriverCount = Math.max(1, realFixed.activeDriverCount||1);
     return {
       id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
       priceIncludesVat:false, cargoUnitPrice:0,
@@ -3501,12 +3568,20 @@ function openProjectAppraisalEditor(id){
       // từng cung đường — không còn lấy số gợi ý từ lịch sử vận hành nữa.
       wagePerTripEstimate: 0,
       foodPerTripEstimate: 0,
-      // Lương cứng / Nhà ở / Khấu hao-sửa chữa: tự động điền sẵn bằng
-      // đúng số liệu THẬT đang có trong app (xem historicalMonthlyFixedCostReal)
-      // để Ông Chủ đỡ phải áng chừng — vẫn sửa lại tự do nếu công trình
-      // này cần thêm/bớt nhân sự hoặc chi phí khác đi.
-      fixedBaseSalaryMonthly: Math.round(realFixed.baseSalaryMonthly),
-      fixedHousingMonthly: Math.round(realFixed.housingMonthly),
+      // Cơ Cấu Ca Chạy mặc định "1 Ca/Ngày" — đúng thực tế phổ biến nhất
+      // (đa số công trình chỉ có 1 trong 2 ca của đội xe làm), và khớp
+      // đúng Ngưỡng Năng Lực/Tháng mặc định 28 ca. fixedStaffAutoManaged
+      // bật sẵn = true: Lương Cứng/Nhà Ở dưới đây sẽ TỰ ĐỘNG gợi ý lại mỗi
+      // khi đổi công tắc, cho tới khi Ông Chủ tự tay gõ vào 2 ô đó lần đầu
+      // (lúc đó tắt cờ này, giữ nguyên số Ông Chủ đã chỉnh, không ghi đè nữa).
+      shiftStructure: 'single',
+      fixedStaffAutoManaged: true,
+      // Lương cứng / Nhà ở: gợi ý ĐÚNG PHẦN CỦA 1 CA (= tổng thật toàn đội
+      // ÷ số tài xế đang hoạt động) — vì mặc định là "1 Ca/Ngày", chỉ 1
+      // người thực sự làm công trình này. Đổi sang "2 Ca/Ngày" sẽ tự gợi
+      // ý lại thành đủ tổng cả đội (xem wiring bên dưới).
+      fixedBaseSalaryMonthly: Math.round(realFixed.baseSalaryMonthly/activeDriverCount),
+      fixedHousingMonthly: Math.round(realFixed.housingMonthly/activeDriverCount),
       fixedDepreciationMonthly: Math.round(realFixed.depreciationMonthly),
       // Vay ngân hàng / Bảo hiểm / Đăng kiểm / Khác: app hiện chưa có sổ
       // riêng theo dõi các khoản này theo tháng nên vẫn để Ông Chủ tự nhập.
@@ -3545,6 +3620,14 @@ function openProjectAppraisalEditor(id){
           <label>Số chuyến dự tính chạy được trong 1 ca</label>
           <input type="number" inputmode="decimal" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
           <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế — đây là chỉ số quyết định công trình cần bao nhiêu CA mới hoà vốn, không chỉ bao nhiêu chuyến.</div>
+        </div>
+        <div class="field">
+          <label>Cơ Cấu Ca Chạy</label>
+          <div class="seg" id="ap_shiftStructureToggle">
+            <button data-val="single" class="${draft.shiftStructure!=='double'?'active':''}">1 Ca/Ngày</button>
+            <button data-val="double" class="${draft.shiftStructure==='double'?'active':''}">2 Ca/Ngày (Ngày + Đêm)</button>
+          </div>
+          <div class="hint">Công trình này chỉ cho phép xe chạy 1 ca/ngày, hay được chạy cả 2 ca? Chọn đúng để app tự tính Ngưỡng Năng Lực/Tháng (28 hay 56 ca) và Lợi Nhuận Dự Kiến/Tháng đúng thực tế, không cần tự nhân tay.</div>
         </div>
         <div class="field">
           <label>Giá cước</label>
@@ -3671,9 +3754,9 @@ function openProjectAppraisalEditor(id){
       <div class="summary-row" style="margin-top:6px;"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.fixedCostMonthly.toLocaleString('vi-VN')} ÷ ${Math.round(m.grossProfitPerTrip).toLocaleString('vi-VN')} = <strong>${m.breakEvenTrips} chuyến</strong></span></div>
       ${m.breakEvenShifts!==null ? `
       <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips} ÷ ${m.tripsPerShift} = <strong>${m.breakEvenShifts} ca</strong></span></div>
-      <div class="summary-row"><span>Ngày công chuẩn/tháng (Cài Đặt)</span><span class="val">${m.standardWorkDays} ca</span></div>
-      <div class="summary-row total"><span>KẾT LUẬN KHẢ THI</span><span class="val">${m.feasible ? `<span class="rating-badge good">Khả thi — dư ${m.standardWorkDays-m.breakEvenShifts} ca</span>` : `<span class="rating-badge warn">Không khả thi trong 1 tháng — thiếu ${m.shortfallShifts} ca</span>`}</span></div>
-      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.standardWorkDays} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
+      <div class="summary-row"><span>Ngưỡng năng lực/tháng (${m.standardWorkDays} ngày công chuẩn × ${m.shiftsPerDay} ca/ngày)</span><span class="val">${m.capacityShifts} ca</span></div>
+      <div class="summary-row total"><span>KẾT LUẬN KHẢ THI</span><span class="val">${m.feasible ? `<span class="rating-badge good">Khả thi — dư ${m.capacityShifts-m.breakEvenShifts} ca</span>` : `<span class="rating-badge warn">Không khả thi trong 1 tháng — thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.capacityShifts} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
       <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
       ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được trong 1 ca" để quy đổi ra số CA hoà vốn và kiểm tra có khả thi trong 1 tháng hay không.</div>`}
       `}
@@ -3692,11 +3775,29 @@ function openProjectAppraisalEditor(id){
       updatePreview();
     });
   });
+  document.querySelectorAll('#ap_shiftStructureToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      draft.shiftStructure = btn.dataset.val==='double' ? 'double' : 'single';
+      document.querySelectorAll('#ap_shiftStructureToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+      // Chỉ tự gợi ý lại Lương Cứng/Nhà Ở nếu Ông Chủ CHƯA từng tự tay sửa
+      // 2 ô này cho công trình này — tránh ghi đè mất số đã tự chỉnh.
+      if(draft.fixedStaffAutoManaged){
+        const activeDriverCount = Math.max(1, realFixed.activeDriverCount||1);
+        const suggestedSalary = draft.shiftStructure==='double' ? Math.round(realFixed.baseSalaryMonthly) : Math.round(realFixed.baseSalaryMonthly/activeDriverCount);
+        const suggestedHousing = draft.shiftStructure==='double' ? Math.round(realFixed.housingMonthly) : Math.round(realFixed.housingMonthly/activeDriverCount);
+        draft.fixedBaseSalaryMonthly = suggestedSalary;
+        draft.fixedHousingMonthly = suggestedHousing;
+        document.getElementById('ap_baseSalary').value = suggestedSalary.toLocaleString('vi-VN');
+        document.getElementById('ap_housing').value = suggestedHousing.toLocaleString('vi-VN');
+      }
+      updatePreview();
+    });
+  });
   attachMoneyInput(document.getElementById('ap_cargoPrice'), draft.cargoUnitPrice, v=>{ draft.cargoUnitPrice=v; updatePreview(); });
-  attachMoneyInput(document.getElementById('ap_baseSalary'), draft.fixedBaseSalaryMonthly, v=>{ draft.fixedBaseSalaryMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_baseSalary'), draft.fixedBaseSalaryMonthly, v=>{ draft.fixedBaseSalaryMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_wagePerTrip'), draft.wagePerTripEstimate, v=>{ draft.wagePerTripEstimate=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_foodPerTrip'), draft.foodPerTripEstimate, v=>{ draft.foodPerTripEstimate=v; updatePreview(); });
-  attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_depreciation'), draft.fixedDepreciationMonthly, v=>{ draft.fixedDepreciationMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_insurance'), draft.fixedInsuranceMonthly, v=>{ draft.fixedInsuranceMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_registration'), draft.fixedRegistrationMonthly, v=>{ draft.fixedRegistrationMonthly=v; updatePreview(); });
@@ -3737,6 +3838,9 @@ function openProjectAppraisalEditor(id){
 /// analysis button — mirrors activeStrategyTruckRun, kept separate so the
 /// two screens' animations never interfere with each other.
 let activeAppraisalTruckRun = null;
+// Tick chọn "đang chạy đồng thời" ở bảng So Sánh Song Song — chỉ tồn tại
+// trong phiên xem hiện tại (không lưu Cloud), reset khi rời màn hình.
+let appraisalCompareSelection = new Set();
 
 /// Builds the Vietnamese expert-persona prompt. Explicitly forbids Gemini
 /// from inventing figures not present in the payload, and explicitly
@@ -3799,7 +3903,8 @@ async function runAppraisalAnalysis(){
         chiPhiCoDinhMoiThang: Math.round(m.fixedCostMonthly),
         soChuyenHoaVon: m.breakEvenTrips,
         soCaHoaVon: m.breakEvenShifts,
-        ngayCongChuanMoiThang: m.standardWorkDays,
+        coCauCaChay: m.shiftsPerDay===2 ? '2 ca/ngày (Ngày + Đêm)' : '1 ca/ngày',
+        nguongNangLucMoiThang: m.capacityShifts,
         khaThiTrongThang: m.feasible,
         loiNhuanDuKienMoiThang: m.projectedMonthlyProfit!==null ? Math.round(m.projectedMonthlyProfit) : null,
         roiPhanTramMoiThang: m.roiPercent!==null ? +m.roiPercent.toFixed(1) : null
