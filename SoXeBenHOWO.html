@@ -3168,15 +3168,14 @@ function historicalMonthlyFixedCostReal(){
   const baseSalaryMonthly = activeDrivers.reduce((s,d)=>s+(Number(d.monthlyBaseSalary)||0),0);
   const housingMonthly = activeDrivers.reduce((s,d)=>s+(Number(d.monthlyHousingBudget)||0),0);
 
-  let depreciationMonthly = 0;
-  if(state.repairs.length>0){
-    const sorted = [...state.repairs].sort((a,b)=>a.date.localeCompare(b.date));
-    const ownerTotal = sorted.reduce((s,r)=>s+((Number(r.amount)||0)-repairDriverResponsibleAmount(r)),0);
-    const firstMs = new Date(sorted[0].date).getTime();
-    const lastMs = new Date(sorted[sorted.length-1].date).getTime();
-    const monthsSpan = Math.max(1, (lastMs-firstMs)/(1000*60*60*24*30.44));
-    depreciationMonthly = Math.max(0, ownerTotal)/monthsSpan;
-  }
+  // SỬA LỖI: "Khấu hao xe" phải là con số CỐ ĐỊNH Ông Chủ đã cấu hình ở
+  // Cài Đặt (state.settings.monthlyVehicleDepreciation) — TRƯỚC ĐÂY nhầm
+  // lấy trung bình chi phí SỬA CHỮA THỰC TẾ đã ghi trong sổ (biến động
+  // từng tháng tuỳ có hỏng hóc hay không), hoàn toàn khác bản chất với
+  // khấu hao. Chi phí sửa chữa phát sinh chỉ đúng cho THÁNG ĐÃ QUA ghi
+  // trong sổ, không phải con số nên dùng để ước tính cho 1 công trình sẽ
+  // chạy lặp lại hàng tháng trong tương lai — nên KHÔNG dùng nó ở đây nữa.
+  const depreciationMonthly = Number(state.settings.monthlyVehicleDepreciation)||0;
   return { baseSalaryMonthly, housingMonthly, depreciationMonthly, activeDriverCount: activeDrivers.length };
 }
 /// Core simulation for ONE prospective project. Everything downstream
@@ -3558,7 +3557,8 @@ function openProjectAppraisalEditor(id){
     // đã có sẵn của công trình cũ, dù Ông Chủ có bấm đổi công tắc sau này —
     // vì số cũ có thể đã được Ông Chủ tự tay chỉnh, không được mất.
     shiftStructure: existing.shiftStructure==='double' ? 'double' : 'single',
-    fixedStaffAutoManaged: false
+    fixedStaffAutoManaged: false,
+    foodAutoManaged: false
   } : (()=>{
     const activeDriverCount = Math.max(1, realFixed.activeDriverCount||1);
     return {
@@ -3568,6 +3568,12 @@ function openProjectAppraisalEditor(id){
       // từng cung đường — không còn lấy số gợi ý từ lịch sử vận hành nữa.
       wagePerTripEstimate: 0,
       foodPerTripEstimate: 0,
+      // Tiền ăn: tự gợi ý = mức TB thực tế toàn đội xe (đ/ca) ÷ số chuyến/ca
+      // — nhân đôi mức TB đó nếu Cơ Cấu Ca Chạy = "2 Ca/Ngày" (2 người,
+      // mỗi người 1 suất ăn riêng cho ca của mình), giữ nguyên nếu "1 Ca/
+      // Ngày" (chỉ 1 người). Tự tắt nếu Ông Chủ gõ tay vào ô này 1 lần,
+      // giống hệt cơ chế của Lương Cứng/Nhà Ở.
+      foodAutoManaged: true,
       // Cơ Cấu Ca Chạy mặc định "1 Ca/Ngày" — đúng thực tế phổ biến nhất
       // (đa số công trình chỉ có 1 trong 2 ca của đội xe làm), và khớp
       // đúng Ngưỡng Năng Lực/Tháng mặc định 28 ca. fixedStaffAutoManaged
@@ -3665,7 +3671,7 @@ function openProjectAppraisalEditor(id){
         <div class="field" style="margin-bottom:0;">
           <label>Tiền ăn ca dự kiến phân bổ cho mỗi chuyến (đ/chuyến)</label>
           <input type="text" inputmode="decimal" id="ap_foodPerTrip">
-          <div class="hint">Tiền ăn TB thực tế toàn đội xe hiện là ${fmtVND(historicalAvgFoodPerShift())}/ca — nếu công trình này dự tính chạy được N chuyến/ca, lấy số đó chia N rồi nhập vào đây cho đúng mỗi chuyến.</div>
+          <div class="hint">Tự động gợi ý = Tiền ăn TB thực tế toàn đội xe (${fmtVND(historicalAvgFoodPerShift())}/ca, nhân đôi nếu chọn "2 Ca/Ngày") ÷ Số chuyến/ca đã nhập ở trên, quy ra đúng mỗi chuyến. Gõ tay đè lên là app sẽ giữ nguyên số Ông Chủ tự nhập, không tự gợi ý lại nữa.</div>
         </div>
       </div>
     </section>
@@ -3681,7 +3687,7 @@ function openProjectAppraisalEditor(id){
         <div class="field">
           <label>Khấu hao xe dự kiến (đ/tháng)</label>
           <input type="text" inputmode="decimal" id="ap_depreciation">
-          <div class="hint">Tự động điền sẵn bằng mức khấu hao/sửa chữa THẬT trung bình mỗi tháng, tính từ toàn bộ sổ Sửa Chữa/Khấu Hao đã ghi (${fmtVND(realFixed.depreciationMonthly)}/tháng) — sửa lại nếu dự kiến khác.</div>
+          <div class="hint">Tự động điền sẵn bằng đúng mức Khấu Hao Xe cố định đang cấu hình ở Cài Đặt (${fmtVND(realFixed.depreciationMonthly)}/tháng) — sửa lại nếu dự kiến khác. (Chi phí sửa chữa phát sinh thực tế trong tháng là khoản RIÊNG, biến động, không dùng để ước tính khoản cố định này.)</div>
         </div>
         <div class="field">
           <label>Bảo hiểm xe dự kiến (đ/tháng)</label>
@@ -3766,8 +3772,20 @@ function openProjectAppraisalEditor(id){
   document.getElementById('ap_name').addEventListener('input', e=>{ draft.name=e.target.value; });
   document.getElementById('ap_kmGo').addEventListener('input', e=>{ draft.kmOneWay=Number(e.target.value)||0; updatePreview(); });
   document.getElementById('ap_kmBack').addEventListener('input', e=>{ draft.kmReturn=Number(e.target.value)||0; updatePreview(); });
+  // Tự gợi ý lại "Tiền ăn/chuyến" = (TB thực tế/ca, nhân đôi nếu 2 Ca/Ngày)
+  // ÷ Số chuyến/ca — chỉ khi Ông Chủ CHƯA từng tự gõ tay vào ô này.
+  const applyFoodSuggestion = ()=>{
+    if(!draft.foodAutoManaged) return;
+    const tripsPerShift = Number(draft.estimatedTripsPerShift)||0;
+    if(tripsPerShift<=0) return;
+    const perShiftFood = historicalAvgFoodPerShift() * (draft.shiftStructure==='double' ? 2 : 1);
+    const suggested = Math.round(perShiftFood/tripsPerShift);
+    draft.foodPerTripEstimate = suggested;
+    const el = document.getElementById('ap_foodPerTrip');
+    if(el) el.value = suggested ? suggested.toLocaleString('vi-VN') : '';
+  };
   document.getElementById('ap_load').addEventListener('input', e=>{ draft.loadPerTrip=Number(e.target.value)||0; updatePreview(); });
-  document.getElementById('ap_tripsPerShift').addEventListener('input', e=>{ draft.estimatedTripsPerShift=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_tripsPerShift').addEventListener('input', e=>{ draft.estimatedTripsPerShift=Number(e.target.value)||0; applyFoodSuggestion(); updatePreview(); });
   document.querySelectorAll('#ap_vatToggle button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       draft.priceIncludesVat = btn.dataset.val==='1';
@@ -3790,13 +3808,15 @@ function openProjectAppraisalEditor(id){
         document.getElementById('ap_baseSalary').value = suggestedSalary.toLocaleString('vi-VN');
         document.getElementById('ap_housing').value = suggestedHousing.toLocaleString('vi-VN');
       }
+      applyFoodSuggestion();
       updatePreview();
     });
   });
+  applyFoodSuggestion();
   attachMoneyInput(document.getElementById('ap_cargoPrice'), draft.cargoUnitPrice, v=>{ draft.cargoUnitPrice=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_baseSalary'), draft.fixedBaseSalaryMonthly, v=>{ draft.fixedBaseSalaryMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_wagePerTrip'), draft.wagePerTripEstimate, v=>{ draft.wagePerTripEstimate=v; updatePreview(); });
-  attachMoneyInput(document.getElementById('ap_foodPerTrip'), draft.foodPerTripEstimate, v=>{ draft.foodPerTripEstimate=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_foodPerTrip'), draft.foodPerTripEstimate, v=>{ draft.foodPerTripEstimate=v; draft.foodAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_depreciation'), draft.fixedDepreciationMonthly, v=>{ draft.fixedDepreciationMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_insurance'), draft.fixedInsuranceMonthly, v=>{ draft.fixedInsuranceMonthly=v; updatePreview(); });
