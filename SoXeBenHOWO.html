@@ -6254,6 +6254,99 @@ function buildRepairRows(from, to){
 /// `resultsData` is optional — when provided (called from the Kết Quả
 /// tab), the "Kết Quả Kinh Doanh" sheet is included; when exporting from
 /// Cài Đặt without a specific period in view, that sheet is skipped.
+// Tên sheet Excel không được chứa dấu tiếng Việt an toàn 100% ở mọi phiên
+// bản Excel/Google Sheets, tối đa 31 ký tự, không chứa : \ / ? * [ ] — bỏ
+// dấu + cắt gọn + tự thêm số thứ tự nếu 2 tài xế trùng tên sau khi bỏ dấu.
+function removeVietnameseDiacritics(str){
+  return String(str||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/đ/g,'d').replace(/Đ/g,'D');
+}
+function sanitizeExcelSheetName(name, usedNames){
+  let clean = removeVietnameseDiacritics(name||'Tai Xe').replace(/[:\\/?*\[\]]/g,' ').trim();
+  if(!clean) clean = 'Tai Xe';
+  if(clean.length>31) clean = clean.slice(0,31);
+  let finalName = clean, i=2;
+  while(usedNames.has(finalName)){
+    const suffix = ` (${i})`;
+    finalName = clean.slice(0, 31-suffix.length) + suffix;
+    i++;
+  }
+  usedNames.add(finalName);
+  return finalName;
+}
+
+/// Xây 1 sheet PHIẾU LƯƠNG riêng cho 1 tài xế — đủ chi tiết để tài xế tự
+/// đối chiếu từng đồng trước khi Ông Chủ chuyển khoản. KHÔNG tính toán gì
+/// mới — mọi số liệu lấy đúng từ các hàm đã kiểm chứng (computeDriverShiftCounts,
+/// shiftTotalTripWage, driverResponsibleRepairTotalInRange,
+/// driverMonthlyBonusTotalInRange), nên LƯƠNG THỰC NHẬN ở đây LUÔN khớp
+/// tuyệt đối với sheet tổng hợp "Lương Tài Xế". Không hiện dầu/lợi nhuận
+/// ca (thuộc nội bộ chủ xe, không liên quan tới lương tài xế).
+function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from, to){
+  const rows = [];
+  rows.push([`PHIẾU LƯƠNG — ${driverName}`]);
+  rows.push([`Kỳ: ${formatDateVN(from)} — ${formatDateVN(to)}`]);
+  rows.push([]);
+  const counts = computeDriverShiftCounts(shiftsForDriver);
+  const baseSalary = shiftsForDriver.reduce((s,sh)=>s+(sh.baseSalaryAllocation||0),0);
+  const tripWage = shiftsForDriver.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
+  const housing = shiftsForDriver.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
+  const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
+  const repairDeduction = driverId ? driverResponsibleRepairTotalInRange(driverId, from, to) : 0;
+  const monthlyBonus = driverId ? driverMonthlyBonusTotalInRange(driverId, from, to) : 0;
+  const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
+
+  rows.push(['TỔNG KẾT']);
+  rows.push(['Số Ca Tính Lương', counts.paidCount]);
+  rows.push(['Số Ca Nghỉ Phép', counts.onLeaveCount]);
+  rows.push(['Số Ca Khác (Không Lương)', counts.otherUnpaidCount]);
+  rows.push(['Lương Cứng', Math.round(baseSalary)]);
+  rows.push(['Tổng Lương Chuyến', Math.round(tripWage)]);
+  rows.push(['Tổng Tiền Ăn', Math.round(food)]);
+  rows.push(['Tiền Tip/Thưởng Cuối Tháng', Math.round(monthlyBonus)]);
+  rows.push(['Ứng Lương/Đền Bù (Trừ)', Math.round(advance)]);
+  rows.push(['Trừ Do Hỏng Hóc', Math.round(repairDeduction)]);
+  rows.push(['LƯƠNG THỰC NHẬN', Math.round(netPay)]);
+  rows.push([]);
+  rows.push(['(Thông tin thêm — Công ty trả trực tiếp, KHÔNG tính vào lương) Tổng Tiền Nhà + Điện Nước', Math.round(housing)]);
+  rows.push([]);
+
+  rows.push(['CHI TIẾT TỪNG CA']);
+  const detailHeader = ['Ngày','Ca','Trạng Thái','Công Trình','Khối Lượng/Chuyến','Đơn Giá Vật Liệu','Số Chuyến',
+    'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến (Ca Này)','Lương Cứng (Ca Này)','Tiền Ăn (Ca Này)','Ứng Lương (Ca Này)','Ghi Chú Ca'];
+  rows.push(detailHeader);
+  const emptySiteFields = ['','','','','','',''];
+  const sorted = [...shiftsForDriver].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
+  for(const sh of sorted){
+    const shared = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), statusLabel(sh.status)];
+    const trailing = [sh.baseSalaryAllocation||0, sh.foodAllowance||0, sh.advanceAmount||0, sh.notes||''];
+    if((sh.siteLogs||[]).length===0){
+      rows.push([...shared, ...emptySiteFields, ...trailing]);
+    } else {
+      sh.siteLogs.forEach((s,idx)=>{
+        const siteFields = [s.siteName||'', s.volumePerTrip||0, s.materialUnitPrice||0, s.trips||0,
+          s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)];
+        // Lương Cứng/Tiền Ăn/Ứng Lương chỉ hiện ở DÒNG ĐẦU của ca — tránh
+        // hiểu nhầm là cộng dồn theo từng công trình khi 1 ca có nhiều
+        // công trình (số đó là của CẢ CA, không phải từng công trình).
+        rows.push([...shared, ...siteFields, ...(idx===0 ? trailing : ['','','',''])]);
+      });
+    }
+  }
+
+  const repairRows = repairsInRange(from, to).filter(r=>r.responsibleDriverId===driverId && repairDriverResponsibleAmount(r)>0);
+  if(repairRows.length>0){
+    rows.push([]);
+    rows.push(['CÁC KHOẢN TRỪ DO HỎNG HÓC (TRONG KỲ)']);
+    rows.push(['Ngày','Hạng Mục','Số Tiền Hoá Đơn','Số Tiền Bị Trừ']);
+    repairRows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(r=>{
+      rows.push([formatDateVN(r.date), r.item||'', Math.round(r.amount)||0, Math.round(repairDriverResponsibleAmount(r))]);
+    });
+  }
+  return rows;
+}
+
 function downloadWorkbook(from, to, resultsData, filenamePrefix){
   const wb = XLSX.utils.book_new();
 
@@ -6268,6 +6361,32 @@ function downloadWorkbook(from, to, resultsData, filenamePrefix){
   applyAccountingFormat(wsPayroll, [1,2,3,4,5,6,7,8,9,10,11], 1);
   autoFitColumns(wsPayroll, payrollRows);
   XLSX.utils.book_append_sheet(wb, wsPayroll, 'Luong Tai Xe');
+
+  // Mỗi tài xế có ca trong kỳ được xuất riêng 1 sheet — đủ chi tiết để tự
+  // in ra đưa cho tài xế đối chiếu trước khi Ông Chủ chuyển khoản. Số
+  // LƯƠNG THỰC NHẬN ở đây LUÔN khớp đúng với dòng tương ứng ở sheet "Luong
+  // Tai Xe" (cùng dùng chung công thức, không tính lại kiểu khác).
+  const usedSheetNames = new Set(['Nhat Ky Van Hanh','Luong Tai Xe','Ket Qua Kinh Doanh','Sua Chua Khau Hao']);
+  const inRangeForPayslips = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const byDriverForPayslips = {};
+  for(const sh of inRangeForPayslips){
+    const driver = driverById(sh.driverId);
+    const name = driver?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
+    if(!byDriverForPayslips[name]) byDriverForPayslips[name] = { driverId: driver?.id || null, shiftsList: [] };
+    byDriverForPayslips[name].shiftsList.push(sh);
+  }
+  Object.keys(byDriverForPayslips).sort().forEach(name=>{
+    const b = byDriverForPayslips[name];
+    const payslipRows = buildDriverPayslipSheetRows(b.driverId, name, b.shiftsList, from, to);
+    const wsPayslip = XLSX.utils.aoa_to_sheet(payslipRows);
+    // applyAccountingFormat chỉ đụng đúng Ô SỐ (cell.t==='n'), tự bỏ qua ô
+    // chữ/ngày/tiêu đề — nên quét rộng toàn bộ cột 0-13 từ dòng đầu vẫn an
+    // toàn tuyệt đối, không làm hỏng bất kỳ ô chữ nào.
+    applyAccountingFormat(wsPayslip, [0,1,2,3,4,5,6,7,8,9,10,11,12,13], 0);
+    autoFitColumns(wsPayslip, payslipRows);
+    const sheetName = sanitizeExcelSheetName(name, usedSheetNames);
+    XLSX.utils.book_append_sheet(wb, wsPayslip, sheetName);
+  });
 
   if(resultsData){
     const resultsRows = buildResultsRows(resultsData);
