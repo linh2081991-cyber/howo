@@ -149,26 +149,28 @@
     padding:0; border-radius:0;
   }
   .stat-highlight .val-suffix{ font-size:15.5px; font-weight:800; color:var(--accent); flex-shrink:0; margin-left:2px; }
-  /// Ô ngày kiểu "text đẹp đè lên input ngày thật" — dùng cho Ngày Nhận
-  /// Tiền, Ngày Giải Ngân, Áp Dụng Từ Ngày... input[type=date] gốc trên
-  /// iOS Safari PWA không theo font-size CSS của app (tự phóng to chữ dạng
-  /// "ngày 18 thg 7, 2026"), nên hiện 1 khối text thường (đúng size/style
-  /// app, dd/mm/yyyy gọn) ĐÈ LÊN TRÊN để nhìn cho đẹp — còn input ngày thật
-  /// vẫn NẰM ĐÚNG NGUYÊN VỊ TRÍ, trong suốt tuyệt đối (opacity:0) nhưng vẫn
-  /// full kích thước + vẫn nhận chạm bình thường, để chạm vào bất kỳ đâu
-  /// trong khung đều trúng thẳng input gốc và bật đúng lịch chọn ngày gốc
-  /// của iOS — KHÔNG cần JS gọi .showPicker() (đã thử đưa input ra hẳn
-  /// ngoài màn hình + gọi showPicker() bằng JS, nhưng lịch bật lên cũng bị
-  /// định vị lệch ra ngoài màn hình luôn, không hiện — nên bỏ cách đó).
-  .date-overlay-wrap{ position:relative; }
-  .date-overlay-wrap .date-display-text{ pointer-events:none; }
-  .date-overlay-wrap input[type=date]{ position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:none; background:transparent; opacity:0; }
-  .date-display-text{ display:flex; align-items:center; width:100%; height:44px; box-sizing:border-box; font-size:16px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit; text-align:left; }
+  /// ĐÃ THỬ VÀ BỎ (KHÔNG dùng nữa — giữ lại đúng lịch sử để không ai lỡ áp
+  /// dụng lại): từng có kiểu "text đẹp đè lên input ngày thật" (opacity:0,
+  /// full kích thước, chạm đâu cũng trúng input ngày gốc) cho Ngày Nhận
+  /// Tiền/Ngày Giải Ngân/Áp Dụng Từ Ngày — vì input[type=date] gốc trên iOS
+  /// Safari PWA không theo font-size CSS của app (tự phóng to chữ dạng
+  /// "ngày 18 thg 7, 2026"). Nhưng trên thực tế máy Ông Chủ, vùng chạm ẩn
+  /// đó gây lỗi — có lúc không mở được lịch, có lúc lại che mất các trường
+  /// khác ngay bên dưới khiến bấm nhầm. Đã chuyển TẤT CẢ 3 ô này về đúng
+  /// input[type=date] gốc, không che/ẩn/đè gì cả — chấp nhận chữ hiển thị
+  /// hơi to hơn app một chút, đổi lấy chắc chắn bấm mở lịch được và không
+  /// bao giờ che trường khác.
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
     border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
   }
   input[type=number]{ font-variant-numeric:tabular-nums; }
+  /// Chỉnh AN TOÀN cho input[type=date] thô (KHÔNG che/di chuyển/ẩn input —
+  /// chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho
+  /// input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả
+  /// năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần).
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; }
+  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; }
   .seg{ display:flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
   .seg button{ flex:1; padding:11px 0; border:none; background:var(--surface); font-size:14px; font-weight:600; color:var(--ink-soft); }
   .seg button.active{ background:var(--accent); color:#fff; }
@@ -5198,10 +5200,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
-          <div class="date-overlay-wrap">
-            <div class="date-display-text" id="sp_dateDisplay">${formatDateVN(draft.date)}</div>
-            <input type="date" id="sp_date" value="${draft.date}">
-          </div>
+          <input type="date" id="sp_date" value="${draft.date}">
         </div>
         <div class="field">
           <label>Chủ công trình / Nhà thầu</label>
@@ -5224,9 +5223,6 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     </section>
   `;
   attachMoneyInput(document.getElementById('sp_amount'), draft.amount, v=>draft.amount=v);
-  document.getElementById('sp_date').addEventListener('change', e=>{
-    if(e.target.value) document.getElementById('sp_dateDisplay').textContent = formatDateVN(e.target.value);
-  });
 
   document.getElementById('saveSitePaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('sp_date').value || draft.date;
