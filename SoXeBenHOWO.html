@@ -563,10 +563,10 @@ let state = {
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [], // {id, siteName, totalContractValue, notes}
   siteAppraisals: [], // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice,
-  // wagePerTripEstimate (đ/chuyến), foodPerTripEstimate (đ/chuyến),
+  // wagePerTripEstimate (đ/chuyến), foodPerShiftEstimate (đ/ca, tương thích ngược đọc từ foodPerTripEstimate cũ nếu có),
   // fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly, fixedLoanMonthly,
   // fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly (tất cả đ/tháng),
-  // roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift}
+  // roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift, shiftStructure ('single'|'double')}
   // — prospective-project appraisal module, fully isolated from shift logs
   monthlyBonuses: [] // {id, driverId, yearMonth:'YYYY-MM', amount, note} — tiền tip/thưởng
   // CUỐI THÁNG của tài xế. Mỗi driverId+yearMonth chỉ nên có 1 dòng; cộng
@@ -3207,7 +3207,7 @@ function computeAppraisalMetrics(p){
   // điền mặc định khi tạo công trình mới) — KHÔNG còn dùng trực tiếp
   // trong công thức lãi gộp/chuyến nữa. Từ nay lương chuyến + tiền ăn là
   // số Ông Chủ tự nhập riêng cho từng công trình (ap_wagePerTrip /
-  // ap_foodPerTrip) để hạch toán đúng đặc thù công trình đó.
+  // ap_foodPerShift) để hạch toán đúng đặc thù công trình đó.
   const avgWagePerTripReal = historicalAvgWagePerTrip();
   const avgFoodPerShiftReal = historicalAvgFoodPerShift();
 
@@ -3235,7 +3235,14 @@ function computeAppraisalMetrics(p){
   // ----- Chi phí biến đổi/chuyến (đúng yêu cầu: dầu + lương chuyến + tiền
   // ăn + tiền luật đường), lấy trực tiếp từ các trường Ông Chủ tự nhập -----
   const wagePerTrip = Number(p.wagePerTripEstimate)||0;
-  const foodPerTrip = Number(p.foodPerTripEstimate)||0;
+  // Tiền ăn: Ông Chủ nhập ĐÚNG số tiền/CA (không phải/chuyến) — app tự quy
+  // đổi ra mỗi chuyến ở đây bằng cách chia cho Số Chuyến/Ca, không bắt Ông
+  // Chủ tự nhẩm chia. Tương thích ngược: công trình cũ (trước khi có ô
+  // "đ/ca") chỉ lưu foodPerTripEstimate (đ/chuyến) — suy ngược lại đúng
+  // tổng tiền ăn/ca = foodPerTripEstimate cũ × Số Chuyến/Ca, để không đổi
+  // kết quả các công trình đã lưu.
+  const foodPerShiftEstimate = p.foodPerShiftEstimate!=null ? Number(p.foodPerShiftEstimate)||0 : (Number(p.foodPerTripEstimate)||0)*tripsPerShift;
+  const foodPerTrip = tripsPerShift>0 ? foodPerShiftEstimate/tripsPerShift : 0;
   const roadFeeMonthly = Number(p.roadFeeEstimate)||0;
   // Tiền luật đường đóng THEO THÁNG ngoài đời thật, nên quy đổi về tương
   // đương mỗi chuyến bằng TỔNG số chuyến ước tính chạy được cả tháng (đã
@@ -3293,7 +3300,7 @@ function computeAppraisalMetrics(p){
 
   return { fuelPerKm, fuelPrice, avgWagePerTripReal, avgFoodPerShiftReal, hasWageBasis, hasFoodBasis, hasRoadFeeBasis,
            kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip, grossCargoRevenuePerTrip, netRevenuePerTrip,
-           wagePerTrip, foodPerTrip, roadFeePerTripEquivalent, monthlyTripsEstimate,
+           wagePerTrip, foodPerTrip, foodPerShiftEstimate, roadFeePerTripEquivalent, monthlyTripsEstimate,
            variableCostPerTrip, grossProfitPerTrip, tripsPerShift, grossProfitPerShift,
            shiftStructure, shiftsPerDay, capacityShifts, monthlyGrossProfitAtCapacity,
            roadFeeMonthly, fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly,
@@ -3500,7 +3507,7 @@ function renderAppraisalList(metricsById){
       <div class="summary-row"><span>Doanh thu thuần ước tính/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
       <div class="summary-row"><span>Chi phí dầu thực tế/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
       <div class="summary-row"><span>Lương chuyến dự kiến</span><span class="val">${fmtVND(m.wagePerTrip)}</span></div>
-      <div class="summary-row"><span>Tiền ăn dự kiến/chuyến</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
+      <div class="summary-row"><span>Tiền ăn dự kiến/chuyến (${fmtVND(m.foodPerShiftEstimate)}/ca ÷ ${m.tripsPerShift>0?m.tripsPerShift:'?'} chuyến/ca)</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
       <div class="summary-row"><span>Tiền luật đường quy đổi/chuyến</span><span class="val">${fmtVND(m.roadFeePerTripEquivalent)}</span></div>
       <div class="summary-row total"><span>LỢI NHUẬN GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
       <div class="summary-row"><span>Số chuyến dự tính chạy được/ca</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
@@ -3540,7 +3547,11 @@ function openProjectAppraisalEditor(id){
   const draft = existing ? {
     ...existing,
     wagePerTripEstimate: existing.wagePerTripEstimate!=null ? existing.wagePerTripEstimate : 0,
-    foodPerTripEstimate: existing.foodPerTripEstimate!=null ? existing.foodPerTripEstimate : 0,
+    // Tiền ăn: công trình cũ chỉ có foodPerTripEstimate (đ/chuyến) — suy
+    // ngược ra đúng tổng tiền ăn/ca (= đ/chuyến cũ × Số Chuyến/Ca) để hiện
+    // đúng số tương đương trong ô "đ/ca" mới, không đổi kết quả đã lưu.
+    foodPerShiftEstimate: existing.foodPerShiftEstimate!=null ? existing.foodPerShiftEstimate
+      : Math.round((existing.foodPerTripEstimate||0)*(existing.estimatedTripsPerShift||0)),
     fixedBaseSalaryMonthly: existing.fixedBaseSalaryMonthly||0,
     fixedHousingMonthly: existing.fixedHousingMonthly||0,
     fixedDepreciationMonthly: existing.fixedDepreciationMonthly||0,
@@ -3567,12 +3578,14 @@ function openProjectAppraisalEditor(id){
       // Lương chuyến: để TRỐNG, luôn do Ông Chủ tự điền tay vì phụ thuộc
       // từng cung đường — không còn lấy số gợi ý từ lịch sử vận hành nữa.
       wagePerTripEstimate: 0,
-      foodPerTripEstimate: 0,
-      // Tiền ăn: tự gợi ý = mức TB thực tế toàn đội xe (đ/ca) ÷ số chuyến/ca
-      // — nhân đôi mức TB đó nếu Cơ Cấu Ca Chạy = "2 Ca/Ngày" (2 người,
-      // mỗi người 1 suất ăn riêng cho ca của mình), giữ nguyên nếu "1 Ca/
-      // Ngày" (chỉ 1 người). Tự tắt nếu Ông Chủ gõ tay vào ô này 1 lần,
-      // giống hệt cơ chế của Lương Cứng/Nhà Ở.
+      // Tiền ăn: nhập ĐÚNG số tiền/CA (không phải/chuyến) — tự gợi ý cố
+      // định = mức TB thực tế toàn đội xe (150.000đ/ca), nhân đôi nếu Cơ
+      // Cấu Ca Chạy = "2 Ca/Ngày" (2 người, mỗi người 1 suất ăn riêng cho
+      // ca của mình). App tự chia cho Số Chuyến/Ca để quy đổi đúng mỗi
+      // chuyến khi tính lãi gộp, Ông Chủ không cần tự nhẩm chia.
+      foodPerShiftEstimate: Math.round(historicalAvgFoodPerShift()),
+      // Tự tắt nếu Ông Chủ gõ tay vào ô này 1 lần, giống hệt cơ chế của
+      // Lương Cứng/Nhà Ở.
       foodAutoManaged: true,
       // Cơ Cấu Ca Chạy mặc định "1 Ca/Ngày" — đúng thực tế phổ biến nhất
       // (đa số công trình chỉ có 1 trong 2 ca của đội xe làm), và khớp
@@ -3669,9 +3682,9 @@ function openProjectAppraisalEditor(id){
       <h3>🍚 Tiền Ăn</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
-          <label>Tiền ăn ca dự kiến phân bổ cho mỗi chuyến (đ/chuyến)</label>
-          <input type="text" inputmode="decimal" id="ap_foodPerTrip">
-          <div class="hint">Tự động gợi ý = Tiền ăn TB thực tế toàn đội xe (${fmtVND(historicalAvgFoodPerShift())}/ca, nhân đôi nếu chọn "2 Ca/Ngày") ÷ Số chuyến/ca đã nhập ở trên, quy ra đúng mỗi chuyến. Gõ tay đè lên là app sẽ giữ nguyên số Ông Chủ tự nhập, không tự gợi ý lại nữa.</div>
+          <label>Tiền ăn dự kiến (đ/ca)</label>
+          <input type="text" inputmode="decimal" id="ap_foodPerShift">
+          <div class="hint">Tự động gợi ý cố định = Tiền ăn TB thực tế toàn đội xe (${fmtVND(historicalAvgFoodPerShift())}/ca) — tự nhân đôi nếu chọn "2 Ca/Ngày" (2 người, mỗi người 1 suất ăn riêng). App tự quy đổi ra đúng mỗi chuyến khi tính lãi gộp, Ông Chủ không cần tự chia. Gõ tay đè lên là app sẽ giữ nguyên số Ông Chủ tự nhập, không tự gợi ý lại nữa.</div>
         </div>
       </div>
     </section>
@@ -3733,7 +3746,7 @@ function openProjectAppraisalEditor(id){
       <div class="summary-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
       <div class="summary-row"><span>− Chi phí dầu thực tế (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
       <div class="summary-row"><span>− Lương chuyến dự kiến</span><span class="val">${fmtVND(m.wagePerTrip)}</span></div>
-      <div class="summary-row"><span>− Tiền ăn dự kiến/chuyến</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
+      <div class="summary-row"><span>− Tiền ăn dự kiến/chuyến (${fmtVND(m.foodPerShiftEstimate)}/ca ÷ ${m.tripsPerShift>0?m.tripsPerShift:'?'} chuyến/ca)</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
       <div class="summary-row"><span>− Tiền luật đường quy đổi/chuyến</span><span class="val">${fmtVND(m.roadFeePerTripEquivalent)}</span></div>
       <div class="summary-row total"><span>LÃI GỘP / CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
       ${(!m.hasWageBasis || !m.hasFoodBasis) ? `<div class="hint" style="color:var(--loss); margin-top:4px;">⚠️ Chưa nhập ${!m.hasWageBasis?'lương chuyến':''}${(!m.hasWageBasis && !m.hasFoodBasis)?' và ':''}${!m.hasFoodBasis?'tiền ăn':''} dự kiến — lãi gộp/chuyến ở trên đang bị TÍNH CAO HƠN thực tế vì thiếu chi phí.</div>` : ''}
@@ -3772,16 +3785,15 @@ function openProjectAppraisalEditor(id){
   document.getElementById('ap_name').addEventListener('input', e=>{ draft.name=e.target.value; });
   document.getElementById('ap_kmGo').addEventListener('input', e=>{ draft.kmOneWay=Number(e.target.value)||0; updatePreview(); });
   document.getElementById('ap_kmBack').addEventListener('input', e=>{ draft.kmReturn=Number(e.target.value)||0; updatePreview(); });
-  // Tự gợi ý lại "Tiền ăn/chuyến" = (TB thực tế/ca, nhân đôi nếu 2 Ca/Ngày)
-  // ÷ Số chuyến/ca — chỉ khi Ông Chủ CHƯA từng tự gõ tay vào ô này.
+  // Tự gợi ý lại "Tiền ăn/ca" = TB thực tế/ca, nhân đôi nếu 2 Ca/Ngày —
+  // CỐ ĐỊNH, không phụ thuộc Số Chuyến/Ca (app tự chia ra mỗi chuyến ở
+  // chỗ khác khi tính lãi gộp) — chỉ khi Ông Chủ CHƯA từng tự gõ tay vào
+  // ô này.
   const applyFoodSuggestion = ()=>{
     if(!draft.foodAutoManaged) return;
-    const tripsPerShift = Number(draft.estimatedTripsPerShift)||0;
-    if(tripsPerShift<=0) return;
-    const perShiftFood = historicalAvgFoodPerShift() * (draft.shiftStructure==='double' ? 2 : 1);
-    const suggested = Math.round(perShiftFood/tripsPerShift);
-    draft.foodPerTripEstimate = suggested;
-    const el = document.getElementById('ap_foodPerTrip');
+    const suggested = Math.round(historicalAvgFoodPerShift() * (draft.shiftStructure==='double' ? 2 : 1));
+    draft.foodPerShiftEstimate = suggested;
+    const el = document.getElementById('ap_foodPerShift');
     if(el) el.value = suggested ? suggested.toLocaleString('vi-VN') : '';
   };
   document.getElementById('ap_load').addEventListener('input', e=>{ draft.loadPerTrip=Number(e.target.value)||0; updatePreview(); });
@@ -3816,7 +3828,7 @@ function openProjectAppraisalEditor(id){
   attachMoneyInput(document.getElementById('ap_cargoPrice'), draft.cargoUnitPrice, v=>{ draft.cargoUnitPrice=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_baseSalary'), draft.fixedBaseSalaryMonthly, v=>{ draft.fixedBaseSalaryMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_wagePerTrip'), draft.wagePerTripEstimate, v=>{ draft.wagePerTripEstimate=v; updatePreview(); });
-  attachMoneyInput(document.getElementById('ap_foodPerTrip'), draft.foodPerTripEstimate, v=>{ draft.foodPerTripEstimate=v; draft.foodAutoManaged=false; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_foodPerShift'), draft.foodPerShiftEstimate, v=>{ draft.foodPerShiftEstimate=v; draft.foodAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_depreciation'), draft.fixedDepreciationMonthly, v=>{ draft.fixedDepreciationMonthly=v; updatePreview(); });
   attachMoneyInput(document.getElementById('ap_insurance'), draft.fixedInsuranceMonthly, v=>{ draft.fixedInsuranceMonthly=v; updatePreview(); });
