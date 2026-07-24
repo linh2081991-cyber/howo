@@ -5771,16 +5771,14 @@ function renderSettings(){
             <input type="number" inputmode="numeric" id="s_loanTerm" value="${blankIfZero(state.settings.bankLoan&&state.settings.bankLoan.termMonths)}" placeholder="0">
           </div>
         </div>
-        <div class="two-col" style="margin-bottom:0;">
-          <div class="field">
-            <label>Ngày giải ngân</label>
-            <input type="date" id="s_loanDate" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}">
-          </div>
-          <div class="field">
-            <label>Ngày đến hạn đóng lãi hàng tháng</label>
-            <input type="number" inputmode="numeric" min="1" max="28" id="s_loanDueDay" value="${state.settings.bankLoan&&state.settings.bankLoan.dueDayOfMonth || 20}">
-            <div class="hint">Mặc định 20 — đúng ngày ngân hàng đang áp dụng. App sẽ cảnh báo trước 3 ngày (từ ngày 17) ở tab Ca Làm Việc.</div>
-          </div>
+        <div class="field">
+          <label>Ngày giải ngân</label>
+          <input type="date" id="s_loanDate" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ngày đến hạn đóng lãi hàng tháng</label>
+          <input type="number" inputmode="numeric" min="1" max="28" id="s_loanDueDay" value="${state.settings.bankLoan&&state.settings.bankLoan.dueDayOfMonth || 20}">
+          <div class="hint">Mặc định 20 — đúng ngày ngân hàng đang áp dụng. App sẽ cảnh báo trước 3 ngày (từ ngày 17) ở tab Ca Làm Việc.</div>
         </div>
       </div>
       <div class="card" style="margin-top:8px;">
