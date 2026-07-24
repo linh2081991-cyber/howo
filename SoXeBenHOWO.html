@@ -1377,7 +1377,11 @@ function groupShiftsIntoDriverColumns(list){
     }
     return columns[indexByKey.get(key)];
   }
-  state.drivers.forEach(d=>ensureColumn(d.id, d.name||'(chưa đặt tên)'));
+  // Chỉ tự tạo sẵn cột rỗng cho tài xế ĐANG HOẠT ĐỘNG — tài xế đã "Ngừng
+  // Hoạt Động" (nghỉ hẳn) sẽ không còn tự hiện tab trống ở các tháng sau
+  // này nữa, nhưng vẫn hiện đầy đủ ở bất kỳ tháng nào họ THẬT SỰ có ca
+  // (nhờ bước gom list.forEach bên dưới, không phân biệt hoạt động hay không).
+  state.drivers.filter(d=>d.isActive!==false).forEach(d=>ensureColumn(d.id, d.name||'(chưa đặt tên)'));
   list.forEach(sh=>{
     const d = driverById(sh.driverId);
     const key = d ? d.id : ('_orphan_'+(sh.driverNameSnapshot||'chưa chọn tài xế'));
@@ -1848,7 +1852,9 @@ function refreshOdoFuelInputs(){
 function renderShiftForm(){
   const sh = state.draftShift;
   const app = document.getElementById('app');
-  const driverOptions = state.drivers.map(d=>`<option value="${d.id}" ${d.id===sh.driverId?'selected':''}>${escapeHtml(d.name)}</option>`).join('');
+  const driverOptions = state.drivers
+    .filter(d=>d.isActive!==false || d.id===sh.driverId)
+    .map(d=>`<option value="${d.id}" ${d.id===sh.driverId?'selected':''}>${escapeHtml(d.name)}${d.isActive===false?' (đã nghỉ)':''}</option>`).join('');
 
   app.innerHTML = `
     <section class="group">
@@ -2292,6 +2298,7 @@ function renderDrivers(){
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
           <button class="btn btn-ghost btn-block viewDriverDetailBtn" data-id="${d.id}" style="margin-top:10px;">📊 Xem Chi Tiết Vận Hành →</button>
+          <button class="btn btn-ghost btn-block toggleDriverActiveBtn" data-id="${d.id}" style="margin-top:8px; ${d.isActive===false?'':'color:var(--loss); border-color:var(--loss);'}">${d.isActive===false ? '✅ Kích Hoạt Lại' : '⛔ Ngừng Hoạt Động (Lái Xe Đã Nghỉ Hẳn)'}</button>
         </div>
       `).join('')}
     </section>
@@ -2335,6 +2342,22 @@ function renderDrivers(){
   });
   document.querySelectorAll('.viewDriverDetailBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverDetail(btn.dataset.id); });
+  });
+  document.querySelectorAll('.toggleDriverActiveBtn').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const driver = driverById(btn.dataset.id);
+      if(!driver) return;
+      if(driver.isActive===false){
+        driver.isActive = true;
+      } else {
+        const ok = confirm(`Xác nhận "${driver.name}" đã nghỉ hẳn?\n\nToàn bộ lịch sử ca/lương/công nợ cũ của "${driver.name}" vẫn giữ nguyên 100%, xem lại được bình thường. Từ nay "${driver.name}" sẽ:\n- Không còn tính vào Công Chuẩn/Dự Đoán Hoà Vốn Cả Tháng.\n- Không còn hiện tab trống ở Ca Làm Việc tháng tới (vẫn xem lại được ở các tháng cũ đã có ca).\n\nCó thể Kích Hoạt Lại bất cứ lúc nào nếu quay lại làm.`);
+        if(!ok) return;
+        driver.isActive = false;
+      }
+      await saveDrivers();
+      renderAll();
+      showToast(driver.isActive ? `"${driver.name}" đã kích hoạt lại.` : `"${driver.name}" đã chuyển sang Ngừng Hoạt Động.`);
+    });
   });
 }
 
@@ -5483,7 +5506,7 @@ function openRepairEditor(id){
           <label>Tài xế chịu trách nhiệm</label>
           <select id="rp_driver">
             <option value="">— Chọn tài xế —</option>
-            ${state.drivers.map(d=>`<option value="${d.id}" ${d.id===draft.responsibleDriverId?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
+            ${state.drivers.filter(d=>d.isActive!==false || d.id===draft.responsibleDriverId).map(d=>`<option value="${d.id}" ${d.id===draft.responsibleDriverId?'selected':''}>${escapeHtml(d.name)}${d.isActive===false?' (đã nghỉ)':''}</option>`).join('')}
           </select>
         </div>
         <div class="field" id="rp_customAmountField" style="margin-top:12px; margin-bottom:0; display:${draft.responsibility==='custom'?'block':'none'};">
