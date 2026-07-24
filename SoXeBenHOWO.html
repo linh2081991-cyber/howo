@@ -55,7 +55,7 @@
   #loginScreen h2{ text-align:center; font-size:18px; margin:0 0 4px 0; }
   #loginScreen .login-sub{ text-align:center; font-size:13px; color:var(--ink-soft); margin-bottom:18px; }
   #loginScreen label{ display:block; font-size:13px; color:var(--ink-soft); margin-bottom:4px; margin-top:12px; }
-  #loginScreen input{ width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--border); font-size:15px; background:#fff; color:var(--ink); }
+  #loginScreen input{ width:100%; padding:14px 14px; border-radius:11px; border:1.5px solid var(--border); font-size:17px; background:#fff; color:var(--ink); }
   #loginScreen input:focus{ outline:none; border-color:var(--accent); }
   #loginScreen .login-error{ color:var(--loss); font-size:13px; margin-top:10px; min-height:16px; }
   #loginScreen button{ margin-top:18px; width:100%; }
@@ -128,9 +128,9 @@
   .empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
   .empty .big{ font-size:38px; margin-bottom:10px; }
 
-  .field{ margin-bottom:14px; }
-  .field label{ display:block; font-size:13px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; }
-  .field .hint{ font-size:11px; color:var(--ink-soft); margin-top:4px; }
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-size:14.5px; font-weight:600; color:var(--ink-soft); margin-bottom:7px; }
+  .field .hint{ font-size:12px; color:var(--ink-soft); margin-top:5px; }
   /// Prominent ODO-driven / fuel-consumed stat chip — replaces the old
   /// plain-text .hint under "Đồng Hồ Km" / "Nhiên Liệu" so hai số quan
   /// trọng nhất của 1 ca (Số ODO chạy, Dầu tiêu hao) nổi bật ngay khi
@@ -161,8 +161,8 @@
   /// hơi to hơn app một chút, đổi lấy chắc chắn bấm mở lịch được và không
   /// bao giờ che trường khác.
   input[type=text], input[type=number], input[type=date], select, textarea{
-    width:100%; font-size:16px; padding:11px 12px; border-radius:10px;
-    border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
+    width:100%; font-size:18px; padding:14px 14px; border-radius:11px;
+    border:1.5px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
   }
   input[type=number]{ font-variant-numeric:tabular-nums; }
   /// Chỉnh AN TOÀN cho input[type=date] thô (KHÔNG che/di chuyển/ẩn input —
@@ -171,8 +171,8 @@
   /// năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần).
   input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; }
-  .seg{ display:flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-  .seg button{ flex:1; padding:11px 0; border:none; background:var(--surface); font-size:14px; font-weight:600; color:var(--ink-soft); }
+  .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
+  .seg button{ flex:1; padding:14px 0; border:none; background:var(--surface); font-size:15.5px; font-weight:600; color:var(--ink-soft); }
   .seg button.active{ background:var(--accent); color:#fff; }
 
   section.group{ margin-bottom:18px; }
@@ -183,8 +183,8 @@
   .site-row .site-head strong{ font-size:13px; }
   .two-col{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
-  .summary-row{ display:flex; justify-content:space-between; padding:8px 0; font-size:14px; }
-  .summary-row.total{ border-top:1px solid var(--border); margin-top:6px; padding-top:12px; font-weight:800; font-size:17px; }
+  .summary-row{ display:flex; justify-content:space-between; padding:9px 0; font-size:16.5px; }
+  .summary-row.total{ border-top:1px solid var(--border); margin-top:6px; padding-top:13px; font-weight:800; font-size:19px; }
   .summary-row .val{ font-variant-numeric:tabular-nums; }
 
   nav.tabbar{
@@ -244,8 +244,8 @@
   .driver-cv-status.off{ color:var(--ink-soft); }
   .driver-cv-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .driver-cv-item{ display:flex; flex-direction:column; gap:2px; background:var(--bg); border-radius:10px; padding:8px 10px; }
-  .driver-cv-item .k{ font-size:11px; color:var(--ink-soft); }
-  .driver-cv-item .v{ font-size:13px; font-weight:700; word-break:break-word; }
+  .driver-cv-item .k{ font-size:12.5px; color:var(--ink-soft); }
+  .driver-cv-item .v{ font-size:15px; font-weight:700; word-break:break-word; }
 
   .formula-block{ padding:10px 0; }
   .formula-label{ font-size:12px; color:var(--ink-soft); margin-bottom:4px; line-height:1.4; }
@@ -268,7 +268,7 @@
   .appraisal-compare .compare-card{ flex:0 0 230px; border:1.5px solid var(--border); border-radius:14px; padding:14px; background:var(--surface); }
   .appraisal-compare .compare-card.best{ border-color:var(--profit); box-shadow:0 0 0 1.5px var(--profit) inset; }
   .appraisal-compare .compare-card h4{ margin:0 0 8px; font-size:14px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-  .appraisal-compare .compare-row{ display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:3px 0; }
+  .appraisal-compare .compare-row{ display:flex; justify-content:space-between; gap:8px; font-size:14px; padding:4px 0; }
   .appraisal-compare .compare-row .val{ font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; }
 
 
