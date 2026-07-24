@@ -333,9 +333,13 @@
     flex-direction:column; align-items:center; justify-content:center; color:var(--ink-soft); font-size:14px;
   }
 
-  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:8px 10px; margin-bottom:6px; cursor:pointer; }
-  .search-bar .ic{ font-size:16px; }
-  .search-bar input[type=date]{ border:none; flex:1; padding:6px 4px; width:100%; background:transparent; color:var(--ink); }
+  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px 10px; margin-bottom:6px; }
+  .search-bar .ic{ font-size:16px; pointer-events:none; }
+  /* Ô ngày chiếm trọn phần còn lại của thanh (cả chiều cao) để chạm chỗ nào */
+  /* cũng trúng thẳng ô ngày và mở lịch ĐÚNG 1 LẦN — không cần JS gọi thêm */
+  /* showPicker() nữa (chính cú gọi thừa đó từng làm iOS chốt luôn ngày hôm */
+  /* nay rồi đóng lịch ngay). */
+  .search-bar input[type=date]{ border:none; flex:1; padding:14px 4px; width:100%; min-width:0; background:transparent; color:var(--ink); font-size:17px; }
   .search-bar button{ background:none; border:none; color:var(--ink-soft); font-size:13px; font-weight:700; }
   .search-bar-hint{ font-size:11px; color:var(--ink-soft); margin:0 2px 14px; }
 
@@ -1642,17 +1646,19 @@ function bindShiftIssueButtons(){
   });
 }
 function bindSearchBar(){
-  const bar = document.getElementById('shiftSearchBar');
   const input = document.getElementById('searchDateInput');
-  if(input) input.addEventListener('change', e=>{ state.searchDate = e.target.value || null; renderShiftList(); });
-  // Tapping anywhere on the bar (icon, padding, empty space) opens the
-  // calendar — not just the few pixels of the native input itself — so
-  // it reliably behaves like "bấm vào là ra lịch" on iOS Safari.
-  if(bar) bar.addEventListener('click', (e)=>{
-    if(e.target.tagName==='BUTTON') return; // đừng chặn nút "Xoá"
-    if(!input) return;
-    if(typeof input.showPicker === 'function'){ try{ input.showPicker(); return; }catch(_ignored){} }
-    input.focus();
+  // LỖI CŨ ĐÃ SỬA: trước đây có thêm 1 handler bấm vào cả thanh tìm kiếm
+  // rồi gọi input.showPicker(). Khi Ông Chủ chạm đúng vào ô ngày, iOS đã
+  // TỰ mở lịch sẵn rồi, cú chạm đó lại lan lên thanh và gọi showPicker()
+  // lần 2 — iOS hiểu là "xác nhận" nên chốt luôn giá trị mặc định (ngày
+  // hôm nay) và đóng lịch ngay lập tức. Nay bỏ hẳn handler đó, để ô ngày
+  // gốc tự xử lý cú chạm của mình như mọi ô ngày khác trong app (cách đã
+  // chạy ổn định sau khi bỏ mọi mẹo che/đè input).
+  if(input) input.addEventListener('change', e=>{
+    const picked = e.target.value || null;
+    if(picked === state.searchDate) return; // không vẽ lại nếu ngày không đổi — vẽ lại sẽ xoá và tạo mới ô ngày, làm đóng luôn bảng lịch đang mở
+    state.searchDate = picked;
+    renderShiftList();
   });
   const clearBtn = document.getElementById('clearSearchBtn');
   if(clearBtn) clearBtn.addEventListener('click', (e)=>{ e.stopPropagation(); state.searchDate=null; renderShiftList(); });
