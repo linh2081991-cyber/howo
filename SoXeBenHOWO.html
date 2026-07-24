@@ -73,9 +73,9 @@
   .shift-card .tag{ font-size:11px; padding:3px 8px; border-radius:20px; background:var(--accent-soft); color:var(--accent); font-weight:600; white-space:nowrap; }
   .shift-card .driver{ font-size:13px; color:var(--ink-soft); margin-top:3px; }
   .shift-card .row1-right{ display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0; }
-  /// Only rendered when computeShiftIssues() finds at least one missing
-  /// field or cash-flow anomaly on that shift — a clean shift keeps the
-  /// plain single-tag layout untouched, per spec.
+  /* Only rendered when computeShiftIssues() finds at least one missing */
+  /* field or cash-flow anomaly on that shift — a clean shift keeps the */
+  /* plain single-tag layout untouched, per spec. */
   .shift-issue-btn{
     appearance:none; border:none; border-radius:20px; padding:4px 10px 4px 8px;
     font-size:10.5px; font-weight:700; background:var(--loss-soft); color:var(--loss);
@@ -83,20 +83,20 @@
   }
   .shift-issue-btn:active{ opacity:0.7; }
   .shift-card .profit{ font-size:17px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:8px; }
-  /// Danh sách Ca Làm Việc chia ĐÚNG 2 cột 50/50 theo chiều ngang màn
-  /// hình (mỗi cột = 1 tài xế, giữ nguyên thứ tự mới nhất → cũ nhất bên
-  /// trong từng cột) để Ông Chủ nhìn thấy song song toàn bộ hoạt động
-  /// của từng người trong 1 màn hình, không cần cuộn ngang. Dùng CSS
-  /// Grid 2 cột cố định (không phải flex co giãn) nên luôn đúng 50/50
-  /// dù có bao nhiêu tài xế; nếu chỉ có 1 tài xế, cột đó giãn hết chiều
-  /// rộng (.full-width); nếu có từ 3 tài xế trở lên, các cột dư tự động
-  /// xuống hàng dưới, vẫn giữ đúng khung 2 cột.
+  /* Danh sách Ca Làm Việc chia ĐÚNG 2 cột 50/50 theo chiều ngang màn */
+  /* hình (mỗi cột = 1 tài xế, giữ nguyên thứ tự mới nhất → cũ nhất bên */
+  /* trong từng cột) để Ông Chủ nhìn thấy song song toàn bộ hoạt động */
+  /* của từng người trong 1 màn hình, không cần cuộn ngang. Dùng CSS */
+  /* Grid 2 cột cố định (không phải flex co giãn) nên luôn đúng 50/50 */
+  /* dù có bao nhiêu tài xế; nếu chỉ có 1 tài xế, cột đó giãn hết chiều */
+  /* rộng (.full-width); nếu có từ 3 tài xế trở lên, các cột dư tự động */
+  /* xuống hàng dưới, vẫn giữ đúng khung 2 cột. */
   .shift-columns{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; }
   .shift-column{ min-width:0; background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--col-accent, var(--accent)); border-radius:var(--radius); padding:10px; }
   .shift-column.full-width{ grid-column:1 / -1; }
-  /// Tên tài xế được "làm nổi bật" bằng icon tài xế (thay cho avatar tròn
-  /// chữ cái đầu cũ) đặt trong khung vuông bo góc màu riêng theo cột, cạnh
-  /// khối chữ: tên IN HOA đậm nổi bật + số ca hoạt động nhỏ gọn bên dưới.
+  /* Tên tài xế được "làm nổi bật" bằng icon tài xế (thay cho avatar tròn */
+  /* chữ cái đầu cũ) đặt trong khung vuông bo góc màu riêng theo cột, cạnh */
+  /* khối chữ: tên IN HOA đậm nổi bật + số ca hoạt động nhỏ gọn bên dưới. */
   .shift-column-head{ display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:14px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); }
   .shift-column-head .avatar{ width:48px; height:48px; border-radius:14px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--col-accent, var(--accent)); background:linear-gradient(135deg, color-mix(in srgb, var(--col-accent, var(--accent)) 20%, #fff), color-mix(in srgb, var(--col-accent, var(--accent)) 7%, #fff)); border:1px solid color-mix(in srgb, var(--col-accent, var(--accent)) 30%, transparent); box-shadow:0 2px 8px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.6); }
   .shift-column-head .avatar svg{ width:30px; height:30px; display:block; overflow:visible; }
@@ -110,17 +110,17 @@
   .shift-column .shift-card .tag{ font-size:10px; padding:2px 7px; }
   .shift-column .shift-card .profit{ font-size:15px; margin-top:6px; }
   .shift-column .shift-issue-btn{ font-size:9.5px; padding:3px 8px 3px 6px; }
-  /// Tab lớn theo tài xế (thay cho layout 2 cột song song cũ) — tái dùng
-  /// nguyên style .shift-column-head (avatar + tên + số ca) nhưng biến
-  /// thành nút bấm được, xếp hàng ngang, cuộn ngang nếu nhiều hơn 2 tài
-  /// xế. Bấm vào tab nào thì chỉ hiện đúng danh sách ca của tài xế đó.
+  /* Tab lớn theo tài xế (thay cho layout 2 cột song song cũ) — tái dùng */
+  /* nguyên style .shift-column-head (avatar + tên + số ca) nhưng biến */
+  /* thành nút bấm được, xếp hàng ngang, cuộn ngang nếu nhiều hơn 2 tài */
+  /* xế. Bấm vào tab nào thì chỉ hiện đúng danh sách ca của tài xế đó. */
   .driver-tabbar{ display:flex; gap:10px; overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:12px; padding-bottom:2px; }
   .driver-tabbar::-webkit-scrollbar{ display:none; }
   .driver-tab{ flex:1 1 0; min-width:158px; margin-bottom:0; border:1.5px solid var(--border); cursor:pointer; text-align:left; font:inherit; -webkit-appearance:none; appearance:none; opacity:0.6; transition:box-shadow .15s, border-color .15s, opacity .15s; }
   .driver-tab.active{ border-color:var(--col-accent, var(--accent)); box-shadow:0 3px 10px rgba(0,0,0,0.10); opacity:1; }
-  /// Khối "trường dữ liệu tương ứng" bên dưới mỗi ca: Km chạy, dầu tiêu
-  /// hao, doanh thu — trình bày dạng nhãn/giá trị 2 cột cho khoa học,
-  /// dễ quét mắt, tất cả đều lấy từ các hàm tính sẵn có (không tính lại).
+  /* Khối "trường dữ liệu tương ứng" bên dưới mỗi ca: Km chạy, dầu tiêu */
+  /* hao, doanh thu — trình bày dạng nhãn/giá trị 2 cột cho khoa học, */
+  /* dễ quét mắt, tất cả đều lấy từ các hàm tính sẵn có (không tính lại). */
   .shift-card-fields{ display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
   .shift-card-fields .field-item{ display:flex; flex-direction:column; gap:1px; min-width:0; }
   .shift-card-fields .field-item .lbl{ font-size:9.5px; color:var(--ink-soft); white-space:nowrap; }
@@ -131,44 +131,44 @@
   .field{ margin-bottom:18px; }
   .field label{ display:block; font-size:15.5px; font-weight:600; color:var(--ink-soft); margin-bottom:8px; }
   .field .hint{ font-size:13px; color:var(--ink-soft); margin-top:6px; }
-  /// Prominent ODO-driven / fuel-consumed stat chip — replaces the old
-  /// plain-text .hint under "Đồng Hồ Km" / "Nhiên Liệu" so hai số quan
-  /// trọng nhất của 1 ca (Số ODO chạy, Dầu tiêu hao) nổi bật ngay khi
-  /// Ông Chủ đang nhập liệu, thay vì chìm lẫn vào chữ xám nhỏ.
+  /* Prominent ODO-driven / fuel-consumed stat chip — replaces the old */
+  /* plain-text .hint under "Đồng Hồ Km" / "Nhiên Liệu" so hai số quan */
+  /* trọng nhất của 1 ca (Số ODO chạy, Dầu tiêu hao) nổi bật ngay khi */
+  /* Ông Chủ đang nhập liệu, thay vì chìm lẫn vào chữ xám nhỏ. */
   .stat-highlight{ display:flex; align-items:center; gap:12px; margin-top:9px; padding:12px 13px; background:var(--accent-soft); border-radius:11px; }
   .stat-highlight .ic{ font-size:20px; line-height:1; flex-shrink:0; }
   .stat-highlight .lbl{ font-size:14px; color:var(--ink); font-weight:600; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .stat-highlight .val{ font-size:18px; font-weight:800; color:var(--accent); white-space:nowrap; flex-shrink:0; font-variant-numeric:tabular-nums; }
-  /// Km-driven inside the ODO stat chip is now an editable number, not just
-  /// display text — kept visually identical to the old .val text (same
-  /// size/weight/color) but as a real <input>, so it can be typed into
-  /// directly (GPS-based km) and drive Odo cuối ca in reverse.
+  /* Km-driven inside the ODO stat chip is now an editable number, not just */
+  /* display text — kept visually identical to the old .val text (same */
+  /* size/weight/color) but as a real <input>, so it can be typed into */
+  /* directly (GPS-based km) and drive Odo cuối ca in reverse. */
   .stat-highlight input.val-input{
     width:78px; flex-shrink:0; text-align:right; font-size:18px; font-weight:800;
     color:var(--accent); font-variant-numeric:tabular-nums; border:none; background:transparent;
     padding:0; border-radius:0;
   }
   .stat-highlight .val-suffix{ font-size:18px; font-weight:800; color:var(--accent); flex-shrink:0; margin-left:2px; }
-  /// ĐÃ THỬ VÀ BỎ (KHÔNG dùng nữa — giữ lại đúng lịch sử để không ai lỡ áp
-  /// dụng lại): từng có kiểu "text đẹp đè lên input ngày thật" (opacity:0,
-  /// full kích thước, chạm đâu cũng trúng input ngày gốc) cho Ngày Nhận
-  /// Tiền/Ngày Giải Ngân/Áp Dụng Từ Ngày — vì input[type=date] gốc trên iOS
-  /// Safari PWA không theo font-size CSS của app (tự phóng to chữ dạng
-  /// "ngày 18 thg 7, 2026"). Nhưng trên thực tế máy Ông Chủ, vùng chạm ẩn
-  /// đó gây lỗi — có lúc không mở được lịch, có lúc lại che mất các trường
-  /// khác ngay bên dưới khiến bấm nhầm. Đã chuyển TẤT CẢ 3 ô này về đúng
-  /// input[type=date] gốc, không che/ẩn/đè gì cả — chấp nhận chữ hiển thị
-  /// hơi to hơn app một chút, đổi lấy chắc chắn bấm mở lịch được và không
-  /// bao giờ che trường khác.
+  /* ĐÃ THỬ VÀ BỎ (KHÔNG dùng nữa — giữ lại đúng lịch sử để không ai lỡ áp */
+  /* dụng lại): từng có kiểu "text đẹp đè lên input ngày thật" (opacity:0, */
+  /* full kích thước, chạm đâu cũng trúng input ngày gốc) cho Ngày Nhận */
+  /* Tiền/Ngày Giải Ngân/Áp Dụng Từ Ngày — vì input[type=date] gốc trên iOS */
+  /* Safari PWA không theo font-size CSS của app (tự phóng to chữ dạng */
+  /* "ngày 18 thg 7, 2026"). Nhưng trên thực tế máy Ông Chủ, vùng chạm ẩn */
+  /* đó gây lỗi — có lúc không mở được lịch, có lúc lại che mất các trường */
+  /* khác ngay bên dưới khiến bấm nhầm. Đã chuyển TẤT CẢ 3 ô này về đúng */
+  /* input[type=date] gốc, không che/ẩn/đè gì cả — chấp nhận chữ hiển thị */
+  /* hơi to hơn app một chút, đổi lấy chắc chắn bấm mở lịch được và không */
+  /* bao giờ che trường khác. */
   input[type=text], input[type=number], input[type=date], select, textarea{
     width:100%; font-size:22px; font-weight:600; padding:16px 15px; border-radius:12px;
     border:1.5px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
   }
   input[type=number]{ font-variant-numeric:tabular-nums; }
-  /// Chỉnh AN TOÀN cho input[type=date] thô (KHÔNG che/di chuyển/ẩn input —
-  /// chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho
-  /// input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả
-  /// năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần).
+  /* Chỉnh AN TOÀN cho input[type=date] thô (KHÔNG che/di chuyển/ẩn input — */
+  /* chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho */
+  /* input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả */
+  /* năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần). */
   input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; }
   .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
@@ -272,19 +272,19 @@
   .appraisal-compare .compare-row .val{ font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; }
 
 
-  /// The HOWO truck's horizontal position and wheel spin are now driven
-  /// entirely from JS (see startTruckRun()) using the Web Animations API
-  /// instead of a fixed-length CSS @keyframes — a real Gemini call has no
-  /// known duration up front, so a static N-second animation either
-  /// finishes early and sits idle, or (worse) has to loop, which looks
-  /// broken. JS eases the truck up to ~97% of the track and HOLDS it
-  /// there — via Animation.fill:'forwards', the WAAPI equivalent of this
-  /// old `forwards` fill-mode — for as long as the real call (including
-  /// any silent background retries) actually takes, then plays one short
-  /// final hop to 100% the instant the response arrives. It still runs
-  /// left→right exactly once and never loops back, per spec — only the
-  /// timing source changed. Only static positioning/sizing rules remain
-  /// here; no `animation:` property on these two classes anymore.
+  /* The HOWO truck's horizontal position and wheel spin are now driven */
+  /* entirely from JS (see startTruckRun()) using the Web Animations API */
+  /* instead of a fixed-length CSS @keyframes — a real Gemini call has no */
+  /* known duration up front, so a static N-second animation either */
+  /* finishes early and sits idle, or (worse) has to loop, which looks */
+  /* broken. JS eases the truck up to ~97% of the track and HOLDS it */
+  /* there — via Animation.fill:'forwards', the WAAPI equivalent of this */
+  /* old `forwards` fill-mode — for as long as the real call (including */
+  /* any silent background retries) actually takes, then plays one short */
+  /* final hop to 100% the instant the response arrives. It still runs */
+  /* left→right exactly once and never loops back, per spec — only the */
+  /* timing source changed. Only static positioning/sizing rules remain */
+  /* here; no `animation:` property on these two classes anymore. */
   .strategy-run-line{ position:relative; overflow:hidden; }
   .howo-truck-run{
     position:absolute; top:50%; left:-4px; width:55px; height:36px;
