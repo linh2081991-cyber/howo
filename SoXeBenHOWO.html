@@ -337,8 +337,13 @@
   .search-bar button{ background:none; border:none; color:var(--ink-soft); font-size:13px; font-weight:700; }
   .search-bar-hint{ font-size:11px; color:var(--ink-soft); margin:0 2px 14px; }
 
-  .date-range{ display:flex; gap:10px; margin-bottom:14px; }
-  .date-range .field{ flex:1; margin-bottom:0; }
+  /* 2 ô "Từ ngày / Đến ngày" xếp DỌC (mỗi ô 1 dòng riêng), không xếp ngang */
+  /* nữa: iOS hiển thị ngày dạng dài "ngày 31 thg 7, 2026" nên 2 ô cạnh nhau */
+  /* luôn vượt quá chiều ngang màn hình điện thoại, bắt phải kéo sang phải */
+  /* mới thấy hết. Input ngày gốc của iOS cũng không thể thu nhỏ chữ theo ý */
+  /* muốn, nên xếp dọc là cách duy nhất chắc chắn không tràn. */
+  .date-range{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
+  .date-range .field{ flex:1; min-width:0; margin-bottom:0; }
 
   table.dash{ width:100%; border-collapse:collapse; font-size:13px; }
   table.dash th, table.dash td{ padding:9px 6px; text-align:right; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
