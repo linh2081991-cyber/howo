@@ -55,7 +55,7 @@
   #loginScreen h2{ text-align:center; font-size:18px; margin:0 0 4px 0; }
   #loginScreen .login-sub{ text-align:center; font-size:13px; color:var(--ink-soft); margin-bottom:18px; }
   #loginScreen label{ display:block; font-size:13px; color:var(--ink-soft); margin-bottom:4px; margin-top:12px; }
-  #loginScreen input{ width:100%; padding:14px 14px; border-radius:11px; border:1.5px solid var(--border); font-size:17px; background:#fff; color:var(--ink); }
+  #loginScreen input{ width:100%; padding:16px 15px; border-radius:12px; border:1.5px solid var(--border); font-size:20px; background:#fff; color:var(--ink); }
   #loginScreen input:focus{ outline:none; border-color:var(--accent); }
   #loginScreen .login-error{ color:var(--loss); font-size:13px; margin-top:10px; min-height:16px; }
   #loginScreen button{ margin-top:18px; width:100%; }
@@ -128,27 +128,27 @@
   .empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
   .empty .big{ font-size:38px; margin-bottom:10px; }
 
-  .field{ margin-bottom:16px; }
-  .field label{ display:block; font-size:14.5px; font-weight:600; color:var(--ink-soft); margin-bottom:7px; }
-  .field .hint{ font-size:12px; color:var(--ink-soft); margin-top:5px; }
+  .field{ margin-bottom:18px; }
+  .field label{ display:block; font-size:15.5px; font-weight:600; color:var(--ink-soft); margin-bottom:8px; }
+  .field .hint{ font-size:13px; color:var(--ink-soft); margin-top:6px; }
   /// Prominent ODO-driven / fuel-consumed stat chip — replaces the old
   /// plain-text .hint under "Đồng Hồ Km" / "Nhiên Liệu" so hai số quan
   /// trọng nhất của 1 ca (Số ODO chạy, Dầu tiêu hao) nổi bật ngay khi
   /// Ông Chủ đang nhập liệu, thay vì chìm lẫn vào chữ xám nhỏ.
-  .stat-highlight{ display:flex; align-items:center; gap:12px; margin-top:9px; padding:10px 12px; background:var(--accent-soft); border-radius:10px; }
-  .stat-highlight .ic{ font-size:18px; line-height:1; flex-shrink:0; }
-  .stat-highlight .lbl{ font-size:12.5px; color:var(--ink); font-weight:600; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .stat-highlight .val{ font-size:15.5px; font-weight:800; color:var(--accent); white-space:nowrap; flex-shrink:0; font-variant-numeric:tabular-nums; }
+  .stat-highlight{ display:flex; align-items:center; gap:12px; margin-top:9px; padding:12px 13px; background:var(--accent-soft); border-radius:11px; }
+  .stat-highlight .ic{ font-size:20px; line-height:1; flex-shrink:0; }
+  .stat-highlight .lbl{ font-size:14px; color:var(--ink); font-weight:600; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stat-highlight .val{ font-size:18px; font-weight:800; color:var(--accent); white-space:nowrap; flex-shrink:0; font-variant-numeric:tabular-nums; }
   /// Km-driven inside the ODO stat chip is now an editable number, not just
   /// display text — kept visually identical to the old .val text (same
   /// size/weight/color) but as a real <input>, so it can be typed into
   /// directly (GPS-based km) and drive Odo cuối ca in reverse.
   .stat-highlight input.val-input{
-    width:64px; flex-shrink:0; text-align:right; font-size:15.5px; font-weight:800;
+    width:78px; flex-shrink:0; text-align:right; font-size:18px; font-weight:800;
     color:var(--accent); font-variant-numeric:tabular-nums; border:none; background:transparent;
     padding:0; border-radius:0;
   }
-  .stat-highlight .val-suffix{ font-size:15.5px; font-weight:800; color:var(--accent); flex-shrink:0; margin-left:2px; }
+  .stat-highlight .val-suffix{ font-size:18px; font-weight:800; color:var(--accent); flex-shrink:0; margin-left:2px; }
   /// ĐÃ THỬ VÀ BỎ (KHÔNG dùng nữa — giữ lại đúng lịch sử để không ai lỡ áp
   /// dụng lại): từng có kiểu "text đẹp đè lên input ngày thật" (opacity:0,
   /// full kích thước, chạm đâu cũng trúng input ngày gốc) cho Ngày Nhận
@@ -161,7 +161,7 @@
   /// hơi to hơn app một chút, đổi lấy chắc chắn bấm mở lịch được và không
   /// bao giờ che trường khác.
   input[type=text], input[type=number], input[type=date], select, textarea{
-    width:100%; font-size:18px; padding:14px 14px; border-radius:11px;
+    width:100%; font-size:22px; font-weight:600; padding:16px 15px; border-radius:12px;
     border:1.5px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
   }
   input[type=number]{ font-variant-numeric:tabular-nums; }
@@ -172,7 +172,7 @@
   input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; }
   .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
-  .seg button{ flex:1; padding:14px 0; border:none; background:var(--surface); font-size:15.5px; font-weight:600; color:var(--ink-soft); }
+  .seg button{ flex:1; padding:16px 0; border:none; background:var(--surface); font-size:17px; font-weight:600; color:var(--ink-soft); }
   .seg button.active{ background:var(--accent); color:#fff; }
 
   section.group{ margin-bottom:18px; }
