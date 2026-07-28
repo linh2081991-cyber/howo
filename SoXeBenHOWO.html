@@ -821,9 +821,23 @@ function computeShiftIssues(sh){
   siteLogs.forEach((s,idx)=>{
     const label = s.siteName ? `"${s.siteName}"` : `Công trình #${idx+1}`;
     if(!s.siteName) issues.push(`Công trình #${idx+1} chưa nhập tên công trình`);
-    if(!(Number(s.trips) > 0)) issues.push(`${label}: chưa nhập số chuyến`);
-    if(!(Number(s.volumePerTrip) > 0)) issues.push(`${label}: chưa nhập khối lượng/chuyến`);
-    if(!(Number(s.materialUnitPrice) > 0)) issues.push(`${label}: chưa nhập đơn giá vật liệu`);
+    if(s.siteType==='commercial'){
+      // Công trình thương mại: kiểm tra theo bộ trường MUA/BÁN, không đòi
+      // "số chuyến / khối lượng / đơn giá vật liệu" của chở cước nữa.
+      const trips = s.commercialTrips || [];
+      if(trips.length===0){
+        issues.push(`${label}: chưa khai chuyến mua/bán nào`);
+      } else {
+        trips.forEach((t,ti)=>{
+          if(!(Number(t.buyVolume)>0) || !(Number(t.buyUnitPrice)>0)) issues.push(`${label} — chuyến ${ti+1}: chưa nhập đủ khối lượng/đơn giá MUA`);
+          if(!(Number(t.sellVolume)>0) || !(Number(t.sellUnitPrice)>0)) issues.push(`${label} — chuyến ${ti+1}: chưa nhập đủ khối lượng/đơn giá BÁN`);
+        });
+      }
+    } else {
+      if(!(Number(s.trips) > 0)) issues.push(`${label}: chưa nhập số chuyến`);
+      if(!(Number(s.volumePerTrip) > 0)) issues.push(`${label}: chưa nhập khối lượng/chuyến`);
+      if(!(Number(s.materialUnitPrice) > 0)) issues.push(`${label}: chưa nhập đơn giá cước`);
+    }
   });
 
   if(Number(sh.incidentalCost) < 0) issues.push('Chi phí phát sinh đang âm — kiểm tra lại số liệu');
