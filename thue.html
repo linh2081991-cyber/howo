@@ -225,6 +225,9 @@ const MAC_DINH = {
 
   dmCoTai:'', dmKhongTai:'', dmChoHang:'',
   giaDau:'', chiKhacChuyen:'', chuyenMoiThang:25, heSoQuyDoi:1.5,
+  // Mô hình chi phí: cố định theo tháng, biến đổi theo chuyến
+  luongCoBan:'', bhxhThang:'', chiCoDinhKhac:'',
+  soLaiXe:1, caMoiNgay:1.5, gioMoiCa:8, ngayLamViec:26, gioMotChuyen:4.5,
   khoanChuyen:'', khoanCongTac:'', khoanAnCa:'', khoanNhaO:''
 };
 
@@ -292,6 +295,14 @@ const HELP = {
   'Gồm dầu theo cự ly, lương và phụ cấp lái xe, tiền thuê xe phân bổ, cùng lốp bảo dưỡng cầu đường.',
   'Con số "hoà vốn" là mức lãi gộp tối thiểu một lô hàng phải đạt thì chuyến mới có lãi. Thấp hơn là chở càng nhiều lỗ càng sâu.',
   'Đây là thước đo để quyết định nhận hay từ chối một cung đường — quan trọng hơn giá bán.'],
+ codinh:['Chi phí cố định và biến đổi',
+  '<b>Cố định</b> là khoản trả đủ mỗi tháng dù xe chạy hay nằm bãi: tiền thuê xe, lương cơ bản lái xe, bảo hiểm xã hội, bảo hiểm xe, phí đường bộ, giám sát hành trình.',
+  '<b>Biến đổi</b> là khoản chỉ phát sinh khi lăn bánh: dầu, phụ cấp chuyến, lốp và bảo dưỡng theo km.',
+  'Phân biệt được hai loại này thì mới trả lời được câu quan trọng nhất: nhận thêm một chuyến giá thấp có lợi không. Câu trả lời là <b>có</b>, miễn giá đó cao hơn chi phí biến đổi — vì phần dư ra góp vào trả chi phí cố định đằng nào cũng phải trả.'],
+ hoavon:['Điểm hoà vốn',
+  'Lãi góp biên = lãi gộp một chuyến trừ chi phí biến đổi một chuyến. Đây là số tiền mỗi chuyến đóng góp để trả chi phí cố định.',
+  'Điểm hoà vốn = tổng chi phí cố định chia cho lãi góp biên. Ra <b>số chuyến mỗi tháng</b> phải chạy để không lỗ.',
+  'Dưới mức đó, chạy càng nhiều lỗ càng ít nhưng vẫn lỗ. Trên mức đó, mỗi chuyến thêm là lãi thật. Đây là con số cần nhớ hơn cả giá bán.'],
  quydoi:['Hệ số quy đổi tấn sang m³',
   'Anh mua ở mỏ bằng <b>tấn</b> (cân, khách quan) nhưng bán cho công trình bằng <b>m³</b> (đo, phụ thuộc cách đo). Toàn bộ lãi của mảng này nằm ở hệ số giữa hai đơn vị.',
   'Đá base cấp phối thường 1,4–1,6 tấn/m³. Chênh giữa 1,4 và 1,6 là 14% giá vốn — đủ biến lãi thành lỗ.',
@@ -411,15 +422,65 @@ function dauChuyen(cuLy){
   if(!km || !co) return 0;
   return km*co/100 + km*(kho||co*0.6)/100;
 }
-/* Chi phí vận hành ước tính của một chuyến. */
-function chiPhiChuyen(cuLy){
+/* ── MÔ HÌNH CHI PHÍ ──────────────────────────────────────────
+   Chia đôi, vì hai loại này hành xử hoàn toàn khác nhau:
+
+   CỐ ĐỊNH theo tháng — không đổi dù chạy 20 hay 60 chuyến:
+     tiền thuê xe, lương cơ bản lái xe, bảo hiểm xã hội,
+     bảo hiểm xe, phí đường bộ, giám sát hành trình, phù hiệu.
+
+   BIẾN ĐỔI theo chuyến — chạy thêm chuyến thì tốn thêm:
+     dầu, phụ cấp chuyến, lốp và bảo dưỡng theo km.
+
+   Chạy càng nhiều chuyến, chi phí cố định chia càng mỏng.
+   Đó là toàn bộ ý nghĩa kinh tế của việc tăng ca.            */
+
+function chiCoDinhThang(){
+  const thueXe = S.cfg.phuongAnXe==='thue' ? (num(S.cfg.tienThueThang)||0) : 0;
+  const luong  = (num(S.cfg.luongCoBan)||0) * (Number(S.cfg.soLaiXe)||1);
+  const bhxh   = num(S.cfg.bhxhThang)||0;
+  const khac   = num(S.cfg.chiCoDinhKhac)||0;
+  return { thueXe, luong, bhxh, khac, tong: thueXe+luong+bhxh+khac };
+}
+/* Chi phí BIẾN ĐỔI của một chuyến — phần thật sự tăng thêm khi chạy thêm. */
+function chiBienDoi(cuLy){
   const lit = dauChuyen(cuLy);
   const dau = lit * (num(S.cfg.giaDau)||0);
-  const luong = num(S.cfg.khoanChuyen)||0;
-  const thueXe = S.cfg.phuongAnXe==='thue'
-    ? (num(S.cfg.tienThueThang)||0)/(Number(S.cfg.chuyenMoiThang)||25) : 0;
+  const phuCap = num(S.cfg.khoanChuyen)||0;
   const khac = num(S.cfg.chiKhacChuyen)||0;
-  return { lit, dau, luong, thueXe, khac, tong: dau+luong+thueXe+khac };
+  return { lit, dau, phuCap, khac, tong: dau+phuCap+khac };
+}
+/* Năng lực chạy tối đa theo giờ lái xe, không phải theo sức xe. */
+function nangLuc(){
+  const ca   = dec(S.cfg.caMoiNgay)||1;
+  const gioCa= dec(S.cfg.gioMoiCa)||8;
+  const ngay = Number(S.cfg.ngayLamViec)||26;
+  const gioCh= dec(S.cfg.gioMotChuyen)||4.5;
+  const soLx = Number(S.cfg.soLaiXe)||1;
+  const gioNgay = ca*gioCa;                       // giờ làm việc mỗi lái xe mỗi ngày
+  const chuyenNgay = gioCh>0 ? (gioNgay*soLx)/gioCh : 0;
+  return { ca, gioCa, ngay, gioCh, soLx, gioNgay,
+           chuyenNgay, chuyenThang: chuyenNgay*ngay,
+           tangCaNgay: Math.max(0, gioNgay-8),
+           tangCaThang: Math.max(0, gioNgay-8)*ngay };
+}
+/* Điểm hoà vốn tính bằng SỐ CHUYẾN MỖI THÁNG, không phải theo chuyến. */
+function hoaVon(laiGopChuyen, cuLy){
+  const cd = chiCoDinhThang(), bd = chiBienDoi(cuLy);
+  const bien = (Number(laiGopChuyen)||0) - bd.tong;   // lãi góp biên mỗi chuyến
+  return { cd, bd, bien,
+           soChuyen: bien>0 ? cd.tong/bien : Infinity,
+           duoc: bien>0 };
+}
+/* Giữ tên cũ cho phần còn lại của app: chi phí đầy đủ một chuyến,
+   có phân bổ cố định theo số chuyến thực tế của mô hình đang chạy. */
+function chiPhiChuyen(cuLy){
+  const bd = chiBienDoi(cuLy), cd = chiCoDinhThang(), nl = nangLuc();
+  const soCh = nl.chuyenThang>0 ? nl.chuyenThang : (Number(S.cfg.chuyenMoiThang)||25);
+  const phanBo = cd.tong/soCh;
+  return { lit:bd.lit, dau:bd.dau, luong:bd.phuCap, khac:bd.khac,
+           thueXe:phanBo, phanBo, bienDoi:bd.tong, soChuyenThang:soCh,
+           tong: bd.tong + phanBo };
 }
 /* Toàn bộ số liệu của một lô hàng. */
 function tinhLo(l){
@@ -882,17 +943,7 @@ function vLo(){
       <span class="val">${tong.khoi>0?(Math.round(tong.tan/tong.khoi*100)/100)+' tấn/m³':'—'}</span></div>
   </div>`:''}
 
-  <div class="eyebrow">Chi phí một chuyến ${qm('chuyen')}</div>
-  <div class="card">
-    <div class="row"><span class="lbl">Dầu ${pct(cp.lit)} lít</span><span class="val">${vnd(cp.dau)}</span></div>
-    <div class="row"><span class="lbl">Lương, phụ cấp lái xe</span><span class="val">${vnd(cp.luong)}</span></div>
-    <div class="row"><span class="lbl">Tiền thuê xe phân bổ</span><span class="val">${vnd(cp.thueXe)}</span></div>
-    <div class="row"><span class="lbl">Lốp, bảo dưỡng, cầu đường</span><span class="val">${vnd(cp.khac)}</span></div>
-    <hr class="sep">
-    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Hoà vốn khi lãi gộp đạt</span>
-      <span class="val" style="font-size:19px">${vnd(cp.tong)}</span></div>
-    <button class="btn ghost" onclick="fChiPhi()">Sửa thông số chi phí</button>
-  </div>
+  ${moHinhHTML(ds)}
 
   <div class="eyebrow">Danh sách lô hàng</div>
   <button class="btn acc" onclick="fLo()">+ Ghi lô hàng mới</button>
@@ -908,6 +959,110 @@ function vLo(){
         <span class="chip ${k.laiRong>=0?'ok':'bad'}">${k.laiRong>=0?'Lãi ròng':'Lỗ'} ${vnd(Math.abs(k.laiRong))}</span></div>
     </div>`;}).join('')
   : `<div class="card"><div class="sub">Chưa có lô hàng nào ${nhanThang(thangXem)}.</div></div>`}`;
+}
+
+/* Khối "Mô hình chi phí" — trái tim của bài toán tăng ca. */
+function moHinhHTML(ds){
+  const cd = chiCoDinhThang(), nl = nangLuc();
+  const cuLy = ds.length ? ds[0].cuLy : (S.cfg.cuLyMacDinh||0);
+  const bd = chiBienDoi(cuLy);
+
+  // Lãi gộp trung bình mỗi chuyến, lấy từ lô hàng thật nếu đã có.
+  const gopTB = ds.length
+    ? ds.reduce((a,l)=>a+tinhLo(l).laiGop,0)/ds.length : 0;
+  const hv = hoaVon(gopTB, cuLy);
+  const thuc = ds.length;
+  const laiThang = thuc*hv.bien - cd.tong;
+
+  const bang = [1, 1.5, 2].map(ca=>{
+    const gioNgay = ca*(dec(S.cfg.gioMoiCa)||8);
+    const chThang = (dec(S.cfg.gioMotChuyen)||4.5)>0
+      ? (gioNgay*(Number(S.cfg.soLaiXe)||1))/(dec(S.cfg.gioMotChuyen)||4.5)*(Number(S.cfg.ngayLamViec)||26) : 0;
+    const lai = chThang*hv.bien - cd.tong;
+    const dangChon = Math.abs(ca-nl.ca) < 0.01;
+    return `<div class="row" style="${dangChon?'font-weight:700':''}">
+      <span class="lbl" style="${dangChon?'color:var(--ink);font-weight:700':''}">${ca} ca · ${gioNgay} giờ/ngày · ${Math.round(chThang)} chuyến${dangChon?' ←':''}</span>
+      <span class="val" style="color:${lai>=0?'var(--profit)':'var(--loss)'}">${vnd(lai)}</span></div>`;
+  }).join('');
+
+  return `
+  <div class="eyebrow">Chi phí cố định mỗi tháng ${qm('codinh')}</div>
+  <div class="card ${cd.tong===0?'alert mid':''}">
+    <div class="row"><span class="lbl">Tiền thuê xe</span><span class="val">${vnd(cd.thueXe)}</span></div>
+    <div class="row"><span class="lbl">Lương cơ bản ${nl.soLx} lái xe</span><span class="val">${vnd(cd.luong)}</span></div>
+    <div class="row"><span class="lbl">Bảo hiểm xã hội</span><span class="val">${vnd(cd.bhxh)}</span></div>
+    <div class="row"><span class="lbl">Bảo hiểm xe, đường bộ, giám sát hành trình</span><span class="val">${vnd(cd.khac)}</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Tổng cố định</span>
+      <span class="val" style="font-size:19px">${vnd(cd.tong)}</span></div>
+    <div class="sub" style="margin-top:8px">Số này <b>không đổi</b> dù anh chạy 20 hay 60 chuyến.
+      Xe nằm bãi vẫn phải trả đủ.</div>
+  </div>
+
+  <div class="eyebrow">Chi phí biến đổi mỗi chuyến (${vnd(cuLy)} km một chiều)</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Dầu ${pct(bd.lit)} lít</span><span class="val">${vnd(bd.dau)}</span></div>
+    <div class="row"><span class="lbl">Phụ cấp chuyến cho lái xe</span><span class="val">${vnd(bd.phuCap)}</span></div>
+    <div class="row"><span class="lbl">Lốp, bảo dưỡng theo km</span><span class="val">${vnd(bd.khac)}</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Tổng biến đổi</span>
+      <span class="val" style="font-size:19px">${vnd(bd.tong)}</span></div>
+    <div class="sub" style="margin-top:8px">Chạy thêm một chuyến thì tốn thêm đúng số này.</div>
+  </div>
+
+  <div class="eyebrow">Điểm hoà vốn ${qm('hoavon')}</div>
+  <div class="card declar">
+    ${hv.duoc && thuc>=hv.soChuyen ? '<span class="stamp">ĐÃ QUA HOÀ VỐN</span>'
+      : (hv.duoc ? '<span class="stamp bad">CHƯA TỚI</span>' : '<span class="stamp warn">CHƯA ĐỦ SỐ</span>')}
+    <div class="sub">Lãi gộp trung bình một chuyến</div>
+    <div class="big" style="font-size:22px">${vnd(gopTB)} đ</div>
+    <hr class="sep">
+    <div class="row"><span class="lbl">Trừ chi phí biến đổi</span><span class="val">− ${vnd(bd.tong)}</span></div>
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Lãi góp biên mỗi chuyến</span>
+      <span class="val" style="color:${hv.bien>=0?'var(--profit)':'var(--loss)'}">${vnd(hv.bien)}</span></div>
+    <hr class="sep">
+    ${hv.duoc ? `
+    <div class="row"><span class="lbl">Cần chạy mỗi tháng để hoà vốn</span>
+      <span class="val" style="font-size:20px">${Math.ceil(hv.soChuyen)} chuyến</span></div>
+    <div class="row"><span class="lbl">Năng lực ${nl.ca} ca · ${nl.gioNgay} giờ/ngày</span>
+      <span class="val">${Math.round(nl.chuyenThang)} chuyến</span></div>
+    <div class="row"><span class="lbl">Thực tế đã ghi ${nhanThang(thangXem)}</span>
+      <span class="val" style="color:${thuc>=hv.soChuyen?'var(--profit)':'var(--loss)'}">${thuc} chuyến</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Lãi ròng tháng này</span>
+      <span class="val" style="font-size:20px;color:${laiThang>=0?'var(--profit)':'var(--loss)'}">${vnd(laiThang)}</span></div>
+    ${nl.chuyenThang < hv.soChuyen ? `<div class="chip bad">Chạy hết sức ${Math.round(nl.chuyenThang)} chuyến vẫn chưa tới hoà vốn ${Math.ceil(hv.soChuyen)}</div>`:''}
+    ` : `<div class="sub">Chưa đủ dữ liệu. Ghi vài lô hàng và nhập thông số chi phí để app tính.</div>`}
+  </div>
+
+  ${hv.duoc?`<div class="eyebrow">So sánh phương án ca</div>
+  <div class="card">
+    <div class="sub" style="margin-bottom:9px">Lãi ròng tháng nếu chạy hết năng lực từng phương án:</div>
+    ${bang}
+    <div class="sub" style="margin-top:10px">Tăng ca không làm lãi mỗi chuyến tăng lên.
+      Nó chỉ chia mỏng ${vnd(cd.tong)} chi phí cố định ra nhiều chuyến hơn.</div>
+  </div>`:''}
+
+  ${nl.tangCaNgay>0?`<div class="card alert ${nl.gioNgay>12||nl.tangCaThang>40?'':'mid'}">
+    <div class="t">Giờ làm việc vượt mức thông thường</div>
+    <div class="sub" style="margin-top:5px">${nl.ca} ca = <b>${nl.gioNgay} giờ/ngày</b>,
+      làm thêm ${nl.tangCaNgay} giờ/ngày, khoảng <b>${Math.round(nl.tangCaThang)} giờ/tháng</b>.</div>
+    <div class="fix">Trần làm thêm là 50% giờ làm bình thường trong ngày và 40 giờ mỗi tháng.
+      Thời gian lái xe không quá 10 giờ/ngày và không quá 4 giờ liên tục — thiết bị giám sát hành trình
+      ghi lại và truyền về hệ thống, không cần cảnh sát dừng xe mới phát hiện.</div>
+    <div class="sub" style="margin-top:7px">Tiền làm thêm phải trả bằng 150% lương giờ.
+      Chưa tính khoản này là chi phí đang bị ghi thiếu.</div>
+  </div>`:''}
+
+  ${nl.soLx===1?`<div class="card alert mid">
+    <div class="t">Cả guồng đang dựa vào một người</div>
+    <div class="sub" style="margin-top:5px">Lái xe nghỉ một tuần là mất khoảng
+      ${Math.round(nl.chuyenNgay*7)} chuyến, tức ${vnd(Math.round(nl.chuyenNgay*7)*hv.bien)} đ lãi góp,
+      trong khi ${vnd(cd.tong)} chi phí cố định vẫn chạy đủ.</div>
+    <div class="fix">Nên có một lái xe dự phòng đã tập huấn, dù chỉ gọi khi cần.</div>
+  </div>`:''}
+
+  <button class="btn ghost" onclick="fChiPhi()">Sửa thông số chi phí</button>`;
 }
 
 function fNcc(id){
@@ -1054,29 +1209,57 @@ async function luuLo(){
 
 function fChiPhi(){
   const c=S.cfg;
-  moModal(`<h2>Thông số chi phí chuyến</h2>
-    <div class="sub">Nhập một lần, app dùng để tính lãi ròng mọi lô hàng.</div>
+  moModal(`<h2>Thông số chi phí</h2>
+    <div class="sub">Nhập một lần. App dùng để tính điểm hoà vốn và lãi ròng mọi lô hàng.</div>
+
+    <div class="eyebrow" style="margin-top:16px">Biến đổi — tốn thêm khi chạy thêm</div>
     <label for="cDau">Giá dầu hiện tại (đ/lít)</label><input id="cDau" inputmode="numeric" value="${c.giaDau}">
     <div class="g2">
       <div><label for="cCo">Định mức có tải (l/100km)</label><input id="cCo" inputmode="decimal" value="${c.dmCoTai}"></div>
       <div><label for="cKho">Không tải (l/100km)</label><input id="cKho" inputmode="decimal" value="${c.dmKhongTai}"></div>
     </div>
-    <label for="cKhac">Lốp, bảo dưỡng, cầu đường (đ/chuyến)</label>
+    <label for="cKhac">Lốp, bảo dưỡng theo km (đ/chuyến)</label>
     <input id="cKhac" inputmode="numeric" value="${c.chiKhacChuyen}">
-    <label for="cSoC">Số chuyến trung bình mỗi tháng</label>
-    <input id="cSoC" inputmode="numeric" value="${c.chuyenMoiThang}">
+
+    <div class="eyebrow" style="margin-top:18px">Cố định — trả đủ dù xe nằm bãi</div>
+    <label for="cLuong">Lương cơ bản một lái xe (đ/tháng)</label>
+    <input id="cLuong" inputmode="numeric" value="${c.luongCoBan}">
+    <label for="cBh">Bảo hiểm xã hội công ty đóng (đ/tháng)</label>
+    <input id="cBh" inputmode="numeric" value="${c.bhxhThang}">
+    <label for="cCdk">Bảo hiểm xe, phí đường bộ, giám sát hành trình (đ/tháng)</label>
+    <input id="cCdk" inputmode="numeric" value="${c.chiCoDinhKhac}">
+    <div class="sub" style="margin-top:6px">Tiền thuê xe ${vnd(c.tienThueThang)} đ/tháng app tự lấy từ mục Phương án xe.</div>
+
+    <div class="eyebrow" style="margin-top:18px">Năng lực chạy</div>
+    <div class="g2">
+      <div><label for="cLx">Số lái xe</label><input id="cLx" inputmode="numeric" value="${c.soLaiXe}"></div>
+      <div><label for="cCa">Số ca mỗi ngày</label><input id="cCa" inputmode="decimal" value="${c.caMoiNgay}"></div>
+    </div>
+    <div class="g2">
+      <div><label for="cGio">Giờ một ca</label><input id="cGio" inputmode="decimal" value="${c.gioMoiCa}"></div>
+      <div><label for="cNgay">Ngày làm việc/tháng</label><input id="cNgay" inputmode="numeric" value="${c.ngayLamViec}"></div>
+    </div>
+    <label for="cGch">Số giờ một chuyến (cả đi, bốc, dỡ, chờ)</label>
+    <input id="cGch" inputmode="decimal" value="${c.gioMotChuyen}">
+
+    <div class="eyebrow" style="margin-top:18px">Quy đổi</div>
     <label for="cHs">Hệ số quy đổi chuẩn (tấn/m³)</label>
     <input id="cHs" inputmode="decimal" value="${c.heSoQuyDoi}">
-    <div class="note">Hệ số quy đổi là con số quan trọng nhất của mảng thương mại. Đá base cấp phối
-      thường 1,4–1,6 tấn/m³. Chạy vài chuyến, lấy tổng tấn chia tổng m³ ra hệ số thật của xe anh
-      rồi sửa lại ở đây. Lương lái xe app lấy từ mục Quy chế khoán chi.</div>
+
+    <div class="note">Phụ cấp chuyến app lấy từ mục Quy chế khoán chi.
+      Đừng nhập lương cơ bản vào cả hai chỗ, sẽ tính đúp.</div>
     <button class="btn acc" onclick="luuChiPhi()">Lưu</button>
     <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
 }
 async function luuChiPhi(){
   Object.assign(S.cfg,{ giaDau:num($('#cDau').value), dmCoTai:dec($('#cCo').value),
     dmKhongTai:dec($('#cKho').value), chiKhacChuyen:num($('#cKhac').value),
-    chuyenMoiThang:Number($('#cSoC').value)||25, heSoQuyDoi:dec($('#cHs').value)||1.5 });
+    luongCoBan:num($('#cLuong').value), bhxhThang:num($('#cBh').value),
+    chiCoDinhKhac:num($('#cCdk').value),
+    soLaiXe:Number($('#cLx').value)||1, caMoiNgay:dec($('#cCa').value)||1,
+    gioMoiCa:dec($('#cGio').value)||8, ngayLamViec:Number($('#cNgay').value)||26,
+    gioMotChuyen:dec($('#cGch').value)||4.5,
+    heSoQuyDoi:dec($('#cHs').value)||1.5 });
   await luu(); dongModal(); ve(); toast('Đã lưu');
 }
 
