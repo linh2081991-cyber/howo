@@ -195,9 +195,6 @@
     display:flex; max-width:520px; margin:0 auto;
     padding-bottom:env(safe-area-inset-bottom);
   }
-  nav.tabbar{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
-  nav.tabbar::-webkit-scrollbar{ display:none; }
-  nav.tabbar button{ min-width:64px; }
   nav.tabbar button{
     flex:1; border:none; background:none; padding:10px 0 8px 0;
     display:flex; flex-direction:column; align-items:center; gap:2px;
@@ -419,7 +416,6 @@
     <button data-tab="strategy"><span class="ic">🧭</span>Trợ Lý</button>
     <button data-tab="drivers"><span class="ic">👤</span>Tài Xế</button>
     <button data-tab="results"><span class="ic">📊</span>Kết Quả</button>
-    <button data-tab="tax"><span class="ic">🧾</span>Thuế</button>
     <button data-tab="settings"><span class="ic">⚙️</span>Cài Đặt</button>
   </nav>
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
@@ -1477,6 +1473,7 @@ function renderShiftCard(sh){
         <div class="row1">
           <span class="date">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}</span>
           <div class="row1-right">
+            ${(Number(sh.intensity)||1)===1.5 ? '<span class="tag" style="background:#FDF0D5; color:#B8791A;">1,5 ca</span>' : ''}
             <span class="tag" style="${statusColorStyle(sh.status)}">${statusLabel(sh.status)}</span>
             ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
           </div>
@@ -1813,6 +1810,7 @@ function startNewShift(){
     fuelEnd: 0,
     fuelAdded: 0,
     fuelUnitPrice: latestKnownFuelUnitPrice(), // ca sau tự lấy đơn giá dầu của lần đổ gần nhất, đỡ phải gõ lại tay mỗi ca
+    intensity: 1, // Cường Độ Ca: 1 = ca thường, 1.5 = ca rưỡi (tài xế làm gấp 1,5 khối lượng). CHỈ nhân vào lương cứng, không đụng tiền ăn/nhà/dầu/lương chuyến.
     baseSalaryAllocation: policy.baseSalary ? dailyBaseSalary(driver) : 0,
     foodAllowance: policy.food ? driver.dailyFoodAllowance : 0,
     housingAllocation: policy.housing ? dailyHousing(driver, dateStr) : 0,
@@ -1832,8 +1830,9 @@ function reapplyCostPolicyToDraft(){
   const sh = state.draftShift;
   const driver = driverById(sh.driverId);
   const policy = state.settings.costPolicies[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
+  const intensity = Number(sh.intensity)||1; // ca rưỡi (1.5) nhân vào ĐÚNG lương cứng, tiền ăn/nhà giữ nguyên
   if(!driver){ sh.baseSalaryAllocation=0; sh.foodAllowance=0; sh.housingAllocation=0; return; }
-  sh.baseSalaryAllocation = policy.baseSalary ? dailyBaseSalary(driver) : 0;
+  sh.baseSalaryAllocation = policy.baseSalary ? Math.round(dailyBaseSalary(driver)*intensity) : 0;
   sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
   sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
 }
@@ -1853,7 +1852,8 @@ function recalcDriverShiftAllocations(driverId){
   state.shifts.forEach(sh=>{
     if(sh.driverId!==driverId) return;
     const policy = state.settings.costPolicies[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
-    sh.baseSalaryAllocation = policy.baseSalary ? dailyBaseSalary(driver) : 0;
+    const intensity = Number(sh.intensity)||1; // giữ đúng hệ số ca rưỡi đã snapshot của từng ca khi tính lại
+    sh.baseSalaryAllocation = policy.baseSalary ? Math.round(dailyBaseSalary(driver)*intensity) : 0;
     sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
     sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
   });
@@ -1913,6 +1913,14 @@ function renderShiftForm(){
           <select id="f_status">
             ${STATUS_OPTIONS.map(s=>`<option value="${s.key}" ${s.key===sh.status?'selected':''}>${s.label}</option>`).join('')}
           </select>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Cường Độ Ca</label>
+          <div class="seg" id="f_intensityToggle">
+            <button type="button" data-val="1" class="${(Number(sh.intensity)||1)===1.5?'':'active'}">1 Ca</button>
+            <button type="button" data-val="1.5" class="${(Number(sh.intensity)||1)===1.5?'active':''}">1,5 Ca (Tăng Cường)</button>
+          </div>
+          <div class="hint">Chọn "1,5 Ca" khi 1 tài xế chạy tăng cường gấp rưỡi khối lượng. Chỉ LƯƠNG CỨNG ca này được nhân 1,5 — tiền ăn, tiền nhà, lương chuyến giữ nguyên.</div>
         </div>
       </div>
     </section>
@@ -2180,6 +2188,15 @@ function bindFormEvents(){
 
   document.getElementById('f_status').addEventListener('change', e=>{
     sh.status = e.target.value; reapplyCostPolicyToDraft(); refreshFixedCostInputs(); updateSummary();
+  });
+  document.querySelectorAll('#f_intensityToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      sh.intensity = Number(btn.dataset.val)||1;
+      document.querySelectorAll('#f_intensityToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+      reapplyCostPolicyToDraft(); // tính lại lương cứng ca này theo hệ số mới (×1 hoặc ×1.5)
+      refreshFixedCostInputs();    // cập nhật ô "Lương cứng" hiển thị đúng số mới
+      updateSummary();
+    });
   });
   document.getElementById('f_driver').addEventListener('change', e=>{
     const driver = driverById(e.target.value);
@@ -6503,13 +6520,14 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push([]);
 
   rows.push(['CHI TIẾT TỪNG CA']);
-  const detailHeader = ['Ngày','Ca','Trạng Thái','Công Trình','Khối Lượng/Chuyến','Đơn Giá Vật Liệu','Số Chuyến',
+  const detailHeader = ['Ngày','Ca','Cường Độ','Trạng Thái','Công Trình','Khối Lượng/Chuyến','Đơn Giá Vật Liệu','Số Chuyến',
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến (Ca Này)','Lương Cứng (Ca Này)','Tiền Ăn (Ca Này)','Ứng Lương (Ca Này)','Ghi Chú Ca'];
   rows.push(detailHeader);
   const emptySiteFields = ['','','','','','',''];
   const sorted = [...shiftsForDriver].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
   for(const sh of sorted){
-    const shared = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), statusLabel(sh.status)];
+    const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
+    const shared = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), intensityLabel, statusLabel(sh.status)];
     const trailing = [sh.baseSalaryAllocation||0, sh.foodAllowance||0, sh.advanceAmount||0, sh.notes||''];
     if((sh.siteLogs||[]).length===0){
       rows.push([...shared, ...emptySiteFields, ...trailing]);
@@ -6640,8 +6658,6 @@ function renderAll(){
     renderStrategyHub();
   } else if(state.currentTab==='results'){
     renderResults();
-  } else if(state.currentTab==='tax'){
-    renderTax();
   } else {
     renderSettings();
   }
@@ -6649,31 +6665,6 @@ function renderAll(){
     b.classList.toggle('active', b.dataset.tab===state.currentTab);
   });
 }
-// ===================== TAB THUẾ (module rời) =====================
-// Nhúng thue.html trong cùng thư mục. Module chỉ ĐỌC dữ liệu ca, ghi
-// riêng vào ô 'taxLedger'. Không đụng gì tới logic vận hành ở trên.
-// Muốn gỡ bỏ: xoá nút tab, nhánh renderAll và hàm này là xong.
-function renderTax(){
-  const app = document.getElementById('app');
-  if(app.dataset.taxMounted === '1') return;   // giữ nguyên iframe, không nạp lại
-  app.innerHTML = '';
-  app.dataset.taxMounted = '1';
-  const f = document.createElement('iframe');
-  f.src = 'thue.html?embed=1';
-  f.title = 'Sổ Thuế';
-  f.style.cssText = 'width:100%;border:0;display:block;height:calc(100vh - 132px);background:var(--bg,#F7F5F1);';
-  app.appendChild(f);
-}
-// Rời khỏi tab Thuế thì bỏ cờ để lần sau dựng lại sạch sẽ.
-document.querySelectorAll('nav.tabbar button').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    if(b.dataset.tab !== 'tax'){
-      const app = document.getElementById('app');
-      if(app) delete app.dataset.taxMounted;
-    }
-  });
-});
-
 function refreshSiteDatalist(){
   const dl=document.getElementById('siteNamesList');
   dl.innerHTML = allSiteNames().map(n=>`<option value="${escapeHtml(n)}">`).join('');
