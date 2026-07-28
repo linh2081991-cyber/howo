@@ -170,6 +170,7 @@ body.embed .backdrop{align-items:center;padding:12px}
 <nav>
   <button data-t="thang" onclick="go('thang')"><span class="ic">▤</span>Tháng này<span class="badge" id="nBadge" hidden></span></button>
   <button data-t="ra"    onclick="go('ra')"><span class="ic">↗</span>Hoá đơn ra</button>
+  <button data-t="lo"    onclick="go('lo')"><span class="ic">📦</span>Lô hàng</button>
   <button data-t="vao"   onclick="go('vao')"><span class="ic">↙</span>Chứng từ</button>
   <button data-t="bangiao" onclick="go('bangiao')"><span class="ic">📤</span>Bàn giao</button>
   <button data-t="hoso"  onclick="go('hoso')"><span class="ic">🗂</span>Hồ sơ</button>
@@ -200,7 +201,8 @@ const ref = n => db.collection('shared').doc(SPACE).collection('appdata').doc(n)
 
 /* ══════════ HẰNG SỐ PHÁP LÝ ══════════ */
 const NGUONG_CK = 5000000;
-const VAT_RA = 8;
+const VAT_RA   = 8;    // dịch vụ vận tải — đang được giảm 2%
+const VAT_HANG = 10;   // đá, cát, sỏi — sản phẩm khai khoáng, KHÔNG được giảm
 const TNDN = 15;
 const NGUONG_THUE_TS = 200000000;
 const LPTB = 2;
@@ -222,10 +224,12 @@ const MAC_DINH = {
   thueSuatRa:VAT_RA, namKhauHao:10, phuongAnXe:'chua', tienThueThang:16600000,
 
   dmCoTai:'', dmKhongTai:'', dmChoHang:'',
+  giaDau:'', chiKhacChuyen:'', chuyenMoiThang:25, heSoQuyDoi:1.5,
   khoanChuyen:'', khoanCongTac:'', khoanAnCa:'', khoanNhaO:''
 };
 
-let S = { cfg:{...MAC_DINH}, khach:[], hopDong:[], invOut:[], invIn:[], bangKe:[], sent:[] };
+let S = { cfg:{...MAC_DINH}, khach:[], hopDong:[], invOut:[], invIn:[], bangKe:[], sent:[],
+          nhaCC:[], tamUng:[], loHang:[] };
 let shifts = [];
 let tab='thang', thangXem=null, cheDoCT='hd';
 
@@ -280,6 +284,18 @@ const HELP = {
   'Anh vừa là chủ công ty vừa là người cho công ty thuê xe. Pháp luật gọi đây là <b>giao dịch liên kết</b>.',
   'Hệ quả: phải kê khai phụ lục giao dịch liên kết kèm quyết toán thuế thu nhập doanh nghiệp hằng năm, và giá thuê phải hợp lý theo giá thị trường.',
   'Đặt giá thuê cao bất thường để đẩy chi phí là điểm cơ quan thuế soi đầu tiên. Đặt vừa phải thì không ai hỏi.'],
+ tamung:['Tạm ứng ở mỏ',
+  'Tiền anh chuyển trước cho mỏ để lái xe lấy hàng ngay tại hiện trường. Về sổ sách, đây là khoản <b>phải thu / trả trước cho người bán</b>, <b>chưa</b> phải chi phí.',
+  'Chi phí và thuế GTGT đầu vào chỉ phát sinh khi <b>mỏ xuất hoá đơn</b> cho từng lô hàng thực nhận. Nhập tạm ứng vào mục Chứng từ là khai khống.',
+  'App trừ dần số dư theo từng lô hàng anh ghi, và báo trước khi hết để anh chuyển tiếp — đừng để lái xe phải rút tiền mặt trả tại mỏ, mất khấu trừ ngay.'],
+ chuyen:['Chi phí một chuyến',
+  'Gồm dầu theo cự ly, lương và phụ cấp lái xe, tiền thuê xe phân bổ, cùng lốp bảo dưỡng cầu đường.',
+  'Con số "hoà vốn" là mức lãi gộp tối thiểu một lô hàng phải đạt thì chuyến mới có lãi. Thấp hơn là chở càng nhiều lỗ càng sâu.',
+  'Đây là thước đo để quyết định nhận hay từ chối một cung đường — quan trọng hơn giá bán.'],
+ quydoi:['Hệ số quy đổi tấn sang m³',
+  'Anh mua ở mỏ bằng <b>tấn</b> (cân, khách quan) nhưng bán cho công trình bằng <b>m³</b> (đo, phụ thuộc cách đo). Toàn bộ lãi của mảng này nằm ở hệ số giữa hai đơn vị.',
+  'Đá base cấp phối thường 1,4–1,6 tấn/m³. Chênh giữa 1,4 và 1,6 là 14% giá vốn — đủ biến lãi thành lỗ.',
+  'Sổ kho mua vào bằng tấn, bán ra bằng m³ sẽ không bao giờ tự khớp. Cần một quyết định nội bộ ghi rõ hệ số để kế toán hạch toán, nếu không kho lệch mãi.'],
  chotso:['Chốt số khi xuất hoá đơn',
   'Lúc anh bấm "đã xuất hoá đơn", app <b>đóng băng</b> con số doanh thu tại thời điểm đó.',
   'Nếu sau này anh sửa ca cũ làm doanh thu đổi, app sẽ báo đỏ và cho biết lệch bao nhiêu.',
@@ -300,7 +316,7 @@ async function tai(){
     if(t.exists){
       const d = t.data();
       S.cfg = Object.assign({...MAC_DINH}, d.cfg||{});
-      ['khach','hopDong','invOut','invIn','bangKe','sent'].forEach(k=>{
+      ['khach','hopDong','invOut','invIn','bangKe','sent','nhaCC','tamUng','loHang'].forEach(k=>{
         S[k] = Array.isArray(d[k]) ? d[k] : []; });
     }
   }catch(e){
@@ -361,11 +377,72 @@ function tenLa(){
 
 const traRa = (ym,key) => S.invOut.find(x=>x.thang===ym && x.key===key) || null;
 const daXuat = (ym,key) => { const r=traRa(ym,key); return !!(r&&r.daXuat); };
+
+/* Loại giao dịch của một dòng doanh thu: chở thuê hay bán hàng.
+   Xe cơ động, chuyến nào ra chuyến nấy, nên đánh dấu theo từng dòng. */
+const LOAI_GD = {
+  cuoc:{ ten:'Chạy cước',    mo:'Dịch vụ vận tải hàng hoá',        suat:VAT_RA  },
+  hang:{ ten:'Bán hàng hoá', mo:'Đá, cát, sỏi — sản phẩm khai khoáng', suat:VAT_HANG }
+};
+function loaiDong(ym,x){ const r=traRa(ym,x.key); return (r&&r.loaiGD)||'cuoc'; }
+function suatDong(ym,x){
+  const r=traRa(ym,x.key);
+  if(r && Number(r.thueSuat)>0) return Number(r.thueSuat);
+  return LOAI_GD[loaiDong(ym,x)].suat;
+}
 /** Chênh lệch giữa doanh thu hiện tại và số đã chốt lúc xuất hoá đơn. */
 function lechChot(ym,x){
   const r = traRa(ym,x.key);
   if(!r || !r.daXuat || r.dtChot===undefined || r.dtChot===null) return 0;
   return Math.round(x.doanhThu - r.dtChot);
+}
+
+/* ══════════ LÔ HÀNG THƯƠNG MẠI ══════════
+   Mua bằng TẤN ở mỏ, bán bằng M3 cho công trình.
+   Toàn bộ lãi nằm ở hệ số quy đổi giữa hai đơn vị đó. */
+
+const nccById = id => S.nhaCC.find(x=>x.id===id) || null;
+const loThang = ym => S.loHang.filter(l=>(l.ngay||'').slice(0,7)===ym);
+
+/* Dầu một chuyến: đi có tải, về không tải, cùng cự ly. */
+function dauChuyen(cuLy){
+  const km = Number(cuLy)||0;
+  const co = dec(S.cfg.dmCoTai), kho = dec(S.cfg.dmKhongTai);
+  if(!km || !co) return 0;
+  return km*co/100 + km*(kho||co*0.6)/100;
+}
+/* Chi phí vận hành ước tính của một chuyến. */
+function chiPhiChuyen(cuLy){
+  const lit = dauChuyen(cuLy);
+  const dau = lit * (num(S.cfg.giaDau)||0);
+  const luong = num(S.cfg.khoanChuyen)||0;
+  const thueXe = S.cfg.phuongAnXe==='thue'
+    ? (num(S.cfg.tienThueThang)||0)/(Number(S.cfg.chuyenMoiThang)||25) : 0;
+  const khac = num(S.cfg.chiKhacChuyen)||0;
+  return { lit, dau, luong, thueXe, khac, tong: dau+luong+thueXe+khac };
+}
+/* Toàn bộ số liệu của một lô hàng. */
+function tinhLo(l){
+  const muaTan  = dec(l.muaTan);
+  const banKhoi = dec(l.banKhoi);
+  const muaHang = num(l.muaTienHang) || Math.round(muaTan * num(l.muaDonGia));
+  const banHang = num(l.banTienHang) || Math.round(banKhoi * num(l.banDonGia));
+  const muaVat  = num(l.muaVat) || Math.round(muaHang*VAT_HANG/100);
+  const banVat  = num(l.banVat) || Math.round(banHang*VAT_HANG/100);
+  const heSo    = banKhoi>0 ? muaTan/banKhoi : 0;          // tấn trên mỗi m3
+  const cp      = chiPhiChuyen(l.cuLy);
+  const laiGop  = banHang - muaHang;
+  return { muaTan, banKhoi, muaHang, banHang, muaVat, banVat, heSo, cp,
+           laiGop, laiRong: laiGop - cp.tong,
+           vatNop: banVat - muaVat,
+           gocMua: muaHang + muaVat, gocBan: banHang + banVat };
+}
+/* Số dư tạm ứng còn lại ở một mỏ. */
+function duTamUng(nccId){
+  const ung = S.tamUng.filter(t=>t.nccId===nccId).reduce((a,t)=>a+num(t.soTien),0);
+  const dung = S.loHang.filter(l=>l.nccId===nccId)
+    .reduce((a,l)=>{ const k=tinhLo(l); return a + k.gocMua; },0);
+  return { ung, dung, du: ung-dung };
 }
 
 const ctThang = ym => S.invIn.filter(h=>(h.ngay||'').slice(0,7)===ym);
@@ -380,10 +457,15 @@ function tinhThue(ym){
   const dtDaXuat = ds.filter(x=>daXuat(ym,x.key)).reduce((t,x)=>t+x.doanhThu,0);
   const dtChua = dtTong - dtDaXuat;
   const suat = Number(S.cfg.thueSuatRa)||VAT_RA;
-  const vatRa = dtTong*suat/100;
+  // Mỗi dòng một thuế suất riêng — không gộp một mức cho tất cả nữa.
+  const vatRa = ds.reduce((t,x)=> t + x.doanhThu*suatDong(ym,x)/100, 0);
+  const dtHang = ds.filter(x=>loaiDong(ym,x)==='hang').reduce((t,x)=>t+x.doanhThu,0);
+  const dtCuoc = dtTong - dtHang;
 
   const ct = ctThang(ym);
   const bk = bkThang(ym);
+  // Giá vốn hàng bán = tiền hàng trên hoá đơn vật liệu mua vào (chưa VAT).
+  const giaVon = ct.filter(h=>h.loai==='vlieu').reduce((t,h)=>t+(Number(h.tienHang)||0),0);
   const chiHD = ct.reduce((t,h)=>t+(Number(h.tong)||0),0);
   const chiBK = bk.filter(bkHopLe).reduce((t,h)=>t+(Number(h.thanhTien)||0),0);
   const vatVao = ct.filter(duocKT).reduce((t,h)=>t+(Number(h.vat)||0),0);
@@ -392,7 +474,8 @@ function tinhThue(ym){
   const vatNop = Math.max(0, vatRa - vatVao);
   const ganh = dtTong>0 ? vatNop/dtTong*100 : 0;
 
-  return { ds, dtTong, dtDaXuat, dtChua, suat, vatRa, ct, bk,
+  return { ds, dtTong, dtDaXuat, dtChua, suat, vatRa, ct, bk, dtHang, dtCuoc, giaVon,
+           laiGop: dtHang - giaVon,
            chiHD, chiBK, chiTong:chiHD+chiBK, vatVao, vatMat, bkMat, vatNop, ganh };
 }
 
@@ -439,6 +522,13 @@ function canhBao(){
       fix:'Cần làm hoá đơn điều chỉnh. Báo kế toán ngay, đừng để đến quyết toán.', go:'ra'});
   });
 
+  K.ds.forEach(x=>{
+    const r=traRa(ym,x.key);
+    if(!r || !r.loaiGD) out.push({nang:false, t:'Chưa chọn loại giao dịch',
+      d:`${esc(x.ten)} — app đang tạm tính là chạy cước ${VAT_RA}%.`,
+      fix:`Nếu là bán đá, cát, sỏi thì phải là ${VAT_HANG}%. Bấm vào dòng đó để chọn.`, go:'ra'});
+  });
+
   if(K.dtChua>0) out.push({nang:true, t:`Chưa xuất hoá đơn ${vnd(K.dtChua)} đ`,
     d:`Doanh thu ${nhanThang(ym)} đã có trong sổ ca nhưng chưa đánh dấu đã xuất.`,
     fix:'Hoá đơn phải lập khi hoàn thành vận chuyển, không chờ khách trả tiền.', go:'ra'});
@@ -470,6 +560,28 @@ function canhBao(){
       d:`${esc(h.ncc)} · số ${esc(h.soHD)} xuất hiện 2 lần`,
       fix:'Kiểm tra lại, tránh kê khai hai lần cùng một hoá đơn.', go:'vao'});
     thay[k]=1; });
+
+  S.nhaCC.forEach(m=>{
+    const d = duTamUng(m.id);
+    if(d.ung>0 && d.du < 20000000) out.push({nang:d.du<=0, t:`Tạm ứng ở ${esc(m.ten)} sắp hết`,
+      d:`Đã chuyển ${vnd(d.ung)} · đã dùng ${vnd(d.dung)} · còn ${vnd(d.du)} đ`,
+      fix:'Chuyển thêm trước khi lái xe tới mỏ, đừng để tài xế phải rút tiền mặt trả tại chỗ.', go:'lo'});
+  });
+  loThang(ym).forEach(l=>{
+    const k = tinhLo(l);
+    const chuan = Number(S.cfg.heSoQuyDoi)||1.5;
+    if(k.heSo>0 && Math.abs(k.heSo-chuan)/chuan > 0.2)
+      out.push({nang:false, t:'Hệ số quy đổi lệch bất thường',
+        d:`Lô ${dmy(l.ngay)}: ${pct(k.muaTan)} tấn / ${pct(k.banKhoi)} m³ = ${(Math.round(k.heSo*100)/100)} tấn/m³, chuẩn là ${chuan}`,
+        fix:'Sổ kho mua vào và bán ra sẽ không khớp. Kế toán sẽ hỏi, chuẩn bị sẵn cách giải thích.', go:'lo'});
+    if(k.laiRong<0)
+      out.push({nang:false, t:'Lô hàng lỗ',
+        d:`Lô ${dmy(l.ngay)}: lãi gộp ${vnd(k.laiGop)} nhưng chi phí chuyến ${vnd(k.cp.tong)}`,
+        fix:'Cự ly quá xa hoặc khối lượng quá thấp so với chi phí chạy xe.', go:'lo'});
+  });
+  if(!num(S.cfg.giaDau)) out.push({nang:false, t:'Chưa nhập giá dầu',
+    d:'Không có giá dầu thì app không tính được lãi ròng của chuyến.',
+    fix:'Vào Hồ sơ → Chi phí chuyến để nhập.', go:'hoso'});
 
   const D = dauThang(ym);
   if(D.dinhMuc>0 && D.vuot>15) out.push({nang:false, t:`Dầu vượt định mức ${pct(D.vuot)}%`,
@@ -515,7 +627,7 @@ function ve(){
   document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current', b.dataset.t===tab));
   const cb=canhBao(), bd=$('#nBadge');
   if(cb.length){bd.hidden=false;bd.textContent=cb.length} else bd.hidden=true;
-  $('#view').innerHTML = ({thang:vThang,ra:vRa,vao:vVao,bangiao:vBanGiao,hoso:vHoSo})[tab](cb);
+  $('#view').innerHTML = ({thang:vThang,ra:vRa,lo:vLo,vao:vVao,bangiao:vBanGiao,hoso:vHoSo})[tab](cb);
 }
 function chonThang(){
   const ds=[...new Set(shifts.map(s=>(s.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
@@ -539,7 +651,20 @@ function vThang(cb){
     <hr class="sep">
     <div class="row"><span class="lbl">Đã xuất hoá đơn</span><span class="val" style="color:var(--profit)">${vnd(K.dtDaXuat)}</span></div>
     <div class="row"><span class="lbl">Chưa xuất</span><span class="val" style="color:${K.dtChua>0?'var(--loss)':'var(--ink-soft)'}">${vnd(K.dtChua)}</span></div>
+    ${K.dtHang>0?`<hr class="sep">
+      <div class="row"><span class="lbl">Chạy cước · VAT ${VAT_RA}%</span><span class="val">${vnd(K.dtCuoc)}</span></div>
+      <div class="row"><span class="lbl">Bán hàng hoá · VAT ${VAT_HANG}%</span><span class="val">${vnd(K.dtHang)}</span></div>`:''}
   </div>
+  ${K.dtHang>0?`<div class="eyebrow">Lãi gộp mảng hàng hoá</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Doanh thu bán hàng</span><span class="val">${vnd(K.dtHang)}</span></div>
+    <div class="row"><span class="lbl">Giá vốn (hoá đơn vật liệu mua vào)</span><span class="val">− ${vnd(K.giaVon)}</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Lãi gộp</span>
+      <span class="val" style="font-size:19px;color:${K.laiGop>=0?'var(--profit)':'var(--loss)'}">${vnd(K.laiGop)}</span></div>
+    ${K.giaVon===0?`<div class="chip warn">Chưa nhập hoá đơn mua hàng — lãi đang ảo</div>`:''}
+    <div class="sub" style="margin-top:8px">Chưa trừ dầu, lương lái và chi phí chạy xe.</div>
+  </div>`:''}
 
   <div class="eyebrow">Thuế giá trị gia tăng ${qm('vat')}</div>
   <div class="card">
@@ -614,10 +739,12 @@ function vRa(){
   K.ds.map(x=>{
     const r=traRa(thangXem,x.key), ok=r&&r.daXuat, l=lechChot(thangXem,x);
     const kh = x.khachId ? S.khach.find(k=>k.id===x.khachId) : null;
+    const lg = loaiDong(thangXem,x), ts = suatDong(thangXem,x);
     return `<div class="card ${l!==0?'alert':''} tap" onclick="fRa('${js(x.key)}')">
       <div class="row"><b style="font-size:15px">${esc(x.ten)}</b><span class="val">${vnd(x.doanhThu)}</span></div>
-      <div class="sub">${x.chuyen} chuyến · VAT ${K.suat}% = ${vnd(x.doanhThu*K.suat/100)} đ</div>
+      <div class="sub">${x.chuyen} chuyến · VAT ${ts}% = ${vnd(x.doanhThu*ts/100)} đ</div>
       <div>
+        <span class="chip ${lg==='hang'?'seal':''}">${LOAI_GD[lg].ten} ${ts}%</span>
         <span class="chip ${ok?'ok':'bad'}">${ok?'Đã xuất':'Chưa xuất'}</span>
         ${r&&r.soHD?`<span class="chip seal">Số ${esc(r.soHD)}</span>`:''}
         ${kh?`<span class="chip ${kh.mst?'ok':'warn'}">${kh.mst?'MST '+esc(kh.mst):'khách chưa có MST'}</span>`
@@ -628,7 +755,8 @@ function vRa(){
 }
 function fRa(key){
   const K=tinhThue(thangXem), x=K.ds.find(d=>d.key===key); if(!x) return;
-  const r = traRa(thangXem,key) || {daXuat:false,soHD:'',ngayXuat:''};
+  const r = traRa(thangXem,key) || {daXuat:false,soHD:'',ngayXuat:'',loaiGD:'cuoc',thueSuat:0};
+  const lgHienTai = loaiDong(thangXem,x), tsHienTai = suatDong(thangXem,x);
   const kh = x.khachId ? S.khach.find(k=>k.id===x.khachId) : null;
   const l = lechChot(thangXem,x);
   moModal(`<h2>${esc(x.ten)}</h2>
@@ -644,6 +772,21 @@ function fRa(key){
       :`<div class="card mid alert" style="margin-top:12px"><div class="t">Chưa có hồ sơ khách</div>
         <div class="fix">Không có mã số thuế thì không xuất được hoá đơn đúng.</div>
         <button class="btn ghost" style="margin-top:8px" onclick="dongModal();go('hoso');setTimeout(()=>fKhach(null,'${js(x.tenGoc[0])}'),80)">Tạo hồ sơ khách ngay</button></div>`}
+    <label>Chuyến này là gì?</label>
+    <div class="seg" id="rLoai">
+      ${Object.entries(LOAI_GD).map(([k,v])=>`<button type="button" data-v="${k}"
+        aria-pressed="${lgHienTai===k}" onclick="segPick(this);doiLoai()">${v.ten}<br>
+        <span style="font-weight:400;font-size:11px;opacity:.8">VAT ${v.suat}%</span></button>`).join('')}
+    </div>
+    <div id="rMoTa" class="sub" style="margin-top:7px"></div>
+    <label for="rTs">Thuế suất ghi trên hoá đơn (%)</label>
+    <input id="rTs" inputmode="numeric" value="${tsHienTai}">
+    <div class="card" style="margin-top:10px;background:var(--seal-soft);border-color:#B6C7DC">
+      <div class="row"><span class="lbl">Tiền hàng chưa VAT</span><span class="val">${vnd(x.doanhThu)}</span></div>
+      <div class="row"><span class="lbl">Tiền thuế</span><span class="val" id="rVat">—</span></div>
+      <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Tổng thanh toán</span>
+        <span class="val" id="rTong">—</span></div>
+    </div>
     <label>Đã xuất hoá đơn chưa?</label>
     <div class="seg" id="rSeg">
       <button type="button" data-v="1" aria-pressed="${r.daXuat}" onclick="segPick(this)">Đã xuất</button>
@@ -657,12 +800,32 @@ function fRa(key){
       thì app báo lệch ngay. ${qm('chotso')}</div>
     <button class="btn acc" onclick="luuRa('${js(key)}')">Lưu</button>
     <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+  window.__dtDong = x.doanhThu;
+  $('#rTs').addEventListener('input', tinhLaiRa);
+  doiLoai(true);
+}
+/* Bấm nút loại giao dịch thì tự điền lại thuế suất chuẩn của loại đó. */
+function doiLoai(giuNguyen){
+  const k = $('#rLoai button[aria-pressed="true"]').dataset.v;
+  if(!giuNguyen) $('#rTs').value = LOAI_GD[k].suat;
+  $('#rMoTa').innerHTML = LOAI_GD[k].mo +
+    (k==='hang' ? ' — <b>không</b> thuộc diện giảm 2%, phải xuất đúng '+VAT_HANG+'%.'
+                : ' — đang được giảm còn '+VAT_RA+'% đến hết 31/12/2026.');
+  tinhLaiRa();
+}
+function tinhLaiRa(){
+  const dt = window.__dtDong||0, ts = Number($('#rTs').value)||0;
+  const vat = dt*ts/100;
+  $('#rVat').textContent = vnd(vat) + ' đ';
+  $('#rTong').textContent = vnd(dt+vat) + ' đ';
 }
 async function luuRa(key){
   const K=tinhThue(thangXem), x=K.ds.find(d=>d.key===key); if(!x) return;
   const daX = $('#rSeg button[aria-pressed="true"]').dataset.v==='1';
   const cu = traRa(thangXem,key);
   const o = { thang:thangXem, key, ten:x.ten, khachId:x.khachId||null, daXuat:daX,
+    loaiGD: $('#rLoai button[aria-pressed="true"]').dataset.v,
+    thueSuat: Number($('#rTs').value)||0,
     soHD:$('#rSo').value.trim(), ngayXuat:$('#rNgay').value,
     dtChot: daX ? (cu && cu.daXuat && cu.dtChot!==undefined ? cu.dtChot : Math.round(x.doanhThu)) : null };
   const i = S.invOut.findIndex(v=>v.thang===thangXem && v.key===key);
@@ -673,6 +836,248 @@ async function chotLai(key){
   const K=tinhThue(thangXem), x=K.ds.find(d=>d.key===key);
   const i = S.invOut.findIndex(v=>v.thang===thangXem && v.key===key);
   if(i>=0 && x){ S.invOut[i].dtChot = Math.round(x.doanhThu); await luu(); dongModal(); ve(); toast('Đã chốt lại'); }
+}
+
+/* ══════════ MÀN HÌNH LÔ HÀNG ══════════ */
+function vLo(){
+  const ds = loThang(thangXem).sort((a,b)=>a.ngay<b.ngay?1:-1);
+  const cp = chiPhiChuyen(ds.length?ds[0].cuLy:0);
+
+  const mo = S.nhaCC.map(m=>{
+    const d = duTamUng(m.id);
+    const het = d.du<=0, sap = d.du<20000000;
+    return `<div class="card ${het?'alert':(sap&&d.ung>0?'alert mid':'')} tap" onclick="fNcc('${m.id}')">
+      <div class="row"><b style="font-size:15px">${esc(m.ten)}</b>
+        <span class="val" style="color:${het?'var(--loss)':'var(--profit)'}">${vnd(d.du)}</span></div>
+      <div class="sub">Đã chuyển ${vnd(d.ung)} · đã dùng ${vnd(d.dung)}</div>
+      <div><span class="chip ${het?'bad':sap?'warn':'ok'}">${het?'Hết tạm ứng':sap?'Sắp hết':'Còn dư'}</span>
+        ${m.mst?`<span class="chip seal">MST ${esc(m.mst)}</span>`:'<span class="chip warn">chưa có MST</span>'}</div>
+    </div>`;}).join('');
+
+  const tong = ds.reduce((a,l)=>{ const k=tinhLo(l);
+    return { ban:a.ban+k.banHang, mua:a.mua+k.muaHang, gop:a.gop+k.laiGop,
+             rong:a.rong+k.laiRong, tan:a.tan+k.muaTan, khoi:a.khoi+k.banKhoi }; },
+    {ban:0,mua:0,gop:0,rong:0,tan:0,khoi:0});
+
+  return chonThang() + `
+  <div class="eyebrow">Tạm ứng ở mỏ ${qm('tamung')}</div>
+  ${mo || `<div class="card"><div class="sub">Chưa có nhà cung cấp nào.</div></div>`}
+  <button class="btn ghost" onclick="fNcc()">+ Thêm mỏ / nhà cung cấp</button>
+  <button class="btn seal" onclick="fTamUng()">+ Ghi lần chuyển tạm ứng</button>
+
+  ${ds.length?`<div class="eyebrow">Tổng kết ${nhanThang(thangXem)}</div>
+  <div class="card declar">
+    <span class="stamp ${tong.rong>=0?'':'bad'}">${tong.rong>=0?'CÓ LÃI':'ĐANG LỖ'}</span>
+    <div class="sub">${ds.length} lô hàng</div>
+    <div class="big">${vnd(tong.rong)} đ</div>
+    <div class="sub" style="margin-top:3px">lãi ròng ước tính sau chi phí chạy xe</div>
+    <hr class="sep">
+    <div class="row"><span class="lbl">Doanh thu bán (chưa VAT)</span><span class="val">${vnd(tong.ban)}</span></div>
+    <div class="row"><span class="lbl">Giá vốn mua (chưa VAT)</span><span class="val">− ${vnd(tong.mua)}</span></div>
+    <div class="row"><span class="lbl">Lãi gộp</span><span class="val" style="color:var(--profit)">${vnd(tong.gop)}</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl">Mua vào</span><span class="val">${pct(tong.tan)} tấn</span></div>
+    <div class="row"><span class="lbl">Bán ra</span><span class="val">${pct(tong.khoi)} m³</span></div>
+    <div class="row"><span class="lbl">Hệ số quy đổi thực tế</span>
+      <span class="val">${tong.khoi>0?(Math.round(tong.tan/tong.khoi*100)/100)+' tấn/m³':'—'}</span></div>
+  </div>`:''}
+
+  <div class="eyebrow">Chi phí một chuyến ${qm('chuyen')}</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Dầu ${pct(cp.lit)} lít</span><span class="val">${vnd(cp.dau)}</span></div>
+    <div class="row"><span class="lbl">Lương, phụ cấp lái xe</span><span class="val">${vnd(cp.luong)}</span></div>
+    <div class="row"><span class="lbl">Tiền thuê xe phân bổ</span><span class="val">${vnd(cp.thueXe)}</span></div>
+    <div class="row"><span class="lbl">Lốp, bảo dưỡng, cầu đường</span><span class="val">${vnd(cp.khac)}</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Hoà vốn khi lãi gộp đạt</span>
+      <span class="val" style="font-size:19px">${vnd(cp.tong)}</span></div>
+    <button class="btn ghost" onclick="fChiPhi()">Sửa thông số chi phí</button>
+  </div>
+
+  <div class="eyebrow">Danh sách lô hàng</div>
+  <button class="btn acc" onclick="fLo()">+ Ghi lô hàng mới</button>
+  ${ds.length ? ds.map(l=>{
+    const k = tinhLo(l), m = nccById(l.nccId), kh = S.khach.find(x=>x.id===l.khachId);
+    return `<div class="card ${k.laiRong<0?'alert':''} tap" onclick="fLo('${l.id}')">
+      <div class="row"><b style="font-size:15px">${esc(l.matHang||'Lô hàng')}</b>
+        <span class="val" style="color:${k.laiRong>=0?'var(--profit)':'var(--loss)'}">${vnd(k.laiRong)}</span></div>
+      <div class="sub">${dmy(l.ngay)} · ${m?esc(m.ten):'chưa chọn mỏ'} → ${kh?esc(kh.ten):'chưa chọn khách'}</div>
+      <div class="sub">Mua ${pct(k.muaTan)} tấn ${vnd(k.muaHang)} · Bán ${pct(k.banKhoi)} m³ ${vnd(k.banHang)}</div>
+      <div><span class="chip">${(Math.round(k.heSo*100)/100)} tấn/m³</span>
+        <span class="chip ok">Lãi gộp ${vnd(k.laiGop)}</span>
+        <span class="chip ${k.laiRong>=0?'ok':'bad'}">${k.laiRong>=0?'Lãi ròng':'Lỗ'} ${vnd(Math.abs(k.laiRong))}</span></div>
+    </div>`;}).join('')
+  : `<div class="card"><div class="sub">Chưa có lô hàng nào ${nhanThang(thangXem)}.</div></div>`}`;
+}
+
+function fNcc(id){
+  const m = S.nhaCC.find(x=>x.id===id) || {id:null,ten:'',mst:'',diaChi:'',dienThoai:'',ghiChu:''};
+  const d = id ? duTamUng(id) : null;
+  moModal(`<h2>${id?'Sửa nhà cung cấp':'Thêm mỏ / nhà cung cấp'}</h2>
+    ${d?`<div class="card" style="margin-top:12px">
+      <div class="row"><span class="lbl">Đã chuyển tạm ứng</span><span class="val">${vnd(d.ung)}</span></div>
+      <div class="row"><span class="lbl">Đã dùng theo hoá đơn</span><span class="val">− ${vnd(d.dung)}</span></div>
+      <hr class="sep">
+      <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Còn lại</span>
+        <span class="val" style="color:${d.du>0?'var(--profit)':'var(--loss)'}">${vnd(d.du)} đ</span></div>
+    </div>`:''}
+    <input type="hidden" id="mId" value="${m.id||''}">
+    <label for="mTen">Tên đơn vị bán</label><input id="mTen" value="${esc(m.ten)}" placeholder="Công ty CP Đầu tư Quốc tế Hoàng Phong">
+    <label for="mMst">Mã số thuế</label><input id="mMst" inputmode="numeric" value="${esc(m.mst)}">
+    <label for="mDc">Địa chỉ</label><input id="mDc" value="${esc(m.diaChi)}">
+    <label for="mDt">Điện thoại</label><input id="mDt" inputmode="tel" value="${esc(m.dienThoai)}">
+    <label for="mGhi">Ghi chú</label><input id="mGhi" value="${esc(m.ghiChu)}" placeholder="Lịch xuất hoá đơn, người liên hệ…">
+    <button class="btn acc" onclick="luuNcc()">Lưu</button>
+    ${id?`<button class="del" onclick="xoa('nhaCC','${id}')">Xoá</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+}
+async function luuNcc(){
+  const o={id:$('#mId').value||uid(), ten:$('#mTen').value.trim(), mst:$('#mMst').value.trim(),
+    diaChi:$('#mDc').value.trim(), dienThoai:$('#mDt').value.trim(), ghiChu:$('#mGhi').value.trim()};
+  if(!o.ten){ toast('Cần nhập tên'); return; }
+  const i=S.nhaCC.findIndex(x=>x.id===o.id); if(i>=0)S.nhaCC[i]=o; else S.nhaCC.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu');
+}
+
+function fTamUng(id){
+  const t = S.tamUng.find(x=>x.id===id) || {id:null,nccId:'',ngay:homNay(),soTien:'',noiDung:'',ghiChu:''};
+  moModal(`<h2>${id?'Sửa khoản tạm ứng':'Ghi lần chuyển tạm ứng'}</h2>
+    <div class="sub">Tiền chuyển trước cho mỏ. Đây <b>chưa</b> phải chi phí — chi phí chỉ phát sinh khi mỏ xuất hoá đơn.</div>
+    <input type="hidden" id="tId" value="${t.id||''}">
+    <label for="tNcc">Chuyển cho</label>
+    <select id="tNcc"><option value="">— chọn mỏ —</option>
+      ${S.nhaCC.map(m=>`<option value="${m.id}" ${t.nccId===m.id?'selected':''}>${esc(m.ten)}</option>`).join('')}</select>
+    <div class="g2">
+      <div><label for="tNgay">Ngày chuyển</label><input type="date" id="tNgay" value="${t.ngay}"></div>
+      <div><label for="tTien">Số tiền</label><input id="tTien" inputmode="numeric" value="${t.soTien}"></div>
+    </div>
+    <label for="tNd">Nội dung chuyển khoản</label>
+    <input id="tNd" value="${esc(t.noiDung)}" placeholder="CT Linh Chi Thanh mua hang">
+    <label for="tGhi">Ghi chú</label><input id="tGhi" value="${esc(t.ghiChu)}">
+    <div class="note">Nội dung chuyển khoản nên ghi rõ mục đích mua hàng. Đừng bao giờ ghi
+      "vay", "trả nợ" hay để trống — nội dung sai bản chất là thứ khó giải thích nhất khi bị hỏi.</div>
+    <button class="btn seal" onclick="luuTamUng()">Lưu</button>
+    ${id?`<button class="del" onclick="xoa('tamUng','${id}')">Xoá</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+}
+async function luuTamUng(){
+  const o={id:$('#tId').value||uid(), nccId:$('#tNcc').value, ngay:$('#tNgay').value||homNay(),
+    soTien:num($('#tTien').value), noiDung:$('#tNd').value.trim(), ghiChu:$('#tGhi').value.trim()};
+  if(!o.nccId){ toast('Cần chọn mỏ'); return; }
+  const i=S.tamUng.findIndex(x=>x.id===o.id); if(i>=0)S.tamUng[i]=o; else S.tamUng.push(o);
+  await luu(); dongModal(); ve(); toast('Đã ghi tạm ứng');
+}
+
+function fLo(id){
+  const l = S.loHang.find(x=>x.id===id) || {id:null,ngay:homNay(),nccId:'',khachId:'',matHang:'',
+    muaTan:'',muaDonGia:'',muaTienHang:'',muaVat:'',muaSoHD:'',
+    banKhoi:'',banDonGia:'',banTienHang:'',banVat:'',banSoHD:'',cuLy:S.cfg.cuLyMacDinh||'',ghiChu:''};
+  moModal(`<h2>${id?'Sửa lô hàng':'Ghi lô hàng mới'}</h2>
+    <input type="hidden" id="lId" value="${l.id||''}">
+    <div class="g2">
+      <div><label for="lNgay">Ngày</label><input type="date" id="lNgay" value="${l.ngay}"></div>
+      <div><label for="lCuLy">Cự ly một chiều (km)</label><input id="lCuLy" inputmode="numeric" value="${l.cuLy}" oninput="loTinh()"></div>
+    </div>
+    <label for="lMat">Mặt hàng</label><input id="lMat" value="${esc(l.matHang)}" placeholder="Đá Base loại A">
+    <label for="lNcc">Mua của</label>
+    <select id="lNcc"><option value="">— chọn mỏ —</option>
+      ${S.nhaCC.map(m=>`<option value="${m.id}" ${l.nccId===m.id?'selected':''}>${esc(m.ten)}</option>`).join('')}</select>
+    <label for="lKh">Bán cho</label>
+    <select id="lKh"><option value="">— chọn khách —</option>
+      ${S.khach.map(k=>`<option value="${k.id}" ${l.khachId===k.id?'selected':''}>${esc(k.ten)}</option>`).join('')}</select>
+
+    <div class="eyebrow" style="margin-top:18px">Mua vào — tính bằng TẤN</div>
+    <div class="g2">
+      <div><label for="lTan">Số tấn (phiếu cân)</label><input id="lTan" inputmode="decimal" value="${l.muaTan}" oninput="loTinh()"></div>
+      <div><label for="lDgM">Đơn giá/tấn chưa VAT</label><input id="lDgM" inputmode="numeric" value="${l.muaDonGia}" oninput="loTinh()"></div>
+    </div>
+    <label for="lHdM">Số hoá đơn mỏ xuất</label><input id="lHdM" value="${esc(l.muaSoHD)}" placeholder="Để trống nếu mỏ chưa xuất">
+
+    <div class="eyebrow" style="margin-top:18px">Bán ra — tính bằng M³</div>
+    <div class="g2">
+      <div><label for="lKhoi">Số m³ trên phiếu giao</label><input id="lKhoi" inputmode="decimal" value="${l.banKhoi}" oninput="loTinh()"></div>
+      <div><label for="lDgB">Đơn giá/m³ chưa VAT</label><input id="lDgB" inputmode="numeric" value="${l.banDonGia}" oninput="loTinh()"></div>
+    </div>
+    <label for="lHdB">Số hoá đơn anh xuất</label><input id="lHdB" value="${esc(l.banSoHD)}">
+
+    <div id="lKq"></div>
+    <label for="lGhi">Ghi chú</label><input id="lGhi" value="${esc(l.ghiChu)}">
+    <div class="note">Đơn giá bán điền số <b>chưa VAT</b>. Hợp đồng ghi giá đã gồm VAT thì lấy
+      giá đó chia 1,1 — ví dụ 510.000 đã gồm VAT 10% thì điền <b>463.636</b>.</div>
+    <button class="btn acc" onclick="luuLo()">Lưu lô hàng</button>
+    ${id?`<button class="del" onclick="xoa('loHang','${id}')">Xoá lô này</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+  loTinh();
+}
+function loTinh(){
+  const el=$('#lKq'); if(!el) return;
+  const l = { muaTan:$('#lTan').value, muaDonGia:$('#lDgM').value, muaTienHang:'',
+              banKhoi:$('#lKhoi').value, banDonGia:$('#lDgB').value, banTienHang:'',
+              muaVat:'', banVat:'', cuLy:$('#lCuLy').value };
+  const k = tinhLo(l);
+  const chuan = Number(S.cfg.heSoQuyDoi)||1.5;
+  const lech = k.heSo>0 ? Math.abs(k.heSo-chuan)/chuan*100 : 0;
+  el.innerHTML = `
+    <div class="card" style="margin-top:14px;background:var(--seal-soft);border-color:#B6C7DC">
+      <div class="row"><span class="lbl">Tiền mua chưa VAT</span><span class="val">${vnd(k.muaHang)}</span></div>
+      <div class="row"><span class="lbl">Tiền bán chưa VAT</span><span class="val">${vnd(k.banHang)}</span></div>
+      <hr class="sep">
+      <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Lãi gộp</span>
+        <span class="val" style="color:${k.laiGop>=0?'var(--profit)':'var(--loss)'}">${vnd(k.laiGop)}</span></div>
+      <div class="row"><span class="lbl">Chi phí chạy xe (${pct(k.cp.lit)} lít dầu)</span><span class="val">− ${vnd(k.cp.tong)}</span></div>
+      <hr class="sep">
+      <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Lãi ròng chuyến này</span>
+        <span class="val" style="font-size:20px;color:${k.laiRong>=0?'var(--profit)':'var(--loss)'}">${vnd(k.laiRong)}</span></div>
+      <hr class="sep">
+      <div class="row"><span class="lbl">VAT thực nộp</span><span class="val">${vnd(k.vatNop)}</span></div>
+      <div class="row"><span class="lbl">Hệ số quy đổi</span>
+        <span class="val">${k.heSo>0?(Math.round(k.heSo*100)/100)+' tấn/m³':'—'}</span></div>
+      ${lech>20?`<div class="chip warn">Lệch ${pct(lech)}% so với hệ số chuẩn ${chuan} — sổ kho sẽ không khớp</div>`:''}
+      ${k.laiRong<0?`<div class="chip bad">Chuyến này lỗ ${vnd(-k.laiRong)} đ</div>`:''}
+    </div>`;
+}
+async function luuLo(){
+  const o={id:$('#lId').value||uid(), ngay:$('#lNgay').value||homNay(),
+    nccId:$('#lNcc').value, khachId:$('#lKh').value, matHang:$('#lMat').value.trim(),
+    muaTan:dec($('#lTan').value), muaDonGia:num($('#lDgM').value),
+    muaTienHang:Math.round(dec($('#lTan').value)*num($('#lDgM').value)),
+    muaVat:Math.round(dec($('#lTan').value)*num($('#lDgM').value)*VAT_HANG/100),
+    muaSoHD:$('#lHdM').value.trim(),
+    banKhoi:dec($('#lKhoi').value), banDonGia:num($('#lDgB').value),
+    banTienHang:Math.round(dec($('#lKhoi').value)*num($('#lDgB').value)),
+    banVat:Math.round(dec($('#lKhoi').value)*num($('#lDgB').value)*VAT_HANG/100),
+    banSoHD:$('#lHdB').value.trim(),
+    cuLy:num($('#lCuLy').value), ghiChu:$('#lGhi').value.trim()};
+  const i=S.loHang.findIndex(x=>x.id===o.id); if(i>=0)S.loHang[i]=o; else S.loHang.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu lô hàng');
+}
+
+function fChiPhi(){
+  const c=S.cfg;
+  moModal(`<h2>Thông số chi phí chuyến</h2>
+    <div class="sub">Nhập một lần, app dùng để tính lãi ròng mọi lô hàng.</div>
+    <label for="cDau">Giá dầu hiện tại (đ/lít)</label><input id="cDau" inputmode="numeric" value="${c.giaDau}">
+    <div class="g2">
+      <div><label for="cCo">Định mức có tải (l/100km)</label><input id="cCo" inputmode="decimal" value="${c.dmCoTai}"></div>
+      <div><label for="cKho">Không tải (l/100km)</label><input id="cKho" inputmode="decimal" value="${c.dmKhongTai}"></div>
+    </div>
+    <label for="cKhac">Lốp, bảo dưỡng, cầu đường (đ/chuyến)</label>
+    <input id="cKhac" inputmode="numeric" value="${c.chiKhacChuyen}">
+    <label for="cSoC">Số chuyến trung bình mỗi tháng</label>
+    <input id="cSoC" inputmode="numeric" value="${c.chuyenMoiThang}">
+    <label for="cHs">Hệ số quy đổi chuẩn (tấn/m³)</label>
+    <input id="cHs" inputmode="decimal" value="${c.heSoQuyDoi}">
+    <div class="note">Hệ số quy đổi là con số quan trọng nhất của mảng thương mại. Đá base cấp phối
+      thường 1,4–1,6 tấn/m³. Chạy vài chuyến, lấy tổng tấn chia tổng m³ ra hệ số thật của xe anh
+      rồi sửa lại ở đây. Lương lái xe app lấy từ mục Quy chế khoán chi.</div>
+    <button class="btn acc" onclick="luuChiPhi()">Lưu</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+}
+async function luuChiPhi(){
+  Object.assign(S.cfg,{ giaDau:num($('#cDau').value), dmCoTai:dec($('#cCo').value),
+    dmKhongTai:dec($('#cKho').value), chiKhacChuyen:num($('#cKhac').value),
+    chuyenMoiThang:Number($('#cSoC').value)||25, heSoQuyDoi:dec($('#cHs').value)||1.5 });
+  await luu(); dongModal(); ve(); toast('Đã lưu');
 }
 
 /* ══════════ 3. CHỨNG TỪ ══════════ */
@@ -857,6 +1262,7 @@ function vBanGiao(){
   </div>
   <button class="btn seal" onclick="xuat('ra')">Tải bảng kê hoá đơn ra</button>
   <button class="btn ghost" onclick="xuat('vao')">Tải bảng kê hoá đơn vào</button>
+  <button class="btn ghost" onclick="xuat('lo')">Tải sổ lô hàng thương mại</button>
   <button class="btn ghost" onclick="xuat('bk')">Tải bảng kê 01/TNDN</button>
   <button class="btn ghost" onclick="xuat('hoso')">Tải hồ sơ pháp lý công ty & xe</button>
   <button class="btn ${gui?'ghost':''}" onclick="danhDauGui()">
@@ -884,14 +1290,14 @@ function taiFile(ten,hang){
 function xuat(loai){
   const K=tinhThue(thangXem), t=thangXem.replace('-','');
   if(loai==='ra'){
-    const h=[['Tháng','Công trình','Khách hàng','MST khách','Số chuyến','Doanh thu chưa VAT',
+    const h=[['Tháng','Công trình','Khách hàng','MST khách','Loại giao dịch','Số chuyến','Doanh thu chưa VAT',
       'Thuế suất %','Tiền VAT','Tổng thanh toán','Đã xuất HĐ','Số hoá đơn','Ngày xuất','Chênh lệch so với số đã chốt']];
     K.ds.forEach(x=>{ const r=traRa(thangXem,x.key)||{}, kh=x.khachId?S.khach.find(k=>k.id===x.khachId):null;
-      const vat=x.doanhThu*K.suat/100;
-      h.push([nhanThang(thangXem), x.ten, kh?kh.ten:'', kh?kh.mst:'', x.chuyen,
-        Math.round(x.doanhThu), K.suat, Math.round(vat), Math.round(x.doanhThu+vat),
+      const ts=suatDong(thangXem,x), vat=x.doanhThu*ts/100;
+      h.push([nhanThang(thangXem), x.ten, kh?kh.ten:'', kh?kh.mst:'', LOAI_GD[loaiDong(thangXem,x)].ten, x.chuyen,
+        Math.round(x.doanhThu), ts, Math.round(vat), Math.round(x.doanhThu+vat),
         r.daXuat?'Có':'CHƯA', r.soHD||'', dmy(r.ngayXuat||''), lechChot(thangXem,x)||'']); });
-    h.push([]); h.push(['TỔNG','','','','',Math.round(K.dtTong),'',Math.round(K.vatRa),'','','','','']);
+    h.push([]); h.push(['TỔNG','','','','','',Math.round(K.dtTong),'',Math.round(K.vatRa),'','','','','']);
     taiFile(`hoadon-ra-${t}.csv`,h);
   } else if(loai==='vao'){
     const h=[['Ngày','Nhà cung cấp','MST','Khoản chi','Số hoá đơn','Tiền hàng','VAT','Tổng',
@@ -901,6 +1307,18 @@ function xuat(loai){
         x.vat||0,x.tong||0,x.ttoan==='tm'?'Tiền mặt':'Chuyển khoản',duocKT(x)?'Có':'KHÔNG',x.ghiChu||'']));
     h.push([]); h.push(['TỔNG','','','','','',Math.round(K.vatVao),Math.round(K.chiHD),'','','']);
     taiFile(`hoadon-vao-${t}.csv`,h);
+  } else if(loai==='lo'){
+    const h=[['Ngày','Mặt hàng','Mua của','MST mỏ','Số tấn','Đơn giá/tấn','Tiền mua chưa VAT','VAT mua','Số HĐ mỏ',
+      'Bán cho','MST khách','Số m³','Đơn giá/m³','Tiền bán chưa VAT','VAT bán','Số HĐ bán',
+      'Hệ số tấn/m³','Lãi gộp','Cự ly km','Chi phí chuyến','Lãi ròng']];
+    loThang(thangXem).sort((a,b)=>a.ngay<b.ngay?-1:1).forEach(l=>{
+      const k=tinhLo(l), m=nccById(l.nccId), kh=S.khach.find(x=>x.id===l.khachId);
+      h.push([dmy(l.ngay), l.matHang||'', m?m.ten:'', m?m.mst:'', k.muaTan, l.muaDonGia||0,
+        k.muaHang, k.muaVat, l.muaSoHD||'', kh?kh.ten:'', kh?kh.mst:'', k.banKhoi, l.banDonGia||0,
+        k.banHang, k.banVat, l.banSoHD||'', Math.round(k.heSo*100)/100, k.laiGop,
+        l.cuLy||'', Math.round(k.cp.tong), Math.round(k.laiRong)]);
+    });
+    taiFile(`lo-hang-${t}.csv`, h);
   } else if(loai==='bk'){
     const h=[['STT','Ngày mua','Tên người bán','Địa chỉ','Số định danh cá nhân','Tên mặt hàng dịch vụ',
       'Số lượng','ĐVT','Đơn giá','Tổng giá thanh toán','Thanh toán','Hợp lệ','Ghi chú']];
@@ -997,6 +1415,15 @@ function vHoSo(){
     <button class="btn ghost" onclick="fDinhMuc()">Nhập định mức</button>
   </div>
 
+  <div class="eyebrow">Chi phí chuyến & quy đổi ${qm('quydoi')}</div>
+  <div class="card ${!c.giaDau?'alert mid':''}">
+    <div class="row"><span class="lbl">Giá dầu</span><span class="val">${c.giaDau?vnd(c.giaDau)+' đ/lít':'—'}</span></div>
+    <div class="row"><span class="lbl">Lốp, bảo dưỡng, cầu đường</span><span class="val">${c.chiKhacChuyen?vnd(c.chiKhacChuyen)+' đ/chuyến':'—'}</span></div>
+    <div class="row"><span class="lbl">Số chuyến mỗi tháng</span><span class="val">${c.chuyenMoiThang}</span></div>
+    <div class="row"><span class="lbl">Hệ số quy đổi chuẩn</span><span class="val">${c.heSoQuyDoi} tấn/m³</span></div>
+    <button class="btn ghost" onclick="fChiPhi()">Sửa thông số</button>
+  </div>
+
   <div class="eyebrow">Quy chế khoán chi ${qm('khoan')}</div>
   <div class="card ${!c.khoanChuyen?'alert mid':''}">
     <div class="row"><span class="lbl">Phụ cấp chuyến</span><span class="val">${c.khoanChuyen?vnd(c.khoanChuyen)+' đ':'—'}</span></div>
@@ -1020,8 +1447,10 @@ function vHoSo(){
     <div class="row"><span class="lbl">Thuế TNDN</span><span class="val">${TNDN}% — doanh thu dưới 3 tỷ</span></div>
     <div class="row"><span class="lbl">Ngưỡng chuyển khoản</span><span class="val">${vnd(NGUONG_CK)} đ</span></div>
     <div class="row"><span class="lbl">Kỳ khai thuế</span><span class="val">Theo quý</span></div>
-    <div class="sub" style="margin-top:8px">Vận tải hàng hoá nội địa đang giảm còn 8% đến hết 31/12/2026.
-      Sang 2027 sửa lại nếu chính sách không gia hạn.</div>
+    <div class="row"><span class="lbl">Bán đá, cát, sỏi</span><span class="val">${VAT_HANG}%</span></div>
+    <div class="sub" style="margin-top:8px">Vận tải hàng hoá nội địa đang giảm còn ${VAT_RA}% đến hết 31/12/2026.
+      Nhưng <b>sản phẩm khai khoáng không thuộc diện được giảm</b> — đá, cát, sỏi vẫn ${VAT_HANG}%.
+      Mỗi dòng doanh thu ở tab Hoá đơn ra có nút chọn riêng.</div>
     <button class="btn ghost" onclick="fChinhSach()">Sửa thuế suất</button>
   </div>`;
 }
