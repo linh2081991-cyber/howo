@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Sổ Thuế — Linh Chí Thành</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sổ Thuế">
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<style>
+:root{
+  --bg:#F7F5F1; --surface:#FFFFFF; --ink:#1F2A37; --ink-soft:#6B7280;
+  --accent:#E8720C; --accent-soft:#FCE4CC;
+  --seal:#2B4C7E; --seal-soft:#E3EAF3;
+  --profit:#1F7A4D; --profit-soft:#E4F3EA;
+  --loss:#B23A2E; --loss-soft:#FAE6E3;
+  --warn:#8A6300; --warn-soft:#FBF0D6;
+  --border:#E5E1D8; --radius:16px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-tap-highlight-color:transparent;-webkit-font-smoothing:antialiased}
+#shell{max-width:520px;margin:0 auto;min-height:100vh;display:none;flex-direction:column}
+button,input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
+:focus-visible{outline:2.5px solid var(--accent);outline-offset:2px}
+
+header.top{position:sticky;top:0;z-index:10;background:var(--bg);
+  padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+header.top h1{margin:0;font-size:17px;letter-spacing:-.01em}
+header.top .plate{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;
+  background:var(--ink);color:#fff;padding:2px 7px;border-radius:5px;margin-left:6px;vertical-align:1px}
+header.top .sub{font-size:11.5px;color:var(--ink-soft);margin-top:3px;line-height:1.4}
+
+main{flex:1;padding:14px 16px 96px}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);
+  font-weight:700;margin:22px 0 8px;display:flex;align-items:center;gap:7px}
+.eyebrow:first-child{margin-top:2px}
+.qm{width:17px;height:17px;border-radius:50%;border:1.3px solid var(--seal);color:var(--seal);
+  background:none;font-size:11px;font-weight:800;line-height:1;cursor:pointer;padding:0;flex:none}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px;margin-bottom:10px}
+.card.tap{cursor:pointer}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.row+.row{margin-top:7px}
+.row .lbl{font-size:14px;color:var(--ink-soft)}
+.row .val{font-size:15px;font-weight:600;white-space:nowrap}
+.big{font-size:26px;font-weight:700;letter-spacing:-.02em}
+.sub{font-size:12.5px;color:var(--ink-soft);line-height:1.55}
+hr.sep{border:none;border-top:1px dashed var(--border);margin:11px 0}
+
+.declar{position:relative;padding-top:20px;overflow:hidden}
+.declar::before{content:"";position:absolute;top:0;left:0;right:0;height:9px;
+  background:radial-gradient(circle at 6px 0, transparent 5px, var(--surface) 5px) 0 0/12px 9px repeat-x;
+  border-top:1px solid var(--border)}
+.stamp{position:absolute;top:16px;right:12px;transform:rotate(-9deg);
+  border:2.5px solid var(--seal);color:var(--seal);border-radius:7px;
+  padding:4px 9px;font-size:11px;font-weight:800;letter-spacing:.06em;opacity:.85}
+.stamp.bad{border-color:var(--loss);color:var(--loss)}
+.stamp.warn{border-color:var(--warn);color:var(--warn)}
+
+.chip{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;
+  border:1px solid var(--border);background:#fff;margin-right:5px;margin-top:6px}
+.chip.ok{background:var(--profit-soft);border-color:#A9C6B1;color:var(--profit)}
+.chip.bad{background:var(--loss-soft);border-color:#DFA595;color:var(--loss)}
+.chip.warn{background:var(--warn-soft);border-color:#E3C87A;color:var(--warn)}
+.chip.seal{background:var(--seal-soft);border-color:#B6C7DC;color:var(--seal)}
+
+.alert{border-left:4px solid var(--loss);background:var(--loss-soft);border-color:#EBCFC9}
+.alert.mid{border-left-color:var(--warn);background:var(--warn-soft);border-color:#EEDDAF}
+.alert .t{font-weight:700;font-size:14.5px}
+.alert .fix{font-size:12.5px;margin-top:5px}
+
+.btn{display:block;width:100%;padding:14px;border-radius:13px;border:none;
+  background:var(--ink);color:#fff;font-weight:700;cursor:pointer;margin-top:8px}
+.btn.acc{background:var(--accent)}
+.btn.seal{background:var(--seal)}
+.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--border)}
+.btn:active{transform:translateY(1px)}
+
+label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin:12px 0 5px}
+input,select,textarea{width:100%;padding:12px;border:1.5px solid var(--border);
+  border-radius:11px;background:#fff}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px}
+.seg{display:flex;gap:6px;margin-top:5px}
+.seg button{flex:1;padding:11px 4px;border:1.5px solid var(--border);background:#fff;
+  border-radius:11px;font-size:13.5px;font-weight:600;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{flex:1;padding:10px 4px;border:1.5px solid var(--border);background:#fff;
+  border-radius:11px;font-size:13px;font-weight:700;cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--seal);color:#fff;border-color:var(--seal)}
+
+.empty{text-align:center;padding:36px 18px;color:var(--ink-soft);font-size:14px;line-height:1.6}
+.empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
+
+nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);
+  border-top:1px solid var(--border);display:flex;max-width:520px;margin:0 auto;
+  padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:none;color:var(--ink-soft);padding:9px 2px 10px;
+  font-size:10.5px;font-weight:700;cursor:pointer}
+nav button .ic{display:block;font-size:18px;margin-bottom:1px}
+nav button[aria-current="true"]{color:var(--accent)}
+.badge{background:var(--loss);color:#fff;border-radius:99px;font-size:9.5px;
+  padding:0 5px;margin-left:2px;vertical-align:top}
+
+#modalRoot:empty{display:none}
+.backdrop{position:fixed;inset:0;background:rgba(20,22,18,.5);z-index:50;
+  display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:520px;border-radius:18px 18px 0 0;
+  padding:18px 16px calc(24px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto;position:relative}
+.sheet h2{margin:0 0 3px;font-size:19px;padding-right:34px}
+.sheet .x{position:absolute;right:14px;top:14px;background:none;border:none;
+  font-size:26px;line-height:1;color:var(--ink-soft);cursor:pointer}
+.note{font-size:12.5px;color:var(--ink-soft);background:var(--seal-soft);
+  border-left:3px solid var(--seal);padding:10px 12px;border-radius:0 8px 8px 0;margin-top:14px;line-height:1.6}
+.note b{color:var(--ink)}
+.del{color:var(--loss);background:none;border:none;font-weight:700;font-size:13.5px;
+  cursor:pointer;padding:10px 0;width:100%;margin-top:4px}
+
+#login{position:fixed;inset:0;z-index:200;background:var(--bg);display:none;
+  flex-direction:column;align-items:center;justify-content:center;padding:24px}
+#login .box{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:24px 20px}
+#login h2{margin:0 0 4px;font-size:18px;text-align:center}
+#login .err{color:var(--loss);font-size:13px;margin-top:10px;min-height:16px}
+#toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--ink);
+  color:#fff;padding:11px 18px;border-radius:11px;font-size:13.5px;z-index:100;
+  opacity:0;pointer-events:none;transition:opacity .2s;max-width:88vw;text-align:center}
+#toast.on{opacity:1}
+
+/* Chế độ nhúng — khi chạy bên trong Sổ Xe Ben:
+   ẩn tiêu đề riêng, đẩy thanh tab lên trên để không đè thanh tab của app mẹ. */
+body.embed header.top{display:none}
+body.embed nav{position:static;border-top:none;border-bottom:1px solid var(--border);
+  overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:0;background:var(--bg)}
+body.embed nav::-webkit-scrollbar{display:none}
+body.embed nav button{min-width:82px;padding:8px 4px 9px}
+body.embed main{padding:12px 14px 28px}
+body.embed #toast{bottom:24px}
+body.embed .sheet{border-radius:18px}
+body.embed .backdrop{align-items:center;padding:12px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <h2>Sổ Thuế</h2>
+    <p class="sub" style="text-align:center;margin:4px 0 14px">Đăng nhập cùng tài khoản Sổ Xe Ben</p>
+    <label for="lEmail">Email</label><input type="email" id="lEmail" autocomplete="username">
+    <label for="lPass">Mật khẩu</label><input type="password" id="lPass" autocomplete="current-password">
+    <div class="err" id="lErr"></div>
+    <button class="btn acc" id="lBtn">Đăng nhập</button>
+  </div>
+</div>
+
+<div id="shell">
+  <header class="top">
+    <h1>Sổ Thuế<span class="plate" id="hPlate">29E-691.12</span></h1>
+    <div class="sub" id="hCo">Đang tải…</div>
+  </header>
+  <main id="view"></main>
+</div>
+
+<nav>
+  <button data-t="thang" onclick="go('thang')"><span class="ic">▤</span>Tháng này<span class="badge" id="nBadge" hidden></span></button>
+  <button data-t="ra"    onclick="go('ra')"><span class="ic">↗</span>Hoá đơn ra</button>
+  <button data-t="vao"   onclick="go('vao')"><span class="ic">↙</span>Chứng từ</button>
+  <button data-t="bangiao" onclick="go('bangiao')"><span class="ic">📤</span>Bàn giao</button>
+  <button data-t="hoso"  onclick="go('hoso')"><span class="ic">🗂</span>Hồ sơ</button>
+</nav>
+
+<div id="modalRoot"></div>
+<div id="toast"></div>
+
+<script>
+/* ══════════ KẾT NỐI ══════════
+   Dùng chung dự án Firebase và chung tài khoản với Sổ Xe Ben HOWO.
+   CHỈ ĐỌC document 'shifts'. Chỉ GHI vào document mới 'taxLedger'.
+   Không đụng tới bất kỳ dữ liệu nào của app vận hành.               */
+const firebaseConfig = {
+  apiKey: "AIzaSyAtT93cEftDeSbzYrMt5LUprPwzq6bFcxw",
+  authDomain: "so-xe-ben-howo.firebaseapp.com",
+  projectId: "so-xe-ben-howo",
+  storageBucket: "so-xe-ben-howo.firebasestorage.app",
+  messagingSenderId: "110470332049",
+  appId: "1:110470332049:web:389e7de2e9044ee4864930"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+try { db.enablePersistence({synchronizeTabs:true}).catch(()=>{}); } catch(e){}
+const SPACE = 'howo-29e-69112';
+const ref = n => db.collection('shared').doc(SPACE).collection('appdata').doc(n);
+
+/* ══════════ HẰNG SỐ PHÁP LÝ ══════════ */
+const NGUONG_CK = 5000000;
+const VAT_RA = 8;
+const TNDN = 15;
+const NGUONG_THUE_TS = 200000000;
+const LPTB = 2;
+
+/* ══════════ HỒ SƠ NẠP SẴN ══════════ */
+const MAC_DINH = {
+  tenCty:'CÔNG TY TNHH THƯƠNG MẠI VÀ VẬN TẢI LINH CHÍ THÀNH',
+  mst:'0111564650',
+  diaChi:'Số 46, phố Đa Sỹ, tổ dân phố Đa Sỹ 1, Phường Kiến Hưng, Thành phố Hà Nội',
+  giamDoc:'BÙI ĐĂNG LINH', cccd:'001091026947',
+  ngayDKKD:'2026-07-09', vonDieuLe:1000000000,
+  email:'linh2081991@gmail.com', dienThoai:'0981899926',
+
+  bienSo:'29E-691.12', soKhung:'LZZ1EXSB8TN599394', soMay:'D103850260307054507',
+  kieuLoai:'CNHTC ZZ3317N3267E1 — ô tô tải tự đổ 8x4', namSX:2026, taiTrong:15480,
+  hanDangKiem:'2028-06-11', hanBaoHiem:'', hanPhuHieu:'',
+
+  giaXeChuaVat:1439814815, vatXe:115185185, giaXeTong:1555000000, vayNganHang:555000000,
+  thueSuatRa:VAT_RA, namKhauHao:10, phuongAnXe:'chua', tienThueThang:16600000,
+
+  dmCoTai:'', dmKhongTai:'', dmChoHang:'',
+  khoanChuyen:'', khoanCongTac:'', khoanAnCa:'', khoanNhaO:''
+};
+
+let S = { cfg:{...MAC_DINH}, khach:[], hopDong:[], invOut:[], invIn:[], bangKe:[], sent:[] };
+let shifts = [];
+let tab='thang', thangXem=null, cheDoCT='hd';
+
+/* ══════════ TIỆN ÍCH ══════════ */
+const $ = s => document.querySelector(s);
+const uid = () => 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const vnd = n => (Math.round(Number(n)||0)).toLocaleString('vi-VN');
+const pct = n => (Math.round((Number(n)||0)*10)/10).toLocaleString('vi-VN');
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const js = s => String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+const num = s => Number(String(s??'').replace(/[^\d-]/g,''))||0;
+const dec = s => Number(String(s??'').replace(',','.').replace(/[^\d.]/g,''))||0;
+function homNay(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+const thangNay = () => homNay().slice(0,7);
+const dmy = s => s ? s.split('-').reverse().join('/') : '—';
+const nhanThang = ym => `tháng ${Number(ym.slice(5))}/${ym.slice(0,4)}`;
+const soNgay = (a,b) => Math.round((new Date(b)-new Date(a))/86400000);
+const chuan = s => String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2800)}
+
+/* ══════════ HỌC NHANH ══════════ */
+const HELP = {
+ hoadon:['Hoá đơn ra là gì',
+  'Là hoá đơn điện tử anh phát hành cho khách sau khi chở xong. Luật bắt lập hoá đơn khi <b>hoàn thành việc vận chuyển</b>, không phân biệt khách đã trả tiền hay chưa.',
+  'Khách không lấy hoá đơn thì anh <b>vẫn phải lập</b> và vẫn phải khai doanh thu — chỉ ghi "người mua không lấy hoá đơn" ở phần thông tin người mua.',
+  'Bỏ hẳn không lập là hành vi trốn thuế, và với xe có giám sát hành trình thì rất dễ bị đối chiếu ra.'],
+ vat:['Thuế giá trị gia tăng chạy thế nào',
+  'VAT đầu ra = doanh thu × thuế suất. Đây là tiền anh <b>thu hộ</b> nhà nước, không phải tiền của anh.',
+  'VAT đầu vào = tiền thuế trên hoá đơn dầu, lốp, sửa chữa anh mua. Cái này được <b>trừ đi</b>.',
+  'Anh chỉ nộp phần chênh lệch. Nên cái giá thật của việc xuất hoá đơn thấp hơn thuế suất rất nhiều — app tính sẵn cho anh ở tab Tháng này.'],
+ nguong5:['Vì sao 5 triệu',
+  'Từ 01/7/2025, mọi khoản mua hàng hoá, dịch vụ <b>từ 5 triệu đồng trở lên</b> (đã gồm VAT) phải thanh toán không dùng tiền mặt mới được khấu trừ VAT và tính vào chi phí.',
+  'Trả tiền mặt là mất cả hai: mất khấu trừ VAT, và có nguy cơ bị loại khỏi chi phí khi tính thuế thu nhập doanh nghiệp.',
+  'Phải chuyển từ <b>tài khoản công ty</b>, không dùng tài khoản cá nhân.'],
+ bangke:['Bảng kê 01/TNDN dùng khi nào',
+  'Khi anh mua của <b>hộ gia đình, cá nhân</b> không thuộc diện phải xuất hoá đơn: đất, đá, cát, sỏi do họ tự khai thác bán ra; đồ dùng, tài sản của hộ gia đình; nông lâm thuỷ sản người sản xuất trực tiếp bán; phế liệu người thu nhặt; dịch vụ của cá nhân không kinh doanh.',
+  '<b>Không</b> dùng thay hoá đơn khi mua của doanh nghiệp, cửa hàng, đại lý — dầu, lốp, sửa chữa vẫn bắt buộc phải có hoá đơn.',
+  'Bảng kê chỉ cho <b>chi phí được trừ</b> thuế TNDN, <b>không</b> được khấu trừ VAT. Từ 5 triệu/người/ngày trở lên vẫn phải chuyển khoản.'],
+ dinhmuc:['Định mức nhiên liệu để làm gì',
+  'Doanh nghiệp tự xây, tự chịu trách nhiệm, không phải đăng ký với cơ quan thuế. Nhưng <b>nếu không có</b> văn bản định mức, phần dầu bị coi là vượt mức hợp lý có thể bị loại khỏi chi phí.',
+  'Dầu chiếm 35–40% doanh thu của anh. Một tờ quyết định ký một lần bảo vệ toàn bộ khoản đó.',
+  'App so số lít thực tế mỗi tháng với định mức anh khai để anh biết có bất thường không.'],
+ khoan:['Khoán chi là gì',
+  'Cơm dọc đường, tiền bãi, tiền lặt vặt — không có hoá đơn nên về nguyên tắc không được trừ.',
+  'Nhưng nếu anh ban hành <b>quy chế chi tiêu nội bộ</b> ghi rõ mức khoán, và ghi lại trong hợp đồng lao động của lái xe, thì các khoản này thành chi phí được trừ mà không cần hoá đơn.',
+  'Chi bằng chuyển khoản, có bảng ký nhận. Đây là cách biến tiền mất trắng thành chi phí hợp lệ.'],
+ nhomkhach:['Khách nhóm A và nhóm B',
+  '<b>Nhóm A</b> — công trình vốn nhà nước, nhà thầu lớn, công ty có kiểm toán. Họ <b>bắt buộc</b> cần hoá đơn để quyết toán. Trả chậm hơn nhưng giá cao hơn và ít rủi ro công nợ.',
+  '<b>Nhóm B</b> — thầu phụ nhỏ, công trình dân sinh, mỏ tư nhân. Trả nhanh, tiền mặt, nhưng ép giá và hay nợ.',
+  'Nhớ ngược lại điều nhiều nhà xe nghĩ: nhóm A không phải khách khó tính, nhóm A là khách <b>trả giá cao hơn</b> vì ít nhà xe xuất được hoá đơn.'],
+ gdlk:['Giao dịch liên kết',
+  'Anh vừa là chủ công ty vừa là người cho công ty thuê xe. Pháp luật gọi đây là <b>giao dịch liên kết</b>.',
+  'Hệ quả: phải kê khai phụ lục giao dịch liên kết kèm quyết toán thuế thu nhập doanh nghiệp hằng năm, và giá thuê phải hợp lý theo giá thị trường.',
+  'Đặt giá thuê cao bất thường để đẩy chi phí là điểm cơ quan thuế soi đầu tiên. Đặt vừa phải thì không ai hỏi.'],
+ chotso:['Chốt số khi xuất hoá đơn',
+  'Lúc anh bấm "đã xuất hoá đơn", app <b>đóng băng</b> con số doanh thu tại thời điểm đó.',
+  'Nếu sau này anh sửa ca cũ làm doanh thu đổi, app sẽ báo đỏ và cho biết lệch bao nhiêu.',
+  'Lệch thì phải làm <b>hoá đơn điều chỉnh</b> — báo kế toán ngay, đừng để đến lúc quyết toán mới phát hiện.']
+};
+function hoc(k){
+  const h = HELP[k]; if(!h) return;
+  moModal(`<h2>${h[0]}</h2>${h.slice(1).map(t=>`<p class="sub" style="margin:12px 0 0">${t}</p>`).join('')}
+    <button class="btn ghost" onclick="dongModal()">Đã hiểu</button>`);
+}
+const qm = k => `<button class="qm" onclick="event.stopPropagation();hoc('${k}')">?</button>`;
+
+/* ══════════ TẢI / LƯU ══════════ */
+async function tai(){
+  try{
+    const [s,t] = await Promise.all([ ref('shifts').get(), ref('taxLedger').get() ]);
+    shifts = s.exists && Array.isArray(s.data().list) ? s.data().list : [];
+    if(t.exists){
+      const d = t.data();
+      S.cfg = Object.assign({...MAC_DINH}, d.cfg||{});
+      ['khach','hopDong','invOut','invIn','bangKe','sent'].forEach(k=>{
+        S[k] = Array.isArray(d[k]) ? d[k] : []; });
+    }
+  }catch(e){
+    toast('Không tải được — kiểm tra mạng.');
+    try{ const b=localStorage.getItem('howo_tax'); if(b) S=Object.assign(S,JSON.parse(b)); }catch(_){}
+  }
+  thangXem = thangXem || thangNay();
+  veHeader(); ve();
+}
+async function luu(){
+  try{ localStorage.setItem('howo_tax', JSON.stringify(S)); }catch(e){}
+  try{ await ref('taxLedger').set(S); }
+  catch(e){ toast('Chưa đồng bộ lên máy chủ — đã lưu tạm trên máy.'); }
+}
+
+/* ══════════ DOANH THU — đọc từ sổ ca, gom theo bí danh ══════════ */
+const dtSite = s => (Number(s.volumePerTrip)||0)*(Number(s.materialUnitPrice)||0)*(Number(s.trips)||0);
+
+/** Tìm khách theo tên công trình, có xét bí danh. */
+function timKhach(ten){
+  const c = chuan(ten);
+  return S.khach.find(k => chuan(k.ten)===c || (k.biDanh||[]).some(b=>chuan(b)===c)) || null;
+}
+/** Khoá gom nhóm: nếu tên đã gắn với khách thì gom theo id khách. */
+function khoaGom(ten){
+  const k = timKhach(ten);
+  return k ? 'k:'+k.id : 't:'+chuan(ten);
+}
+function doanhThuThang(ym){
+  const map = {};
+  shifts.filter(sh=>(sh.date||'').slice(0,7)===ym).forEach(sh=>{
+    (sh.siteLogs||[]).forEach(s=>{
+      const ten = (s.siteName||'').trim() || 'Chưa đặt tên công trình';
+      const dt = dtSite(s); if(dt<=0) return;
+      const key = khoaGom(ten);
+      if(!map[key]){
+        const k = timKhach(ten);
+        map[key] = { key, ten: k? k.ten : ten, khachId: k? k.id : null,
+                     tenGoc:new Set(), doanhThu:0, chuyen:0 };
+      }
+      map[key].tenGoc.add(ten);
+      map[key].doanhThu += dt;
+      map[key].chuyen += Number(s.trips)||0;
+    });
+  });
+  return Object.values(map).map(x=>({...x, tenGoc:[...x.tenGoc]}))
+    .sort((a,b)=>b.doanhThu-a.doanhThu);
+}
+/** Tên công trình xuất hiện trong sổ ca mà chưa gắn với khách nào. */
+function tenLa(){
+  const set = new Set();
+  shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>{
+    const t=(s.siteName||'').trim();
+    if(t && dtSite(s)>0 && !timKhach(t)) set.add(t);
+  }));
+  return [...set];
+}
+
+const traRa = (ym,key) => S.invOut.find(x=>x.thang===ym && x.key===key) || null;
+const daXuat = (ym,key) => { const r=traRa(ym,key); return !!(r&&r.daXuat); };
+/** Chênh lệch giữa doanh thu hiện tại và số đã chốt lúc xuất hoá đơn. */
+function lechChot(ym,x){
+  const r = traRa(ym,x.key);
+  if(!r || !r.daXuat || r.dtChot===undefined || r.dtChot===null) return 0;
+  return Math.round(x.doanhThu - r.dtChot);
+}
+
+const ctThang = ym => S.invIn.filter(h=>(h.ngay||'').slice(0,7)===ym);
+const bkThang = ym => S.bangKe.filter(h=>(h.ngay||'').slice(0,7)===ym);
+const duocKT = h => h.ttoan==='ck' || Number(h.tong) < NGUONG_CK;
+const bkHopLe = h => h.ttoan==='ck' || Number(h.thanhTien) < NGUONG_CK;
+
+/* ══════════ BỘ MÁY THUẾ ══════════ */
+function tinhThue(ym){
+  const ds = doanhThuThang(ym);
+  const dtTong = ds.reduce((t,x)=>t+x.doanhThu,0);
+  const dtDaXuat = ds.filter(x=>daXuat(ym,x.key)).reduce((t,x)=>t+x.doanhThu,0);
+  const dtChua = dtTong - dtDaXuat;
+  const suat = Number(S.cfg.thueSuatRa)||VAT_RA;
+  const vatRa = dtTong*suat/100;
+
+  const ct = ctThang(ym);
+  const bk = bkThang(ym);
+  const chiHD = ct.reduce((t,h)=>t+(Number(h.tong)||0),0);
+  const chiBK = bk.filter(bkHopLe).reduce((t,h)=>t+(Number(h.thanhTien)||0),0);
+  const vatVao = ct.filter(duocKT).reduce((t,h)=>t+(Number(h.vat)||0),0);
+  const vatMat = ct.filter(h=>!duocKT(h)).reduce((t,h)=>t+(Number(h.vat)||0),0);
+  const bkMat = bk.filter(h=>!bkHopLe(h)).reduce((t,h)=>t+(Number(h.thanhTien)||0),0);
+  const vatNop = Math.max(0, vatRa - vatVao);
+  const ganh = dtTong>0 ? vatNop/dtTong*100 : 0;
+
+  return { ds, dtTong, dtDaXuat, dtChua, suat, vatRa, ct, bk,
+           chiHD, chiBK, chiTong:chiHD+chiBK, vatVao, vatMat, bkMat, vatNop, ganh };
+}
+
+/* ══════════ NHIÊN LIỆU ══════════ */
+function dauThang(ym){
+  const sh = shifts.filter(x=>(x.date||'').slice(0,7)===ym);
+  let km=0, lit=0;
+  sh.forEach(x=>{
+    const d = (Number(x.odoEnd)||0)-(Number(x.odoStart)||0);
+    if(d>0 && d<2000) km += d;
+    lit += Number(x.fuelAdded)||0;
+  });
+  const tt = km>0 ? lit/km*100 : 0;
+  const dm = dec(S.cfg.dmCoTai);
+  return { km, lit, thucTe:tt, dinhMuc:dm,
+           vuot: dm>0 && tt>dm ? (tt-dm)/dm*100 : 0 };
+}
+
+/* ══════════ HẠN THUẾ ══════════ */
+const cuoiThang = (y,m) => new Date(y, m, 0).toISOString().slice(0,10);
+function hanThue(){
+  const t=homNay(), y=new Date().getFullYear(), out=[];
+  for(let q=1;q<=4;q++){
+    const m=q*3+1, yy=m>12?y+1:y, mm=m>12?1:m;
+    out.push({ten:`Tờ khai thuế GTGT quý ${q}/${y}`, ngay:cuoiThang(yy,mm),
+      ghi:'Chậm nhất ngày cuối của tháng đầu quý sau.'});
+    out.push({ten:`Tạm nộp thuế TNDN quý ${q}/${y}`,
+      ngay:`${yy}-${String(mm).padStart(2,'0')}-30`,
+      ghi:'Chậm nhất ngày 30 của tháng đầu quý sau.'});
+  }
+  out.push({ten:`Quyết toán thuế TNDN & Báo cáo tài chính ${y-1}`, ngay:`${y}-03-31`,
+    ghi:'Kèm phụ lục giao dịch liên kết vì anh có giao dịch với chính công ty mình.'});
+  return out.filter(h=>soNgay(t,h.ngay)>=-20).sort((a,b)=>a.ngay<b.ngay?-1:1);
+}
+
+/* ══════════ CẢNH BÁO ══════════ */
+function canhBao(){
+  const out=[], t=homNay(), ym=thangXem, K=tinhThue(ym);
+
+  K.ds.forEach(x=>{
+    const l = lechChot(ym,x);
+    if(l!==0) out.push({nang:true, t:`Doanh thu đổi sau khi đã xuất hoá đơn`,
+      d:`${esc(x.ten)}: đã xuất ${vnd(traRa(ym,x.key).dtChot)}, sổ ca hiện là ${vnd(x.doanhThu)} — lệch ${l>0?'+':''}${vnd(l)} đ`,
+      fix:'Cần làm hoá đơn điều chỉnh. Báo kế toán ngay, đừng để đến quyết toán.', go:'ra'});
+  });
+
+  if(K.dtChua>0) out.push({nang:true, t:`Chưa xuất hoá đơn ${vnd(K.dtChua)} đ`,
+    d:`Doanh thu ${nhanThang(ym)} đã có trong sổ ca nhưng chưa đánh dấu đã xuất.`,
+    fix:'Hoá đơn phải lập khi hoàn thành vận chuyển, không chờ khách trả tiền.', go:'ra'});
+
+  const la = tenLa();
+  if(la.length) out.push({nang:false, t:`${la.length} công trình chưa có hồ sơ khách`,
+    d: la.slice(0,3).map(esc).join(', ') + (la.length>3?'…':''),
+    fix:'Gắn vào hồ sơ khách để app gom đúng và biết mã số thuế khi xuất hoá đơn.', go:'hoso'});
+
+  S.invIn.filter(h=>h.ttoan==='tm'&&Number(h.tong)>=NGUONG_CK).forEach(h=>{
+    out.push({nang:true, t:`Trả tiền mặt ${vnd(h.tong)} đ — mất khấu trừ`,
+      d:`${esc(h.ncc||'Không rõ')} · ${dmy(h.ngay)}`,
+      fix:`Từ ${vnd(NGUONG_CK)} đ trở lên phải chuyển khoản từ tài khoản công ty.`, go:'vao'});
+  });
+  S.bangKe.filter(h=>h.ttoan==='tm'&&Number(h.thanhTien)>=NGUONG_CK).forEach(h=>{
+    out.push({nang:true, t:`Bảng kê ${vnd(h.thanhTien)} đ trả tiền mặt`,
+      d:`${esc(h.nguoiBan||'Không rõ')} · ${dmy(h.ngay)}`,
+      fix:'Bảng kê từ 5 triệu/người/ngày cũng bắt buộc chuyển khoản, nếu không sẽ bị loại chi phí.', go:'vao'});
+  });
+  S.invIn.filter(h=>!h.mst).forEach(h=>{
+    out.push({nang:false, t:'Hoá đơn thiếu mã số thuế người bán',
+      d:`${esc(h.ncc||'Không rõ')} · ${dmy(h.ngay)} · ${vnd(h.tong)} đ`,
+      fix:'Hoá đơn không đủ thông tin dễ bị loại khi hậu kiểm.', go:'vao'});
+  });
+  const thay={};
+  S.invIn.forEach(h=>{ if(!h.soHD) return;
+    const k=(h.ncc||'')+'|'+h.soHD;
+    if(thay[k]) out.push({nang:false, t:'Trùng số hoá đơn',
+      d:`${esc(h.ncc)} · số ${esc(h.soHD)} xuất hiện 2 lần`,
+      fix:'Kiểm tra lại, tránh kê khai hai lần cùng một hoá đơn.', go:'vao'});
+    thay[k]=1; });
+
+  const D = dauThang(ym);
+  if(D.dinhMuc>0 && D.vuot>15) out.push({nang:false, t:`Dầu vượt định mức ${pct(D.vuot)}%`,
+    d:`${nhanThang(ym)}: ${pct(D.thucTe)} lít/100km, định mức ${pct(D.dinhMuc)}`,
+    fix:'Cần biên bản giải trình lưu cùng hồ sơ ca, nếu không phần vượt có thể bị loại chi phí.', go:'hoso'});
+  if(!D.dinhMuc) out.push({nang:false, t:'Chưa khai định mức nhiên liệu',
+    d:'Không có định mức thì chi phí dầu không có gì bảo vệ.',
+    fix:'Vào Hồ sơ → Định mức nhiên liệu để nhập, rồi in quyết định ký.', go:'hoso'});
+
+  [['hanBaoHiem','Bảo hiểm'],['hanPhuHieu','Phù hiệu xe tải'],['hanDangKiem','Đăng kiểm']]
+  .forEach(([k,ten])=>{
+    const v=S.cfg[k];
+    if(!v){ out.push({nang:false, t:`Chưa nhập hạn ${ten.toLowerCase()}`,
+      d:'App không nhắc được nếu chưa có ngày.', fix:'Vào Hồ sơ nhập ngày hết hạn.', go:'hoso'}); return; }
+    const con=soNgay(t,v);
+    if(con<0) out.push({nang:true, t:`${ten} đã hết hạn`, d:`Hết hạn ${dmy(v)}, quá ${-con} ngày`,
+      fix:'Xe chạy trong tình trạng này có thể bị phạt và thu phù hiệu.', go:'hoso'});
+    else if(con<=30) out.push({nang:false, t:`${ten} sắp hết hạn`, d:`Còn ${con} ngày — ${dmy(v)}`,
+      fix:'Làm sớm, đừng để sát ngày.', go:'hoso'});
+  });
+
+  hanThue().forEach(h=>{ const c=soNgay(t,h.ngay);
+    if(c>=0&&c<=12) out.push({nang:c<=4, t:h.ten, d:`Hạn ${dmy(h.ngay)} — còn ${c} ngày`,
+      fix:h.ghi, go:'bangiao'}); });
+
+  if(S.cfg.phuongAnXe==='chua') out.push({nang:false, t:'Xe chưa gắn vào công ty',
+    d:'Xe đứng tên cá nhân, công ty chưa có căn cứ ghi chi phí cho con xe.',
+    fix:'Vào Hồ sơ → Phương án xe để chọn bán hoặc cho thuê.', go:'hoso'});
+  if(!S.cfg.khoanChuyen) out.push({nang:false, t:'Chưa có quy chế khoán chi',
+    d:'Cơm dọc đường, tiền bãi, tiền lặt vặt đang là tiền mất trắng.',
+    fix:'Vào Hồ sơ → Quy chế khoán chi, nhập mức rồi in quyết định ký.', go:'hoso'});
+
+  return out.sort((a,b)=> a.nang===b.nang ? 0 : (a.nang?-1:1));
+}
+
+/* ══════════ ĐIỀU HƯỚNG ══════════ */
+function go(t){ tab=t; ve(); window.scrollTo(0,0); }
+function veHeader(){
+  $('#hPlate').textContent = S.cfg.bienSo||'—';
+  $('#hCo').textContent = S.cfg.tenCty + ' · MST ' + S.cfg.mst;
+}
+function ve(){
+  document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current', b.dataset.t===tab));
+  const cb=canhBao(), bd=$('#nBadge');
+  if(cb.length){bd.hidden=false;bd.textContent=cb.length} else bd.hidden=true;
+  $('#view').innerHTML = ({thang:vThang,ra:vRa,vao:vVao,bangiao:vBanGiao,hoso:vHoSo})[tab](cb);
+}
+function chonThang(){
+  const ds=[...new Set(shifts.map(s=>(s.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  if(!ds.includes(thangNay())) ds.unshift(thangNay());
+  if(!ds.includes(thangXem)) ds.unshift(thangXem);
+  return `<select onchange="thangXem=this.value;ve()" style="margin-bottom:12px">
+    ${ds.map(m=>`<option value="${m}" ${m===thangXem?'selected':''}>${nhanThang(m)}</option>`).join('')}</select>`;
+}
+
+/* ══════════ 1. THÁNG NÀY ══════════ */
+function vThang(cb){
+  const K=tinhThue(thangXem), D=dauThang(thangXem);
+  const thieu = K.dtChua>0;
+  const dau = thieu?'<span class="stamp bad">CHƯA ĐỦ</span>'
+    : (K.dtTong>0?'<span class="stamp">ĐỦ ĐIỀU KIỆN</span>':'<span class="stamp warn">CHƯA CÓ SỐ</span>');
+  return chonThang()+`
+  <div class="card declar">${dau}
+    <div class="sub">Doanh thu ${nhanThang(thangXem)}</div>
+    <div class="big">${vnd(K.dtTong)} đ</div>
+    <div class="sub" style="margin-top:3px">${K.ds.length} công trình · lấy thẳng từ sổ ca</div>
+    <hr class="sep">
+    <div class="row"><span class="lbl">Đã xuất hoá đơn</span><span class="val" style="color:var(--profit)">${vnd(K.dtDaXuat)}</span></div>
+    <div class="row"><span class="lbl">Chưa xuất</span><span class="val" style="color:${K.dtChua>0?'var(--loss)':'var(--ink-soft)'}">${vnd(K.dtChua)}</span></div>
+  </div>
+
+  <div class="eyebrow">Thuế giá trị gia tăng ${qm('vat')}</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Đầu ra ${K.suat}%</span><span class="val">${vnd(K.vatRa)}</span></div>
+    <div class="row"><span class="lbl">Đầu vào được khấu trừ</span><span class="val" style="color:var(--profit)">− ${vnd(K.vatVao)}</span></div>
+    <hr class="sep">
+    <div class="row"><span class="lbl" style="font-weight:700;color:var(--ink)">Phải nộp</span>
+      <span class="val" style="font-size:20px">${vnd(K.vatNop)}</span></div>
+    ${K.dtTong>0?`<div class="sub" style="margin-top:8px">Tức <b>${pct(K.ganh)}%</b> doanh thu. Đây mới là giá thật của việc xuất hoá đơn, không phải ${K.suat}%.</div>`:''}
+    ${K.vatMat>0?`<div class="chip bad">Mất khấu trừ ${vnd(K.vatMat)} đ do tiền mặt</div>`:''}
+    <button class="btn ghost" onclick="mDamPhan()">Nên cộng thêm bao nhiêu % để xuất hoá đơn?</button>
+  </div>
+
+  <div class="eyebrow">Chi phí có chứng từ</div>
+  <div class="card">
+    <div class="row"><span class="lbl">${K.ct.length} hoá đơn</span><span class="val">${vnd(K.chiHD)}</span></div>
+    <div class="row"><span class="lbl">${K.bk.length} dòng bảng kê hợp lệ</span><span class="val">${vnd(K.chiBK)}</span></div>
+    ${K.bkMat>0?`<div class="chip bad">Bảng kê bị loại ${vnd(K.bkMat)} đ do tiền mặt</div>`:''}
+    <div class="sub" style="margin-top:8px">Chưa gồm khấu hao xe, lương lái và khoán chi — kế toán ghép thêm từ hồ sơ anh gửi.</div>
+  </div>
+
+  <div class="eyebrow">Nhiên liệu ${qm('dinhmuc')}</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Quãng đường</span><span class="val">${vnd(D.km)} km</span></div>
+    <div class="row"><span class="lbl">Dầu đã đổ</span><span class="val">${pct(D.lit)} lít</span></div>
+    <div class="row"><span class="lbl">Thực tế</span><span class="val">${D.km>0?pct(D.thucTe)+' lít/100km':'—'}</span></div>
+    <div class="row"><span class="lbl">Định mức đã khai</span>
+      <span class="val">${D.dinhMuc>0?pct(D.dinhMuc)+' lít/100km':'<span class="chip warn">chưa khai</span>'}</span></div>
+    ${D.vuot>0?`<div class="chip ${D.vuot>15?'bad':'warn'}">Vượt ${pct(D.vuot)}%</div>`:''}
+  </div>
+
+  <div class="eyebrow">${cb.length?cb.length+' việc cần xử lý':'Không có cảnh báo'}</div>
+  ${cb.length ? cb.map(x=>`<div class="card alert ${x.nang?'':'mid'} tap" onclick="go('${x.go}')">
+      <div class="t">${x.t}</div><div class="sub" style="margin-top:3px">${x.d}</div>
+      <div class="fix">${x.fix}</div></div>`).join('')
+   : `<div class="card"><div class="sub">Hồ sơ đang sạch. Giữ nếp: ghi ca mỗi ngày, nhập hoá đơn ngay khi lái xe gửi ảnh.</div></div>`}`;
+}
+
+function mDamPhan(){
+  const K=tinhThue(thangXem), g=K.ganh||4, loi=K.suat+TNDN;
+  moModal(`<h2>Cộng thêm bao nhiêu là hoà?</h2>
+    <div class="sub" style="margin-top:4px">Tính trên số thật ${nhanThang(thangXem)}.</div>
+    <div class="card" style="margin-top:14px">
+      <div class="row"><span class="lbl">Doanh thu</span><span class="val">${vnd(K.dtTong)}</span></div>
+      <div class="row"><span class="lbl">VAT đầu ra ${K.suat}%</span><span class="val">${vnd(K.vatRa)}</span></div>
+      <div class="row"><span class="lbl">VAT đầu vào khấu trừ</span><span class="val" style="color:var(--profit)">− ${vnd(K.vatVao)}</span></div>
+      <hr class="sep">
+      <div class="row"><span class="lbl" style="color:var(--ink);font-weight:700">Anh thật sự mất</span>
+        <span class="val" style="color:var(--loss)">${vnd(K.vatNop)} = ${pct(g)}%</span></div>
+    </div>
+    <div class="note">Dầu, lốp, sửa chữa đều có VAT đầu vào. Không xuất hoá đơn ra thì toàn bộ VAT
+      đầu vào đó cũng mất theo. Khoảng cách giữa có và không xuất hoá đơn <b>không phải ${K.suat}%</b>,
+      chỉ khoảng <b>${pct(g)}%</b>.</div>
+    <div class="eyebrow">Câu để nói với công trình</div>
+    <div class="card"><div class="sub" style="font-style:italic">
+      "Anh trả thêm ${pct(Math.ceil(g))}% để lấy hoá đơn. Nhưng anh được khấu trừ ${K.suat}% VAT,
+      lại được tính vào chi phí giảm ${TNDN}–20% thuế thu nhập doanh nghiệp. Tổng lại anh lợi
+      khoảng ${loi}%. Trả thêm ${pct(Math.ceil(g))} để lấy về ${loi}."</div>
+      <div class="sub" style="margin-top:10px">Ai nghe con số đó mà vẫn từ chối thì thường bên họ
+      cũng không có nguồn gốc hàng hoá — cân nhắc cả rủi ro công nợ, không riêng rủi ro thuế.</div>
+    </div>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+}
+
+/* ══════════ 2. HOÁ ĐƠN RA ══════════ */
+function vRa(){
+  const K=tinhThue(thangXem);
+  if(!K.ds.length) return chonThang()+`<div class="empty"><b>Chưa có ca chạy nào ${nhanThang(thangXem)}</b>
+    Ghi ca trong Sổ Xe Ben, doanh thu tự hiện ở đây.</div>`;
+  return chonThang()+`<div class="sub" style="margin-bottom:10px">
+    Mỗi dòng là một công trình trong tháng. Bấm để ghi số hoá đơn đã xuất. ${qm('hoadon')}</div>` +
+  K.ds.map(x=>{
+    const r=traRa(thangXem,x.key), ok=r&&r.daXuat, l=lechChot(thangXem,x);
+    const kh = x.khachId ? S.khach.find(k=>k.id===x.khachId) : null;
+    return `<div class="card ${l!==0?'alert':''} tap" onclick="fRa('${js(x.key)}')">
+      <div class="row"><b style="font-size:15px">${esc(x.ten)}</b><span class="val">${vnd(x.doanhThu)}</span></div>
+      <div class="sub">${x.chuyen} chuyến · VAT ${K.suat}% = ${vnd(x.doanhThu*K.suat/100)} đ</div>
+      <div>
+        <span class="chip ${ok?'ok':'bad'}">${ok?'Đã xuất':'Chưa xuất'}</span>
+        ${r&&r.soHD?`<span class="chip seal">Số ${esc(r.soHD)}</span>`:''}
+        ${kh?`<span class="chip ${kh.mst?'ok':'warn'}">${kh.mst?'MST '+esc(kh.mst):'khách chưa có MST'}</span>`
+            :'<span class="chip warn">chưa có hồ sơ khách</span>'}
+        ${l!==0?`<span class="chip bad">Lệch ${l>0?'+':''}${vnd(l)}</span>`:''}
+      </div></div>`;
+  }).join('');
+}
+function fRa(key){
+  const K=tinhThue(thangXem), x=K.ds.find(d=>d.key===key); if(!x) return;
+  const r = traRa(thangXem,key) || {daXuat:false,soHD:'',ngayXuat:''};
+  const kh = x.khachId ? S.khach.find(k=>k.id===x.khachId) : null;
+  const l = lechChot(thangXem,x);
+  moModal(`<h2>${esc(x.ten)}</h2>
+    <div class="sub">${nhanThang(thangXem)} · ${x.chuyen} chuyến · doanh thu ${vnd(x.doanhThu)} đ</div>
+    ${x.tenGoc.length>1?`<div class="sub" style="margin-top:4px">Gom từ: ${x.tenGoc.map(esc).join(' · ')}</div>`:''}
+    ${l!==0?`<div class="card alert" style="margin-top:12px"><div class="t">Doanh thu đã đổi sau khi xuất hoá đơn</div>
+      <div class="sub" style="margin-top:4px">Chốt lúc xuất: ${vnd(r.dtChot)} đ<br>Sổ ca hiện tại: ${vnd(x.doanhThu)} đ<br>
+      Lệch: <b>${l>0?'+':''}${vnd(l)} đ</b></div>
+      <div class="fix">Cần lập hoá đơn điều chỉnh ${l>0?'tăng':'giảm'}. Gửi kế toán kèm biên bản điều chỉnh có chữ ký hai bên.</div>
+      <button class="btn ghost" style="margin-top:10px" onclick="chotLai('${js(key)}')">Đã xử lý xong — chốt lại theo số hiện tại</button></div>`:''}
+    ${kh?`<div class="card" style="margin-top:12px"><div class="row"><span class="lbl">Khách</span><span class="val">${esc(kh.ten)}</span></div>
+      <div class="row"><span class="lbl">MST</span><span class="val">${kh.mst?esc(kh.mst):'—'}</span></div></div>`
+      :`<div class="card mid alert" style="margin-top:12px"><div class="t">Chưa có hồ sơ khách</div>
+        <div class="fix">Không có mã số thuế thì không xuất được hoá đơn đúng.</div>
+        <button class="btn ghost" style="margin-top:8px" onclick="dongModal();go('hoso');setTimeout(()=>fKhach(null,'${js(x.tenGoc[0])}'),80)">Tạo hồ sơ khách ngay</button></div>`}
+    <label>Đã xuất hoá đơn chưa?</label>
+    <div class="seg" id="rSeg">
+      <button type="button" data-v="1" aria-pressed="${r.daXuat}" onclick="segPick(this)">Đã xuất</button>
+      <button type="button" data-v="0" aria-pressed="${!r.daXuat}" onclick="segPick(this)">Chưa xuất</button>
+    </div>
+    <div class="g2">
+      <div><label for="rSo">Số hoá đơn</label><input id="rSo" value="${esc(r.soHD)}"></div>
+      <div><label for="rNgay">Ngày xuất</label><input type="date" id="rNgay" value="${r.ngayXuat||''}"></div>
+    </div>
+    <div class="note">Khi bấm "Đã xuất", app <b>chốt</b> con số ${vnd(x.doanhThu)} đ. Sau này sổ ca đổi
+      thì app báo lệch ngay. ${qm('chotso')}</div>
+    <button class="btn acc" onclick="luuRa('${js(key)}')">Lưu</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+}
+async function luuRa(key){
+  const K=tinhThue(thangXem), x=K.ds.find(d=>d.key===key); if(!x) return;
+  const daX = $('#rSeg button[aria-pressed="true"]').dataset.v==='1';
+  const cu = traRa(thangXem,key);
+  const o = { thang:thangXem, key, ten:x.ten, khachId:x.khachId||null, daXuat:daX,
+    soHD:$('#rSo').value.trim(), ngayXuat:$('#rNgay').value,
+    dtChot: daX ? (cu && cu.daXuat && cu.dtChot!==undefined ? cu.dtChot : Math.round(x.doanhThu)) : null };
+  const i = S.invOut.findIndex(v=>v.thang===thangXem && v.key===key);
+  if(i>=0) S.invOut[i]=o; else S.invOut.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu');
+}
+async function chotLai(key){
+  const K=tinhThue(thangXem), x=K.ds.find(d=>d.key===key);
+  const i = S.invOut.findIndex(v=>v.thang===thangXem && v.key===key);
+  if(i>=0 && x){ S.invOut[i].dtChot = Math.round(x.doanhThu); await luu(); dongModal(); ve(); toast('Đã chốt lại'); }
+}
+
+/* ══════════ 3. CHỨNG TỪ ══════════ */
+const LOAI = {dau:'Dầu DO', lop:'Lốp, phụ tùng', sua:'Sửa chữa', bot:'Phí đường bộ, BOT',
+  bao:'Bảo hiểm', dki:'Đăng kiểm, phù hiệu', vlieu:'Vật liệu mua vào', khac:'Khác'};
+
+function vVao(){
+  const t = `<div class="tabs">
+    <button aria-pressed="${cheDoCT==='hd'}" onclick="cheDoCT='hd';ve()">Có hoá đơn</button>
+    <button aria-pressed="${cheDoCT==='bk'}" onclick="cheDoCT='bk';ve()">Bảng kê 01/TNDN</button></div>`;
+  return t + (cheDoCT==='hd' ? vHD() : vBK());
+}
+function vHD(){
+  const ds = ctThang(thangXem).sort((a,b)=>a.ngay<b.ngay?1:-1);
+  const dau = `<button class="btn acc" onclick="fVao()">+ Nhập hoá đơn đầu vào</button>` + chonThang();
+  if(!ds.length) return dau+`<div class="empty"><b>Chưa có hoá đơn nào ${nhanThang(thangXem)}</b>
+    Lái xe gửi ảnh qua Zalo, anh nhập ngay trong ngày.</div>`;
+  const tong = ds.reduce((t,h)=>t+(Number(h.tong)||0),0);
+  return dau+`<div class="card"><div class="row"><span class="lbl">${ds.length} hoá đơn</span>
+    <span class="val">${vnd(tong)} đ</span></div></div>` +
+    ds.map(h=>{ const xau=!duocKT(h);
+      return `<div class="card tap" onclick="fVao('${h.id}')">
+        <div class="row"><b style="font-size:15px">${esc(h.ncc||'Không rõ')}</b><span class="val">${vnd(h.tong)}</span></div>
+        <div class="sub">${dmy(h.ngay)} · ${LOAI[h.loai]||'Khác'}${h.soHD?' · số '+esc(h.soHD):''}</div>
+        <div><span class="chip ${xau?'bad':'ok'}">${h.ttoan==='tm'?'Tiền mặt':'Chuyển khoản'}</span>
+          ${!h.mst?'<span class="chip warn">Thiếu MST</span>':''}
+          ${Number(h.vat)>0?`<span class="chip ${xau?'bad':'seal'}">VAT ${vnd(h.vat)}${xau?' — mất':''}</span>`:''}
+        </div></div>`; }).join('');
+}
+function fVao(id){
+  const h = S.invIn.find(x=>x.id===id) || {id:null,ngay:homNay(),ncc:'',mst:'',loai:'dau',
+    soHD:'',tienHang:'',vat:'',tong:'',ttoan:'ck',ghiChu:''};
+  moModal(`<h2>${id?'Sửa hoá đơn':'Nhập hoá đơn đầu vào'}</h2>
+    <div class="sub">Gõ đúng như trên hoá đơn, không làm tròn. ${qm('nguong5')}</div>
+    <input type="hidden" id="vId" value="${h.id||''}">
+    <div class="g2">
+      <div><label for="vNgay">Ngày hoá đơn</label><input type="date" id="vNgay" value="${h.ngay}"></div>
+      <div><label for="vLoai">Khoản chi</label><select id="vLoai">
+        ${Object.entries(LOAI).map(([k,v])=>`<option value="${k}" ${h.loai===k?'selected':''}>${v}</option>`).join('')}
+      </select></div></div>
+    <label for="vNcc">Nhà cung cấp</label><input id="vNcc" value="${esc(h.ncc)}" placeholder="Cây xăng, gara, đại lý lốp…">
+    <label for="vMst">Mã số thuế nhà cung cấp</label><input id="vMst" inputmode="numeric" value="${esc(h.mst)}">
+    <label for="vSo">Số hoá đơn</label><input id="vSo" value="${esc(h.soHD)}">
+    <div class="g2">
+      <div><label for="vHang">Tiền hàng</label><input id="vHang" inputmode="numeric" value="${h.tienHang}" oninput="congTong()"></div>
+      <div><label for="vVat">Tiền thuế VAT</label><input id="vVat" inputmode="numeric" value="${h.vat}" oninput="congTong()"></div></div>
+    <label for="vTong">Tổng thanh toán</label><input id="vTong" inputmode="numeric" value="${h.tong}" oninput="baoCK()">
+    <label>Hình thức thanh toán</label>
+    <div class="seg" id="vSeg">
+      <button type="button" data-v="ck" aria-pressed="${h.ttoan==='ck'}" onclick="segPick(this);baoCK()">Chuyển khoản</button>
+      <button type="button" data-v="tm" aria-pressed="${h.ttoan==='tm'}" onclick="segPick(this);baoCK()">Tiền mặt</button>
+    </div><div id="vBao"></div>
+    <label for="vGhi">Ghi chú</label><input id="vGhi" value="${esc(h.ghiChu)}">
+    <button class="btn acc" onclick="luuVao()">Lưu hoá đơn</button>
+    ${id?`<button class="del" onclick="xoa('invIn','${id}')">Xoá hoá đơn này</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+  baoCK();
+}
+function congTong(){ $('#vTong').value = num($('#vHang').value)+num($('#vVat').value); baoCK(); }
+function baoCK(){
+  const el=$('#vBao'); if(!el) return;
+  const tm = $('#vSeg button[aria-pressed="true"]').dataset.v==='tm', tong=num($('#vTong').value);
+  el.innerHTML = (tm&&tong>=NGUONG_CK)
+    ? `<div class="card alert" style="margin-top:10px"><div class="t">Khoản này sẽ mất khấu trừ VAT</div>
+       <div class="fix">Từ ${vnd(NGUONG_CK)} đ trở lên phải chuyển khoản từ tài khoản công ty. Còn kịp thì chuyển lại rồi sửa dòng này.</div></div>`
+    : (tm?`<div class="sub" style="margin-top:8px">Dưới ${vnd(NGUONG_CK)} đ nên tiền mặt vẫn được khấu trừ.</div>`:'');
+}
+async function luuVao(){
+  const o={id:$('#vId').value||uid(), ngay:$('#vNgay').value||homNay(), ncc:$('#vNcc').value.trim(),
+    mst:$('#vMst').value.trim(), loai:$('#vLoai').value, soHD:$('#vSo').value.trim(),
+    tienHang:num($('#vHang').value), vat:num($('#vVat').value),
+    tong:num($('#vTong').value)||num($('#vHang').value)+num($('#vVat').value),
+    ttoan:$('#vSeg button[aria-pressed="true"]').dataset.v, ghiChu:$('#vGhi').value.trim()};
+  const i=S.invIn.findIndex(x=>x.id===o.id); if(i>=0)S.invIn[i]=o; else S.invIn.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu');
+}
+
+function vBK(){
+  const ds = bkThang(thangXem).sort((a,b)=>a.ngay<b.ngay?1:-1);
+  const dau = `<button class="btn seal" onclick="fBK()">+ Thêm dòng bảng kê</button>` + chonThang() +
+    `<div class="sub" style="margin-bottom:10px">Chỉ dùng khi mua của hộ gia đình, cá nhân
+     không thuộc diện phải xuất hoá đơn. ${qm('bangke')}</div>`;
+  if(!ds.length) return dau+`<div class="empty"><b>Chưa có dòng nào ${nhanThang(thangXem)}</b>
+    Mua cát, đá, sỏi của cá nhân tự khai thác, hoặc thuê dịch vụ của cá nhân không kinh doanh thì ghi vào đây.</div>`;
+  const tong = ds.filter(bkHopLe).reduce((t,h)=>t+(Number(h.thanhTien)||0),0);
+  return dau+`<div class="card"><div class="row"><span class="lbl">${ds.length} dòng · hợp lệ</span>
+    <span class="val">${vnd(tong)} đ</span></div></div>` +
+    ds.map(h=>{ const xau=!bkHopLe(h);
+      return `<div class="card tap" onclick="fBK('${h.id}')">
+        <div class="row"><b style="font-size:15px">${esc(h.nguoiBan||'Không rõ')}</b><span class="val">${vnd(h.thanhTien)}</span></div>
+        <div class="sub">${dmy(h.ngay)} · ${esc(h.matHang||'—')} · ${pct(h.soLuong)} ${esc(h.dvt||'')}</div>
+        <div><span class="chip ${xau?'bad':'ok'}">${h.ttoan==='tm'?'Tiền mặt':'Chuyển khoản'}</span>
+          ${xau?'<span class="chip bad">Bị loại chi phí</span>':''}
+          ${!h.cccd?'<span class="chip warn">Thiếu số định danh</span>':''}
+        </div></div>`; }).join('');
+}
+function fBK(id){
+  const h = S.bangKe.find(x=>x.id===id) || {id:null,ngay:homNay(),nguoiBan:'',diaChi:'',cccd:'',
+    matHang:'',soLuong:'',dvt:'',donGia:'',thanhTien:'',ttoan:'ck',ghiChu:''};
+  moModal(`<h2>${id?'Sửa dòng bảng kê':'Thêm dòng bảng kê 01/TNDN'}</h2>
+    <input type="hidden" id="bId" value="${h.id||''}">
+    <label for="bNgay">Ngày mua</label><input type="date" id="bNgay" value="${h.ngay}">
+    <label for="bTen">Tên người bán</label><input id="bTen" value="${esc(h.nguoiBan)}">
+    <label for="bDc">Địa chỉ người bán</label><input id="bDc" value="${esc(h.diaChi)}">
+    <label for="bCccd">Số định danh cá nhân</label><input id="bCccd" inputmode="numeric" value="${esc(h.cccd)}">
+    <label for="bMh">Tên mặt hàng, dịch vụ</label><input id="bMh" value="${esc(h.matHang)}" placeholder="Cát vàng, đá 1x2, công bốc xếp…">
+    <div class="g3">
+      <div><label for="bSl">Số lượng</label><input id="bSl" inputmode="decimal" value="${h.soLuong}" oninput="bkTinh()"></div>
+      <div><label for="bDvt">ĐVT</label><input id="bDvt" value="${esc(h.dvt)}" placeholder="m3"></div>
+      <div><label for="bDg">Đơn giá</label><input id="bDg" inputmode="numeric" value="${h.donGia}" oninput="bkTinh()"></div>
+    </div>
+    <label for="bTt">Tổng giá thanh toán</label><input id="bTt" inputmode="numeric" value="${h.thanhTien}" oninput="bkBao()">
+    <label>Hình thức thanh toán</label>
+    <div class="seg" id="bSeg">
+      <button type="button" data-v="ck" aria-pressed="${h.ttoan==='ck'}" onclick="segPick(this);bkBao()">Chuyển khoản</button>
+      <button type="button" data-v="tm" aria-pressed="${h.ttoan==='tm'}" onclick="segPick(this);bkBao()">Tiền mặt</button>
+    </div><div id="bBao"></div>
+    <label for="bGhi">Ghi chú</label><input id="bGhi" value="${esc(h.ghiChu)}">
+    <div class="note">Bảng kê chỉ cho <b>chi phí được trừ</b> thuế TNDN, <b>không</b> khấu trừ VAT.
+      Không dùng thay hoá đơn khi mua của doanh nghiệp, cửa hàng, đại lý.</div>
+    <button class="btn seal" onclick="luuBK()">Lưu dòng</button>
+    ${id?`<button class="del" onclick="xoa('bangKe','${id}')">Xoá dòng này</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`);
+  bkBao();
+}
+function bkTinh(){ $('#bTt').value = Math.round(dec($('#bSl').value)*num($('#bDg').value)); bkBao(); }
+function bkBao(){
+  const el=$('#bBao'); if(!el) return;
+  const tm=$('#bSeg button[aria-pressed="true"]').dataset.v==='tm', t=num($('#bTt').value);
+  el.innerHTML = (tm&&t>=NGUONG_CK)
+    ? `<div class="card alert" style="margin-top:10px"><div class="t">Dòng này sẽ bị loại khỏi chi phí</div>
+       <div class="fix">Bảng kê từ ${vnd(NGUONG_CK)} đ/người/ngày trở lên bắt buộc chuyển khoản.</div></div>` : '';
+}
+async function luuBK(){
+  const o={id:$('#bId').value||uid(), ngay:$('#bNgay').value||homNay(), nguoiBan:$('#bTen').value.trim(),
+    diaChi:$('#bDc').value.trim(), cccd:$('#bCccd').value.trim(), matHang:$('#bMh').value.trim(),
+    soLuong:dec($('#bSl').value), dvt:$('#bDvt').value.trim(), donGia:num($('#bDg').value),
+    thanhTien:num($('#bTt').value)||Math.round(dec($('#bSl').value)*num($('#bDg').value)),
+    ttoan:$('#bSeg button[aria-pressed="true"]').dataset.v, ghiChu:$('#bGhi').value.trim()};
+  const i=S.bangKe.findIndex(x=>x.id===o.id); if(i>=0)S.bangKe[i]=o; else S.bangKe.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu');
+}
+async function xoa(kho,id){
+  if(!confirm('Xoá dòng này? Không khôi phục được.')) return;
+  S[kho]=S[kho].filter(x=>x.id!==id); await luu(); dongModal(); ve();
+}
+
+/* ══════════ 4. BÀN GIAO ══════════ */
+function vBanGiao(){
+  const K=tinhThue(thangXem), D=dauThang(thangXem);
+  const gui = S.sent.find(x=>x.thang===thangXem);
+  const lech = K.ds.some(x=>lechChot(thangXem,x)!==0);
+  const muc = [
+    {ok:K.dtTong>0, t:'Đã ghi đủ ca chạy trong tháng'},
+    {ok:K.dtChua===0&&K.dtTong>0, t:'Mọi công trình đã xuất hoá đơn'},
+    {ok:!lech, t:'Không có chênh lệch doanh thu sau khi xuất hoá đơn'},
+    {ok:K.ct.length>0, t:'Đã nhập hoá đơn đầu vào'},
+    {ok:K.vatMat===0&&K.bkMat===0, t:'Không có khoản nào mất do trả tiền mặt'},
+    {ok:tenLa().length===0, t:'Mọi công trình đã có hồ sơ khách'},
+    {ok:D.dinhMuc>0, t:'Đã ban hành định mức nhiên liệu'},
+    {ok:S.cfg.phuongAnXe!=='chua', t:'Xe đã có căn cứ pháp lý gắn với công ty'},
+  ];
+  const xong = muc.filter(m=>m.ok).length;
+  return chonThang()+`
+  <div class="card declar">
+    ${xong===muc.length?'<span class="stamp">SẴN SÀNG GỬI</span>':`<span class="stamp warn">${xong}/${muc.length}</span>`}
+    <div class="sub">Hồ sơ ${nhanThang(thangXem)}</div>
+    <div class="big" style="font-size:20px">${xong===muc.length?'Đủ để bàn giao':'Còn thiếu '+(muc.length-xong)+' mục'}</div>
+    <hr class="sep">
+    ${muc.map(m=>`<div class="row"><span class="lbl">${m.t}</span>
+      <span class="val" style="color:${m.ok?'var(--profit)':'var(--loss)'}">${m.ok?'✓':'✗'}</span></div>`).join('')}
+  </div>
+  <div class="eyebrow">Số liệu gửi kế toán</div>
+  <div class="card">
+    <div class="row"><span class="lbl">Doanh thu chưa VAT</span><span class="val">${vnd(K.dtTong)}</span></div>
+    <div class="row"><span class="lbl">VAT đầu ra ${K.suat}%</span><span class="val">${vnd(K.vatRa)}</span></div>
+    <div class="row"><span class="lbl">VAT đầu vào khấu trừ</span><span class="val">${vnd(K.vatVao)}</span></div>
+    <div class="row"><span class="lbl">VAT phải nộp</span><span class="val">${vnd(K.vatNop)}</span></div>
+    <div class="row"><span class="lbl">Chi phí có hoá đơn</span><span class="val">${vnd(K.chiHD)}</span></div>
+    <div class="row"><span class="lbl">Chi phí theo bảng kê</span><span class="val">${vnd(K.chiBK)}</span></div>
+    <div class="row"><span class="lbl">Km chạy / dầu đổ</span><span class="val">${vnd(D.km)} km / ${pct(D.lit)} l</span></div>
+  </div>
+  <button class="btn seal" onclick="xuat('ra')">Tải bảng kê hoá đơn ra</button>
+  <button class="btn ghost" onclick="xuat('vao')">Tải bảng kê hoá đơn vào</button>
+  <button class="btn ghost" onclick="xuat('bk')">Tải bảng kê 01/TNDN</button>
+  <button class="btn ghost" onclick="xuat('hoso')">Tải hồ sơ pháp lý công ty & xe</button>
+  <button class="btn ${gui?'ghost':''}" onclick="danhDauGui()">
+    ${gui?`Đã gửi ngày ${dmy(gui.ngay)} — bấm để bỏ đánh dấu`:'Đánh dấu đã gửi kế toán'}</button>
+  <div class="eyebrow">Hạn sắp tới</div>
+  ${hanThue().slice(0,4).map(h=>{const c=soNgay(homNay(),h.ngay);
+    return `<div class="card"><div class="row"><b style="font-size:14.5px">${h.ten}</b>
+      <span class="chip ${c<0?'bad':c<=12?'warn':''}">${dmy(h.ngay)}</span></div>
+      <div class="sub" style="margin-top:4px">${h.ghi}</div></div>`;}).join('')}
+  <div class="note">Bốn file này cộng với ảnh hoá đơn gốc là trọn bộ việc của anh.
+    Gửi một lần mỗi tháng, kế toán không phải hỏi lại.</div>`;
+}
+async function danhDauGui(){
+  const i=S.sent.findIndex(x=>x.thang===thangXem);
+  if(i>=0) S.sent.splice(i,1); else S.sent.push({thang:thangXem,ngay:homNay()});
+  await luu(); ve();
+}
+function taiFile(ten,hang){
+  const q=v=>`"${String(v??'').replace(/"/g,'""')}"`;
+  const csv='\uFEFF'+hang.map(r=>r.map(q).join(',')).join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=ten; a.click(); URL.revokeObjectURL(a.href);
+}
+function xuat(loai){
+  const K=tinhThue(thangXem), t=thangXem.replace('-','');
+  if(loai==='ra'){
+    const h=[['Tháng','Công trình','Khách hàng','MST khách','Số chuyến','Doanh thu chưa VAT',
+      'Thuế suất %','Tiền VAT','Tổng thanh toán','Đã xuất HĐ','Số hoá đơn','Ngày xuất','Chênh lệch so với số đã chốt']];
+    K.ds.forEach(x=>{ const r=traRa(thangXem,x.key)||{}, kh=x.khachId?S.khach.find(k=>k.id===x.khachId):null;
+      const vat=x.doanhThu*K.suat/100;
+      h.push([nhanThang(thangXem), x.ten, kh?kh.ten:'', kh?kh.mst:'', x.chuyen,
+        Math.round(x.doanhThu), K.suat, Math.round(vat), Math.round(x.doanhThu+vat),
+        r.daXuat?'Có':'CHƯA', r.soHD||'', dmy(r.ngayXuat||''), lechChot(thangXem,x)||'']); });
+    h.push([]); h.push(['TỔNG','','','','',Math.round(K.dtTong),'',Math.round(K.vatRa),'','','','','']);
+    taiFile(`hoadon-ra-${t}.csv`,h);
+  } else if(loai==='vao'){
+    const h=[['Ngày','Nhà cung cấp','MST','Khoản chi','Số hoá đơn','Tiền hàng','VAT','Tổng',
+      'Thanh toán','Được khấu trừ','Ghi chú']];
+    ctThang(thangXem).sort((a,b)=>a.ngay<b.ngay?-1:1).forEach(x=>
+      h.push([dmy(x.ngay),x.ncc||'',x.mst||'',LOAI[x.loai]||'Khác',x.soHD||'',x.tienHang||0,
+        x.vat||0,x.tong||0,x.ttoan==='tm'?'Tiền mặt':'Chuyển khoản',duocKT(x)?'Có':'KHÔNG',x.ghiChu||'']));
+    h.push([]); h.push(['TỔNG','','','','','',Math.round(K.vatVao),Math.round(K.chiHD),'','','']);
+    taiFile(`hoadon-vao-${t}.csv`,h);
+  } else if(loai==='bk'){
+    const h=[['STT','Ngày mua','Tên người bán','Địa chỉ','Số định danh cá nhân','Tên mặt hàng dịch vụ',
+      'Số lượng','ĐVT','Đơn giá','Tổng giá thanh toán','Thanh toán','Hợp lệ','Ghi chú']];
+    bkThang(thangXem).sort((a,b)=>a.ngay<b.ngay?-1:1).forEach((x,i)=>
+      h.push([i+1,dmy(x.ngay),x.nguoiBan||'',x.diaChi||'',x.cccd||'',x.matHang||'',x.soLuong||'',
+        x.dvt||'',x.donGia||0,x.thanhTien||0,x.ttoan==='tm'?'Tiền mặt':'Chuyển khoản',
+        bkHopLe(x)?'Có':'KHÔNG',x.ghiChu||'']));
+    h.push([]); h.push(['','TỔNG HỢP LỆ','','','','','','','',Math.round(K.chiBK),'','','']);
+    taiFile(`bang-ke-01TNDN-${t}.csv`,h);
+  } else {
+    const c=S.cfg, pa={chua:'Chưa xử lý',ban:'Đã bán cho công ty',thue:'Cho công ty thuê'}[c.phuongAnXe];
+    taiFile('ho-so-phap-ly.csv',[
+      ['Mục','Nội dung'],
+      ['Tên công ty',c.tenCty],['Mã số thuế',c.mst],['Địa chỉ trụ sở',c.diaChi],
+      ['Ngày đăng ký lần đầu',dmy(c.ngayDKKD)],['Giám đốc',c.giamDoc],['Số định danh cá nhân',c.cccd],
+      ['Vốn điều lệ',c.vonDieuLe],['Email',c.email],['Điện thoại',c.dienThoai],['',''],
+      ['Biển số xe',c.bienSo],['Kiểu loại',c.kieuLoai],['Số khung',c.soKhung],['Số máy',c.soMay],
+      ['Năm sản xuất',c.namSX],['Khối lượng hàng cho phép chở (kg)',c.taiTrong],
+      ['Hạn đăng kiểm',dmy(c.hanDangKiem)],['Hạn bảo hiểm',dmy(c.hanBaoHiem)],['Hạn phù hiệu',dmy(c.hanPhuHieu)],['',''],
+      ['Giá xe chưa VAT',c.giaXeChuaVat],['VAT trên hoá đơn mua xe',c.vatXe],['Tổng giá xe',c.giaXeTong],
+      ['Hoá đơn mua xe đứng tên',c.giamDoc+' (cá nhân)'],['Dư nợ vay ngân hàng',c.vayNganHang],
+      ['Phương án gắn xe vào công ty',pa],['Số năm khấu hao',c.namKhauHao],
+      ['Tiền thuê xe/tháng',c.tienThueThang],['',''],
+      ['Định mức dầu có tải (lít/100km)',c.dmCoTai],['Định mức dầu không tải',c.dmKhongTai],
+      ['Định mức nổ máy chờ (lít/giờ)',c.dmChoHang],['',''],
+      ['Khoán phụ cấp chuyến',c.khoanChuyen],['Khoán công tác phí/ngày',c.khoanCongTac],
+      ['Tiền ăn ca',c.khoanAnCa],['Hỗ trợ nhà ở lái xe/tháng',c.khoanNhaO]
+    ]);
+  }
+  toast('Đã tải file');
+}
+
+/* ══════════ 5. HỒ SƠ ══════════ */
+function vHoSo(){
+  const c=S.cfg, t=homNay();
+  const han=([k,ten])=>{ const v=c[k];
+    if(!v) return `<div class="row"><span class="lbl">${ten}</span><span class="chip warn">Chưa nhập</span></div>`;
+    const con=soNgay(t,v);
+    return `<div class="row"><span class="lbl">${ten}</span><span class="val">
+      <span class="chip ${con<0?'bad':con<=30?'warn':'ok'}">${con<0?'quá '+(-con)+' ngày':'còn '+con+' ngày'}</span> ${dmy(v)}</span></div>`;};
+  const pa={chua:'Chưa xử lý — công ty chưa ghi được chi phí nào cho xe',
+    ban:'Đã bán cho công ty', thue:'Cho công ty thuê'}[c.phuongAnXe];
+  const la=tenLa();
+
+  return `
+  <div class="eyebrow">Công ty</div>
+  <div class="card">
+    <b style="font-size:15px;line-height:1.35;display:block">${esc(c.tenCty)}</b>
+    <div class="sub" style="margin-top:6px">${esc(c.diaChi)}</div>
+    <hr class="sep">
+    <div class="row"><span class="lbl">Mã số thuế</span><span class="val">${esc(c.mst)}</span></div>
+    <div class="row"><span class="lbl">Đăng ký lần đầu</span><span class="val">${dmy(c.ngayDKKD)}</span></div>
+    <div class="row"><span class="lbl">Giám đốc</span><span class="val">${esc(c.giamDoc)}</span></div>
+    <div class="row"><span class="lbl">Vốn điều lệ</span><span class="val">${vnd(c.vonDieuLe)} đ</span></div>
+    <button class="btn ghost" onclick="fCty()">Sửa thông tin công ty</button>
+  </div>
+
+  <div class="eyebrow">Xe ${esc(c.bienSo)}</div>
+  <div class="card">
+    <div class="sub">${esc(c.kieuLoai)} · sản xuất ${c.namSX}</div>
+    <div class="sub">Chở tối đa ${vnd(c.taiTrong)} kg · số khung ${esc(c.soKhung)}</div>
+    <hr class="sep">
+    ${han(['hanDangKiem','Đăng kiểm'])}${han(['hanBaoHiem','Bảo hiểm'])}${han(['hanPhuHieu','Phù hiệu xe tải'])}
+    <button class="btn ghost" onclick="fXe()">Sửa hạn giấy tờ</button>
+  </div>
+
+  <div class="eyebrow">Khách hàng & công trình ${qm('nhomkhach')}</div>
+  ${la.length?`<div class="card alert mid"><div class="t">${la.length} tên công trình chưa có hồ sơ</div>
+    <div class="sub" style="margin-top:5px">${la.map(x=>`<span class="chip warn tap" onclick="fKhach(null,'${js(x)}')">${esc(x)}</span>`).join('')}</div>
+    <div class="fix">Bấm vào từng tên để tạo hồ sơ, hoặc gắn làm bí danh của khách đã có.</div></div>`:''}
+  ${S.khach.length?S.khach.map(k=>`<div class="card tap" onclick="fKhach('${k.id}')">
+      <div class="row"><b style="font-size:15px">${esc(k.ten)}</b>
+        <span class="chip ${k.nhom==='A'?'seal':''}">Nhóm ${k.nhom||'B'}</span></div>
+      <div class="sub">${k.mst?'MST '+esc(k.mst):'chưa có MST'}${k.donGiaNet?' · '+vnd(k.donGiaNet)+' đ/'+esc(k.dvt||'đv'):''}</div>
+      ${(k.biDanh||[]).length?`<div class="sub">Bí danh: ${(k.biDanh||[]).map(esc).join(' · ')}</div>`:''}
+    </div>`).join('') : `<div class="card"><div class="sub">Chưa có khách nào.</div></div>`}
+  <button class="btn ghost" onclick="fKhach()">+ Thêm khách hàng</button>
+
+  <div class="eyebrow">Hợp đồng vận chuyển</div>
+  ${S.hopDong.length?S.hopDong.map(h=>{
+    const k=S.khach.find(x=>x.id===h.khachId), con=h.hetHan?soNgay(t,h.hetHan):null;
+    return `<div class="card tap" onclick="fHD('${h.id}')">
+      <div class="row"><b style="font-size:15px">Số ${esc(h.so||'—')}</b>
+        ${con!==null?`<span class="chip ${con<0?'bad':con<=30?'warn':'ok'}">${con<0?'hết hạn':'còn '+con+' ngày'}</span>`:''}</div>
+      <div class="sub">${k?esc(k.ten):'chưa gắn khách'} · ký ${dmy(h.ngayKy)}${h.hetHan?' · hết hạn '+dmy(h.hetHan):''}</div>
+    </div>`;}).join('') : `<div class="card"><div class="sub">Chưa có hợp đồng nào. Chạy bằng lời nói là nguồn tranh chấp công nợ lớn nhất.</div></div>`}
+  <button class="btn ghost" onclick="fHD()">+ Thêm hợp đồng</button>
+
+  <div class="eyebrow">Định mức nhiên liệu ${qm('dinhmuc')}</div>
+  <div class="card ${!c.dmCoTai?'alert mid':''}">
+    <div class="row"><span class="lbl">Chạy có tải</span><span class="val">${c.dmCoTai?pct(c.dmCoTai)+' lít/100km':'—'}</span></div>
+    <div class="row"><span class="lbl">Chạy không tải</span><span class="val">${c.dmKhongTai?pct(c.dmKhongTai)+' lít/100km':'—'}</span></div>
+    <div class="row"><span class="lbl">Nổ máy chờ hàng</span><span class="val">${c.dmChoHang?pct(c.dmChoHang)+' lít/giờ':'—'}</span></div>
+    <button class="btn ghost" onclick="fDinhMuc()">Nhập định mức</button>
+  </div>
+
+  <div class="eyebrow">Quy chế khoán chi ${qm('khoan')}</div>
+  <div class="card ${!c.khoanChuyen?'alert mid':''}">
+    <div class="row"><span class="lbl">Phụ cấp chuyến</span><span class="val">${c.khoanChuyen?vnd(c.khoanChuyen)+' đ':'—'}</span></div>
+    <div class="row"><span class="lbl">Công tác phí khoán</span><span class="val">${c.khoanCongTac?vnd(c.khoanCongTac)+' đ/ngày':'—'}</span></div>
+    <div class="row"><span class="lbl">Tiền ăn giữa ca</span><span class="val">${c.khoanAnCa?vnd(c.khoanAnCa)+' đ/ca':'—'}</span></div>
+    <div class="row"><span class="lbl">Hỗ trợ nhà ở lái xe</span><span class="val">${c.khoanNhaO?vnd(c.khoanNhaO)+' đ/tháng':'—'}</span></div>
+    <button class="btn ghost" onclick="fKhoan()">Nhập mức khoán</button>
+  </div>
+
+  <div class="eyebrow">Phương án gắn xe vào công ty ${qm('gdlk')}</div>
+  <div class="card ${c.phuongAnXe==='chua'?'alert mid':''}">
+    <div class="row"><span class="lbl">Hiện tại</span><span class="val">${pa}</span></div>
+    <div class="sub" style="margin-top:7px">Hoá đơn mua xe ${vnd(c.giaXeTong)} đ đứng tên cá nhân anh,
+      trong đó ${vnd(c.vatXe)} đ VAT không lấy lại được. Xe đang thế chấp khoản vay ${vnd(c.vayNganHang)} đ.</div>
+    <button class="btn seal" onclick="mPhuongAn()">So sánh bán và cho thuê</button>
+  </div>
+
+  <div class="eyebrow">Chính sách đang áp dụng</div>
+  <div class="card">
+    <div class="row"><span class="lbl">VAT đầu ra</span><span class="val">${c.thueSuatRa}%</span></div>
+    <div class="row"><span class="lbl">Thuế TNDN</span><span class="val">${TNDN}% — doanh thu dưới 3 tỷ</span></div>
+    <div class="row"><span class="lbl">Ngưỡng chuyển khoản</span><span class="val">${vnd(NGUONG_CK)} đ</span></div>
+    <div class="row"><span class="lbl">Kỳ khai thuế</span><span class="val">Theo quý</span></div>
+    <div class="sub" style="margin-top:8px">Vận tải hàng hoá nội địa đang giảm còn 8% đến hết 31/12/2026.
+      Sang 2027 sửa lại nếu chính sách không gia hạn.</div>
+    <button class="btn ghost" onclick="fChinhSach()">Sửa thuế suất</button>
+  </div>`;
+}
+
+/* ---- biểu mẫu hồ sơ ---- */
+function fCty(){ const c=S.cfg;
+  moModal(`<h2>Thông tin công ty</h2>
+    <label for="cMst">Mã số thuế</label><input id="cMst" inputmode="numeric" value="${esc(c.mst)}">
+    <label for="cTen">Tên công ty</label><input id="cTen" value="${esc(c.tenCty)}">
+    <label for="cDc">Địa chỉ trụ sở</label><input id="cDc" value="${esc(c.diaChi)}">
+    <label for="cBs">Biển số xe</label><input id="cBs" value="${esc(c.bienSo)}">
+    <button class="btn acc" onclick="luuCty()">Lưu</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuCty(){
+  Object.assign(S.cfg,{mst:$('#cMst').value.trim(),tenCty:$('#cTen').value.trim(),
+    diaChi:$('#cDc').value.trim(),bienSo:$('#cBs').value.trim()});
+  await luu(); dongModal(); veHeader(); ve(); toast('Đã lưu'); }
+
+function fXe(){ const c=S.cfg;
+  moModal(`<h2>Hạn giấy tờ xe</h2>
+    <label for="xDk">Hạn đăng kiểm</label><input type="date" id="xDk" value="${c.hanDangKiem}">
+    <label for="xBh">Hạn bảo hiểm trách nhiệm dân sự</label><input type="date" id="xBh" value="${c.hanBaoHiem}">
+    <label for="xPh">Hạn phù hiệu xe tải</label><input type="date" id="xPh" value="${c.hanPhuHieu}">
+    <div class="note">Đăng kiểm đã lấy sẵn từ giấy chứng nhận: hiệu lực đến 11/06/2028.
+      Bảo hiểm và phù hiệu anh xem trên giấy rồi nhập, app nhắc trước 30 ngày.</div>
+    <button class="btn acc" onclick="luuXe()">Lưu</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuXe(){
+  Object.assign(S.cfg,{hanDangKiem:$('#xDk').value,hanBaoHiem:$('#xBh').value,hanPhuHieu:$('#xPh').value});
+  await luu(); dongModal(); ve(); toast('Đã lưu'); }
+
+function fKhach(id, tenGoiY){
+  const k = S.khach.find(x=>x.id===id) || {id:null,ten:tenGoiY||'',mst:'',diaChi:'',nguoiLienHe:'',
+    dienThoai:'',nhom:'B',donGiaNet:'',dvt:'',chuKyTT:'',biDanh:tenGoiY?[tenGoiY]:[]};
+  moModal(`<h2>${id?'Sửa khách hàng':'Thêm khách hàng'}</h2>
+    ${tenGoiY?`<div class="sub">Đang gắn cho công trình "<b>${esc(tenGoiY)}</b>" trong sổ ca.</div>`:''}
+    <input type="hidden" id="kId" value="${k.id||''}">
+    <label for="kTen">Tên pháp nhân đầy đủ (dùng để xuất hoá đơn)</label>
+    <input id="kTen" value="${esc(k.ten)}" placeholder="Công ty TNHH …">
+    <label for="kMst">Mã số thuế</label><input id="kMst" inputmode="numeric" value="${esc(k.mst)}">
+    <label for="kDc">Địa chỉ xuất hoá đơn</label><input id="kDc" value="${esc(k.diaChi)}">
+    <div class="g2">
+      <div><label for="kLh">Người liên hệ</label><input id="kLh" value="${esc(k.nguoiLienHe)}"></div>
+      <div><label for="kDt">Điện thoại</label><input id="kDt" inputmode="tel" value="${esc(k.dienThoai)}"></div></div>
+    <label>Nhóm khách</label>
+    <div class="seg" id="kSeg">
+      <button type="button" data-v="A" aria-pressed="${k.nhom==='A'}" onclick="segPick(this)">A — cần hoá đơn</button>
+      <button type="button" data-v="B" aria-pressed="${k.nhom!=='A'}" onclick="segPick(this)">B — không cần</button>
+    </div>
+    <div class="g2">
+      <div><label for="kGia">Đơn giá chưa VAT</label><input id="kGia" inputmode="numeric" value="${k.donGiaNet}"></div>
+      <div><label for="kDvt">Đơn vị tính</label><input id="kDvt" value="${esc(k.dvt)}" placeholder="tấn / m3 / chuyến"></div></div>
+    <label for="kCk">Chu kỳ thanh toán</label><input id="kCk" value="${esc(k.chuKyTT)}" placeholder="VD: đối chiếu ngày 5, trả trong 15 ngày">
+    <label for="kBd">Bí danh — các cách viết tên khác trong sổ ca</label>
+    <textarea id="kBd" rows="3" placeholder="Mỗi dòng một cách viết">${esc((k.biDanh||[]).join('\n'))}</textarea>
+    <div class="note">Bí danh giúp app gom đúng khi anh gõ tên công trình khác nhau giữa các ca —
+      "Hoà Bình", "Hòa Bình", "cty hoà bình" sẽ về một mối.</div>
+    <button class="btn acc" onclick="luuKhach()">Lưu khách hàng</button>
+    ${id?`<button class="del" onclick="xoa('khach','${id}')">Xoá khách này</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuKhach(){
+  const bd = $('#kBd').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const o={id:$('#kId').value||uid(), ten:$('#kTen').value.trim(), mst:$('#kMst').value.trim(),
+    diaChi:$('#kDc').value.trim(), nguoiLienHe:$('#kLh').value.trim(), dienThoai:$('#kDt').value.trim(),
+    nhom:$('#kSeg button[aria-pressed="true"]').dataset.v, donGiaNet:num($('#kGia').value),
+    dvt:$('#kDvt').value.trim(), chuKyTT:$('#kCk').value.trim(), biDanh:bd};
+  if(!o.ten){ toast('Cần nhập tên khách'); return; }
+  const i=S.khach.findIndex(x=>x.id===o.id); if(i>=0)S.khach[i]=o; else S.khach.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu khách hàng'); }
+
+function fHD(id){
+  const h = S.hopDong.find(x=>x.id===id) || {id:null,khachId:'',so:'',ngayKy:homNay(),hetHan:'',giaTri:'',ghiChu:''};
+  moModal(`<h2>${id?'Sửa hợp đồng':'Thêm hợp đồng vận chuyển'}</h2>
+    <input type="hidden" id="hId" value="${h.id||''}">
+    <label for="hKh">Khách hàng</label>
+    <select id="hKh"><option value="">— chọn —</option>
+      ${S.khach.map(k=>`<option value="${k.id}" ${h.khachId===k.id?'selected':''}>${esc(k.ten)}</option>`).join('')}</select>
+    <label for="hSo">Số hợp đồng</label><input id="hSo" value="${esc(h.so)}">
+    <div class="g2">
+      <div><label for="hKy">Ngày ký</label><input type="date" id="hKy" value="${h.ngayKy}"></div>
+      <div><label for="hHan">Hết hạn</label><input type="date" id="hHan" value="${h.hetHan}"></div></div>
+    <label for="hGt">Giá trị hợp đồng (nếu có)</label><input id="hGt" inputmode="numeric" value="${h.giaTri}">
+    <label for="hGhi">Ghi chú</label><input id="hGhi" value="${esc(h.ghiChu)}">
+    <div class="note">App nhắc trước 30 ngày khi hợp đồng sắp hết hạn.
+      Mẫu hợp đồng vận chuyển đã có trong bộ văn bản, chỉ cần điền và ký.</div>
+    <button class="btn acc" onclick="luuHD()">Lưu hợp đồng</button>
+    ${id?`<button class="del" onclick="xoa('hopDong','${id}')">Xoá hợp đồng này</button>`:''}
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuHD(){
+  const o={id:$('#hId').value||uid(), khachId:$('#hKh').value, so:$('#hSo').value.trim(),
+    ngayKy:$('#hKy').value, hetHan:$('#hHan').value, giaTri:num($('#hGt').value), ghiChu:$('#hGhi').value.trim()};
+  const i=S.hopDong.findIndex(x=>x.id===o.id); if(i>=0)S.hopDong[i]=o; else S.hopDong.push(o);
+  await luu(); dongModal(); ve(); toast('Đã lưu'); }
+
+function fDinhMuc(){ const c=S.cfg, D=dauThang(thangXem);
+  moModal(`<h2>Định mức tiêu hao nhiên liệu</h2>
+    <div class="sub">Anh tự khai theo kinh nghiệm chạy thật. Con số này bảo vệ chi phí dầu của anh.</div>
+    ${D.km>0?`<div class="card" style="margin-top:12px"><div class="row"><span class="lbl">Thực tế ${nhanThang(thangXem)}</span>
+      <span class="val">${pct(D.thucTe)} lít/100km</span></div>
+      <div class="sub" style="margin-top:5px">${vnd(D.km)} km · ${pct(D.lit)} lít. Lấy con số này làm mốc rồi cộng thêm biên độ an toàn.</div></div>`:''}
+    <label for="dCo">Chạy có tải (lít/100km)</label><input id="dCo" inputmode="decimal" value="${c.dmCoTai}">
+    <label for="dKh">Chạy không tải (lít/100km)</label><input id="dKh" inputmode="decimal" value="${c.dmKhongTai}">
+    <label for="dCh">Nổ máy chờ hàng, nâng hạ ben (lít/giờ)</label><input id="dCh" inputmode="decimal" value="${c.dmChoHang}">
+    <div class="note">Khai xong, in <b>Quyết định ban hành định mức tiêu hao nhiên liệu</b> trong bộ văn bản,
+      điền đúng ba con số này, ký và đóng dấu, lưu vào hồ sơ công ty. Không có tờ đó thì con số ở đây
+      không có giá trị với cơ quan thuế.</div>
+    <button class="btn acc" onclick="luuDinhMuc()">Lưu định mức</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuDinhMuc(){
+  Object.assign(S.cfg,{dmCoTai:dec($('#dCo').value),dmKhongTai:dec($('#dKh').value),dmChoHang:dec($('#dCh').value)});
+  await luu(); dongModal(); ve(); toast('Đã lưu định mức'); }
+
+function fKhoan(){ const c=S.cfg;
+  moModal(`<h2>Quy chế khoán chi</h2>
+    <div class="sub">Các mức này biến tiền không hoá đơn thành chi phí được trừ.</div>
+    <label for="qCh">Phụ cấp chuyến (đ/chuyến)</label><input id="qCh" inputmode="numeric" value="${c.khoanChuyen}">
+    <label for="qCt">Công tác phí khoán (đ/ngày đi tỉnh)</label><input id="qCt" inputmode="numeric" value="${c.khoanCongTac}">
+    <label for="qAn">Tiền ăn giữa ca (đ/ca)</label><input id="qAn" inputmode="numeric" value="${c.khoanAnCa}">
+    <label for="qNh">Hỗ trợ nhà ở lái xe (đ/người/tháng)</label><input id="qNh" inputmode="numeric" value="${c.khoanNhaO}">
+    <div class="note">Khai xong, in <b>Quyết định ban hành Quy chế chi tiêu nội bộ</b> trong bộ văn bản,
+      điền đúng bốn con số này, ký đóng dấu. Đồng thời phải ghi lại các mức này trong
+      <b>hợp đồng lao động</b> của từng lái xe — thiếu bước đó là khoản chi vẫn bị loại.</div>
+    <button class="btn acc" onclick="luuKhoan()">Lưu mức khoán</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuKhoan(){
+  Object.assign(S.cfg,{khoanChuyen:num($('#qCh').value),khoanCongTac:num($('#qCt').value),
+    khoanAnCa:num($('#qAn').value),khoanNhaO:num($('#qNh').value)});
+  await luu(); dongModal(); ve(); toast('Đã lưu'); }
+
+function fChinhSach(){
+  moModal(`<h2>Thuế suất đầu ra</h2>
+    <label for="pTs">Phần trăm VAT xuất trên hoá đơn</label>
+    <input id="pTs" inputmode="numeric" value="${S.cfg.thueSuatRa}">
+    <div class="note">Chỉ sửa khi chính sách giảm 2% hết hiệu lực hoặc kế toán yêu cầu.
+      Sửa sai ở đây là sai toàn bộ số liệu bàn giao.</div>
+    <button class="btn acc" onclick="luuChinhSach()">Lưu</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuChinhSach(){
+  S.cfg.thueSuatRa = Number($('#pTs').value)||VAT_RA; await luu(); dongModal(); ve(); }
+
+function mPhuongAn(){
+  const c=S.cfg, gia=Number(c.giaXeTong)||0, nam=Number(c.namKhauHao)||10;
+  const kh=gia/nam, lptb=gia*LPTB/100;
+  const thueNam=(Number(c.tienThueThang)||0)*12;
+  const thueCN = thueNam>NGUONG_THUE_TS ? thueNam*0.10 : 0;
+  moModal(`<h2>Bán xe cho công ty hay cho công ty thuê?</h2>
+    <div class="sub">Tính trên giá xe ${vnd(gia)} đ và dư nợ ${vnd(c.vayNganHang)} đ.</div>
+    <div class="eyebrow">Phương án A — bán xe cho công ty</div>
+    <div class="card">
+      <div class="row"><span class="lbl">Khấu hao được trừ mỗi năm</span><span class="val">${vnd(kh)}</span></div>
+      <div class="row"><span class="lbl">Thuế TNDN tiết kiệm</span><span class="val" style="color:var(--profit)">${vnd(kh*TNDN/100)}</span></div>
+      <div class="row"><span class="lbl">Lệ phí trước bạ một lần</span><span class="val" style="color:var(--loss)">${vnd(lptb)}</span></div>
+      <div class="sub" style="margin-top:8px">Công ty ghi nợ phải trả anh ${vnd(gia)} đ rồi trả dần.
+        Tiền trả nợ gốc về túi anh <b>không chịu thuế thu nhập cá nhân</b>.</div>
+      <div class="sub" style="margin-top:6px;color:var(--loss)">Vướng: xe đang thế chấp ${vnd(c.vayNganHang)} đ.
+        Sang tên phải được ngân hàng đồng ý giải chấp hoặc chuyển khoản vay sang pháp nhân.</div>
+    </div>
+    <div class="eyebrow">Phương án B — cho công ty thuê</div>
+    <div class="card">
+      <div class="row"><span class="lbl">Tiền thuê mỗi tháng</span><span class="val">${vnd(c.tienThueThang)}</span></div>
+      <div class="row"><span class="lbl">Cả năm</span><span class="val">${vnd(thueNam)}</span></div>
+      <div class="row"><span class="lbl">Thuế TNDN tiết kiệm</span><span class="val" style="color:var(--profit)">${vnd(thueNam*TNDN/100)}</span></div>
+      <div class="row"><span class="lbl">Thuế cá nhân phải nộp</span>
+        <span class="val" style="color:${thueCN>0?'var(--loss)':'var(--profit)'}">${thueCN>0?vnd(thueCN):'0'}</span></div>
+      <div class="sub" style="margin-top:8px">${thueCN>0
+        ? `Vượt ngưỡng ${vnd(NGUONG_THUE_TS)} đ/năm nên phải nộp 5% GTGT + 5% TNCN trên <b>toàn bộ</b> tiền thuê.`
+        : `Dưới ngưỡng ${vnd(NGUONG_THUE_TS)} đ/năm nên anh không phải nộp thuế cho thuê tài sản.`}</div>
+      <div class="sub" style="margin-top:6px;color:var(--profit)">Không cần động đến ngân hàng, không sang tên,
+        không mất trước bạ. Hợp đồng thuê bằng văn bản với cá nhân là căn cứ hợp lệ để xin phù hiệu.</div>
+    </div>
+    <label for="paThue">Thử mức tiền thuê khác (đ/tháng)</label>
+    <input id="paThue" inputmode="numeric" value="${c.tienThueThang}">
+    <label for="paNam">Số năm khấu hao nếu bán cho công ty</label>
+    <input id="paNam" inputmode="numeric" value="${nam}">
+    <div class="note">Khung khấu hao ô tô tải là 6–10 năm. Chọn 10 cho nhẹ: khấu hao 6 năm sẽ là
+      ${vnd(gia/6)} đ/năm, gần như chắc chắn đẩy công ty vào lỗ sổ sách nhiều năm liền.</div>
+    <label>Chốt phương án</label>
+    <div class="seg" id="paSeg">
+      <button type="button" data-v="chua" aria-pressed="${c.phuongAnXe==='chua'}" onclick="segPick(this)">Chưa chốt</button>
+      <button type="button" data-v="ban" aria-pressed="${c.phuongAnXe==='ban'}" onclick="segPick(this)">Bán</button>
+      <button type="button" data-v="thue" aria-pressed="${c.phuongAnXe==='thue'}" onclick="segPick(this)">Cho thuê</button>
+    </div>
+    <button class="btn acc" onclick="luuPhuongAn()">Lưu và tính lại</button>
+    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
+async function luuPhuongAn(){
+  S.cfg.tienThueThang=num($('#paThue').value);
+  S.cfg.namKhauHao=Number($('#paNam').value)||10;
+  S.cfg.phuongAnXe=$('#paSeg button[aria-pressed="true"]').dataset.v;
+  await luu(); dongModal(); ve(); mPhuongAn(); }
+
+/* ══════════ MODAL + ĐĂNG NHẬP ══════════ */
+function segPick(b){ b.parentNode.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', x===b)); }
+function moModal(html){
+  $('#modalRoot').innerHTML=`<div class="backdrop" id="bd"><div class="sheet">
+    <button class="x" onclick="dongModal()">×</button>${html}</div></div>`;
+  $('#bd').addEventListener('click',e=>{ if(e.target.id==='bd') dongModal(); }); }
+function dongModal(){ $('#modalRoot').innerHTML=''; }
+
+/* Chạy nhúng trong Sổ Xe Ben: thue.html?embed=1 */
+const EMBED = new URLSearchParams(location.search).get('embed')==='1';
+if(EMBED){
+  document.body.classList.add('embed');
+  const n = document.querySelector('nav'), sh = $('#shell');
+  sh.insertBefore(n, $('#view'));   // thanh tab lên đầu, nhường chỗ cho tab của app mẹ
+}
+
+auth.onAuthStateChanged(u=>{
+  if(u){ $('#login').style.display='none'; $('#shell').style.display='flex'; tai(); }
+  else { $('#login').style.display='flex'; $('#shell').style.display='none'; } });
+$('#lBtn').addEventListener('click', async ()=>{
+  $('#lErr').textContent='';
+  try{ await auth.signInWithEmailAndPassword($('#lEmail').value.trim(), $('#lPass').value); }
+  catch(e){ $('#lErr').textContent='Sai email hoặc mật khẩu.'; } });
+$('#lPass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#lBtn').click(); });
+</script>
+</body>
+</html>

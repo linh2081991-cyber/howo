@@ -195,6 +195,9 @@
     display:flex; max-width:520px; margin:0 auto;
     padding-bottom:env(safe-area-inset-bottom);
   }
+  nav.tabbar{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  nav.tabbar::-webkit-scrollbar{ display:none; }
+  nav.tabbar button{ min-width:64px; }
   nav.tabbar button{
     flex:1; border:none; background:none; padding:10px 0 8px 0;
     display:flex; flex-direction:column; align-items:center; gap:2px;
@@ -416,6 +419,7 @@
     <button data-tab="strategy"><span class="ic">🧭</span>Trợ Lý</button>
     <button data-tab="drivers"><span class="ic">👤</span>Tài Xế</button>
     <button data-tab="results"><span class="ic">📊</span>Kết Quả</button>
+    <button data-tab="tax"><span class="ic">🧾</span>Thuế</button>
     <button data-tab="settings"><span class="ic">⚙️</span>Cài Đặt</button>
   </nav>
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
@@ -6636,6 +6640,8 @@ function renderAll(){
     renderStrategyHub();
   } else if(state.currentTab==='results'){
     renderResults();
+  } else if(state.currentTab==='tax'){
+    renderTax();
   } else {
     renderSettings();
   }
@@ -6643,6 +6649,31 @@ function renderAll(){
     b.classList.toggle('active', b.dataset.tab===state.currentTab);
   });
 }
+// ===================== TAB THUẾ (module rời) =====================
+// Nhúng thue.html trong cùng thư mục. Module chỉ ĐỌC dữ liệu ca, ghi
+// riêng vào ô 'taxLedger'. Không đụng gì tới logic vận hành ở trên.
+// Muốn gỡ bỏ: xoá nút tab, nhánh renderAll và hàm này là xong.
+function renderTax(){
+  const app = document.getElementById('app');
+  if(app.dataset.taxMounted === '1') return;   // giữ nguyên iframe, không nạp lại
+  app.innerHTML = '';
+  app.dataset.taxMounted = '1';
+  const f = document.createElement('iframe');
+  f.src = 'thue.html?embed=1';
+  f.title = 'Sổ Thuế';
+  f.style.cssText = 'width:100%;border:0;display:block;height:calc(100vh - 132px);background:var(--bg,#F7F5F1);';
+  app.appendChild(f);
+}
+// Rời khỏi tab Thuế thì bỏ cờ để lần sau dựng lại sạch sẽ.
+document.querySelectorAll('nav.tabbar button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    if(b.dataset.tab !== 'tax'){
+      const app = document.getElementById('app');
+      if(app) delete app.dataset.taxMounted;
+    }
+  });
+});
+
 function refreshSiteDatalist(){
   const dl=document.getElementById('siteNamesList');
   dl.innerHTML = allSiteNames().map(n=>`<option value="${escapeHtml(n)}">`).join('');
