@@ -333,15 +333,12 @@
     flex-direction:column; align-items:center; justify-content:center; color:var(--ink-soft); font-size:14px;
   }
 
-  .search-bar{ display:flex; gap:8px; align-items:center; width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 12px; margin-bottom:6px; cursor:pointer; text-align:left; font:inherit; -webkit-appearance:none; appearance:none; position:relative; }
+  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px 10px; margin-bottom:6px; }
   .search-bar .ic{ font-size:16px; pointer-events:none; }
-  .search-bar-text{ flex:1; min-width:0; font-size:17px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .search-bar-text.placeholder{ color:var(--ink-soft); }
-  .search-clear{ color:var(--accent); font-size:14px; font-weight:700; flex-shrink:0; padding:2px 4px; }
-  /* Ô ngày gốc chỉ dùng để BẬT lịch qua showPicker() từ nút bên ngoài — ẩn */
-  /* hoàn toàn khỏi vùng chạm để không ai chạm trực tiếp vào nó (tránh đúng */
-  /* lỗi iOS tự chốt ngày hôm nay rồi đóng lịch). */
-  .search-date-native{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; border:none; padding:0; margin:0; left:12px; bottom:0; }
+  /* Ô ngày chiếm trọn thanh (cả chiều cao) để dễ chạm trực tiếp — trên iPhone */
+  /* iOS chỉ mở lịch khi chạm THẲNG vào ô này, nên KHÔNG che/ẩn nó đi. */
+  .search-bar input[type=date]{ border:none; flex:1; padding:14px 4px; width:100%; min-width:0; background:transparent; color:var(--ink); font-size:17px; }
+  .search-bar button{ background:none; border:none; color:var(--accent); font-size:14px; font-weight:700; flex-shrink:0; }
   .search-bar-hint{ font-size:11px; color:var(--ink-soft); margin:0 2px 14px; }
 
   /* 2 ô "Từ ngày / Đến ngày" xếp DỌC (mỗi ô 1 dòng riêng), không xếp ngang */
@@ -1544,13 +1541,12 @@ function renderShiftList(){
   // tìm XUYÊN SUỐT toàn bộ lịch sử (không bị giới hạn theo tháng đang
   // xem) vì mục đích là tra cứu nhanh 1 ngày bất kỳ khi có khúc mắc.
   const searchBarHtml = `
-    <button type="button" class="search-bar" id="searchDateBtn">
+    <div class="search-bar" id="shiftSearchBar">
       <span class="ic">🔍</span>
-      <span class="search-bar-text${state.searchDate?'':' placeholder'}">${state.searchDate ? formatDateVN(state.searchDate) : 'Bấm để chọn 1 ngày cần xem'}</span>
-      ${state.searchDate ? '<span class="search-clear" id="clearSearchBtn">Xoá</span>' : ''}
-      <input type="date" id="searchDateInput" value="${state.searchDate||''}" class="search-date-native" tabindex="-1" aria-hidden="true">
-    </button>
-    <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)} (xuyên suốt mọi tháng).` : 'Bấm để mở lịch, chọn đúng ngày muốn xem rồi bấm dấu tích. Để trống sẽ xem ca của THÁNG NÀY, mới nhất trước.'}</div>
+      <input type="date" id="searchDateInput" value="${state.searchDate || todayLocalDateStr()}">
+      ${state.searchDate ? '<button type="button" id="clearSearchBtn">Xoá</button>' : ''}
+    </div>
+    <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)} (xuyên suốt mọi tháng).` : 'Bấm vào ô ngày để mở lịch, chọn ngày cần xem. Chưa chọn (hoặc bấm "Xoá") sẽ xem ca của THÁNG NÀY, mới nhất trước.'}</div>
     <div style="display:flex; gap:8px; margin-top:8px;">
       <input type="month" id="shiftArchiveMonthPicker" style="flex:1;">
       <button class="btn btn-ghost" id="viewOtherMonthBtn">+ Thêm Tháng Mới</button>
@@ -1648,26 +1644,23 @@ function bindShiftIssueButtons(){
   });
 }
 function bindSearchBar(){
-  const btn = document.getElementById('searchDateBtn');
   const input = document.getElementById('searchDateInput');
-  // Bấm vào NÚT (ô ngày thật bị ẩn khỏi vùng chạm) rồi mới gọi showPicker()
-  // đúng 1 lần để mở lịch. Vì cú chạm rơi vào NÚT chứ không rơi trực tiếp
-  // vào ô ngày, iOS KHÔNG hiểu đó là "xác nhận chọn ngày" — nên lịch mở ra
-  // và ĐỢI Ông Chủ tự chọn ngày rồi bấm dấu tích mới nhận, không còn tự
-  // chốt ngày hôm nay rồi đóng sập như trước. Nút "Xoá" nằm lồng trong nút
-  // lớn nên chặn lan sự kiện để bấm Xoá không vô tình mở lại lịch.
-  if(btn) btn.addEventListener('click', (e)=>{
-    if(e.target.id==='clearSearchBtn'){ e.stopPropagation(); state.searchDate=null; renderShiftList(); return; }
-    if(!input) return;
-    if(typeof input.showPicker === 'function'){ try{ input.showPicker(); return; }catch(_ignored){} }
-    input.focus();
-  });
+  // Trên iPhone (PWA), iOS CHỈ chịu mở lịch khi Ông Chủ chạm TRỰC TIẾP vào
+  // ô ngày — không mở được "gián tiếp" qua nút khác bằng lệnh showPicker()
+  // (nên bản trước bấm nút không phản hồi trên điện thoại). Vì vậy quay lại
+  // để Ông Chủ chạm thẳng ô ngày. Ô luôn có sẵn giá trị hôm nay để iOS
+  // không gặp "ngày trống" mà tự chốt-rồi-đóng. Chỉ khi Ông Chủ chọn 1
+  // ngày KHÁC hôm nay (sự kiện change, tức đã bấm dấu tích xác nhận trong
+  // lịch) mới thực sự lọc; nếu mở lịch rồi đóng mà không đổi gì thì không
+  // lọc, không giật.
   if(input) input.addEventListener('change', e=>{
     const picked = e.target.value || null;
     if(picked === state.searchDate) return;
     state.searchDate = picked;
     renderShiftList();
   });
+  const clearBtn = document.getElementById('clearSearchBtn');
+  if(clearBtn) clearBtn.addEventListener('click', (e)=>{ e.stopPropagation(); state.searchDate=null; renderShiftList(); });
 }
 function bindWarningsBanner(){
   const btn = document.getElementById('warningsGoToSettingsBtn');
