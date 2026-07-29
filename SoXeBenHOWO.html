@@ -6462,7 +6462,7 @@ function renderSettings(){
           <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
           ${r.isPaidOff ? '' : `
           <div class="formula-divider" style="margin:10px 0;"></div>
-          ${(loanDraft.lastPaidMonth===todayLocalDateStr().slice(0,7))
+          ${((state.settings.bankLoan&&state.settings.bankLoan.lastPaidMonth)===todayLocalDateStr().slice(0,7))
             ? `<div class="summary-row" style="color:var(--profit); font-weight:700;"><span>✅ Đã ghi nhận trả ngân hàng tháng ${todayLocalDateStr().slice(5,7)}/${todayLocalDateStr().slice(0,4)}</span><span class="val"></span></div>
                <button class="btn btn-ghost btn-sm btn-block" id="loanUnpaidBtn" style="margin-top:8px;">↩︎ Bỏ ghi nhận (chưa trả)</button>`
             : `<button class="btn btn-primary btn-block" id="loanMarkPaidBtn" style="margin-top:4px;">✅ Đã Trả Tiền Ngân Hàng Tháng Này</button>
@@ -6472,29 +6472,23 @@ function renderSettings(){
       }
     }
     renderLoanFullSchedule();
-    bindLoanPaidButtons();
   }
-  // Nút ghi nhận / bỏ ghi nhận đã trả ngân hàng — LUÔN có trong Cài Đặt để
-  // Ông Chủ chủ động, không phụ thuộc cảnh báo (cảnh báo chỉ hiện gần hạn).
-  function bindLoanPaidButtons(){
-    const curYM = todayLocalDateStr().slice(0,7);
-    const paidBtn = document.getElementById('loanMarkPaidBtn');
-    if(paidBtn) paidBtn.addEventListener('click', async ()=>{
-      loanDraft.lastPaidMonth = curYM;
-      if(state.settings.bankLoan) state.settings.bankLoan.lastPaidMonth = curYM;
-      await saveSettings();
-      showToast('Đã ghi nhận trả ngân hàng tháng này.');
-      renderLoanPreview();
-      if(state.currentTab==='shifts') renderShiftList();
-    });
-    const unpaidBtn = document.getElementById('loanUnpaidBtn');
-    if(unpaidBtn) unpaidBtn.addEventListener('click', async ()=>{
-      loanDraft.lastPaidMonth = null;
-      if(state.settings.bankLoan) state.settings.bankLoan.lastPaidMonth = null;
-      await saveSettings();
-      showToast('Đã bỏ ghi nhận — sẽ nhắc đóng lại.');
-      renderLoanPreview();
-      if(state.currentTab==='shifts') renderShiftList();
+  // Ghi nhận / bỏ ghi nhận trả ngân hàng — dùng event delegation gắn 1 LẦN
+  // trên document (không gắn lại mỗi lần render) để nút luôn bấm được dù
+  // được vẽ lại bất cứ lúc nào, tránh lỗi timing khiến bấm không phản hồi.
+  if(!window.__loanPaidDelegationBound){
+    window.__loanPaidDelegationBound = true;
+    document.addEventListener('click', async (e)=>{
+      const paid = e.target.closest && e.target.closest('#loanMarkPaidBtn');
+      const unpaid = e.target.closest && e.target.closest('#loanUnpaidBtn');
+      if(!paid && !unpaid) return;
+      const curYM = todayLocalDateStr().slice(0,7);
+      if(!state.settings.bankLoan) state.settings.bankLoan = {};
+      state.settings.bankLoan.lastPaidMonth = paid ? curYM : null;
+      showToast(paid ? 'Đã ghi nhận trả ngân hàng tháng này.' : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.');
+      if(state.currentTab==='settings') renderAll();       // vẽ lại Cài Đặt để đổi nút/trạng thái
+      else if(state.currentTab==='shifts') renderShiftList();
+      try { await saveSettings(); } catch(err){ console.error('Lưu trạng thái trả NH lỗi:', err); }
     });
   }
   // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
