@@ -185,6 +185,26 @@
   .site-row .site-head strong{ font-size:13px; }
   .two-col{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
+  /* Bảng diễn giải tài chính công trình thương mại — rõ ràng, khoa học */
+  .cbreak{ margin-top:10px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
+  .cbreak .cb-sec{ padding:10px 12px; }
+  .cbreak .cb-sec + .cb-sec{ border-top:1px solid var(--border); }
+  .cbreak .cb-title{ font-size:11.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
+  .cbreak .cb-line{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding:3px 0; font-size:13.5px; }
+  .cbreak .cb-line .cb-lbl{ color:var(--ink); }
+  .cbreak .cb-line .cb-val{ font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+  .cbreak .cb-line.cb-sub{ font-size:12.5px; color:var(--ink-soft); padding-left:12px; }
+  .cbreak .cb-line.cb-sub .cb-val{ font-weight:500; }
+  .cbreak .cb-line.cb-net{ font-weight:700; }
+  .cbreak .cb-profit{ background:var(--profit-soft); padding:11px 12px; display:flex; justify-content:space-between; align-items:center; }
+  .cbreak .cb-profit .cb-lbl{ font-weight:800; font-size:14px; color:var(--profit); }
+  .cbreak .cb-profit .cb-val{ font-weight:800; font-size:17px; color:var(--profit); font-variant-numeric:tabular-nums; }
+  .cbreak .cb-vat{ background:#FFF9EC; padding:9px 12px; font-size:12.5px; color:#8A6D00; display:flex; justify-content:space-between; gap:10px; }
+  .cbreak .cb-vat .cb-val{ font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cbreak .cb-vat-note{ background:#FFF9EC; padding:0 12px 9px; font-size:11px; color:#A07D1A; line-height:1.4; }
+  .cbreak .cb-wage{ padding:8px 12px; border-top:1px solid var(--border); display:flex; justify-content:space-between; font-size:13px; color:var(--ink-soft); }
+  .cbreak .cb-wage .cb-val{ font-variant-numeric:tabular-nums; font-weight:600; }
+
   .summary-row{ display:flex; justify-content:space-between; padding:8px 0; font-size:15px; }
   .summary-row.total{ border-top:1px solid var(--border); margin-top:6px; padding-top:12px; font-weight:800; font-size:17.5px; }
   .summary-row .val{ font-variant-numeric:tabular-nums; }
@@ -749,7 +769,28 @@ function computeAllWarnings(){
   const docs = computeDocumentWarnings();
   const maint = computeMaintenanceWarnings();
   const loan = computeLoanDueWarning();
-  return { docs, maint, loan, total: docs.length + maint.length + (loan?1:0) };
+  const invoices = computeInvoiceWarnings();
+  return { docs, maint, loan, invoices, total: docs.length + maint.length + (loan?1:0) + invoices.length };
+}
+// Quét mọi công trình THƯƠNG MẠI xem chuyến hàng nào còn thiếu hóa đơn MUA
+// hoặc BÁN (vì cả 2 bên cuối tháng mới xuất) — để Ông Chủ chủ động đòi/xuất,
+// không quên. Quên hóa đơn MUA = mất quyền khấu trừ VAT đầu vào = mất tiền thật.
+function computeInvoiceWarnings(){
+  const out = [];
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      const missing = [];
+      if(!s.buyHasInvoice) missing.push('hóa đơn MUA');
+      if(!s.sellHasInvoice) missing.push('hóa đơn BÁN');
+      if(missing.length>0){
+        out.push({ date: sh.date, siteName: s.siteName||'(chưa đặt tên)', missing: missing.join(' + ') });
+      }
+    }
+  }
+  // mới nhất trước cho dễ theo dõi
+  out.sort((a,b)=>b.date.localeCompare(a.date));
+  return out;
 }
 // Cảnh báo đến hạn đóng lãi ngân hàng — hiện từ ngày 17 (3 ngày trước hạn,
 // nếu hạn là 20) tới hết ngày đến hạn, và tiếp tục hiện QUÁ HẠN nếu chưa
@@ -1243,26 +1284,49 @@ function siteRevenue(s){
   const gross = (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
   return s.priceIncludesVat ? gross/(1+vatRateFraction()) : gross;
 }
-// Tổng tiền BÁN (đã quy chưa VAT nếu bán có VAT — vì VAT đầu ra là giữ hộ).
+// Tổng tiền MUA quy về NET (chưa VAT) — chỉ để tính lãi gộp. Nếu giá nhập
+// đã gồm VAT thì bóc ra; nếu giá nhập là net thì giữ nguyên. LƯU Ý: việc
+// "giá đã gồm VAT hay chưa" (buyIncludesVat) KHÁC với việc "có được khấu
+// trừ VAT đầu vào hay không" (buyHasInvoice) — 2 chuyện độc lập.
 function commercialNetBuy(s){
   const grossBuy = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0),0);
-  // Mua CÓ hoá đơn VAT → khấu trừ được → chi phí thật là giá chưa VAT.
-  // Mua KHÔNG hoá đơn → không khấu trừ → chi phí thật là nguyên tiền đã trả.
   return s.buyIncludesVat ? grossBuy/(1+vatRateFraction()) : grossBuy;
 }
 function commercialNetSell(s){
   const grossSell = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0),0);
   return s.sellIncludesVat ? grossSell/(1+vatRateFraction()) : grossSell;
 }
-// VAT thực phải nộp nhà nước cuối tháng cho công trình thương mại này =
-// VAT đầu ra (trên tiền bán) − VAT đầu vào được khấu trừ (chỉ khi mua có
-// hoá đơn). Dòng này CHỈ để Ông Chủ biết bao nhiêu tiền mặt đang cầm là
-// của nhà nước (giữ hộ), KHÔNG trừ vào lãi (vì lãi đã là số chưa VAT).
+// Tiền GỘP mỗi đầu (đúng số Ông Chủ gõ: nếu chọn "có VAT" thì đây là số
+// đối tác trả / mình trả gồm cả VAT; nếu "chưa VAT" thì bằng luôn số net).
+function commercialGrossBuy(s){
+  return (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0),0);
+}
+function commercialGrossSell(s){
+  return (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0),0);
+}
+// VAT đầu ra (trên tiền bán) và VAT đầu vào (trên tiền mua) — chỉ có khi
+// đầu đó chọn "có VAT". VAT đầu vào chỉ được KHẤU TRỪ khi có hoá đơn mua.
+function commercialOutputVat(s){ return commercialGrossSell(s) - commercialNetSell(s); }
+function commercialInputVat(s){ return commercialGrossBuy(s) - commercialNetBuy(s); }
+// Có được KHẤU TRỪ VAT đầu vào không? = có nhận được hoá đơn VAT mua hay
+// không (buyHasInvoice). ĐỘC LẬP với chuyện giá nhập đã gồm VAT hay chưa.
+// Dữ liệu cũ chưa có cờ này → suy mặc định theo buyIncludesVat để không
+// đổi kết quả đã có.
+function buyIsDeductible(s){
+  return (s.buyHasInvoice===undefined || s.buyHasInvoice===null) ? !!s.buyIncludesVat : !!s.buyHasInvoice;
+}
+// VAT thực phải nộp nhà nước cuối tháng = VAT đầu ra (trên tiền bán có VAT)
+// − VAT đầu vào ĐƯỢC KHẤU TRỪ (chỉ khi mua có hoá đơn). Dòng này CHỈ để Ông
+// Chủ biết bao nhiêu tiền mặt đang cầm là của nhà nước (giữ hộ), KHÔNG trừ
+// vào lãi (vì lãi đã là số net).
+//   - Trường hợp Ông Chủ: mua giá net + CÓ hoá đơn cuối tháng (khấu trừ
+//     được), bán có VAT → VAT nộp = (bán_net − mua_net) × %VAT. Đúng ví dụ
+//     1 chuyến lãi 200.000đ thì nộp 20.000đ.
 function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
   const vat = vatRateFraction();
   const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vat : 0);
-  const inputVat = commercialNetBuy(s) * (s.buyIncludesVat ? vat : 0);
+  const inputVat = buyIsDeductible(s) ? (commercialNetBuy(s) * vat) : 0;
   return Math.max(0, outputVat - inputVat);
 }
 function siteEffectiveWageTrips(s){
@@ -1592,6 +1656,15 @@ function renderShiftList(){
           <span class="rating-badge ${warnings.loan.urgency.className}">${warnings.loan.urgency.label}</span>
         </div>
         <button class="btn btn-ghost btn-sm" id="loanPaidBtn" style="margin-top:6px;">✅ Đã Trả Tiền Ngân Hàng</button>
+      ` : ''}
+      ${warnings.invoices && warnings.invoices.length>0 ? `
+        <div style="font-weight:700; margin-top:10px; margin-bottom:4px;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</div>
+        ${warnings.invoices.map(v=>`
+          <div class="kv" style="padding:4px 0;">
+            <span>${formatDateVN(v.date)} — ${escapeHtml(v.siteName)}</span>
+            <span class="rating-badge warn">thiếu ${escapeHtml(v.missing)}</span>
+          </div>`).join('')}
+        <div class="hint" style="margin-top:4px;">Cả 2 bên cuối tháng mới xuất hóa đơn — nhớ đòi hóa đơn MUA (để được khấu trừ VAT) và xuất hóa đơn BÁN. Vào ca tương ứng, tick "Đã nhận/xuất hóa đơn" khi xong.</div>
       ` : ''}
       <button class="link-btn" id="warningsGoToSettingsBtn" style="margin-top:6px;">Quản lý giấy tờ / bảo dưỡng →</button>
     </div>`;
@@ -2191,6 +2264,16 @@ function renderSiteRows(){
         </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
         <button class="btn btn-ghost btn-sm addTripBtn" data-idx="${i}" style="margin-bottom:10px;">+ Thêm Chuyến</button>
+        <div class="card" style="background:var(--bg); margin-bottom:10px; padding:10px;">
+          <label class="chk-line" style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <input type="checkbox" class="site-chk" data-idx="${i}" data-field="buyHasInvoice" ${buyIsDeductible(s)?'checked':''}>
+            <span>Đã nhận hóa đơn MUA (được khấu trừ VAT đầu vào)</span>
+          </label>
+          <label class="chk-line" style="display:flex; align-items:center; gap:8px; margin-bottom:0;">
+            <input type="checkbox" class="site-chk" data-idx="${i}" data-field="sellHasInvoice" ${s.sellHasInvoice?'checked':''}>
+            <span>Đã xuất hóa đơn BÁN</span>
+          </label>
+        </div>
         <div class="field" style="margin-bottom:0;">
           <label>Lương / chuyến (đ)</label>
           <input type="text" inputmode="decimal" class="site-money" data-idx="${i}" data-field="driverWagePerTrip" placeholder="0" value="${s.driverWagePerTrip?toIntSafe(s.driverWagePerTrip).toLocaleString('vi-VN'):''}">
@@ -2234,7 +2317,7 @@ function renderSiteRows(){
       ${typeToggle}
       ${nameField}
       ${body}
-      <div class="hint site-calc" data-idx="${i}"></div>
+      <div class="site-calc" data-idx="${i}" style="font-size:12.5px; color:var(--ink-soft); margin-top:4px;"></div>
     </div>`;
   }).join('');
   sh.siteLogs.forEach((s,i)=>updateSiteCalc(i));
@@ -2314,6 +2397,13 @@ function bindSiteRowEvents(){
       renderSiteRows(); updateSummary();
     });
   });
+  wrap.querySelectorAll('.site-chk').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      const idx = Number(chk.dataset.idx), field = chk.dataset.field;
+      sh.siteLogs[idx][field] = chk.checked;
+      updateSiteCalc(idx); updateSummary();
+    });
+  });
   wrap.querySelectorAll('.removeSiteBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const idx = Number(btn.dataset.idx);
@@ -2328,10 +2418,45 @@ function updateSiteCalc(idx){
   const el = document.querySelector(`.site-calc[data-idx="${idx}"]`);
   if(!el) return;
   if(s.siteType==='commercial'){
-    const buy = commercialNetBuy(s), sell = commercialNetSell(s), margin = sell - buy;
+    const grossSell = commercialGrossSell(s), netSell = commercialNetSell(s), outVat = commercialOutputVat(s);
+    const grossBuy = commercialGrossBuy(s), netBuy = commercialNetBuy(s), inVat = commercialInputVat(s);
+    const deductible = buyIsDeductible(s);
+    const margin = netSell - netBuy;
     const vatPay = commercialVatPayable(s);
-    el.innerHTML = `Tổng mua: ${fmtVND(buy)} · Tổng bán: ${fmtVND(sell)} · <strong>Lãi gộp: ${fmtVND(margin)}</strong> · Lương chuyến: ${fmtVND(siteWageTotal(s))}`
-      + (vatPay>0 ? `<br><span style="color:var(--ink-soft);">VAT phải nộp cuối tháng (giữ hộ, không phải lãi mất đi): ${fmtVND(vatPay)}</span>` : '');
+    const wage = siteWageTotal(s);
+
+    // Phần BÁN
+    let sellLines = `<div class="cb-line"><span class="cb-lbl">Đối tác thanh toán${s.sellIncludesVat?' (gồm VAT)':''}</span><span class="cb-val">${fmtVND(grossSell)}</span></div>`;
+    if(s.sellIncludesVat && outVat>0) sellLines += `<div class="cb-line cb-sub"><span class="cb-lbl">− VAT đầu ra (giữ hộ, sẽ nộp)</span><span class="cb-val">${fmtVND(outVat)}</span></div>`;
+    sellLines += `<div class="cb-line cb-net"><span class="cb-lbl">= Tiền bán thực của Ông Chủ</span><span class="cb-val">${fmtVND(netSell)}</span></div>`;
+
+    // Phần MUA
+    let buyLines = `<div class="cb-line"><span class="cb-lbl">Trả nhà cung cấp${s.buyIncludesVat?' (gồm VAT)':''}</span><span class="cb-val">${fmtVND(grossBuy)}</span></div>`;
+    if(s.buyIncludesVat && inVat>0) buyLines += `<div class="cb-line cb-sub"><span class="cb-lbl">− VAT đầu vào ${deductible?'(được khấu trừ)':'(CHƯA có hoá đơn, chưa trừ được)'}</span><span class="cb-val">${fmtVND(inVat)}</span></div>`;
+    buyLines += `<div class="cb-line cb-net"><span class="cb-lbl">= Tiền mua thực</span><span class="cb-val">${fmtVND(netBuy)}</span></div>`;
+
+    el.innerHTML = `
+      <div class="cbreak">
+        <div class="cb-sec">
+          <div class="cb-title">💰 Bán ra</div>
+          ${sellLines}
+        </div>
+        <div class="cb-sec">
+          <div class="cb-title">📦 Mua vào</div>
+          ${buyLines}
+        </div>
+        <div class="cb-profit">
+          <span class="cb-lbl">LÃI BỎ TÚI THỰC</span>
+          <span class="cb-val">${margin>=0?'+':''}${fmtVND(margin)}</span>
+        </div>
+        ${vatPay>0 ? `
+        <div class="cb-vat">
+          <span>🧾 VAT phải nộp nhà nước cuối tháng</span>
+          <span class="cb-val">${fmtVND(vatPay)}</span>
+        </div>
+        <div class="cb-vat-note">Đây là tiền Ông Chủ đã thu hộ của khách, KHÔNG phải lãi bị mất. Kế toán kê khai qua tờ khai thuế GTGT hàng tháng và nộp cho nhà nước.</div>` : ''}
+        ${wage>0 ? `<div class="cb-wage"><span>Lương chuyến trả tài xế</span><span class="cb-val">${fmtVND(wage)}</span></div>` : ''}
+      </div>`;
   } else {
     el.textContent = `Thành tiền: ${fmtVND(siteRevenue(s))}  ·  Lương chuyến: ${fmtVND(siteWageTotal(s))}`;
   }
@@ -2429,7 +2554,7 @@ function bindFormEvents(){
 
   document.getElementById('addSiteBtn').addEventListener('click', ()=>{
     sh.siteLogs.push({ siteType:'freight', siteName:'', volumePerTrip:0, materialUnitPrice:0, priceIncludesVat:false, trips:0, driverWagePerTrip:0, wageQualifyingTripsOverride:null,
-      commercialTrips:[], buyIncludesVat:false, sellIncludesVat:false });
+      commercialTrips:[], buyIncludesVat:false, sellIncludesVat:false, buyHasInvoice:false, sellHasInvoice:false });
     renderSiteRows(); updateSummary();
   });
 
