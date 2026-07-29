@@ -6460,10 +6460,42 @@ function renderSettings(){
           <div class="formula-divider" style="margin:10px 0;"></div>
           <div class="summary-row"><span>💰 Tiền lãi đã trả tính đến nay (${r.elapsedMonths} kỳ)</span><span class="val">${fmtVND(interestPaidSoFar)}</span></div>
           <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
+          ${r.isPaidOff ? '' : `
+          <div class="formula-divider" style="margin:10px 0;"></div>
+          ${(loanDraft.lastPaidMonth===todayLocalDateStr().slice(0,7))
+            ? `<div class="summary-row" style="color:var(--profit); font-weight:700;"><span>✅ Đã ghi nhận trả ngân hàng tháng ${todayLocalDateStr().slice(5,7)}/${todayLocalDateStr().slice(0,4)}</span><span class="val"></span></div>
+               <button class="btn btn-ghost btn-sm btn-block" id="loanUnpaidBtn" style="margin-top:8px;">↩︎ Bỏ ghi nhận (chưa trả)</button>`
+            : `<button class="btn btn-primary btn-block" id="loanMarkPaidBtn" style="margin-top:4px;">✅ Đã Trả Tiền Ngân Hàng Tháng Này</button>
+               <div class="hint" style="margin-top:6px;">Bấm để ghi nhận đã đóng tiền ngân hàng cho tháng hiện tại — tắt cảnh báo nhắc đóng. Bấm được bất cứ lúc nào, không cần chờ tới gần hạn.</div>`}
+          `}
         `;
       }
     }
     renderLoanFullSchedule();
+    bindLoanPaidButtons();
+  }
+  // Nút ghi nhận / bỏ ghi nhận đã trả ngân hàng — LUÔN có trong Cài Đặt để
+  // Ông Chủ chủ động, không phụ thuộc cảnh báo (cảnh báo chỉ hiện gần hạn).
+  function bindLoanPaidButtons(){
+    const curYM = todayLocalDateStr().slice(0,7);
+    const paidBtn = document.getElementById('loanMarkPaidBtn');
+    if(paidBtn) paidBtn.addEventListener('click', async ()=>{
+      loanDraft.lastPaidMonth = curYM;
+      if(state.settings.bankLoan) state.settings.bankLoan.lastPaidMonth = curYM;
+      await saveSettings();
+      showToast('Đã ghi nhận trả ngân hàng tháng này.');
+      renderLoanPreview();
+      if(state.currentTab==='shifts') renderShiftList();
+    });
+    const unpaidBtn = document.getElementById('loanUnpaidBtn');
+    if(unpaidBtn) unpaidBtn.addEventListener('click', async ()=>{
+      loanDraft.lastPaidMonth = null;
+      if(state.settings.bankLoan) state.settings.bankLoan.lastPaidMonth = null;
+      await saveSettings();
+      showToast('Đã bỏ ghi nhận — sẽ nhắc đóng lại.');
+      renderLoanPreview();
+      if(state.currentTab==='shifts') renderShiftList();
+    });
   }
   // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
   // computeFullLoanSchedule() (cùng công thức, không tính lại kiểu khác) để
