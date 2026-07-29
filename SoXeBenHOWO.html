@@ -1269,7 +1269,15 @@ function vatRateFraction(){ return (Number(state.settings.vatRatePercent)||0)/10
 // dòng chuyến đã khai (mỗi dòng 1 chuyến, vì khối lượng mua/bán mỗi chuyến
 // khác nhau nên phải khai riêng từng chuyến).
 function siteTripCount(s){
-  if(s.siteType==='commercial') return (s.commercialTrips||[]).length;
+  if(s.siteType==='commercial'){
+    // Chỉ tính là 1 chuyến khi đã nhập ĐỦ dữ liệu MUA (khối lượng + giá) VÀ
+    // BÁN (khối lượng + giá) — vì mỗi chuyến khối lượng khác nhau, chỉ khi
+    // đủ 4 số mới coi là 1 chuyến hoàn chỉnh.
+    return (s.commercialTrips||[]).filter(t=>
+      (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+      (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0)
+    ).length;
+  }
   return Number(s.trips)||0;
 }
 // DOANH THU công trình:
@@ -6445,7 +6453,7 @@ function renderSettings(){
         const interestTotalLife = schedule.reduce((sum,row)=>sum+row.interest, 0);
         wrap.innerHTML = `
           <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${r.annualRatePercent.toFixed(2)}%/năm</span></div>
-          <div class="summary-row"><span>Đã vay được (tự tính từ Ngày Giải Ngân)</span><span class="val">${r.elapsedMonths} / ${r.termMonths} tháng</span></div>
+          <div class="summary-row"><span>Số kỳ đã trả ngân hàng</span><span class="val">${((state.settings.bankLoan&&Array.isArray(state.settings.bankLoan.paidMonths))?state.settings.bankLoan.paidMonths.length:0)} / ${r.termMonths} kỳ</span></div>
           <div class="summary-row"><span>Dư nợ còn lại</span><span class="val">${fmtVND(r.remainingBalance)}</span></div>
           ${r.isPaidOff ? `
           <div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>
@@ -6484,9 +6492,19 @@ function renderSettings(){
       if(!paid && !unpaid) return;
       const curYM = todayLocalDateStr().slice(0,7);
       if(!state.settings.bankLoan) state.settings.bankLoan = {};
-      state.settings.bankLoan.lastPaidMonth = paid ? curYM : null;
-      showToast(paid ? 'Đã ghi nhận trả ngân hàng tháng này.' : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.');
-      if(state.currentTab==='settings') renderAll();       // vẽ lại Cài Đặt để đổi nút/trạng thái
+      const bl = state.settings.bankLoan;
+      // Danh sách các kỳ (tháng) đã thực trả — số kỳ = độ dài mảng này.
+      // Tương thích ngược: nếu trước đây chỉ có lastPaidMonth thì gộp vào mảng.
+      if(!Array.isArray(bl.paidMonths)) bl.paidMonths = bl.lastPaidMonth ? [bl.lastPaidMonth] : [];
+      if(paid){
+        if(!bl.paidMonths.includes(curYM)) bl.paidMonths.push(curYM);
+        bl.lastPaidMonth = curYM;
+      } else {
+        bl.paidMonths = bl.paidMonths.filter(m=>m!==curYM);
+        bl.lastPaidMonth = bl.paidMonths.length ? bl.paidMonths[bl.paidMonths.length-1] : null;
+      }
+      showToast(paid ? `Đã ghi nhận trả kỳ này (tổng ${bl.paidMonths.length} kỳ đã trả).` : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.');
+      if(state.currentTab==='settings') renderAll();
       else if(state.currentTab==='shifts') renderShiftList();
       try { await saveSettings(); } catch(err){ console.error('Lưu trạng thái trả NH lỗi:', err); }
     });
