@@ -450,7 +450,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-07-29 · #42';
+const APP_BUILD = '2026-07-29 · #44';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2871,7 +2871,7 @@ function openDriverDetail(driverId){
   const inRange = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
   const activeShifts = inRange.filter(sh=>sh.status==='active');
   const activeDates = new Set(activeShifts.map(sh=>sh.date));
-  const totalTrips = activeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalTrips = activeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalKm = activeShifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
   const totalRevenue = activeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
   // Lợi nhuận RÒNG mà tài xế này tạo ra trong kỳ — cộng dồn đúng
@@ -3167,9 +3167,14 @@ function aggregateStrategyData(from, to){
     fuelPerKm: d.km>0 ? +(d.fuelLiters/d.km).toFixed(3) : 0
   }));
 
-  const siteRanking = computeSiteRanking(inRange).map(s=>({
-    name: s.name, revenue: Math.round(s.revenue), trips: s.trips, revenuePerTrip: Math.round(s.revenuePerTrip)
-  }));
+  const todayStr = todayLocalDateStr();
+  const siteRanking = computeSiteRanking(inRange).map(s=>{
+    const last = lastActivityDateForSite(s.name);
+    const daysSince = last ? daysBetweenDates(last, todayStr) : null;
+    const ended = (daysSince!==null && daysSince>=5); // quá 5 ngày không nhập số liệu = coi như đã kết thúc công trình
+    return { name: s.name, revenue: Math.round(s.revenue), trips: s.trips, revenuePerTrip: Math.round(s.revenuePerTrip),
+             lastActivityDate: last, daysSinceLastActivity: daysSince, status: ended ? 'da_ket_thuc' : 'dang_chay' };
+  });
 
   // Lịch Bảo Dưỡng Định Kỳ (Cài Đặt) là nguồn ĐÚNG cho tư vấn bảo dưỡng —
   // mỗi hạng mục (dầu máy, lốp, xích...) đã có sẵn km còn lại tính riêng,
@@ -3240,7 +3245,7 @@ Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính ch
 
 ${JSON.stringify(summary, null, 2)}
 
-YÊU CẦU BẮT BUỘC: "siteAnalysis" phải có ĐỦ từng công trình xuất hiện trong summary.siteRanking (không được bỏ sót, không giới hạn số lượng, không chỉ chọn tốt nhất/tệ nhất). "driverAnalysis" phải có ĐỦ từng tài xế xuất hiện trong summary.driverStats. Nếu 1 công trình hay tài xế không có gì đặc biệt để nói, vẫn phải có mặt với ghi chú ngắn kiểu "Hoạt động bình thường, chưa có gì bất thường".
+YÊU CẦU BẮT BUỘC: "siteAnalysis" phải có ĐỦ từng công trình xuất hiện trong summary.siteRanking (không được bỏ sót, không giới hạn số lượng, không chỉ chọn tốt nhất/tệ nhất). LƯU Ý QUAN TRỌNG: mỗi công trình có trường "status" — nếu status là "da_ket_thuc" (không có số liệu mới từ 5 ngày trở lên, xem daysSinceLastActivity) thì đó là công trình ĐÃ KẾT THÚC: hãy nhận xét như một công trình đã hoàn thành (tổng kết hiệu quả), TUYỆT ĐỐI không đánh giá "cần chú ý" chỉ vì nó ngừng phát sinh số liệu, và không nhắc nhở kiểu "sao mấy hôm nay không chạy". Chỉ công trình status "dang_chay" mới xét tính liên tục/hiệu suất hiện tại. "driverAnalysis" phải có ĐỦ từng tài xế xuất hiện trong summary.driverStats.
 
 Hãy phân tích và CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
 {
@@ -3537,7 +3542,7 @@ function historicalAvgFuelPerKm(){
 /// trình dự kiến theo đúng "thông số hiện tại đang vận hành".
 function historicalAvgWagePerTrip(){
   const shifts = operationalShifts();
-  const totalTrips = shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalTrips = shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalWage = shifts.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
   return totalTrips>0 ? totalWage/totalTrips : 0;
 }
@@ -4414,7 +4419,7 @@ function computeResultsGroup(shifts){
   const grossProfit = revenue - opCost;
   const margin = revenue>0 ? (grossProfit/revenue*100) : 0;
   const totalKm = shifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
-  const totalTrips = shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalTrips = shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const fuelLiters = shifts.reduce((s,sh)=>s+shiftFuelConsumed(sh),0);
   const fuelCost = shifts.reduce((s,sh)=>s+shiftFuelCost(sh),0);
   const fuelPerKm = totalKm>0 ? fuelCost/totalKm : 0;
@@ -4490,7 +4495,7 @@ function renderComparisonChartSVG(gDay, gNight){
 function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal, otherFixedMonthly=0){
   const dayShifts = inRangeShifts.filter(sh=>sh.shiftType==='day');
   const nightShifts = inRangeShifts.filter(sh=>sh.shiftType==='night');
-  const tripsOf = shifts => shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const tripsOf = shifts => shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const revenueOf = shifts => shifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
 
   const dayTrips = tripsOf(dayShifts), nightTrips = tripsOf(nightShifts);
@@ -4547,7 +4552,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const fromDate = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth()+1).padStart(2,'0')}-${String(fromDateObj.getDate()).padStart(2,'0')}`;
   const excludedShiftIds = getExcludedRecentShiftIds();
   const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id));
-  const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+  const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
   const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0),0);
 
@@ -4566,7 +4571,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const dayOfMonth = now.getDate();
   const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
   const tripsSoFarThisMonth = state.shifts.filter(sh=>sh.date.slice(0,7)===today.slice(0,7) && !excludedShiftIds.has(sh.id))
-    .reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+(Number(l.trips)||0),0),0);
+    .reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const projectedTotalTripsThisMonth = tripsSoFarThisMonth + tripsPerDay*daysRemaining;
   const remainingTripsNeeded = Math.max(0, breakEvenTrips - tripsSoFarThisMonth);
   const neededPacePerRemainingDay = daysRemaining>0 ? remainingTripsNeeded/daysRemaining : null;
@@ -4696,6 +4701,19 @@ function computeDailyBreakdown(inRangeShifts){
 }
 
 // ---- Site profitability ranking (revenue per trip, proxy for site value) ----
+// Ngày gần nhất có ghi số liệu cho 1 công trình (theo tên) — dùng để biết
+// công trình đã "ngủ" bao lâu. Quá 5 ngày không nhập gì coi như đã kết thúc.
+function lastActivityDateForSite(siteName){
+  let latest = null;
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
+      if(name!==siteName) continue;
+      if(!latest || sh.date>latest) latest = sh.date;
+    }
+  }
+  return latest;
+}
 function computeSiteRanking(inRangeShifts){
   const bySite = {};
   for(const sh of inRangeShifts){
@@ -4703,7 +4721,7 @@ function computeSiteRanking(inRangeShifts){
       const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
       if(!bySite[name]) bySite[name] = { name, revenue:0, trips:0 };
       bySite[name].revenue += siteRevenue(s);
-      bySite[name].trips += Number(s.trips)||0;
+      bySite[name].trips += siteTripCount(s);
     }
   }
   return Object.values(bySite)
@@ -4736,10 +4754,10 @@ function computeSiteDetail(siteName, from, to){
       const rev = siteRevenue(s);
       const cost = siteWageTotal(s);
       if(!tripsByDriver[driverName]) tripsByDriver[driverName] = { trips:0, revenue:0, cost:0 };
-      tripsByDriver[driverName].trips += Number(s.trips)||0;
+      tripsByDriver[driverName].trips += siteTripCount(s);
       tripsByDriver[driverName].revenue += rev;
       tripsByDriver[driverName].cost += cost;
-      dailyActivity.push({ date: sh.date, driverName, trips: Number(s.trips)||0, volumePerTrip: s.volumePerTrip||0, revenue: rev, cost });
+      dailyActivity.push({ date: sh.date, driverName, trips: siteTripCount(s), volumePerTrip: s.volumePerTrip||0, revenue: rev, cost });
     }
   }
   dailyActivity.sort((a,b)=>a.date.localeCompare(b.date));
@@ -6208,6 +6226,13 @@ function computeFullLoanSchedule(loan){
   for(let i=0;i<termMonths;i++) rows.push(computeLoanPeriod(loanForCalc, i, dueDates));
   return rows;
 }
+function loanPaidPeriodsCount(){
+  const bl = state.settings.bankLoan;
+  if(!bl) return 0;
+  if(Array.isArray(bl.paidMonths)) return bl.paidMonths.length;
+  // Tương thích ngược: bản cũ chỉ lưu lastPaidMonth (1 kỳ) → đếm là 1.
+  return bl.lastPaidMonth ? 1 : 0;
+}
 function computeBankLoanAmortization(loan, refDate){
   refDate = refDate || new Date();
   const principal = Number(loan && loan.principal)||0;
@@ -6461,12 +6486,17 @@ function renderSettings(){
         wrap.innerHTML = `<div class="hint" style="margin:0;">Nhập đủ Số tiền vay, Thời hạn vay, Ngày giải ngân và ít nhất 1 mức lãi ở Lộ Trình Lãi Suất để app tự tính Gốc+Lãi hàng tháng theo dư nợ giảm dần.</div>`;
       } else {
         const schedule = computeFullLoanSchedule(loanDraft);
-        const interestPaidSoFar = schedule.filter(row=>row.periodIndex < r.elapsedMonths).reduce((sum,row)=>sum+row.interest, 0);
+        const paidCount = loanPaidPeriodsCount();
+        // "Đã trả" tính theo SỐ KỲ ÔNG CHỦ ĐÃ GHI NHẬN TRẢ (paidCount), không
+        // theo lịch — để nhất quán: đã bấm trả 1 kỳ thì lãi đã trả = lãi kỳ 1,
+        // dư nợ còn lại = dư nợ sau kỳ 1.
+        const interestPaidSoFar = schedule.filter(row=>row.periodIndex < paidCount).reduce((sum,row)=>sum+row.interest, 0);
         const interestTotalLife = schedule.reduce((sum,row)=>sum+row.interest, 0);
+        const remainingByPaid = (paidCount>0 && schedule[paidCount-1]) ? schedule[paidCount-1].remainingBalanceAfter : r.remainingBalance;
         wrap.innerHTML = `
           <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${r.annualRatePercent.toFixed(2)}%/năm</span></div>
-          <div class="summary-row"><span>Số kỳ đã trả ngân hàng</span><span class="val">${((state.settings.bankLoan&&Array.isArray(state.settings.bankLoan.paidMonths))?state.settings.bankLoan.paidMonths.length:0)} / ${r.termMonths} kỳ</span></div>
-          <div class="summary-row"><span>Dư nợ còn lại</span><span class="val">${fmtVND(r.remainingBalance)}</span></div>
+          <div class="summary-row"><span>Số kỳ đã trả ngân hàng</span><span class="val">${paidCount} / ${r.termMonths} kỳ</span></div>
+          <div class="summary-row"><span>Dư nợ còn lại (sau ${paidCount} kỳ đã trả)</span><span class="val">${fmtVND(remainingByPaid)}</span></div>
           ${r.isPaidOff ? `
           <div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>
           ` : `
@@ -6478,7 +6508,7 @@ function renderSettings(){
           <div class="hint" style="margin-top:6px;">Số này tự động dùng làm "Gốc + lãi vay ngân hàng/tháng" cho toàn bộ app — sẽ tự đổi đúng theo từng kỳ thực tế (số ngày khác nhau mỗi tháng), Ông Chủ không cần vào đây sửa tay hàng tháng.</div>
           `}
           <div class="formula-divider" style="margin:10px 0;"></div>
-          <div class="summary-row"><span>💰 Tiền lãi đã trả tính đến nay (${r.elapsedMonths} kỳ)</span><span class="val">${fmtVND(interestPaidSoFar)}</span></div>
+          <div class="summary-row"><span>💰 Tiền lãi đã trả tính đến nay (${paidCount} kỳ)</span><span class="val">${fmtVND(interestPaidSoFar)}</span></div>
           <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
           ${r.isPaidOff ? '' : `
           <div class="formula-divider" style="margin:10px 0;"></div>
