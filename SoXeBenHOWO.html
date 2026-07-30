@@ -2525,12 +2525,25 @@ function updateSummary(){
   const revenue = shiftTotalRevenue(sh);
   const cost = shiftTotalCost(sh);
   const profit = shiftNetProfit(sh);
+  // Đúng các khoản đã cộng bên trong shiftTotalCost() — liệt kê riêng từng
+  // dòng thay vì gộp thẳng vào "Tổng chi phí", để Ông Chủ nhìn là hiểu ngay
+  // tiền đi đâu, không phải tự cộng tay. Chỉ hiện dòng nào > 0 cho gọn.
+  const costItems = [
+    { label:'Tiền dầu tiêu hao', value: shiftFuelCost(sh) },
+    { label:'Lương chuyến', value: shiftTotalTripWage(sh) },
+    { label:'Lương cứng phân bổ', value: Number(sh.baseSalaryAllocation)||0 },
+    { label:'Tiền ăn', value: Number(sh.foodAllowance)||0 },
+    { label:'Tiền nhà phân bổ', value: Number(sh.housingAllocation)||0 },
+    { label:'Chi phí phát sinh', value: Number(sh.incidentalCost)||0 },
+    { label:'Tiền luật phát sinh', value: Number(sh.roadFeeIncidental)||0 }
+  ];
   document.getElementById('summaryCard').innerHTML = `
     <div class="summary-row"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
-    <div class="summary-row"><span>Tiền dầu tiêu hao</span><span class="val">${fmtVND(shiftFuelCost(sh))}</span></div>
-    <div class="summary-row"><span>Lương chuyến</span><span class="val">${fmtVND(shiftTotalTripWage(sh))}</span></div>
-    <div class="summary-row"><span>Tổng chi phí</span><span class="val">${fmtVND(cost)}</span></div>
-    <div class="summary-row total"><span>Lợi nhuận ròng</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
+    <div class="formula-divider" style="margin:8px 0;"></div>
+    ${costItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
+    <div class="summary-row total"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
+    <div class="formula-divider" style="margin:8px 0;"></div>
+    <div class="summary-row total" style="font-size:16px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
   // Số ODO chạy trong ca is now an editable input (#f_kmDriven), not
   // rebuilt HTML — only push the computed value in when Ông Chủ ISN'T

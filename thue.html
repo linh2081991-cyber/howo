@@ -349,7 +349,20 @@ async function luu(){
 }
 
 /* ══════════ DOANH THU — đọc từ sổ ca, gom theo bí danh ══════════ */
-const dtSite = s => (Number(s.volumePerTrip)||0)*(Number(s.materialUnitPrice)||0)*(Number(s.trips)||0);
+// Doanh thu 1 dòng công trình — 2 kiểu dữ liệu khác nhau tuỳ loại ca:
+//  - Chở cước (mặc định cũ): khối lượng × đơn giá × số chuyến.
+//  - Thương mại (siteType 'commercial', nhập ở app Sổ Xe Ben): mỗi chuyến
+//    khai riêng trong commercialTrips[] — DOANH THU (để tính VAT đầu ra)
+//    là tổng tiền BÁN, không phải lãi gộp (bán − mua). Quy về chưa VAT nếu
+//    đơn giá bán đã nhập gồm VAT, dùng đúng thuế suất "Bán hàng hoá"
+//    (đá/cát/sỏi — sản phẩm khai khoáng, 10%).
+const dtSite = s => {
+  if(s.siteType==='commercial'){
+    const grossSell = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0),0);
+    return s.sellIncludesVat ? grossSell/(1+VAT_HANG/100) : grossSell;
+  }
+  return (Number(s.volumePerTrip)||0)*(Number(s.materialUnitPrice)||0)*(Number(s.trips)||0);
+};
 
 /** Tìm khách theo tên công trình, có xét bí danh. */
 function timKhach(ten){
@@ -380,11 +393,12 @@ function doanhThuThang(ym){
       if(!map[key]){
         const k = timKhach(ten);
         map[key] = { key, ten: k? k.ten : ten, khachId: k? k.id : null,
-                     tenGoc:new Set(), doanhThu:0, chuyen:0 };
+                     tenGoc:new Set(), doanhThu:0, chuyen:0, laThuongMai:false };
       }
       map[key].tenGoc.add(ten);
       map[key].doanhThu += dt;
-      map[key].chuyen += Number(s.trips)||0;
+      map[key].chuyen += s.siteType==='commercial' ? (s.commercialTrips||[]).length : (Number(s.trips)||0);
+      if(s.siteType==='commercial') map[key].laThuongMai = true;
     });
   });
   return Object.values(map).map(x=>({...x, tenGoc:[...x.tenGoc]}))
@@ -409,7 +423,7 @@ const LOAI_GD = {
   cuoc:{ ten:'Chạy cước',    mo:'Dịch vụ vận tải hàng hoá',        suat:VAT_RA  },
   hang:{ ten:'Bán hàng hoá', mo:'Đá, cát, sỏi — sản phẩm khai khoáng', suat:VAT_HANG }
 };
-function loaiDong(ym,x){ const r=traRa(ym,x.key); return (r&&r.loaiGD)||'cuoc'; }
+function loaiDong(ym,x){ const r=traRa(ym,x.key); if(r&&r.loaiGD) return r.loaiGD; return x.laThuongMai ? 'hang' : 'cuoc'; }
 function suatDong(ym,x){
   const r=traRa(ym,x.key);
   if(r && Number(r.thueSuat)>0) return Number(r.thueSuat);
@@ -600,8 +614,8 @@ function canhBao(){
   K.ds.forEach(x=>{
     const r=traRa(ym,x.key);
     if(!r || !r.loaiGD) out.push({nang:false, t:'Chưa chọn loại giao dịch',
-      d:`${esc(x.ten)} — app đang tạm tính là chạy cước ${VAT_RA}%.`,
-      fix:`Nếu là bán đá, cát, sỏi thì phải là ${VAT_HANG}%. Bấm vào dòng đó để chọn.`, go:'ra'});
+      d:`${esc(x.ten)} — app đang tạm tính là ${x.laThuongMai?'bán hàng hoá '+VAT_HANG:'chạy cước '+VAT_RA}%.`,
+      fix:`Bấm vào dòng đó để xác nhận đúng loại — chạy cước ${VAT_RA}% hay bán đá/cát/sỏi ${VAT_HANG}%.`, go:'ra'});
   });
 
   if(K.dtChua>0) out.push({nang:true, t:`Chưa xuất hoá đơn ${vnd(K.dtChua)} đ`,
