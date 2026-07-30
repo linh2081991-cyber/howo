@@ -439,6 +439,7 @@
     <button data-tab="strategy"><span class="ic">🧭</span>Trợ Lý</button>
     <button data-tab="drivers"><span class="ic">👤</span>Tài Xế</button>
     <button data-tab="results"><span class="ic">📊</span>Kết Quả</button>
+    <button data-tab="taxLedger"><span class="ic">🧾</span>Sổ Thuế</button>
     <button data-tab="settings"><span class="ic">⚙️</span>Cài Đặt</button>
   </nav>
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
@@ -450,7 +451,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-07-29 · #44';
+const APP_BUILD = '2026-07-30 · #45';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -798,6 +799,22 @@ function computeInvoiceWarnings(){
   // mới nhất trước cho dễ theo dõi
   out.sort((a,b)=>b.date.localeCompare(a.date));
   return out;
+}
+/// Modal "Chi Tiết" cho khối hóa đơn ở banner cảnh báo tab Ca Làm Việc —
+/// tách riêng danh sách từng chuyến thiếu hóa đơn ra khỏi banner chính để
+/// banner không bị dài trang, nhưng khi Ông Chủ cần xem vẫn đầy đủ y hệt
+/// nội dung cũ (không mất thông tin gì, chỉ đổi chỗ hiển thị).
+function renderInvoiceWarningsModal(invoices){
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${invoices.length})</h3>
+    ${invoices.map(v=>`
+      <div class="kv" style="padding:4px 0;">
+        <span>${formatDateVN(v.date)} — ${escapeHtml(v.siteName)}</span>
+        <span class="rating-badge warn">thiếu ${escapeHtml(v.missing)}</span>
+      </div>`).join('')}
+    <div class="hint" style="margin-top:10px;">Cả 2 bên cuối tháng mới xuất hóa đơn — nhớ đòi hóa đơn MUA (để được khấu trừ VAT) và xuất hóa đơn BÁN. Vào ca tương ứng, tick "Đã nhận/xuất hóa đơn" khi xong.</div>
+  `);
 }
 // Cảnh báo đến hạn đóng lãi ngân hàng — hiện từ ngày 17 (3 ngày trước hạn,
 // nếu hạn là 20) tới hết ngày đến hạn, và tiếp tục hiện QUÁ HẠN nếu chưa
@@ -1523,6 +1540,8 @@ function renderHeader(){
     title.textContent='Trợ Lý'; sub.textContent='Chọn tác vụ cần thực hiện';
   } else if(state.currentTab==='results'){
     title.textContent='Kết Quả Kinh Doanh'; sub.textContent='Theo khoảng thời gian';
+  } else if(state.currentTab==='taxLedger'){
+    title.textContent='Sổ Thuế'; sub.textContent='Hóa đơn, VAT, công nợ mỏ';
   } else {
     title.textContent='Cài Đặt'; sub.textContent='Định mức & tuỳ chỉnh';
   }
@@ -1694,13 +1713,10 @@ function renderShiftList(){
         <button class="btn btn-ghost btn-sm" id="loanPaidBtn" style="margin-top:6px;">✅ Đã Trả Tiền Ngân Hàng</button>
       ` : ''}
       ${warnings.invoices && warnings.invoices.length>0 ? `
-        <div style="font-weight:700; margin-top:10px; margin-bottom:4px;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</div>
-        ${warnings.invoices.map(v=>`
-          <div class="kv" style="padding:4px 0;">
-            <span>${formatDateVN(v.date)} — ${escapeHtml(v.siteName)}</span>
-            <span class="rating-badge warn">thiếu ${escapeHtml(v.missing)}</span>
-          </div>`).join('')}
-        <div class="hint" style="margin-top:4px;">Cả 2 bên cuối tháng mới xuất hóa đơn — nhớ đòi hóa đơn MUA (để được khấu trừ VAT) và xuất hóa đơn BÁN. Vào ca tương ứng, tick "Đã nhận/xuất hóa đơn" khi xong.</div>
+        <div class="kv" style="padding:4px 0; margin-top:10px;">
+          <span style="font-weight:700;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</span>
+          <button class="btn btn-ghost btn-sm" id="invoiceWarningsDetailBtn" style="width:auto; margin-top:0; padding:6px 12px;">📖 Chi Tiết</button>
+        </div>
       ` : ''}
       <button class="link-btn" id="warningsGoToSettingsBtn" style="margin-top:6px;">Quản lý giấy tờ / bảo dưỡng →</button>
     </div>`;
@@ -1833,6 +1849,8 @@ function bindSearchBar(){
   if(clearBtn) clearBtn.addEventListener('click', (e)=>{ e.stopPropagation(); state.searchDate=null; renderShiftList(); });
 }
 function bindWarningsBanner(){
+  const invBtn = document.getElementById('invoiceWarningsDetailBtn');
+  if(invBtn) invBtn.addEventListener('click', ()=>renderInvoiceWarningsModal(computeInvoiceWarnings()));
   const btn = document.getElementById('warningsGoToSettingsBtn');
   if(btn) btn.addEventListener('click', ()=>{ state.currentTab='settings'; renderAll(); });
   const loanBtn = document.getElementById('loanPaidBtn');
@@ -3168,13 +3186,20 @@ function aggregateStrategyData(from, to){
   }));
 
   const todayStr = todayLocalDateStr();
-  const siteRanking = computeSiteRanking(inRange).map(s=>{
-    const last = lastActivityDateForSite(s.name);
-    const daysSince = last ? daysBetweenDates(last, todayStr) : null;
-    const ended = (daysSince!==null && daysSince>=5); // quá 5 ngày không nhập số liệu = coi như đã kết thúc công trình
-    return { name: s.name, revenue: Math.round(s.revenue), trips: s.trips, revenuePerTrip: Math.round(s.revenuePerTrip),
-             lastActivityDate: last, daysSinceLastActivity: daysSince, status: ended ? 'da_ket_thuc' : 'dang_chay' };
-  });
+  // Công trình quá 5 ngày không có ca nào chạy (căn cứ ngày ca làm việc
+  // gần nhất) coi như đã kết thúc/gặp trục trặc — Ông Chủ không còn chạy
+  // nữa. Loại HẲN khỏi dữ liệu gửi Trợ Lý Chiến Lược (không chỉ gắn nhãn
+  // như trước) để AI không nhắc tới, dù trong khoảng ngày đang xem vẫn
+  // còn số liệu cũ của công trình đó. KHÔNG đụng tới bảng công trình bên
+  // tab Kết Quả Kinh Doanh (đó là sổ sách hoạt động trong tháng, tính
+  // riêng bằng computeSiteRanking() ở chỗ khác — giữ nguyên).
+  const siteRanking = computeSiteRanking(inRange)
+    .map(s=>{
+      const last = lastActivityDateForSite(s.name);
+      const daysSince = last ? daysBetweenDates(last, todayStr) : null;
+      return { name: s.name, revenue: Math.round(s.revenue), trips: s.trips, revenuePerTrip: Math.round(s.revenuePerTrip), daysSinceLastActivity: daysSince };
+    })
+    .filter(s => !(s.daysSinceLastActivity!==null && s.daysSinceLastActivity>=5));
 
   // Lịch Bảo Dưỡng Định Kỳ (Cài Đặt) là nguồn ĐÚNG cho tư vấn bảo dưỡng —
   // mỗi hạng mục (dầu máy, lốp, xích...) đã có sẵn km còn lại tính riêng,
@@ -3245,7 +3270,7 @@ Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính ch
 
 ${JSON.stringify(summary, null, 2)}
 
-YÊU CẦU BẮT BUỘC: "siteAnalysis" phải có ĐỦ từng công trình xuất hiện trong summary.siteRanking (không được bỏ sót, không giới hạn số lượng, không chỉ chọn tốt nhất/tệ nhất). LƯU Ý QUAN TRỌNG: mỗi công trình có trường "status" — nếu status là "da_ket_thuc" (không có số liệu mới từ 5 ngày trở lên, xem daysSinceLastActivity) thì đó là công trình ĐÃ KẾT THÚC: hãy nhận xét như một công trình đã hoàn thành (tổng kết hiệu quả), TUYỆT ĐỐI không đánh giá "cần chú ý" chỉ vì nó ngừng phát sinh số liệu, và không nhắc nhở kiểu "sao mấy hôm nay không chạy". Chỉ công trình status "dang_chay" mới xét tính liên tục/hiệu suất hiện tại. "driverAnalysis" phải có ĐỦ từng tài xế xuất hiện trong summary.driverStats.
+YÊU CẦU BẮT BUỘC: "siteAnalysis" phải có ĐỦ từng công trình xuất hiện trong summary.siteRanking (không được bỏ sót, không giới hạn số lượng, không chỉ chọn tốt nhất/tệ nhất) — summary.siteRanking chỉ gồm công trình ĐANG CÒN CHẠY (công trình đã quá 5 ngày không có ca nào đã được loại bỏ sẵn trước khi gửi cho Mày, nên không cần cân nhắc việc "ngừng chạy" nữa). "driverAnalysis" phải có ĐỦ từng tài xế xuất hiện trong summary.driverStats.
 
 Hãy phân tích và CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
 {
@@ -7202,6 +7227,22 @@ function exportCSV(){
 
 // ========================= NAV & INIT =========================
 
+/// Tab "Sổ Thuế" — nhúng nguyên app thue.html (đã có sẵn chế độ nhúng
+/// `?embed=1`: tự ẩn header riêng, đẩy thanh tab con lên đầu để không đè
+/// thanh tab của app này) qua iframe. thue.html dùng ĐÚNG Firebase project
+/// + không gian dữ liệu (howo-29e-69112) nên tự động đăng nhập sẵn (không
+/// cần đăng nhập lại lần 2), và nó tự đọc dữ liệu ca làm việc + tự lưu sổ
+/// thuế riêng trực tiếp qua Firestore của NÓ — hoàn toàn không đụng tới
+/// state/dữ liệu đang chạy của app chính. Nếu chưa upload thue.html lên
+/// cùng thư mục với SoXeBenHOWO.html trên GitHub Pages, tab này sẽ không
+/// tải được — cần đưa 2 file vào chung 1 thư mục khi deploy.
+function renderTaxLedger(){
+  const app = document.getElementById('app');
+  app.style.cssText = 'padding:0; overflow:hidden;';
+  app.innerHTML = `<iframe src="thue.html?embed=1" title="Sổ Thuế"
+    style="width:100%; height:100%; border:none; display:block;"></iframe>`;
+}
+
 function renderAll(){
   recomputeBankLoanMonthlyPayment(); // luôn làm mới Gốc+Lãi/tháng theo đúng dư nợ giảm dần hôm nay TRƯỚC khi bất kỳ tab nào (Kết Quả, Trợ Lý...) đọc state.settings.monthlyLoanPayment
   // Tháng đang "xem lại" (chỉ đọc) mà lại trùng đúng THÁNG HIỆN TẠI THẬT —
@@ -7214,6 +7255,7 @@ function renderAll(){
   }
   renderHeader();
   refreshSiteDatalist();
+  document.getElementById('app').removeAttribute('style'); // xoá style riêng của tab Sổ Thuế (nếu có) trước khi vẽ tab khác
   if(state.currentTab==='shifts'){
     if(state.view==='form') renderShiftForm();
     else if(state.shiftArchiveMonth) renderShiftMonthArchive();
@@ -7224,6 +7266,8 @@ function renderAll(){
     renderStrategyHub();
   } else if(state.currentTab==='results'){
     renderResults();
+  } else if(state.currentTab==='taxLedger'){
+    renderTaxLedger();
   } else {
     renderSettings();
   }
