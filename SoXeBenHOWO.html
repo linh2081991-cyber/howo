@@ -3207,7 +3207,7 @@ function aggregateStrategyData(from, to){
   const siteRanking = computeSiteRanking(inRange)
     .map(s=>{
       const last = lastActivityDateForSite(s.name);
-      const daysSince = last ? daysBetweenDates(last, todayStr) : null;
+      const daysSince = last ? daysBetweenDates(new Date(last+'T00:00:00'), new Date(todayStr+'T00:00:00')) : null;
       return { name: s.name, revenue: Math.round(s.revenue), trips: s.trips, revenuePerTrip: Math.round(s.revenuePerTrip), daysSinceLastActivity: daysSince };
     })
     .filter(s => !(s.daysSinceLastActivity!==null && s.daysSinceLastActivity>=5));
@@ -3382,6 +3382,208 @@ async function runStrategyAnalysis(){
 /// (mô phỏng công trình CHƯA nhận) are two unrelated tasks that just
 /// happened to share a tab before. Neither sub-screen's own logic changes
 /// here — this only decides which one Ông Chủ sees first.
+/// "Có Nên Tuyển Thêm Lái Xe?" — Ông Chủ hiện chỉ có 1 tài xế hoạt động
+/// nên xe mới chạy được ~1 ca/ngày, trong khi chi phí cố định (khấu hao,
+/// lãi vay, bảo hiểm, đăng kiểm) vẫn phải trả đủ 100% dù chạy 1 hay 2 ca.
+/// Mục này so sánh lợi nhuận ròng/tháng giữa kịch bản hiện tại (1 lái) và
+/// kịch bản tuyển thêm 1 lái để chạy đủ CẢ Ca Ngày + Ca Đêm trên CÙNG 1
+/// xe. Lãi gộp/chuyến dùng ĐÚNG số liệu thực tế đã ghi trong sổ (không
+/// suy đoán) — chỉ có 2 khoản Ông Chủ PHẢI tự giả định vì app không có
+/// căn cứ để tính: số chuyến chạy được mỗi ca (phụ thuộc giờ mở cửa điểm
+/// múc/điểm đổ) và mức lương dự kiến trả người mới.
+function computeHiringAdvisorMetrics(draft){
+  const workDays = Number(state.settings.standardWorkDaysPerMonth)||28;
+
+  // ----- Lãi gộp/chuyến thực tế trong khoảng Ông Chủ tự chọn — đúng công
+  // thức đã dùng ở "Dự Đoán Hoà Vốn Cả Tháng" (computeMonthlyBreakEvenProjection),
+  // chỉ tổng quát hoá để nhận khoảng ngày tuỳ ý thay vì cố định 10/30
+  // ngày — không tính lại công thức mới, không đụng hàm gốc. -----
+  const excludedShiftIds = getExcludedRecentShiftIds();
+  const rangeShifts = state.shifts.filter(sh=>sh.date>=draft.from && sh.date<=draft.to && !excludedShiftIds.has(sh.id));
+  const totalTrips = rangeShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
+  const totalRevenue = rangeShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
+  const variableCost = rangeShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0),0);
+  const marginPerTrip = totalTrips>0 ? (totalRevenue-variableCost)/totalTrips : null;
+  const daysInRange = Math.max(1, daysBetweenDates(new Date(draft.from+'T00:00:00'), new Date(draft.to+'T00:00:00'))+1);
+
+  // ----- Chi phí cố định hiện tại của đội xe — đúng số đang dùng ở "Dự
+  // Đoán Hoà Vốn Cả Tháng" (lương cứng + nhà + ăn quy theo ngày công
+  // chuẩn của mọi tài xế đang hoạt động, cộng luật đường + khấu hao/vay/
+  // bảo hiểm/đăng kiểm từ Cài Đặt). -----
+  const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
+  const currentMonthlySalary = activeDrivers.reduce((s,d)=>s+(Number(d.monthlyBaseSalary)||0),0);
+  const currentMonthlyHousing = activeDrivers.reduce((s,d)=>s+(Number(d.monthlyHousingBudget)||0),0);
+  const currentMonthlyFood = activeDrivers.reduce((s,d)=>s+(Number(d.dailyFoodAllowance)||0),0)*workDays;
+  const today = todayLocalDateStr();
+  const monthlyRoadFee = roadFeeForRange(today, today);
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const currentFixedCost = currentMonthlySalary + currentMonthlyHousing + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
+
+  // ----- Kịch bản HIỆN TẠI (1 lái) — quy đổi nhịp độ thực tế trong khoảng
+  // đã chọn ra 1 tháng chuẩn, để so sánh ngang hàng với kịch bản 2 lái -----
+  const avgTripsPerDayActual = totalTrips/daysInRange;
+  const currentMonthlyTrips = avgTripsPerDayActual*workDays;
+  const currentMonthlyProfit = (marginPerTrip!==null) ? Math.round(currentMonthlyTrips*marginPerTrip - currentFixedCost) : null;
+
+  // ----- Kịch bản CÓ 2 LÁI (số chuyến/ca + lương lái mới do Ông Chủ tự
+  // nhập, mặc định = mức tài xế hiện có đang hưởng) -----
+  const tripsPerDay = Math.max(0, Number(draft.tripsPerDayShift)||0);
+  const tripsPerNight = Math.max(0, Number(draft.tripsPerNightShift)||0);
+  const projectedMonthlyTrips = (tripsPerDay+tripsPerNight)*workDays;
+  const newDriverMonthlySalary = Number(draft.newDriverMonthlySalary)||0;
+  const newDriverMonthlyFood = (Number(draft.newDriverDailyFood)||0)*workDays;
+  const newDriverMonthlyHousing = Number(draft.newDriverMonthlyHousing)||0;
+  const newDriverFixedCost = newDriverMonthlySalary + newDriverMonthlyFood + newDriverMonthlyHousing;
+  const projectedFixedCost = currentFixedCost + newDriverFixedCost;
+  const projectedMonthlyProfit = (marginPerTrip!==null) ? Math.round(projectedMonthlyTrips*marginPerTrip - projectedFixedCost) : null;
+
+  const profitIncrease = (currentMonthlyProfit!==null && projectedMonthlyProfit!==null) ? (projectedMonthlyProfit-currentMonthlyProfit) : null;
+  const hasEnoughWork = (tripsPerDay+tripsPerNight)>0;
+
+  return { from:draft.from, to:draft.to, daysInRange, totalTrips, totalRevenue, variableCost, marginPerTrip,
+           workDays, currentFixedCost, avgTripsPerDayActual, currentMonthlyTrips, currentMonthlyProfit,
+           tripsPerDay, tripsPerNight, projectedMonthlyTrips, newDriverMonthlySalary, newDriverMonthlyFood,
+           newDriverMonthlyHousing, newDriverFixedCost, projectedFixedCost, projectedMonthlyProfit,
+           profitIncrease, hasEnoughWork };
+}
+
+/// Nội dung khối kết quả — tách riêng để updatePreview() gọi lại mà không
+/// phải vẽ lại cả trang (giữ nguyên focus đang gõ dở của ô tiền/số chuyến).
+function renderHiringAdvisorPreviewHtml(m){
+  if(m.marginPerTrip===null){
+    return `<div class="hint" style="color:var(--loss);">Không có chuyến nào trong khoảng ${formatDateVN(m.from)} – ${formatDateVN(m.to)} để tính lãi gộp/chuyến thực tế. Chọn khoảng ngày khác có dữ liệu.</div>`;
+  }
+  const positive = m.profitIncrease!==null && m.profitIncrease>=0;
+  return `
+    <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">LÃI GỘP / CHUYẾN THỰC TẾ (${formatDateVN(m.from)} – ${formatDateVN(m.to)})</div>
+    <div class="summary-row"><span>Tổng doanh thu ${m.totalTrips} chuyến</span><span class="val">${fmtVND(m.totalRevenue)}</span></div>
+    <div class="summary-row"><span>− Dầu + lương chuyến + phát sinh + luật đường phát sinh</span><span class="val">${fmtVND(m.variableCost)}</span></div>
+    <div class="summary-row total"><span>LÃI GỘP / CHUYẾN</span><span class="val" style="color:var(--profit);">${fmtVND(m.marginPerTrip)}</span></div>
+
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">KỊCH BẢN HIỆN TẠI (1 LÁI)</div>
+    <div class="summary-row"><span>Nhịp độ thực tế đã chạy</span><span class="val">${m.avgTripsPerDayActual.toFixed(1)} chuyến/ngày</span></div>
+    <div class="summary-row"><span>Quy đổi ${m.workDays} ngày công chuẩn</span><span class="val">${Math.round(m.currentMonthlyTrips)} chuyến/tháng</span></div>
+    <div class="summary-row"><span>Chi phí cố định hiện tại/tháng</span><span class="val">${fmtVND(m.currentFixedCost)}</span></div>
+    <div class="summary-row total"><span>Lợi nhuận ròng/tháng — hiện tại</span><span class="val" style="color:${m.currentMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.currentMonthlyProfit)}</span></div>
+
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">KỊCH BẢN CÓ 2 LÁI (CHẠY ĐỦ NGÀY + ĐÊM)</div>
+    <div class="summary-row"><span>${m.tripsPerDay} chuyến ngày + ${m.tripsPerNight} chuyến đêm × ${m.workDays} ngày công</span><span class="val">${Math.round(m.projectedMonthlyTrips)} chuyến/tháng</span></div>
+    <div class="summary-row"><span>+ Lương cứng lái mới</span><span class="val">${fmtVND(m.newDriverMonthlySalary)}</span></div>
+    <div class="summary-row"><span>+ Tiền ăn lái mới (${m.workDays} ngày công)</span><span class="val">${fmtVND(m.newDriverMonthlyFood)}</span></div>
+    ${m.newDriverMonthlyHousing>0 ? `<div class="summary-row"><span>+ Tiền nhà lái mới</span><span class="val">${fmtVND(m.newDriverMonthlyHousing)}</span></div>` : ''}
+    <div class="summary-row"><span>Tổng chi phí cố định/tháng (đã gồm lái mới)</span><span class="val">${fmtVND(m.projectedFixedCost)}</span></div>
+    <div class="summary-row total"><span>Lợi nhuận ròng/tháng — dự kiến 2 lái</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
+
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <div class="summary-row total" style="font-size:16px;"><span>LỢI NHUẬN TĂNG THÊM NẾU TUYỂN</span><span class="val" style="color:${positive?'var(--profit)':'var(--loss)'}; font-weight:800;">${positive?'+':''}${fmtVND(m.profitIncrease)}/tháng</span></div>
+
+    ${!m.hasEnoughWork ? `<div class="hint" style="color:var(--loss); margin-top:8px;">⚠️ Chưa nhập số chuyến/ca dự kiến ở trên nên chưa tính được kịch bản 2 lái.</div>` : ''}
+    <div class="hint" style="margin-top:10px;">⚠️ Con số này chỉ đúng NẾU thực sự có đủ công trình/việc để lấp đầy ${m.tripsPerDay+m.tripsPerNight} chuyến/ngày liên tục mỗi ngày công — số chuyến/ca phụ thuộc giờ hoạt động thực tế của điểm múc/điểm đổ, đây là phần Ông Chủ tự đánh giá, app không kiểm tra được nguồn việc.</div>
+  `;
+}
+
+/// Trang riêng "Có Nên Tuyển Thêm Lái Xe?" — cùng quy ước full-screen với
+/// Thẩm Định Công Trình (nút back trả về đúng renderAll()+restoreMainScroll()).
+/// Giả định lưu tạm trong state.hiringAdvisorDraft (không lưu Firestore —
+/// đây là công cụ thử số, không phải hồ sơ cần lưu vĩnh viễn).
+function renderHiringAdvisor(){
+  state.strategyView = 'hiring';
+  const app = document.getElementById('app');
+
+  if(!state.hiringAdvisorDraft){
+    const refDriver = state.drivers.find(d=>d.isActive!==false) || state.drivers[0] || {};
+    const r = currentMonthRange();
+    state.hiringAdvisorDraft = {
+      from: r.from, to: r.to,
+      tripsPerDayShift: 3, tripsPerNightShift: 2,
+      newDriverMonthlySalary: Number(refDriver.monthlyBaseSalary)||0,
+      newDriverDailyFood: Number(refDriver.dailyFoodAllowance)||0,
+      newDriverMonthlyHousing: Number(refDriver.monthlyHousingBudget)||0
+    };
+  }
+  const draft = state.hiringAdvisorDraft;
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="hiringBackBtn">← Quay Lại</button>
+    </section>
+
+    <section class="group">
+      <div class="card">
+        <h3 style="margin-top:0;">👥 Có Nên Tuyển Thêm Lái Xe?</h3>
+        <div class="hint">So sánh lợi nhuận ròng/tháng giữa chạy 1 lái (hiện tại) và tuyển thêm 1 lái để chạy đủ cả Ca Ngày + Ca Đêm trên cùng 1 xe. Lãi gộp/chuyến dùng đúng số liệu thực tế đã ghi trong sổ — chỉ số chuyến/ca và lương lái mới là giả định Ông Chủ tự nhập.</div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Khoảng Ngày Lấy Lãi Gộp/Chuyến Thực Tế</h3>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="ha_from" value="${draft.from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="ha_to" value="${draft.to}">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Giả Định Số Chuyến Mỗi Ca</h3>
+      <div class="hint" style="margin-bottom:10px;">Phụ thuộc giờ hoạt động thực tế của điểm múc/điểm đổ — Ông Chủ tự đánh giá theo kinh nghiệm, app không kiểm tra được.</div>
+      <div class="date-range">
+        <div class="field">
+          <label>Số chuyến Ca Ngày dự kiến</label>
+          <input type="number" inputmode="numeric" id="ha_tripsDay" value="${draft.tripsPerDayShift}">
+        </div>
+        <div class="field">
+          <label>Số chuyến Ca Đêm dự kiến</label>
+          <input type="number" inputmode="numeric" id="ha_tripsNight" value="${draft.tripsPerNightShift}">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Lương Dự Kiến Trả Lái Xe Mới</h3>
+      <div class="hint" style="margin-bottom:10px;">Mặc định lấy đúng mức tài xế hiện có đang hưởng — Ông Chủ chỉnh nếu định trả khác.</div>
+      <div class="field">
+        <label>Lương cứng/tháng</label>
+        <input type="text" inputmode="decimal" id="ha_salary">
+      </div>
+      <div class="field">
+        <label>Tiền ăn/ngày công</label>
+        <input type="text" inputmode="decimal" id="ha_food">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Tiền nhà/tháng (bỏ trống nếu không hỗ trợ)</label>
+        <input type="text" inputmode="decimal" id="ha_housing">
+      </div>
+    </section>
+
+    <section class="group">
+      <div class="card" id="ha_preview"></div>
+    </section>
+  `;
+
+  const updatePreview = ()=>{
+    document.getElementById('ha_preview').innerHTML = renderHiringAdvisorPreviewHtml(computeHiringAdvisorMetrics(draft));
+  };
+
+  document.getElementById('hiringBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('ha_from').addEventListener('change', e=>{ draft.from=e.target.value; updatePreview(); });
+  document.getElementById('ha_to').addEventListener('change', e=>{ draft.to=e.target.value; updatePreview(); });
+  document.getElementById('ha_tripsDay').addEventListener('input', e=>{ draft.tripsPerDayShift=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ha_tripsNight').addEventListener('input', e=>{ draft.tripsPerNightShift=Number(e.target.value)||0; updatePreview(); });
+  attachMoneyInput(document.getElementById('ha_salary'), draft.newDriverMonthlySalary, v=>{ draft.newDriverMonthlySalary=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ha_food'), draft.newDriverDailyFood, v=>{ draft.newDriverDailyFood=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ha_housing'), draft.newDriverMonthlyHousing, v=>{ draft.newDriverMonthlyHousing=v; updatePreview(); });
+
+  updatePreview();
+}
+
 function renderStrategyHub(){
   state.strategyView = 'hub';
   const app = document.getElementById('app');
@@ -3402,9 +3604,18 @@ function renderStrategyHub(){
         <button class="btn btn-accent btn-block" id="hubGoAppraisalBtn">🧮 THẨM ĐỊNH CÔNG TRÌNH TRƯỚC KHI NHẬN</button>
       </div>
     </section>
+    <section class="group">
+      <div class="card" style="text-align:center; padding:26px 18px;">
+        <div style="font-size:42px; margin-bottom:8px;">👥</div>
+        <div style="font-weight:700; font-size:15.5px; margin-bottom:6px;">Có Nên Tuyển Thêm Lái Xe?</div>
+        <div class="hint" style="margin-bottom:16px;">So sánh lợi nhuận ròng/tháng giữa chạy 1 lái (hiện tại) và tuyển thêm 1 lái để chạy đủ Ca Ngày + Ca Đêm, dựa trên lãi gộp/chuyến thực tế đã ghi trong sổ.</div>
+        <button class="btn btn-accent btn-block" id="hubGoHiringBtn">👥 CÓ NÊN TUYỂN THÊM LÁI XE?</button>
+      </div>
+    </section>
   `;
   document.getElementById('hubGoStrategyBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategy(); });
   document.getElementById('hubGoAppraisalBtn').addEventListener('click', ()=>{ saveMainScroll(); renderProjectAppraisal(); });
+  document.getElementById('hubGoHiringBtn').addEventListener('click', ()=>{ saveMainScroll(); renderHiringAdvisor(); });
 }
 
 function renderStrategy(){
@@ -6195,6 +6406,9 @@ function openRepairEditor(id){
 /// "Đổi Key", and even then the field always starts EMPTY (never
 /// re-displays the previously saved key), per spec.
 let showGeminiKeyInput = false;
+// Theo dõi listener đo chiều cao khung Sổ Thuế, để gỡ đúng listener cũ mỗi
+// khi rời tab (tránh chồng chất nhiều listener sau nhiều lần bấm qua lại).
+let taxLedgerResizeHandler = null;
 
 // ==== CÔNG CỤ TÍNH GỐC + LÃI VAY NGÂN HÀNG TỰ ĐỘNG (DƯ NỢ GIẢM DẦN) ====
 // Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng
@@ -7249,14 +7463,26 @@ function exportCSV(){
 /// tải được — cần đưa 2 file vào chung 1 thư mục khi deploy.
 function renderTaxLedger(){
   const app = document.getElementById('app');
-  // position:relative + iframe position:absolute;inset:0 thay vì dựa vào
-  // height:100% xuyên qua flex:1 — trên Safari/iOS, % chiều cao của 1 phần
-  // tử con không phải lúc nào cũng "ăn" được chiều cao thật của 1 flex-item
-  // cha, khiến iframe bị co lại rất thấp (chỉ hiện vài dòng đầu rồi cắt
-  // cụt). Neo tuyệt đối vào đúng khung #app luôn cho kích thước đúng.
-  app.style.cssText = 'padding:0; overflow:hidden; position:relative;';
-  app.innerHTML = `<iframe src="thue.html?embed=1" title="Sổ Thuế"
-    style="position:absolute; inset:0; width:100%; height:100%; border:none; display:block;"></iframe>`;
+  app.style.cssText = 'padding:0; overflow:hidden;';
+  app.innerHTML = `<iframe src="thue.html?embed=1" title="Sổ Thuế" id="taxLedgerFrame"
+    style="width:100%; border:none; display:block;"></iframe>`;
+  // Đo chiều cao THẬT bằng JS thay vì dựa vào height:100%/position:absolute
+  // qua flexbox — cách cũ vẫn phụ thuộc hành vi tính % chiều cao của trình
+  // duyệt (không ổn định trên mọi máy, có máy ra 0 khiến trắng cả trang).
+  // Đo trực tiếp header + nav rồi trừ vào chiều cao màn hình luôn cho ra
+  // đúng số px thật, không phụ thuộc CSS mập mờ nào nữa.
+  const header = document.querySelector('header.top');
+  const nav = document.querySelector('nav.tabbar');
+  const frame = document.getElementById('taxLedgerFrame');
+  function sizeTaxLedgerFrame(){
+    if(!frame.isConnected) return; // Ông Chủ đã rời tab này, dừng đo
+    const used = (header?.getBoundingClientRect().height||0) + (nav?.getBoundingClientRect().height||0);
+    frame.style.height = Math.max(window.innerHeight - used, 300) + 'px';
+  }
+  sizeTaxLedgerFrame();
+  if(taxLedgerResizeHandler) window.removeEventListener('resize', taxLedgerResizeHandler);
+  taxLedgerResizeHandler = sizeTaxLedgerFrame;
+  window.addEventListener('resize', taxLedgerResizeHandler);
 }
 
 function renderAll(){
@@ -7272,6 +7498,7 @@ function renderAll(){
   renderHeader();
   refreshSiteDatalist();
   document.getElementById('app').removeAttribute('style'); // xoá style riêng của tab Sổ Thuế (nếu có) trước khi vẽ tab khác
+  if(taxLedgerResizeHandler){ window.removeEventListener('resize', taxLedgerResizeHandler); taxLedgerResizeHandler = null; }
   if(state.currentTab==='shifts'){
     if(state.view==='form') renderShiftForm();
     else if(state.shiftArchiveMonth) renderShiftMonthArchive();
