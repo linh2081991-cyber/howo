@@ -3394,15 +3394,19 @@ async function runStrategyAnalysis(){
 function computeHiringAdvisorMetrics(draft){
   const workDays = Number(state.settings.standardWorkDaysPerMonth)||28;
 
-  // ----- Lãi gộp/chuyến thực tế trong khoảng Ông Chủ tự chọn — đúng công
-  // thức đã dùng ở "Dự Đoán Hoà Vốn Cả Tháng" (computeMonthlyBreakEvenProjection),
-  // chỉ tổng quát hoá để nhận khoảng ngày tuỳ ý thay vì cố định 10/30
-  // ngày — không tính lại công thức mới, không đụng hàm gốc. -----
+  // ----- Lãi gộp/chuyến thực tế trong khoảng Ông Chủ tự chọn — dựa trên
+  // cùng nguồn số liệu với "Dự Đoán Hoà Vốn Cả Tháng"
+  // (computeMonthlyBreakEvenProjection), nhưng CHỈ trừ dầu + lương chuyến
+  // (2 khoản lặp lại đều đặn, lường trước được mỗi chuyến). Theo yêu cầu
+  // Ông Chủ, CỐ Ý không trừ incidentalCost/roadFeeIncidental (chi phí phát
+  // sinh, tiền luật phát sinh, tiền phạt...) vì đây là biến số không lường
+  // trước được — đưa vào sẽ làm méo dự đoán tuyển người. Sửa chữa xe cũng
+  // không đưa vào vì luôn không đều giữa các tháng. -----
   const excludedShiftIds = getExcludedRecentShiftIds();
   const rangeShifts = state.shifts.filter(sh=>sh.date>=draft.from && sh.date<=draft.to && !excludedShiftIds.has(sh.id));
   const totalTrips = rangeShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = rangeShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
-  const variableCost = rangeShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0),0);
+  const variableCost = rangeShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh),0);
   const marginPerTrip = totalTrips>0 ? (totalRevenue-variableCost)/totalTrips : null;
   const daysInRange = Math.max(1, daysBetweenDates(new Date(draft.from+'T00:00:00'), new Date(draft.to+'T00:00:00'))+1);
 
@@ -3457,8 +3461,9 @@ function renderHiringAdvisorPreviewHtml(m){
   return `
     <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">LÃI GỘP / CHUYẾN THỰC TẾ (${formatDateVN(m.from)} – ${formatDateVN(m.to)})</div>
     <div class="summary-row"><span>Tổng doanh thu ${m.totalTrips} chuyến</span><span class="val">${fmtVND(m.totalRevenue)}</span></div>
-    <div class="summary-row"><span>− Dầu + lương chuyến + phát sinh + luật đường phát sinh</span><span class="val">${fmtVND(m.variableCost)}</span></div>
+    <div class="summary-row"><span>− Dầu + lương chuyến (chỉ chi phí lường trước được)</span><span class="val">${fmtVND(m.variableCost)}</span></div>
     <div class="summary-row total"><span>LÃI GỘP / CHUYẾN</span><span class="val" style="color:var(--profit);">${fmtVND(m.marginPerTrip)}</span></div>
+    <div class="hint" style="margin-top:2px;">Không tính sửa chữa, bị phạt, hay chi phí phát sinh khác vào đây — đây là những khoản Ông Chủ không lường trước được, đưa vào sẽ làm méo dự đoán.</div>
 
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">KỊCH BẢN HIỆN TẠI (1 LÁI)</div>
