@@ -214,6 +214,11 @@ const MAC_DINH = {
   diaChi:'Số 46, phố Đa Sỹ, tổ dân phố Đa Sỹ 1, Phường Kiến Hưng, Thành phố Hà Nội',
   giamDoc:'BÙI ĐĂNG LINH', cccd:'001091026947',
   ngayDKKD:'2026-07-09', vonDieuLe:1000000000,
+  // Giai đoạn 01/7–27/7/2026: Ông Chủ tự chạy thuê nhận tiền nét cá nhân,
+  // tiền không qua tài khoản công ty, VAT bên đối tác tự xử lý — không
+  // liên quan gì tới công ty Linh Chí Thành dù đã có ĐKKD từ 09/7. Nên
+  // doanh thu công ty CHỈ tính từ ngày này trở đi, không phải từ ngayDKKD.
+  ngayBatDauDoanhThu:'2026-07-28',
   email:'linh2081991@gmail.com', dienThoai:'0981899926',
 
   bienSo:'29E-691.12', soKhung:'LZZ1EXSB8TN599394', soMay:'D103850260307054507',
@@ -356,9 +361,18 @@ function khoaGom(ten){
   const k = timKhach(ten);
   return k ? 'k:'+k.id : 't:'+chuan(ten);
 }
+/** Chỉ giữ lại ca LÀM SAU ngày bắt đầu tính doanh thu công ty
+    (S.cfg.ngayBatDauDoanhThu) — loại bỏ giai đoạn cá nhân tự chạy thuê
+    trước đó (tiền không qua tài khoản công ty, không liên quan Linh Chí
+    Thành) ra khỏi MỌI phép tính doanh thu/dầu/thuế của sổ này. Nếu chưa
+    cấu hình ngày này (rỗng), giữ nguyên hành vi cũ — tính hết như trước. */
+function companyRevenueShifts(list){
+  const tu = S.cfg.ngayBatDauDoanhThu;
+  return tu ? list.filter(sh=>(sh.date||'')>=tu) : list;
+}
 function doanhThuThang(ym){
   const map = {};
-  shifts.filter(sh=>(sh.date||'').slice(0,7)===ym).forEach(sh=>{
+  companyRevenueShifts(shifts).filter(sh=>(sh.date||'').slice(0,7)===ym).forEach(sh=>{
     (sh.siteLogs||[]).forEach(s=>{
       const ten = (s.siteName||'').trim() || 'Chưa đặt tên công trình';
       const dt = dtSite(s); if(dt<=0) return;
@@ -379,7 +393,7 @@ function doanhThuThang(ym){
 /** Tên công trình xuất hiện trong sổ ca mà chưa gắn với khách nào. */
 function tenLa(){
   const set = new Set();
-  shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>{
+  companyRevenueShifts(shifts).forEach(sh=>(sh.siteLogs||[]).forEach(s=>{
     const t=(s.siteName||'').trim();
     if(t && dtSite(s)>0 && !timKhach(t)) set.add(t);
   }));
@@ -542,7 +556,7 @@ function tinhThue(ym){
 
 /* ══════════ NHIÊN LIỆU ══════════ */
 function dauThang(ym){
-  const sh = shifts.filter(x=>(x.date||'').slice(0,7)===ym);
+  const sh = companyRevenueShifts(shifts).filter(x=>(x.date||'').slice(0,7)===ym);
   let km=0, lit=0;
   sh.forEach(x=>{
     const d = (Number(x.odoEnd)||0)-(Number(x.odoStart)||0);
@@ -704,7 +718,10 @@ function vThang(cb){
   const thieu = K.dtChua>0;
   const dau = thieu?'<span class="stamp bad">CHƯA ĐỦ</span>'
     : (K.dtTong>0?'<span class="stamp">ĐỦ ĐIỀU KIỆN</span>':'<span class="stamp warn">CHƯA CÓ SỐ</span>');
-  return chonThang()+`
+  const tuNgay = S.cfg.ngayBatDauDoanhThu;
+  const ghiChuMoc = (tuNgay && tuNgay.slice(0,7)===thangXem)
+    ? `<div class="note">Sổ này chỉ tính doanh thu/dầu TỪ NGÀY ${dmy(tuNgay)} trở đi — giai đoạn trước đó Ông Chủ tự chạy thuê cá nhân, tiền không qua tài khoản công ty, không tính vào đây. Sửa ở Hồ sơ → Thông tin công ty nếu cần đổi mốc.</div>` : '';
+  return chonThang()+ghiChuMoc+`
   <div class="card declar">${dau}
     <div class="sub">Doanh thu ${nhanThang(thangXem)}</div>
     <div class="big">${vnd(K.dtTong)} đ</div>
@@ -1645,11 +1662,14 @@ function fCty(){ const c=S.cfg;
     <label for="cTen">Tên công ty</label><input id="cTen" value="${esc(c.tenCty)}">
     <label for="cDc">Địa chỉ trụ sở</label><input id="cDc" value="${esc(c.diaChi)}">
     <label for="cBs">Biển số xe</label><input id="cBs" value="${esc(c.bienSo)}">
+    <label for="cTuNgay">Ngày bắt đầu tính doanh thu công ty</label>
+    <input type="date" id="cTuNgay" value="${c.ngayBatDauDoanhThu||''}">
+    <div class="note">Doanh thu/dầu TRƯỚC ngày này sẽ KHÔNG tính vào sổ thuế công ty — dùng cho giai đoạn Ông Chủ tự chạy thuê cá nhân trước khi gắn hẳn xe vào công ty. Để trống nếu muốn tính hết từ đầu.</div>
     <button class="btn acc" onclick="luuCty()">Lưu</button>
     <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
 async function luuCty(){
   Object.assign(S.cfg,{mst:$('#cMst').value.trim(),tenCty:$('#cTen').value.trim(),
-    diaChi:$('#cDc').value.trim(),bienSo:$('#cBs').value.trim()});
+    diaChi:$('#cDc').value.trim(),bienSo:$('#cBs').value.trim(),ngayBatDauDoanhThu:$('#cTuNgay').value||''});
   await luu(); dongModal(); veHeader(); ve(); toast('Đã lưu'); }
 
 function fXe(){ const c=S.cfg;
