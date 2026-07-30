@@ -223,7 +223,6 @@ const MAC_DINH = {
 
   bienSo:'29E-691.12', soKhung:'LZZ1EXSB8TN599394', soMay:'D103850260307054507',
   kieuLoai:'CNHTC ZZ3317N3267E1 — ô tô tải tự đổ 8x4', namSX:2026, taiTrong:15480,
-  hanDangKiem:'2028-06-11', hanBaoHiem:'', hanPhuHieu:'',
 
   giaXeChuaVat:1439814815, vatXe:115185185, giaXeTong:1555000000, vayNganHang:555000000,
   thueSuatRa:VAT_RA, namKhauHao:10, phuongAnXe:'chua', tienThueThang:16600000,
@@ -239,6 +238,10 @@ const MAC_DINH = {
 let S = { cfg:{...MAC_DINH}, khach:[], hopDong:[], invOut:[], invIn:[], bangKe:[], sent:[],
           nhaCC:[], tamUng:[], loHang:[] };
 let shifts = [];
+// Hạn giấy tờ xe (Đăng Kiểm/Bảo Hiểm/Phù Hiệu) — đọc CHUNG từ đúng nơi Ông
+// Chủ đã nhập bên app Sổ Xe Ben (Cài Đặt → Quản lý giấy tờ), không giữ
+// riêng 1 bộ ngày khác ở đây nữa để tránh nhập 2 lần / lệch dữ liệu.
+let vehicleDocs = [];
 let tab='thang', thangXem=null, cheDoCT='hd';
 
 /* ══════════ TIỆN ÍCH ══════════ */
@@ -293,6 +296,13 @@ const thangNay = () => homNay().slice(0,7);
 const dmy = s => s ? s.split('-').reverse().join('/') : '—';
 const nhanThang = ym => `tháng ${Number(ym.slice(5))}/${ym.slice(0,4)}`;
 const soNgay = (a,b) => Math.round((new Date(b)-new Date(a))/86400000);
+/** Hạn giấy tờ xe mới nhất theo loại (Đăng Kiểm/Bảo Hiểm/Phù Hiệu Vận Tải)
+    — lấy đúng từ dữ liệu chung với app Sổ Xe Ben, không phải nhập riêng ở
+    đây. Nếu có nhiều lần gia hạn cùng loại, lấy hạn XA NHẤT (mới gia hạn). */
+function hanGiayToXe(type){
+  const ds = vehicleDocs.filter(x=>x.type===type).map(x=>x.expiryDate).filter(Boolean).sort();
+  return ds.length ? ds[ds.length-1] : '';
+}
 const chuan = s => String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2800)}
 
@@ -365,8 +375,9 @@ const qm = k => `<button class="qm" onclick="event.stopPropagation();hoc('${k}')
 /* ══════════ TẢI / LƯU ══════════ */
 async function tai(){
   try{
-    const [s,t] = await Promise.all([ ref('shifts').get(), ref('taxLedger').get() ]);
+    const [s,t,d] = await Promise.all([ ref('shifts').get(), ref('taxLedger').get(), ref('documents').get() ]);
     shifts = s.exists && Array.isArray(s.data().list) ? s.data().list : [];
+    vehicleDocs = d.exists && Array.isArray(d.data().list) ? d.data().list.filter(x=>x.scope==='vehicle') : [];
     if(t.exists){
       const d = t.data();
       S.cfg = Object.assign({...MAC_DINH}, d.cfg||{});
@@ -733,11 +744,11 @@ function canhBao(){
     d:'Không có định mức thì chi phí dầu không có gì bảo vệ.',
     fix:'Vào Hồ sơ → Định mức nhiên liệu để nhập, rồi in quyết định ký.', go:'hoso'});
 
-  [['hanBaoHiem','Bảo hiểm'],['hanPhuHieu','Phù hiệu xe tải'],['hanDangKiem','Đăng kiểm']]
-  .forEach(([k,ten])=>{
-    const v=S.cfg[k];
+  [['Đăng Kiểm','Đăng kiểm'],['Bảo Hiểm','Bảo hiểm'],['Phù Hiệu Vận Tải','Phù hiệu xe tải']]
+  .forEach(([type,ten])=>{
+    const v=hanGiayToXe(type);
     if(!v){ out.push({nang:false, t:`Chưa nhập hạn ${ten.toLowerCase()}`,
-      d:'App không nhắc được nếu chưa có ngày.', fix:'Vào Hồ sơ nhập ngày hết hạn.', go:'hoso'}); return; }
+      d:'App không nhắc được nếu chưa có ngày.', fix:'Vào Sổ Xe Ben → Cài Đặt → Quản lý giấy tờ để nhập.', go:'hoso'}); return; }
     const con=soNgay(t,v);
     if(con<0) out.push({nang:true, t:`${ten} đã hết hạn`, d:`Hết hạn ${dmy(v)}, quá ${-con} ngày`,
       fix:'Xe chạy trong tình trạng này có thể bị phạt và thu phù hiệu.', go:'hoso'});
@@ -761,7 +772,7 @@ function canhBao(){
 
 /* ══════════ ĐIỀU HƯỚNG ══════════ */
 function go(t){ tab=t; ve(); window.scrollTo(0,0); }
-const TAX_BUILD = '2026-07-30 · #4'; // đổi số này mỗi lần giao bản mới — hiện ngay dưới tên công ty để biết chắc bản đang chạy có phải bản mới nhất không, khỏi đoán mò do cache PWA
+const TAX_BUILD = '2026-07-30 · #5'; // đổi số này mỗi lần giao bản mới — hiện ngay dưới tên công ty để biết chắc bản đang chạy có phải bản mới nhất không, khỏi đoán mò do cache PWA
 function veHeader(){
   $('#hPlate').textContent = S.cfg.bienSo||'—';
   $('#hCo').textContent = S.cfg.tenCty + ' · MST ' + S.cfg.mst + ' · Bản ' + TAX_BUILD;
@@ -876,9 +887,13 @@ function mDamPhan(){
       <div class="row"><span class="lbl" style="color:var(--ink);font-weight:700">Anh thật sự mất</span>
         <span class="val" style="color:var(--loss)">${vnd(K.vatNop)} = ${pct(g)}%</span></div>
     </div>
-    <div class="note">Dầu, lốp, sửa chữa đều có VAT đầu vào. Không xuất hoá đơn ra thì toàn bộ VAT
+    <div class="note">${K.vatVao>0
+      ? `Dầu, lốp, sửa chữa đều có VAT đầu vào. Không xuất hoá đơn ra thì toàn bộ VAT
       đầu vào đó cũng mất theo. Khoảng cách giữa có và không xuất hoá đơn <b>không phải ${K.suat}%</b>,
-      chỉ khoảng <b>${pct(g)}%</b>.</div>
+      chỉ khoảng <b>${pct(g)}%</b>.`
+      : `Hiện Anh <b>chưa nhập hoá đơn mua dầu/lốp/sửa chữa nào</b> (VAT đầu vào khấu trừ đang bằng 0),
+      nên khoảng cách đang bằng đúng thuế suất <b>${K.suat}%</b>. Nhập đủ hoá đơn mua vào ở tab
+      Chứng Từ thì khoảng cách thật sẽ <b>thấp hơn ${K.suat}%</b> — vì phần VAT đầu vào đó được khấu trừ bớt.`}</div>
     <div class="eyebrow">Câu để nói với công trình</div>
     <div class="card"><div class="sub" style="font-style:italic">
       "Anh trả thêm ${pct(Math.ceil(g))}% để lấy hoá đơn. Nhưng anh được khấu trừ ${K.suat}% VAT,
@@ -1621,7 +1636,7 @@ function xuat(loai){
       ['Vốn điều lệ',c.vonDieuLe],['Email',c.email],['Điện thoại',c.dienThoai],['',''],
       ['Biển số xe',c.bienSo],['Kiểu loại',c.kieuLoai],['Số khung',c.soKhung],['Số máy',c.soMay],
       ['Năm sản xuất',c.namSX],['Khối lượng hàng cho phép chở (kg)',c.taiTrong],
-      ['Hạn đăng kiểm',dmy(c.hanDangKiem)],['Hạn bảo hiểm',dmy(c.hanBaoHiem)],['Hạn phù hiệu',dmy(c.hanPhuHieu)],['',''],
+      ['Hạn đăng kiểm',dmy(hanGiayToXe('Đăng Kiểm'))],['Hạn bảo hiểm',dmy(hanGiayToXe('Bảo Hiểm'))],['Hạn phù hiệu',dmy(hanGiayToXe('Phù Hiệu Vận Tải'))],['',''],
       ['Giá xe chưa VAT',c.giaXeChuaVat],['VAT trên hoá đơn mua xe',c.vatXe],['Tổng giá xe',c.giaXeTong],
       ['Hoá đơn mua xe đứng tên',c.giamDoc+' (cá nhân)'],['Dư nợ vay ngân hàng',c.vayNganHang],
       ['Phương án gắn xe vào công ty',pa],['Số năm khấu hao',c.namKhauHao],
@@ -1638,7 +1653,7 @@ function xuat(loai){
 /* ══════════ 5. HỒ SƠ ══════════ */
 function vHoSo(){
   const c=S.cfg, t=homNay();
-  const han=([k,ten])=>{ const v=c[k];
+  const han=([type,ten])=>{ const v=hanGiayToXe(type);
     if(!v) return `<div class="row"><span class="lbl">${ten}</span><span class="chip warn">Chưa nhập</span></div>`;
     const con=soNgay(t,v);
     return `<div class="row"><span class="lbl">${ten}</span><span class="val">
@@ -1665,8 +1680,8 @@ function vHoSo(){
     <div class="sub">${esc(c.kieuLoai)} · sản xuất ${c.namSX}</div>
     <div class="sub">Chở tối đa ${vnd(c.taiTrong)} kg · số khung ${esc(c.soKhung)}</div>
     <hr class="sep">
-    ${han(['hanDangKiem','Đăng kiểm'])}${han(['hanBaoHiem','Bảo hiểm'])}${han(['hanPhuHieu','Phù hiệu xe tải'])}
-    <button class="btn ghost" onclick="fXe()">Sửa hạn giấy tờ</button>
+    ${han(['Đăng Kiểm','Đăng kiểm'])}${han(['Bảo Hiểm','Bảo hiểm'])}${han(['Phù Hiệu Vận Tải','Phù hiệu xe tải'])}
+    <div class="note">Các hạn này lấy tự động từ Sổ Xe Ben → Cài Đặt → Quản lý giấy tờ — sửa/nhập bên đó, không nhập ở đây để tránh lệch dữ liệu.</div>
   </div>
 
   <div class="eyebrow">Khách hàng & công trình ${qm('nhomkhach')}</div>
@@ -1755,19 +1770,6 @@ async function luuCty(){
   Object.assign(S.cfg,{mst:$('#cMst').value.trim(),tenCty:$('#cTen').value.trim(),
     diaChi:$('#cDc').value.trim(),bienSo:$('#cBs').value.trim(),ngayBatDauDoanhThu:$('#cTuNgay').value||''});
   await luu(); dongModal(); veHeader(); ve(); toast('Đã lưu'); }
-
-function fXe(){ const c=S.cfg;
-  moModal(`<h2>Hạn giấy tờ xe</h2>
-    <label for="xDk">Hạn đăng kiểm</label><input type="date" id="xDk" value="${c.hanDangKiem}">
-    <label for="xBh">Hạn bảo hiểm trách nhiệm dân sự</label><input type="date" id="xBh" value="${c.hanBaoHiem}">
-    <label for="xPh">Hạn phù hiệu xe tải</label><input type="date" id="xPh" value="${c.hanPhuHieu}">
-    <div class="note">Đăng kiểm đã lấy sẵn từ giấy chứng nhận: hiệu lực đến 11/06/2028.
-      Bảo hiểm và phù hiệu anh xem trên giấy rồi nhập, app nhắc trước 30 ngày.</div>
-    <button class="btn acc" onclick="luuXe()">Lưu</button>
-    <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
-async function luuXe(){
-  Object.assign(S.cfg,{hanDangKiem:$('#xDk').value,hanBaoHiem:$('#xBh').value,hanPhuHieu:$('#xPh').value});
-  await luu(); dongModal(); ve(); toast('Đã lưu'); }
 
 function fKhach(id, tenGoiY){
   const k = S.khach.find(x=>x.id===id) || {id:uid(),ten:tenGoiY||'',mst:'',diaChi:'',nguoiLienHe:'',
