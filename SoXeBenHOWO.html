@@ -7249,9 +7249,14 @@ function exportCSV(){
 /// tải được — cần đưa 2 file vào chung 1 thư mục khi deploy.
 function renderTaxLedger(){
   const app = document.getElementById('app');
-  app.style.cssText = 'padding:0; overflow:hidden;';
+  // position:relative + iframe position:absolute;inset:0 thay vì dựa vào
+  // height:100% xuyên qua flex:1 — trên Safari/iOS, % chiều cao của 1 phần
+  // tử con không phải lúc nào cũng "ăn" được chiều cao thật của 1 flex-item
+  // cha, khiến iframe bị co lại rất thấp (chỉ hiện vài dòng đầu rồi cắt
+  // cụt). Neo tuyệt đối vào đúng khung #app luôn cho kích thước đúng.
+  app.style.cssText = 'padding:0; overflow:hidden; position:relative;';
   app.innerHTML = `<iframe src="thue.html?embed=1" title="Sổ Thuế"
-    style="width:100%; height:100%; border:none; display:block;"></iframe>`;
+    style="position:absolute; inset:0; width:100%; height:100%; border:none; display:block;"></iframe>`;
 }
 
 function renderAll(){
