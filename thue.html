@@ -244,6 +244,44 @@ let tab='thang', thangXem=null, cheDoCT='hd';
 /* ══════════ TIỆN ÍCH ══════════ */
 const $ = s => document.querySelector(s);
 const uid = () => 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const FILE_GIOI_HAN = 900*1024; // ~900KB gốc — sau base64 (+33%) vẫn an toàn dưới hạn 1MB/tài liệu của Firestore
+/** Đọc 1 file (ảnh hoặc PDF) thành base64 để lưu riêng — không đọc thì trả về null. */
+function docFile(file){
+  return new Promise((resolve,reject)=>{
+    if(!file){ resolve(null); return; }
+    if(file.size > FILE_GIOI_HAN){ reject(new Error('File quá lớn (tối đa 900KB) — chụp/nén ảnh nhỏ hơn hoặc chọn PDF dung lượng thấp hơn.')); return; }
+    const r = new FileReader();
+    r.onload = () => resolve({ name:file.name, type:file.type, dataUrl:r.result });
+    r.onerror = () => reject(new Error('Không đọc được file.'));
+    r.readAsDataURL(file);
+  });
+}
+/** Xem file đính kèm ngay trong modal — không dùng window.open() vì Safari
+    hay chặn popup mở sau 1 lệnh await (không còn tính là thao tác trực
+    tiếp của người dùng nữa). */
+async function xemFileDinhKem(key){
+  try{
+    const snap = await ref('file_'+key).get();
+    if(!snap.exists){ toast('Không tìm thấy file.'); return; }
+    const f = snap.data();
+    moModal(`<h2>${esc(f.name)}</h2>
+      ${f.type==='application/pdf'
+        ? `<iframe src="${f.dataUrl}" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px"></iframe>`
+        : `<img src="${f.dataUrl}" style="width:100%;border-radius:8px">`}
+      <button class="btn ghost" style="margin-top:12px" onclick="dongModal()">Đóng</button>`);
+  }catch(e){ toast('Không mở được file.'); }
+}
+async function xoaFileDinhKemUI(loai, id){
+  if(!confirm('Xoá file đính kèm này?')) return;
+  try{
+    await ref('file_'+loai+'_'+id).delete();
+    const arr = loai==='khach'?S.khach:S.hopDong;
+    const o = arr.find(x=>x.id===id); if(o) o.tenFileDinhKem='';
+    await luu();
+    toast('Đã xoá file.');
+    if(loai==='khach') fKhach(id); else fHD(id);
+  }catch(e){ toast('Không xoá được file.'); }
+}
 const vnd = n => (Math.round(Number(n)||0)).toLocaleString('vi-VN');
 const pct = n => (Math.round((Number(n)||0)*10)/10).toLocaleString('vi-VN');
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -545,9 +583,13 @@ function tinhThue(ym){
   const dtTong = ds.reduce((t,x)=>t+x.doanhThu,0);
   const dtDaXuat = ds.filter(x=>daXuat(ym,x.key)).reduce((t,x)=>t+x.doanhThu,0);
   const dtChua = dtTong - dtDaXuat;
-  const suat = Number(S.cfg.thueSuatRa)||VAT_RA;
-  // Mỗi dòng một thuế suất riêng — không gộp một mức cho tất cả nữa.
   const vatRa = ds.reduce((t,x)=> t + x.doanhThu*suatDong(ym,x)/100, 0);
+  // K.suat = thuế suất THẬT SỰ đang áp dụng (tính ngược từ vatRa/dtTong),
+  // không phải một mức mặc định cứng — vatRa đã tính đúng riêng từng dòng
+  // theo suatDong() từ lâu, nhưng nhãn hiển thị "suat" trước đây vẫn lấy
+  // mức mặc định cấu hình (thường lệch nếu doanh thu không phải 100% cước
+  // 8%). Giờ nhãn luôn khớp đúng số tiền đã hiển thị bên cạnh.
+  const suat = dtTong>0 ? vatRa/dtTong*100 : (Number(S.cfg.thueSuatRa)||VAT_RA);
   const dtHang = ds.filter(x=>loaiDong(ym,x)==='hang').reduce((t,x)=>t+x.doanhThu,0);
   const dtCuoc = dtTong - dtHang;
 
@@ -587,16 +629,27 @@ function dauThang(ym){
 const cuoiThang = (y,m) => new Date(y, m, 0).toISOString().slice(0,10);
 function hanThue(){
   const t=homNay(), y=new Date().getFullYear(), out=[];
+  const ngayLap = S.cfg.ngayDKKD||''; // công ty chỉ có nghĩa vụ thuế TỪ ngày này, không phải từ đầu năm
   for(let q=1;q<=4;q++){
     const m=q*3+1, yy=m>12?y+1:y, mm=m>12?1:m;
+    // Quý này công ty có tồn tại dù chỉ 1 ngày không? So ngày CUỐI quý
+    // (tháng q*3 của năm y) với ngày thành lập — nếu quý kết thúc TRƯỚC
+    // khi công ty tồn tại thì bỏ hẳn quý đó, không cảnh báo thừa.
+    const ngayCuoiQuy = cuoiThang(y, q*3);
+    if(ngayLap && ngayCuoiQuy < ngayLap) continue;
     out.push({ten:`Tờ khai thuế GTGT quý ${q}/${y}`, ngay:cuoiThang(yy,mm),
       ghi:'Chậm nhất ngày cuối của tháng đầu quý sau.'});
     out.push({ten:`Tạm nộp thuế TNDN quý ${q}/${y}`,
       ngay:`${yy}-${String(mm).padStart(2,'0')}-30`,
       ghi:'Chậm nhất ngày 30 của tháng đầu quý sau.'});
   }
-  out.push({ten:`Quyết toán thuế TNDN & Báo cáo tài chính ${y-1}`, ngay:`${y}-03-31`,
-    ghi:'Kèm phụ lục giao dịch liên kết vì anh có giao dịch với chính công ty mình.'});
+  // Quyết toán năm trước chỉ có nghĩa vụ nếu công ty đã tồn tại (dù chỉ 1
+  // phần) trong năm đó — chưa thành lập thì không có báo cáo tài chính nào
+  // để quyết toán cả.
+  if(!ngayLap || ngayLap<=cuoiThang(y-1,12)){
+    out.push({ten:`Quyết toán thuế TNDN & Báo cáo tài chính ${y-1}`, ngay:`${y}-03-31`,
+      ghi:'Kèm phụ lục giao dịch liên kết vì anh có giao dịch với chính công ty mình.'});
+  }
   return out.filter(h=>soNgay(t,h.ngay)>=-20).sort((a,b)=>a.ngay<b.ngay?-1:1);
 }
 
@@ -708,15 +761,31 @@ function canhBao(){
 
 /* ══════════ ĐIỀU HƯỚNG ══════════ */
 function go(t){ tab=t; ve(); window.scrollTo(0,0); }
+const TAX_BUILD = '2026-07-30 · #4'; // đổi số này mỗi lần giao bản mới — hiện ngay dưới tên công ty để biết chắc bản đang chạy có phải bản mới nhất không, khỏi đoán mò do cache PWA
 function veHeader(){
   $('#hPlate').textContent = S.cfg.bienSo||'—';
-  $('#hCo').textContent = S.cfg.tenCty + ' · MST ' + S.cfg.mst;
+  $('#hCo').textContent = S.cfg.tenCty + ' · MST ' + S.cfg.mst + ' · Bản ' + TAX_BUILD;
+}
+let quayLaiInfo = null;
+function go(t){ quayLaiInfo=null; tab=t; ve(); window.scrollTo(0,0); }
+/** Bấm vào 1 dòng "việc cần xử lý" — nhớ lại đúng tab + vị trí cuộn hiện
+    tại trước khi nhảy sang, để có thể quay lại đúng chỗ vừa bấm vào. */
+function xemCanhBao(t){
+  quayLaiInfo = { tab, scrollY: window.scrollY };
+  tab = t; ve(); window.scrollTo(0,0);
+}
+function thucHienQuayLai(){
+  if(!quayLaiInfo) return;
+  const q = quayLaiInfo; quayLaiInfo = null;
+  tab = q.tab; ve();
+  setTimeout(()=>window.scrollTo(0, q.scrollY), 30);
 }
 function ve(){
   document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current', b.dataset.t===tab));
   const cb=canhBao(), bd=$('#nBadge');
   if(cb.length){bd.hidden=false;bd.textContent=cb.length} else bd.hidden=true;
-  $('#view').innerHTML = ({thang:vThang,ra:vRa,lo:vLo,vao:vVao,bangiao:vBanGiao,hoso:vHoSo})[tab](cb);
+  const nutQuayLai = quayLaiInfo ? `<button class="btn ghost" style="margin-bottom:12px" onclick="thucHienQuayLai()">← Quay lại</button>` : '';
+  $('#view').innerHTML = nutQuayLai + ({thang:vThang,ra:vRa,lo:vLo,vao:vVao,bangiao:vBanGiao,hoso:vHoSo})[tab](cb);
 }
 function chonThang(){
   const ds=[...new Set(shifts.map(s=>(s.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
@@ -789,7 +858,7 @@ function vThang(cb){
   </div>
 
   <div class="eyebrow">${cb.length?cb.length+' việc cần xử lý':'Không có cảnh báo'}</div>
-  ${cb.length ? cb.map(x=>`<div class="card alert ${x.nang?'':'mid'} tap" onclick="go('${x.go}')">
+  ${cb.length ? cb.map(x=>`<div class="card alert ${x.nang?'':'mid'} tap" onclick="xemCanhBao('${x.go}')">
       <div class="t">${x.t}</div><div class="sub" style="margin-top:3px">${x.d}</div>
       <div class="fix">${x.fix}</div></div>`).join('')
    : `<div class="card"><div class="sub">Hồ sơ đang sạch. Giữ nếp: ghi ca mỗi ngày, nhập hoá đơn ngay khi lái xe gửi ảnh.</div></div>`}`;
@@ -1437,6 +1506,7 @@ async function luuBK(){
 async function xoa(kho,id){
   if(!confirm('Xoá dòng này? Không khôi phục được.')) return;
   S[kho]=S[kho].filter(x=>x.id!==id); await luu(); dongModal(); ve();
+  if(kho==='khach'||kho==='hopDong'){ try{ await ref('file_'+kho+'_'+id).delete(); }catch(e){} }
 }
 
 /* ══════════ 4. BÀN GIAO ══════════ */
@@ -1700,8 +1770,8 @@ async function luuXe(){
   await luu(); dongModal(); ve(); toast('Đã lưu'); }
 
 function fKhach(id, tenGoiY){
-  const k = S.khach.find(x=>x.id===id) || {id:null,ten:tenGoiY||'',mst:'',diaChi:'',nguoiLienHe:'',
-    dienThoai:'',nhom:'B',donGiaNet:'',dvt:'',chuKyTT:'',biDanh:tenGoiY?[tenGoiY]:[]};
+  const k = S.khach.find(x=>x.id===id) || {id:uid(),ten:tenGoiY||'',mst:'',diaChi:'',nguoiLienHe:'',
+    dienThoai:'',nhom:'B',donGiaNet:'',dvt:'',chuKyTT:'',biDanh:tenGoiY?[tenGoiY]:[],tenFileDinhKem:''};
   moModal(`<h2>${id?'Sửa khách hàng':'Thêm khách hàng'}</h2>
     ${tenGoiY?`<div class="sub">Đang gắn cho công trình "<b>${esc(tenGoiY)}</b>" trong sổ ca.</div>`:''}
     <input type="hidden" id="kId" value="${k.id||''}">
@@ -1725,21 +1795,34 @@ function fKhach(id, tenGoiY){
     <textarea id="kBd" rows="3" placeholder="Mỗi dòng một cách viết">${esc((k.biDanh||[]).join('\n'))}</textarea>
     <div class="note">Bí danh giúp app gom đúng khi anh gõ tên công trình khác nhau giữa các ca —
       "Hoà Bình", "Hòa Bình", "cty hoà bình" sẽ về một mối.</div>
+    <label>Hồ sơ đính kèm (ảnh hoặc PDF — VD giấy phép, hợp đồng)</label>
+    ${k.tenFileDinhKem?`<div class="row" style="margin-bottom:8px"><span class="lbl">📎 ${esc(k.tenFileDinhKem)}</span>
+      <span class="val"><a href="#" onclick="xemFileDinhKem('khach_${k.id}');return false" style="margin-right:12px">Xem</a><a href="#" onclick="xoaFileDinhKemUI('khach','${k.id}');return false" style="color:var(--loss)">Xoá</a></span></div>`:''}
+    <input type="file" id="kFile" accept="image/*,application/pdf">
+    <div class="note">Ảnh/PDF tối đa 900KB — chụp hoặc nén nhỏ nếu file lớn hơn.</div>
     <button class="btn acc" onclick="luuKhach()">Lưu khách hàng</button>
     ${id?`<button class="del" onclick="xoa('khach','${id}')">Xoá khách này</button>`:''}
     <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
 async function luuKhach(){
   const bd = $('#kBd').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  const o={id:$('#kId').value||uid(), ten:$('#kTen').value.trim(), mst:$('#kMst').value.trim(),
+  const id = $('#kId').value||uid();
+  const cu = S.khach.find(x=>x.id===id);
+  const o={id, ten:$('#kTen').value.trim(), mst:$('#kMst').value.trim(),
     diaChi:$('#kDc').value.trim(), nguoiLienHe:$('#kLh').value.trim(), dienThoai:$('#kDt').value.trim(),
     nhom:$('#kSeg button[aria-pressed="true"]').dataset.v, donGiaNet:num($('#kGia').value),
-    dvt:$('#kDvt').value.trim(), chuKyTT:$('#kCk').value.trim(), biDanh:bd};
+    dvt:$('#kDvt').value.trim(), chuKyTT:$('#kCk').value.trim(), biDanh:bd,
+    tenFileDinhKem:cu?.tenFileDinhKem||''};
   if(!o.ten){ toast('Cần nhập tên khách'); return; }
+  const fileEl = $('#kFile');
+  if(fileEl && fileEl.files[0]){
+    try{ const f = await docFile(fileEl.files[0]); await ref('file_khach_'+id).set(f); o.tenFileDinhKem=f.name; }
+    catch(e){ toast(e.message||'Không lưu được file đính kèm.'); return; }
+  }
   const i=S.khach.findIndex(x=>x.id===o.id); if(i>=0)S.khach[i]=o; else S.khach.push(o);
   await luu(); dongModal(); ve(); toast('Đã lưu khách hàng'); }
 
 function fHD(id){
-  const h = S.hopDong.find(x=>x.id===id) || {id:null,khachId:'',so:'',ngayKy:homNay(),hetHan:'',giaTri:'',ghiChu:''};
+  const h = S.hopDong.find(x=>x.id===id) || {id:uid(),khachId:'',so:'',ngayKy:homNay(),hetHan:'',giaTri:'',ghiChu:'',tenFileDinhKem:''};
   moModal(`<h2>${id?'Sửa hợp đồng':'Thêm hợp đồng vận chuyển'}</h2>
     <input type="hidden" id="hId" value="${h.id||''}">
     <label for="hKh">Khách hàng</label>
@@ -1753,12 +1836,25 @@ function fHD(id){
     <label for="hGhi">Ghi chú</label><input id="hGhi" value="${esc(h.ghiChu)}">
     <div class="note">App nhắc trước 30 ngày khi hợp đồng sắp hết hạn.
       Mẫu hợp đồng vận chuyển đã có trong bộ văn bản, chỉ cần điền và ký.</div>
+    <label>File hợp đồng đã ký (ảnh hoặc PDF)</label>
+    ${h.tenFileDinhKem?`<div class="row" style="margin-bottom:8px"><span class="lbl">📎 ${esc(h.tenFileDinhKem)}</span>
+      <span class="val"><a href="#" onclick="xemFileDinhKem('hopDong_${h.id}');return false" style="margin-right:12px">Xem</a><a href="#" onclick="xoaFileDinhKemUI('hopDong','${h.id}');return false" style="color:var(--loss)">Xoá</a></span></div>`:''}
+    <input type="file" id="hFile" accept="image/*,application/pdf">
+    <div class="note">Ảnh/PDF tối đa 900KB — chụp hoặc nén nhỏ nếu file lớn hơn.</div>
     <button class="btn acc" onclick="luuHD()">Lưu hợp đồng</button>
     ${id?`<button class="del" onclick="xoa('hopDong','${id}')">Xoá hợp đồng này</button>`:''}
     <button class="btn ghost" onclick="dongModal()">Đóng</button>`); }
 async function luuHD(){
-  const o={id:$('#hId').value||uid(), khachId:$('#hKh').value, so:$('#hSo').value.trim(),
-    ngayKy:$('#hKy').value, hetHan:$('#hHan').value, giaTri:num($('#hGt').value), ghiChu:$('#hGhi').value.trim()};
+  const id = $('#hId').value||uid();
+  const cu = S.hopDong.find(x=>x.id===id);
+  const o={id, khachId:$('#hKh').value, so:$('#hSo').value.trim(),
+    ngayKy:$('#hKy').value, hetHan:$('#hHan').value, giaTri:num($('#hGt').value), ghiChu:$('#hGhi').value.trim(),
+    tenFileDinhKem:cu?.tenFileDinhKem||''};
+  const fileEl = $('#hFile');
+  if(fileEl && fileEl.files[0]){
+    try{ const f = await docFile(fileEl.files[0]); await ref('file_hopDong_'+id).set(f); o.tenFileDinhKem=f.name; }
+    catch(e){ toast(e.message||'Không lưu được file đính kèm.'); return; }
+  }
   const i=S.hopDong.findIndex(x=>x.id===o.id); if(i>=0)S.hopDong[i]=o; else S.hopDong.push(o);
   await luu(); dongModal(); ve(); toast('Đã lưu'); }
 

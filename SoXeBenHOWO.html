@@ -452,6 +452,10 @@
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
 const APP_BUILD = '2026-07-30 · #45';
+// Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
+// thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
+// liên quan gì đến APP_BUILD ở trên.
+const TAX_LEDGER_BUILD = '4';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2538,12 +2542,12 @@ function updateSummary(){
     { label:'Tiền luật phát sinh', value: Number(sh.roadFeeIncidental)||0 }
   ];
   document.getElementById('summaryCard').innerHTML = `
-    <div class="summary-row"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
+    <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${costItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
-    <div class="summary-row total"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
+    <div class="summary-row total" style="font-size:15.5px;"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
-    <div class="summary-row total" style="font-size:16px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
+    <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
   // Số ODO chạy trong ca is now an editable input (#f_kmDriven), not
   // rebuilt HTML — only push the computed value in when Ông Chủ ISN'T
@@ -7482,7 +7486,7 @@ function exportCSV(){
 function renderTaxLedger(){
   const app = document.getElementById('app');
   app.style.cssText = 'padding:0; overflow:hidden;';
-  app.innerHTML = `<iframe src="thue.html?embed=1" title="Sổ Thuế" id="taxLedgerFrame"
+  app.innerHTML = `<iframe src="thue.html?embed=1&v=${TAX_LEDGER_BUILD}" title="Sổ Thuế" id="taxLedgerFrame"
     style="width:100%; border:none; display:block;"></iframe>`;
   // Đo chiều cao THẬT bằng JS thay vì dựa vào height:100%/position:absolute
   // qua flexbox — cách cũ vẫn phụ thuộc hành vi tính % chiều cao của trình
