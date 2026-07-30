@@ -800,21 +800,32 @@ function computeInvoiceWarnings(){
   out.sort((a,b)=>b.date.localeCompare(a.date));
   return out;
 }
-/// Modal "Chi Tiết" cho khối hóa đơn ở banner cảnh báo tab Ca Làm Việc —
-/// tách riêng danh sách từng chuyến thiếu hóa đơn ra khỏi banner chính để
-/// banner không bị dài trang, nhưng khi Ông Chủ cần xem vẫn đầy đủ y hệt
-/// nội dung cũ (không mất thông tin gì, chỉ đổi chỗ hiển thị).
-function renderInvoiceWarningsModal(invoices){
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${invoices.length})</h3>
-    ${invoices.map(v=>`
-      <div class="kv" style="padding:4px 0;">
-        <span>${formatDateVN(v.date)} — ${escapeHtml(v.siteName)}</span>
-        <span class="rating-badge warn">thiếu ${escapeHtml(v.missing)}</span>
-      </div>`).join('')}
-    <div class="hint" style="margin-top:10px;">Cả 2 bên cuối tháng mới xuất hóa đơn — nhớ đòi hóa đơn MUA (để được khấu trừ VAT) và xuất hóa đơn BÁN. Vào ca tương ứng, tick "Đã nhận/xuất hóa đơn" khi xong.</div>
-  `);
+/// Trang riêng "Chi Tiết Hóa Đơn Còn Thiếu" — mở như 1 trang đầy đủ (giống
+/// Chi Tiết Tài Xế), không phải popup nhỏ, vì danh sách này có thể dài và
+/// Ông Chủ cần đọc kỹ từng dòng. Quay lại bằng nút back, không phải đóng
+/// popup.
+function openInvoiceWarningsDetail(){
+  saveMainScroll();
+  const invoices = computeInvoiceWarnings();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="invoiceDetailBackBtn">← Quay Lại Ca Làm Việc</button>
+    </section>
+
+    <section class="group">
+      <h3>🧾 Chuyến Hàng Chưa Đủ Hóa Đơn</h3>
+      <div class="hint" style="margin-bottom:12px;">${invoices.length} chuyến trong sổ hiện đang thiếu hóa đơn MUA và/hoặc BÁN — cả 2 bên thường chỉ xuất hóa đơn vào cuối tháng, nên đây là danh sách để Ông Chủ chủ động đòi/xuất, tránh quên mất quyền khấu trừ VAT đầu vào.</div>
+      ${invoices.length===0 ? '<div class="hint">Không còn chuyến nào thiếu hóa đơn.</div>' : invoices.map(v=>`
+        <div class="card" style="padding:12px 14px; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <span style="font-weight:700; font-size:14.5px;">${escapeHtml(v.siteName)}</span>
+            <span class="rating-badge warn">thiếu ${escapeHtml(v.missing)}</span>
+          </div>
+          <div class="hint" style="margin-top:2px;">${formatDateVN(v.date)}</div>
+        </div>`).join('')}
+    </section>`;
+  document.getElementById('invoiceDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
 }
 // Cảnh báo đến hạn đóng lãi ngân hàng — hiện từ ngày 17 (3 ngày trước hạn,
 // nếu hạn là 20) tới hết ngày đến hạn, và tiếp tục hiện QUÁ HẠN nếu chưa
@@ -1713,9 +1724,9 @@ function renderShiftList(){
         <button class="btn btn-ghost btn-sm" id="loanPaidBtn" style="margin-top:6px;">✅ Đã Trả Tiền Ngân Hàng</button>
       ` : ''}
       ${warnings.invoices && warnings.invoices.length>0 ? `
-        <div class="kv" style="padding:4px 0; margin-top:10px;">
-          <span style="font-weight:700;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</span>
-          <button class="btn btn-ghost btn-sm" id="invoiceWarningsDetailBtn" style="width:auto; margin-top:0; padding:6px 12px;">📖 Chi Tiết</button>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:10px 12px; background:#FFF3CD; border-radius:12px;">
+          <span style="font-weight:700; font-size:13.5px; color:#8A6D00;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</span>
+          <button class="btn btn-ghost btn-sm" id="invoiceWarningsDetailBtn" style="flex:none; white-space:nowrap; margin-top:0;">Chi Tiết →</button>
         </div>
       ` : ''}
       <button class="link-btn" id="warningsGoToSettingsBtn" style="margin-top:6px;">Quản lý giấy tờ / bảo dưỡng →</button>
@@ -1850,7 +1861,7 @@ function bindSearchBar(){
 }
 function bindWarningsBanner(){
   const invBtn = document.getElementById('invoiceWarningsDetailBtn');
-  if(invBtn) invBtn.addEventListener('click', ()=>renderInvoiceWarningsModal(computeInvoiceWarnings()));
+  if(invBtn) invBtn.addEventListener('click', openInvoiceWarningsDetail);
   const btn = document.getElementById('warningsGoToSettingsBtn');
   if(btn) btn.addEventListener('click', ()=>{ state.currentTab='settings'; renderAll(); });
   const loanBtn = document.getElementById('loanPaidBtn');
