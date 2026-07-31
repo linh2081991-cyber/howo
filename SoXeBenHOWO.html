@@ -7360,7 +7360,12 @@ async function exportDriverPayslipXLSX(driverId){
   const ws = wb.addWorksheet('Phiếu Lương', {
     pageSetup:{ paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0, margins:{ left:0.5, right:0.5, top:0.6, bottom:0.6, header:0.3, footer:0.3 } }
   });
-  ws.properties.defaultRowHeight = 20; // thoáng hơn mặc định ~15, đỡ cảm giác chữ số dính sát nhau
+  // QUAN TRỌNG: không dựa vào ws.properties.defaultRowHeight — nhiều app
+  // xem file (Numbers, Google Sheets, Excel trên điện thoại...) KHÔNG đọc
+  // giá trị mặc định này, chỉ theo đúng chiều cao đã set RIÊNG cho từng
+  // dòng. Đây là lý do giãn dòng trước đó vẫn chưa ổn dù đã set default —
+  // giờ MỌI dòng đều set chiều cao tay qua nextRow(), không sót dòng nào.
+  const ROW_H = 22;
 
   const FONT='Times New Roman';
   const NUMFMT='#,##0" đ"'; // luôn kèm đơn vị "đ" ngay trong số, khỏi phải đoán cột nào là tiền
@@ -7380,20 +7385,23 @@ async function exportDriverPayslipXLSX(driverId){
     if(opts.border) c.border = { top:{style:'thin',color:{argb:'FFBBBBBB'}}, left:{style:'thin',color:{argb:'FFBBBBBB'}}, bottom:{style:'thin',color:{argb:'FFBBBBBB'}}, right:{style:'thin',color:{argb:'FFBBBBBB'}} };
     return c;
   };
+  // Chốt chiều cao dòng r hiện tại rồi mới sang dòng kế — gọi đúng 1 lần
+  // cho MỖI dòng đã ghi dữ liệu, không sót dòng nào (kể cả dòng trắng).
+  const nextRow = (h)=>{ ws.getRow(r).height = h||ROW_H; r++; };
 
-  merge(r,'A',lastColLetter); setCell(`A${r}`, 'PHIẾU LƯƠNG TÀI XẾ', { size:16, bold:true, align:'center' }); ws.getRow(r).height=24; r++;
-  merge(r,'A',lastColLetter); setCell(`A${r}`, 'Xe 29E-691.12', { size:14, align:'center', color:'FF666666' }); r++;
-  r++;
-  merge(r,'A','C'); setCell(`A${r}`, 'Họ tên tài xế:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, driverName, { border:true }); ws.getRow(r).height=22; r++;
-  merge(r,'A','C'); setCell(`A${r}`, 'Kỳ lương:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${formatDateVN(from)} — ${formatDateVN(to)}`, { border:true }); ws.getRow(r).height=22; r++;
-  merge(r,'A','C'); setCell(`A${r}`, 'Số ca đi làm:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${counts.paidCount} ca` + (counts.onLeaveCount?` · Nghỉ phép: ${counts.onLeaveCount} ngày`:''), { border:true }); ws.getRow(r).height=22; r++;
-  r++;
+  merge(r,'A',lastColLetter); setCell(`A${r}`, 'PHIẾU LƯƠNG TÀI XẾ', { size:16, bold:true, align:'center' }); nextRow(28);
+  merge(r,'A',lastColLetter); setCell(`A${r}`, 'Xe 29E-691.12', { size:14, align:'center', color:'FF666666' }); nextRow(22);
+  nextRow(12);
+  merge(r,'A','C'); setCell(`A${r}`, 'Họ tên tài xế:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, driverName, { border:true }); nextRow(24);
+  merge(r,'A','C'); setCell(`A${r}`, 'Kỳ lương:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${formatDateVN(from)} — ${formatDateVN(to)}`, { border:true }); nextRow(24);
+  merge(r,'A','C'); setCell(`A${r}`, 'Số ca đi làm:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${counts.paidCount} ca` + (counts.onLeaveCount?` · Nghỉ phép: ${counts.onLeaveCount} ngày`:''), { border:true }); nextRow(24);
+  nextRow(12);
 
-  merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); r++;
+  merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); nextRow(24);
   const headRow = r;
   const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình','Số chuyến','Lương/chuyến','Thành tiền chuyến'];
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
-  ws.getRow(headRow).height=30; r++;
+  nextRow(32);
 
   for(const sh of shiftsForDriver){
     const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
@@ -7401,26 +7409,25 @@ async function exportDriverPayslipXLSX(driverId){
     if(sites.length===0){
       const vals = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), intensityLabel, statusLabel(sh.status), '', '', '', ''];
       vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5?'right':'left') }));
-      r++;
+      nextRow();
     } else {
       sites.forEach((s,idx)=>{
         const vals = [ idx===0?formatDateVN(sh.date):'', idx===0?shiftTypeLabel(sh.shiftType):'',
           idx===0?intensityLabel:'', idx===0?statusLabel(sh.status):'',
           s.siteName||'', siteEffectiveWageTrips(s), Number(s.driverWagePerTrip)||0, siteWageTotal(s) ];
         vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined }));
-        r++;
+        nextRow();
       });
     }
   }
-  r++;
+  nextRow(12);
 
-  merge(r,'A',lastColLetter); setCell(`A${r}`, 'TỔNG KẾT LƯƠNG', { size:14, bold:true }); r++;
+  merge(r,'A',lastColLetter); setCell(`A${r}`, 'TỔNG KẾT LƯƠNG', { size:14, bold:true }); nextRow(24);
   const line = (label, val, opts={})=>{
-    merge(r,'A','E'); const la=setCell(`A${r}`, label, { bold:!!opts.bold, size:opts.size||14, color:opts.color, border:true, fill:opts.fill||'FFFFFFFF' });
+    merge(r,'A','E'); setCell(`A${r}`, label, { bold:!!opts.bold, size:opts.size||14, color:opts.color, border:true, fill:opts.fill||'FFFFFFFF' });
     merge(r,'F',lastColLetter);
     setCell(`F${r}`, money(val), { bold:!!opts.bold, size:opts.size||14, align:'right', numFmt:NUMFMT, fill:opts.fill||'FFFFFFFF', color:opts.color, border:true });
-    ws.getRow(r).height=22;
-    r++;
+    nextRow(opts.bold ? 26 : ROW_H);
   };
   line('Lương cứng', baseSalary);
   line('Tổng lương chuyến', tripWage);
@@ -7432,22 +7439,24 @@ async function exportDriverPayslipXLSX(driverId){
 
   const repairRows = repairsInRange(from, to).filter(x=>x.responsibleDriverId===driverId && repairDriverResponsibleAmount(x)>0);
   if(repairRows.length>0){
-    r++; merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT KHOẢN TRỪ HỎNG HÓC', { size:14, bold:true }); r++;
+    nextRow(12);
+    merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT KHOẢN TRỪ HỎNG HÓC', { size:14, bold:true }); nextRow(24);
     setCell(ws.getCell(r,1).address, 'Ngày', { bold:true, fill:'FFEDEDED', border:true });
     merge(r,'B','G'); setCell(`B${r}`, 'Hạng mục', { bold:true, fill:'FFEDEDED', border:true });
     setCell(ws.getCell(r,8).address, 'Số tiền bị trừ', { bold:true, fill:'FFEDEDED', border:true, align:'right', wrap:true });
-    r++;
+    nextRow(28);
     repairRows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(x=>{
       setCell(ws.getCell(r,1).address, formatDateVN(x.date), { border:true });
       merge(r,'B','G'); setCell(`B${r}`, x.item||'', { border:true });
       setCell(ws.getCell(r,8).address, money(repairDriverResponsibleAmount(x)), { border:true, align:'right', numFmt:NUMFMT });
-      r++;
+      nextRow();
     });
   }
 
-  r+=2;
+  nextRow(28); nextRow(28);
   merge(r,'A','D'); setCell(`A${r}`, 'Người lập phiếu (Ông Chủ)', { align:'center', color:'FF666666' });
   merge(r,'E',lastColLetter); setCell(`E${r}`, 'Người nhận (Tài xế)', { align:'center', color:'FF666666' });
+  ws.getRow(r).height = 24;
 
   const safeName = removeVietnameseDiacritics(driverName).replace(/[^a-zA-Z0-9]+/g,'_');
   const buf = await wb.xlsx.writeBuffer();
