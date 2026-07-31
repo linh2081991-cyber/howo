@@ -2801,6 +2801,17 @@ function renderDrivers(){
     s.standardWorkDaysPerMonth = Number(document.getElementById('wd_workDays').value)||28;
     s.extraDayBaseSalary = wdVals.extraDaySalary;
     await saveSettings();
+    // Số ngày công chuẩn / mức lương ca vượt vừa đổi ảnh hưởng lương cứng
+    // của MỌI tài xế, MỌI ca đã lưu (không riêng ca mới) — phải tính lại
+    // hết, không chỉ áp dụng cho ca tạo sau thời điểm này. Dùng đúng hàm
+    // recalcDriverShiftAllocations() đã có sẵn, y hệt cách màn Sửa Tài Xế
+    // đang làm khi đổi lương 1 người.
+    try {
+      state.drivers.forEach(d=>recalcDriverShiftAllocations(d.id));
+      await saveShifts();
+    } catch(e) {
+      showToast('Đã lưu Công Chuẩn nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
+    }
     renderAll();
     showToast('Đã lưu Công Chuẩn Toàn Đội.');
   });
