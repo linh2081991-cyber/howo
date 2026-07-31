@@ -1301,14 +1301,21 @@ function dailyBaseSalary(driver){
   return (driver.monthlyBaseSalary||0) / days;
 }
 /// Số thứ tự của 1 ca trong tháng, tính riêng theo từng tài xế (ca đầu
-/// tiên của tài xế đó trong tháng = 1, ca kế = 2...). Luôn tự đối chiếu
-/// với state.shifts (loại bỏ trùng id nếu sh đã có sẵn trong đó, rồi thêm
-/// lại chính nó) nên dùng được cho cả ca mới chưa lưu lẫn ca đã lưu.
+/// tiên của tài xế đó trong tháng = 1, ca kế = 2...). CHỈ đếm những ca THỰC
+/// SỰ có lương cứng (costPolicies[status].baseSalary === true) — ca "Nghỉ
+/// Phép" (không lương) không được tính vào 28 công chuẩn, nếu không sẽ
+/// chiếm mất chỗ của ca đi làm thật, đẩy ca đi làm thật lên mức "vượt"
+/// sớm hơn đáng lẽ (đây chính là lỗi khiến lương cứng bị tính dư trước
+/// đó). Luôn tự đối chiếu với state.shifts (loại bỏ trùng id nếu sh đã có
+/// sẵn trong đó, rồi thêm lại chính nó) nên dùng được cho cả ca mới chưa
+/// lưu lẫn ca đã lưu.
 function shiftOrdinalInMonth(sh){
   const ym = (sh.date||'').slice(0,7);
+  const earnsBaseSalary = s => !!(state.settings.costPolicies[s.status]||{}).baseSalary;
   const pool = state.shifts
-    .filter(s=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym)
-    .concat([sh]);
+    .filter(s=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym && earnsBaseSalary(s))
+    .concat(earnsBaseSalary(sh) ? [sh] : []);
+  if(!earnsBaseSalary(sh)) return 0; // ca không lương cứng thì không có "thứ tự" gì để xét vượt/không vượt
   pool.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : String(a.id).localeCompare(String(b.id)));
   return pool.findIndex(s=>s.id===sh.id) + 1;
 }
