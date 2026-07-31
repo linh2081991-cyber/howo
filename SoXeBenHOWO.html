@@ -1300,35 +1300,45 @@ function dailyBaseSalary(driver){
   const days = state.settings.standardWorkDaysPerMonth || 1;
   return (driver.monthlyBaseSalary||0) / days;
 }
-/// Số thứ tự của 1 ca trong tháng, tính riêng theo từng tài xế (ca đầu
-/// tiên của tài xế đó trong tháng = 1, ca kế = 2...). CHỈ đếm những ca THỰC
-/// SỰ có lương cứng (costPolicies[status].baseSalary === true) — ca "Nghỉ
-/// Phép" (không lương) không được tính vào 28 công chuẩn, nếu không sẽ
-/// chiếm mất chỗ của ca đi làm thật, đẩy ca đi làm thật lên mức "vượt"
-/// sớm hơn đáng lẽ (đây chính là lỗi khiến lương cứng bị tính dư trước
-/// đó). Luôn tự đối chiếu với state.shifts (loại bỏ trùng id nếu sh đã có
-/// sẵn trong đó, rồi thêm lại chính nó) nên dùng được cho cả ca mới chưa
-/// lưu lẫn ca đã lưu.
-function shiftOrdinalInMonth(sh){
+/// Vị trí của 1 ca trong tháng, tính riêng theo từng tài xế — trả về
+/// { ordinal, priorIntensitySum }. ordinal = thứ tự ca (ca đầu tiên có
+/// lương cứng trong tháng = 1, ca kế = 2...) — CHỈ đếm ca THỰC SỰ có lương
+/// cứng (costPolicies[status].baseSalary === true); ca "Nghỉ Phép" (không
+/// lương) không được tính vào 28 công chuẩn, nếu không sẽ chiếm mất chỗ
+/// của ca đi làm thật, đẩy ca đi làm thật lên mức "vượt" sớm hơn đáng lẽ.
+/// priorIntensitySum = tổng Cường Độ Ca của các ca CHUẨN đứng TRƯỚC ca này
+/// (không gồm chính nó) — dùng để làm tròn LUỸ KẾ bên dưới, đảm bảo cộng
+/// đủ 28 ca chuẩn luôn ra khớp NGUYÊN lương cứng/tháng, không lệch vài
+/// đồng do làm tròn từng ca riêng lẻ (VD 15tr/28 dư số lẻ). Luôn tự đối
+/// chiếu với state.shifts (loại bỏ trùng id nếu sh đã có sẵn trong đó,
+/// rồi thêm lại chính nó) nên dùng được cho cả ca mới chưa lưu lẫn ca đã
+/// lưu.
+function shiftPositionInfo(sh){
   const ym = (sh.date||'').slice(0,7);
+  const standard = Number(state.settings.standardWorkDaysPerMonth)||28;
   const earnsBaseSalary = s => !!(state.settings.costPolicies[s.status]||{}).baseSalary;
+  if(!earnsBaseSalary(sh)) return { ordinal:0, priorIntensitySum:0 };
   const pool = state.shifts
     .filter(s=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym && earnsBaseSalary(s))
-    .concat(earnsBaseSalary(sh) ? [sh] : []);
-  if(!earnsBaseSalary(sh)) return 0; // ca không lương cứng thì không có "thứ tự" gì để xét vượt/không vượt
+    .concat([sh]);
   pool.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : String(a.id).localeCompare(String(b.id)));
-  return pool.findIndex(s=>s.id===sh.id) + 1;
+  const ordinal = pool.findIndex(s=>s.id===sh.id) + 1;
+  let priorIntensitySum = 0;
+  for(let i=0;i<ordinal-1 && i<standard;i++) priorIntensitySum += Number(pool[i].intensity)||1;
+  return { ordinal, priorIntensitySum };
 }
 /// Lương cứng phân bổ cho 1 ca — nếu là ca vượt ngày công chuẩn/tháng của
 /// tài xế đó (VD chuẩn 28 ca thì ca thứ 29/30/31 trở đi), dùng mức CỐ ĐỊNH
 /// state.settings.extraDayBaseSalary (mặc định 1.000.000đ), không nhân
 /// Cường Độ Ca và không dùng công thức chia đều dailyBaseSalary() nữa —
-/// đúng theo yêu cầu Ông Chủ. Ca trong hạn mức chuẩn vẫn tính y hệt cũ.
+/// đúng theo yêu cầu Ông Chủ. Ca trong hạn mức chuẩn dùng làm tròn luỹ kế
+/// (xem shiftPositionInfo) để tổng 28 ca luôn khớp tròn lương cứng/tháng.
 function baseSalaryForShift(sh, driver, intensity){
   const standard = Number(state.settings.standardWorkDaysPerMonth)||28;
-  const ordinal = shiftOrdinalInMonth(sh);
+  const { ordinal, priorIntensitySum } = shiftPositionInfo(sh);
   if(ordinal > standard) return Number(state.settings.extraDayBaseSalary)||1000000;
-  return Math.round(dailyBaseSalary(driver)*intensity);
+  const daily = dailyBaseSalary(driver);
+  return Math.round(daily*(priorIntensitySum+intensity)) - Math.round(daily*priorIntensitySum);
 }
 function dailyHousing(driver, dateStr){
   const dim = daysInMonth(dateStr) || 30;
