@@ -578,6 +578,11 @@ let state = {
   settings: { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
               monthlyFixedRoadFee: 25000000, geminiApiKey: '',
               currentFuelUnitPrice: 0, vatRatePercent: 10,
+              // Ca "vượt" ngày công chuẩn/tháng (VD ca thứ 29/30/31 khi
+              // chuẩn là 28) — lương cứng ngày đó tính CỐ ĐỊNH theo mức
+              // này, không chia đều theo dailyBaseSalary() nữa. Xem
+              // baseSalaryForShift().
+              extraDayBaseSalary: 1000000,
               // Các chi phí cố định hàng tháng khác — trước đây CHƯA được
               // cộng vào bất kỳ công thức tài chính nào (Lợi Nhuận Thực Tế,
               // Điểm Hoà Vốn, Cảnh Báo Tài Chính). Từ nay được cộng thêm
@@ -1294,6 +1299,29 @@ function daysInMonth(dateStr){
 function dailyBaseSalary(driver){
   const days = state.settings.standardWorkDaysPerMonth || 1;
   return (driver.monthlyBaseSalary||0) / days;
+}
+/// Số thứ tự của 1 ca trong tháng, tính riêng theo từng tài xế (ca đầu
+/// tiên của tài xế đó trong tháng = 1, ca kế = 2...). Luôn tự đối chiếu
+/// với state.shifts (loại bỏ trùng id nếu sh đã có sẵn trong đó, rồi thêm
+/// lại chính nó) nên dùng được cho cả ca mới chưa lưu lẫn ca đã lưu.
+function shiftOrdinalInMonth(sh){
+  const ym = (sh.date||'').slice(0,7);
+  const pool = state.shifts
+    .filter(s=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym)
+    .concat([sh]);
+  pool.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : String(a.id).localeCompare(String(b.id)));
+  return pool.findIndex(s=>s.id===sh.id) + 1;
+}
+/// Lương cứng phân bổ cho 1 ca — nếu là ca vượt ngày công chuẩn/tháng của
+/// tài xế đó (VD chuẩn 28 ca thì ca thứ 29/30/31 trở đi), dùng mức CỐ ĐỊNH
+/// state.settings.extraDayBaseSalary (mặc định 1.000.000đ), không nhân
+/// Cường Độ Ca và không dùng công thức chia đều dailyBaseSalary() nữa —
+/// đúng theo yêu cầu Ông Chủ. Ca trong hạn mức chuẩn vẫn tính y hệt cũ.
+function baseSalaryForShift(sh, driver, intensity){
+  const standard = Number(state.settings.standardWorkDaysPerMonth)||28;
+  const ordinal = shiftOrdinalInMonth(sh);
+  if(ordinal > standard) return Number(state.settings.extraDayBaseSalary)||1000000;
+  return Math.round(dailyBaseSalary(driver)*intensity);
 }
 function dailyHousing(driver, dateStr){
   const dim = daysInMonth(dateStr) || 30;
@@ -2013,7 +2041,7 @@ function startNewShift(){
     fuelAdded: 0,
     fuelUnitPrice: latestKnownFuelUnitPrice(), // ca sau tự lấy đơn giá dầu của lần đổ gần nhất, đỡ phải gõ lại tay mỗi ca
     intensity: 1, // Cường Độ Ca: 1 = ca thường, 1.5 = ca rưỡi (tài xế làm gấp 1,5 khối lượng). CHỈ nhân vào lương cứng, không đụng tiền ăn/nhà/dầu/lương chuyến.
-    baseSalaryAllocation: policy.baseSalary ? dailyBaseSalary(driver) : 0,
+    baseSalaryAllocation: 0, // gán đúng ngay bên dưới, sau khi draft đã dựng xong (baseSalaryForShift cần tham chiếu draft.id/date/driverId)
     foodAllowance: policy.food ? driver.dailyFoodAllowance : 0,
     housingAllocation: policy.housing ? dailyHousing(driver, dateStr) : 0,
     incidentalCost: 0,
@@ -2025,6 +2053,7 @@ function startNewShift(){
     siteLogs: []
   };
   state.draftShift = draft;
+  draft.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(draft, driver, 1) : 0;
   state.view='form';
   renderAll();
 }
@@ -2035,7 +2064,7 @@ function reapplyCostPolicyToDraft(){
   const policy = state.settings.costPolicies[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
   const intensity = Number(sh.intensity)||1; // ca rưỡi (1.5) nhân vào ĐÚNG lương cứng, tiền ăn/nhà giữ nguyên
   if(!driver){ sh.baseSalaryAllocation=0; sh.foodAllowance=0; sh.housingAllocation=0; return; }
-  sh.baseSalaryAllocation = policy.baseSalary ? Math.round(dailyBaseSalary(driver)*intensity) : 0;
+  sh.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(sh, driver, intensity) : 0;
   sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
   sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
 }
@@ -2056,7 +2085,7 @@ function recalcDriverShiftAllocations(driverId){
     if(sh.driverId!==driverId) return;
     const policy = state.settings.costPolicies[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
     const intensity = Number(sh.intensity)||1; // giữ đúng hệ số ca rưỡi đã snapshot của từng ca khi tính lại
-    sh.baseSalaryAllocation = policy.baseSalary ? Math.round(dailyBaseSalary(driver)*intensity) : 0;
+    sh.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(sh, driver, intensity) : 0;
     sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
     sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
   });
@@ -2716,13 +2745,17 @@ function renderDrivers(){
     <section class="group">
       <h3>Công Chuẩn Toàn Đội</h3>
       <div class="card">
-        <div class="field" style="margin-bottom:0;">
+        <div class="field" style="margin-bottom:14px;">
           <label>Số ngày công chuẩn / tháng (dùng để chia lương cứng)</label>
           <input type="number" inputmode="numeric" id="wd_workDays" value="${s.standardWorkDaysPerMonth}">
         </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Lương cứng ca vượt ngày công chuẩn (VD ca thứ 29/30/31)</label>
+          <input type="text" inputmode="decimal" id="wd_extraDaySalary">
+        </div>
       </div>
       <button class="btn btn-ghost btn-sm" id="saveWorkDaysBtn" style="margin-top:10px;">💾 Lưu Công Chuẩn</button>
-      <div class="hint" style="margin-top:6px;">Áp dụng chung cho toàn đội (không riêng từng tài xế) — dùng để chia lương cứng mỗi ca, tính Điểm Hoà Vốn và Thẩm Định Công Trình.</div>
+      <div class="hint" style="margin-top:6px;">Áp dụng chung cho toàn đội (không riêng từng tài xế) — dùng để chia lương cứng mỗi ca, tính Điểm Hoà Vốn và Thẩm Định Công Trình. Ca nào vượt quá số ngày công chuẩn trong tháng của đúng tài xế đó (VD chuẩn 28 ca thì ca thứ 29 trở đi) sẽ tính lương cứng theo mức cố định riêng ở trên thay vì chia đều.</div>
     </section>
 
     <section class="group">
@@ -2761,8 +2794,12 @@ function renderDrivers(){
   attachMoneyInput(document.getElementById('nd_food'), ndVals.food, v=>ndVals.food=v);
   attachMoneyInput(document.getElementById('nd_housing'), ndVals.housing, v=>ndVals.housing=v);
 
+  const wdVals = { extraDaySalary: Number(s.extraDayBaseSalary)||1000000 };
+  attachMoneyInput(document.getElementById('wd_extraDaySalary'), wdVals.extraDaySalary, v=>wdVals.extraDaySalary=v);
+
   document.getElementById('saveWorkDaysBtn').addEventListener('click', async ()=>{
     s.standardWorkDaysPerMonth = Number(document.getElementById('wd_workDays').value)||28;
+    s.extraDayBaseSalary = wdVals.extraDaySalary;
     await saveSettings();
     renderAll();
     showToast('Đã lưu Công Chuẩn Toàn Đội.');
@@ -6961,7 +6998,8 @@ function renderSettings(){
     if(confirm('Khôi phục toàn bộ Cài Đặt về mặc định gốc? (Không xoá dữ liệu ca/tài xế)')){
       state.settings = { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
         monthlyFixedRoadFee: 25000000, geminiApiKey: state.settings.geminiApiKey,
-        currentFuelUnitPrice: state.settings.currentFuelUnitPrice, vatRatePercent: 10 };
+        currentFuelUnitPrice: state.settings.currentFuelUnitPrice, vatRatePercent: 10,
+        extraDayBaseSalary: 1000000 };
       await saveSettings();
       renderAll(); showToast('Đã khôi phục cài đặt gốc.');
     }
@@ -7225,7 +7263,7 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push(['Trừ Do Hỏng Hóc', Math.round(repairDeduction)]);
   rows.push(['LƯƠNG THỰC NHẬN', Math.round(netPay)]);
   rows.push([]);
-  rows.push(['(Thông tin thêm — Công ty trả trực tiếp, KHÔNG tính vào lương) Tổng Tiền Nhà + Điện Nước', Math.round(housing)]);
+  rows.push(['Tiền Nhà+Điện Nước (Cty trả riêng, ngoài lương)', Math.round(housing)]);
   rows.push([]);
 
   rows.push(['CHI TIẾT TỪNG CA']);
