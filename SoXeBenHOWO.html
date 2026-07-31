@@ -7360,9 +7360,10 @@ async function exportDriverPayslipXLSX(driverId){
   const ws = wb.addWorksheet('Phiếu Lương', {
     pageSetup:{ paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0, margins:{ left:0.5, right:0.5, top:0.6, bottom:0.6, header:0.3, footer:0.3 } }
   });
+  ws.properties.defaultRowHeight = 20; // thoáng hơn mặc định ~15, đỡ cảm giác chữ số dính sát nhau
 
   const FONT='Times New Roman';
-  const NUMFMT='#,##0';
+  const NUMFMT='#,##0" đ"'; // luôn kèm đơn vị "đ" ngay trong số, khỏi phải đoán cột nào là tiền
   const lastColLetter = 'H';
   ws.columns = [ {width:12},{width:8},{width:9},{width:14},{width:22},{width:9},{width:14},{width:16} ];
 
@@ -7383,9 +7384,9 @@ async function exportDriverPayslipXLSX(driverId){
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'PHIẾU LƯƠNG TÀI XẾ', { size:16, bold:true, align:'center' }); ws.getRow(r).height=24; r++;
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'Xe 29E-691.12', { size:14, align:'center', color:'FF666666' }); r++;
   r++;
-  merge(r,'A','C'); setCell(`A${r}`, 'Họ tên tài xế:', { bold:true }); merge(r,'D',lastColLetter); setCell(`D${r}`, driverName, {}); r++;
-  merge(r,'A','C'); setCell(`A${r}`, 'Kỳ lương:', { bold:true }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${formatDateVN(from)} — ${formatDateVN(to)}`, {}); r++;
-  merge(r,'A','C'); setCell(`A${r}`, 'Số ca đi làm:', { bold:true }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${counts.paidCount} ca` + (counts.onLeaveCount?` · Nghỉ phép: ${counts.onLeaveCount} ngày`:''), {}); r++;
+  merge(r,'A','C'); setCell(`A${r}`, 'Họ tên tài xế:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, driverName, { border:true }); ws.getRow(r).height=22; r++;
+  merge(r,'A','C'); setCell(`A${r}`, 'Kỳ lương:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${formatDateVN(from)} — ${formatDateVN(to)}`, { border:true }); ws.getRow(r).height=22; r++;
+  merge(r,'A','C'); setCell(`A${r}`, 'Số ca đi làm:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${counts.paidCount} ca` + (counts.onLeaveCount?` · Nghỉ phép: ${counts.onLeaveCount} ngày`:''), { border:true }); ws.getRow(r).height=22; r++;
   r++;
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); r++;
@@ -7415,10 +7416,10 @@ async function exportDriverPayslipXLSX(driverId){
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'TỔNG KẾT LƯƠNG', { size:14, bold:true }); r++;
   const line = (label, val, opts={})=>{
-    merge(r,'A','E'); const la=setCell(`A${r}`, label, { bold:!!opts.bold, size:opts.size||14, color:opts.color });
-    if(opts.fill) la.fill = { type:'pattern', pattern:'solid', fgColor:{argb:opts.fill} };
+    merge(r,'A','E'); const la=setCell(`A${r}`, label, { bold:!!opts.bold, size:opts.size||14, color:opts.color, border:true, fill:opts.fill||'FFFFFFFF' });
     merge(r,'F',lastColLetter);
-    setCell(`F${r}`, money(val), { bold:!!opts.bold, size:opts.size||14, align:'right', numFmt:NUMFMT, fill:opts.fill, color:opts.color });
+    setCell(`F${r}`, money(val), { bold:!!opts.bold, size:opts.size||14, align:'right', numFmt:NUMFMT, fill:opts.fill||'FFFFFFFF', color:opts.color, border:true });
+    ws.getRow(r).height=22;
     r++;
   };
   line('Lương cứng', baseSalary);
