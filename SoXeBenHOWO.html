@@ -2013,7 +2013,12 @@ function renderShiftMonthArchive(){
     });
   });
   const cardsWrap = document.getElementById('shiftArchiveCardsWrap');
-  if(cardsWrap) cardsWrap.addEventListener('click', e=>e.stopPropagation(), true);
+  if(cardsWrap) cardsWrap.addEventListener('click', e=>{
+    const card = e.target.closest('.shift-card');
+    if(!card) return;
+    e.stopPropagation(); // chặn onclick="openShift(...)" gắn sẵn trên thẻ — màn này chỉ xem, không sửa
+    renderShiftReadOnlyDetail(card.dataset.id);
+  }, true);
 }
 function formatDateVN(dateStr){
   const [y,m,d]=dateStr.split('-');
@@ -2570,14 +2575,14 @@ function updateSiteCalc(idx){
   }
 }
 
-function updateSummary(){
-  const sh = state.draftShift;
+/// Khối "Tổng doanh thu / từng khoản chi phí / Tổng chi phí / Lợi nhuận
+/// ròng" — dùng chung cho cả form sửa ca (updateSummary) lẫn trang xem lại
+/// chỉ đọc (renderShiftReadOnlyDetail), để 2 nơi luôn hiển thị khớp nhau
+/// tuyệt đối, không lệch công thức.
+function shiftFinancialSummaryHtml(sh){
   const revenue = shiftTotalRevenue(sh);
   const cost = shiftTotalCost(sh);
   const profit = shiftNetProfit(sh);
-  // Đúng các khoản đã cộng bên trong shiftTotalCost() — liệt kê riêng từng
-  // dòng thay vì gộp thẳng vào "Tổng chi phí", để Ông Chủ nhìn là hiểu ngay
-  // tiền đi đâu, không phải tự cộng tay. Chỉ hiện dòng nào > 0 cho gọn.
   const costItems = [
     { label:'Tiền dầu tiêu hao', value: shiftFuelCost(sh) },
     { label:'Lương chuyến', value: shiftTotalTripWage(sh) },
@@ -2587,7 +2592,7 @@ function updateSummary(){
     { label:'Chi phí phát sinh', value: Number(sh.incidentalCost)||0 },
     { label:'Tiền luật phát sinh', value: Number(sh.roadFeeIncidental)||0 }
   ];
-  document.getElementById('summaryCard').innerHTML = `
+  return `
     <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${costItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
@@ -2595,6 +2600,10 @@ function updateSummary(){
     <div class="formula-divider" style="margin:8px 0;"></div>
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
+}
+function updateSummary(){
+  const sh = state.draftShift;
+  document.getElementById('summaryCard').innerHTML = shiftFinancialSummaryHtml(sh);
   // Số ODO chạy trong ca is now an editable input (#f_kmDriven), not
   // rebuilt HTML — only push the computed value in when Ông Chủ ISN'T
   // actively typing into it himself (otherwise every keystroke on Odo
@@ -2971,6 +2980,70 @@ function openEditDriver(id){
 // — dùng chung công thức với sheet "Lương Tài Xế" khi xuất Excel
 // (buildDriverPayrollRows), nên số liệu ở đây và số liệu xuất ra luôn khớp
 // nhau. Màn hình này chỉ ĐỌC dữ liệu, không sửa bất kỳ ca/sửa chữa nào.
+/// Trang xem chi tiết 1 ca — CHỈ ĐỌC, dùng khi Ông Chủ đang xem lại 1
+/// tháng đã qua (renderShiftMonthArchive) và bấm vào 1 thẻ ca cụ thể. Vẽ
+/// lại đúng số liệu vận hành của ca đó (Km/dầu, từng công trình đã ghé,
+/// doanh thu, chi phí từng khoản, lợi nhuận ròng) — dùng đúng các hàm tính
+/// đã có sẵn, không tính lại công thức mới, không có ô nhập/nút lưu/xoá.
+function renderShiftReadOnlyDetail(shiftId){
+  const sh = state.shifts.find(s=>s.id===shiftId);
+  const app = document.getElementById('app');
+  if(!sh){ renderAll(); return; }
+  saveMainScroll();
+  const driver = driverById(sh.driverId);
+  const sites = sh.siteLogs||[];
+  const kmDriven = shiftOdoDriven(sh);
+  const fuelConsumed = shiftFuelConsumed(sh);
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="shiftReadOnlyBackBtn">← Quay Lại Xem Lại Tháng</button>
+    </section>
+
+    <section class="group">
+      <div class="card">
+        <h3 style="margin-top:0;">${formatDateVN(sh.date)} · ${escapeHtml(shiftTypeLabel(sh.shiftType))}</h3>
+        <div class="summary-row"><span>Trạng thái</span><span class="val">${escapeHtml(statusLabel(sh.status))}</span></div>
+        <div class="summary-row"><span>Cường độ ca</span><span class="val">${(Number(sh.intensity)||1)===1.5?'1,5 ca':'1 ca'}</span></div>
+        <div class="summary-row"><span>Tài xế</span><span class="val">${escapeHtml(driver?driver.name:(sh.driverNameSnapshot||'(chưa gán)'))}</span></div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Km &amp; Nhiên Liệu</h3>
+      <div class="card">
+        <div class="summary-row"><span>ODO đầu ca → cuối ca</span><span class="val">${(Number(sh.odoStart)||0).toLocaleString('vi-VN')} → ${(Number(sh.odoEnd)||0).toLocaleString('vi-VN')} km</span></div>
+        <div class="summary-row"><span>Số Km đã chạy</span><span class="val">${kmDriven.toLocaleString('vi-VN')} km</span></div>
+        <div class="summary-row"><span>Dầu đầu ca + đổ thêm</span><span class="val">${(Number(sh.fuelStart)||0).toLocaleString('vi-VN')} + ${(Number(sh.fuelAdded)||0).toLocaleString('vi-VN')} lít</span></div>
+        <div class="summary-row"><span>Dầu cuối ca</span><span class="val">${(Number(sh.fuelEnd)||0).toLocaleString('vi-VN')} lít</span></div>
+        <div class="summary-row"><span>Dầu tiêu hao</span><span class="val">${fuelConsumed.toLocaleString('vi-VN')} lít</span></div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Công Trình Đã Ghé (${sites.length})</h3>
+      ${sites.length===0 ? `<div class="hint">Ca này chưa ghi công trình nào.</div>` : sites.map(s=>`
+        <div class="card" style="padding:12px 14px; margin-bottom:8px;">
+          <div style="font-weight:700; font-size:14.5px; margin-bottom:6px;">${escapeHtml(s.siteName||'(chưa đặt tên)')}</div>
+          <div class="summary-row"><span>Số chuyến</span><span class="val">${siteTripCount(s)}</span></div>
+          <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(siteRevenue(s))}</span></div>
+          <div class="summary-row"><span>Lương chuyến</span><span class="val">${fmtVND(siteWageTotal(s))}</span></div>
+        </div>`).join('')}
+    </section>
+
+    <section class="group">
+      <div class="card" id="shiftReadOnlySummary"></div>
+    </section>
+
+    ${sh.notes ? `
+    <section class="group">
+      <h3>Ghi Chú</h3>
+      <div class="card"><div class="hint" style="font-size:14px; color:var(--ink);">${escapeHtml(sh.notes)}</div></div>
+    </section>` : ''}
+  `;
+  document.getElementById('shiftReadOnlySummary').innerHTML = shiftFinancialSummaryHtml(sh);
+  document.getElementById('shiftReadOnlyBackBtn').addEventListener('click', ()=>{ renderShiftMonthArchive(); restoreMainScroll(); });
+}
 function openDriverDetail(driverId){
   const driver = driverById(driverId);
   if(!driver){ renderAll(); return; }
