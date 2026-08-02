@@ -597,7 +597,7 @@ let state = {
   draftShift: null,
   loaded: false,
   searchDate: null,
-  shiftArchiveMonth: null, // null = xem Danh Sách Ca bình thường (tháng hiện tại); "YYYY-MM" = đang xem lại 1 tháng cũ (chỉ đọc)
+  shiftArchiveMonth: null, // null = xem Danh Sách Ca bình thường (tháng hiện tại); "YYYY-MM" = đang xem lại 1 tháng cũ (xem VÀ sửa được)
   shiftArchiveDriverTab: null, // tab tài xế đang chọn RIÊNG cho màn xem lại tháng cũ — tách biệt với state.shiftDriverTab của Danh Sách Ca bình thường
   resultsRange: null,
   resultsRoadFeeOverride: null, // nếu có gõ đè, ưu tiên số này hơn số tính từ Tiền Luật Đường Theo Tháng cho kỳ đang xem
@@ -1956,7 +1956,7 @@ function renderShiftMonthArchive(){
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="shiftArchiveBackBtn">← Quay Lại Tháng Hiện Tại</button>
     </section>
-    <div class="hint" style="margin:0 0 10px;">Đang xem lại Tháng ${monthLabelVN(ym)} — CHỈ XEM, không sửa/xoá được ở màn này.</div>`;
+    <div class="hint" style="margin:0 0 10px;">Đang xem lại Tháng ${monthLabelVN(ym)} — bấm vào 1 ca để xem chi tiết hoặc sửa lại số liệu nếu cần.</div>`;
 
   const list = state.shifts.filter(sh=>sh.date.slice(0,7)===ym)
     .sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
@@ -2012,13 +2012,6 @@ function renderShiftMonthArchive(){
       renderShiftMonthArchive();
     });
   });
-  const cardsWrap = document.getElementById('shiftArchiveCardsWrap');
-  if(cardsWrap) cardsWrap.addEventListener('click', e=>{
-    const card = e.target.closest('.shift-card');
-    if(!card) return;
-    e.stopPropagation(); // chặn onclick="openShift(...)" gắn sẵn trên thẻ — màn này chỉ xem, không sửa
-    renderShiftReadOnlyDetail(card.dataset.id);
-  }, true);
 }
 function formatDateVN(dateStr){
   const [y,m,d]=dateStr.split('-');
@@ -7658,11 +7651,11 @@ function renderTaxLedger(){
 
 function renderAll(){
   recomputeBankLoanMonthlyPayment(); // luôn làm mới Gốc+Lãi/tháng theo đúng dư nợ giảm dần hôm nay TRƯỚC khi bất kỳ tab nào (Kết Quả, Trợ Lý...) đọc state.settings.monthlyLoanPayment
-  // Tháng đang "xem lại" (chỉ đọc) mà lại trùng đúng THÁNG HIỆN TẠI THẬT —
-  // dù do Ông Chủ lỡ chọn ngay tháng hiện tại ở "+ Thêm Tháng Mới", hay do
-  // đồng hồ vừa sang tháng mới trong lúc màn này đang mở — luôn coi là
-  // KHÔNG còn ở chế độ xem lại nữa, trả về đúng màn chính sửa/xoá được bình
-  // thường. Chỉ tháng nào THỰC SỰ đã qua mới bị khoá chỉ-xem.
+  // Tháng đang "xem lại" mà lại trùng đúng THÁNG HIỆN TẠI THẬT — dù do Ông
+  // Chủ lỡ chọn ngay tháng hiện tại ở "+ Thêm Tháng Mới", hay do đồng hồ vừa
+  // sang tháng mới trong lúc màn này đang mở — luôn coi là KHÔNG còn ở chế
+  // độ xem lại nữa, trả về đúng màn Danh Sách Ca bình thường. Chỉ tháng nào
+  // THỰC SỰ đã qua mới hiện ở dạng "xem lại tháng cũ".
   if(state.shiftArchiveMonth && state.shiftArchiveMonth===todayLocalDateStr().slice(0,7)){
     state.shiftArchiveMonth = null;
   }
