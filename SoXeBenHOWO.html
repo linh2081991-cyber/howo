@@ -7370,7 +7370,7 @@ async function exportDriverPayslipXLSX(driverId){
   const FONT='Times New Roman';
   const NUMFMT='#,##0" đ"'; // luôn kèm đơn vị "đ" ngay trong số, khỏi phải đoán cột nào là tiền
   const lastColLetter = 'H';
-  ws.columns = [ {width:12},{width:10},{width:10},{width:20},{width:36},{width:9},{width:13},{width:15} ];
+  ws.columns = [ {width:16},{width:14},{width:14},{width:27},{width:49},{width:12},{width:18},{width:20} ];
 
   let r = 1;
   const merge = (row, a, b)=>ws.mergeCells(`${a}${row}:${b}${row}`);
@@ -7444,7 +7444,7 @@ async function exportDriverPayslipXLSX(driverId){
     setCell(ws.getCell(r,1).address, 'Ngày', { bold:true, fill:'FFEDEDED', border:true });
     merge(r,'B','G'); setCell(`B${r}`, 'Hạng mục', { bold:true, fill:'FFEDEDED', border:true });
     setCell(ws.getCell(r,8).address, 'Số tiền bị trừ', { bold:true, fill:'FFEDEDED', border:true, align:'right', wrap:true });
-    nextRow(28);
+    nextRow(32);
     repairRows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(x=>{
       setCell(ws.getCell(r,1).address, formatDateVN(x.date), { border:true });
       merge(r,'B','G'); setCell(`B${r}`, x.item||'', { border:true });
