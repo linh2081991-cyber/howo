@@ -172,8 +172,8 @@
   /* chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho */
   /* input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả */
   /* năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần). */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; }
-  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; }
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; }
+  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; }
   .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
   .seg button{ flex:1; padding:13px 0; border:none; background:var(--surface); font-size:15.5px; font-weight:600; color:var(--ink-soft); }
   .seg button.active{ background:var(--accent); color:#fff; }
@@ -5604,7 +5604,10 @@ function computeCustomerDebt(customerId){
     }
   }
   const collected = state.sitePayments.filter(p=>p.customerId===customerId).reduce((sum,p)=>sum+(Number(p.amount)||0),0);
-  return { billed, collected, owed: Math.max(0, billed-collected) };
+  // KHÔNG kẹp về 0 nữa — âm nghĩa là khách đã tạm ứng NHIỀU HƠN số đã
+  // phải thu tính đến giờ (Ông Chủ tạm thời "nợ ngược" lại khách), đúng
+  // tình huống khách tạm ứng trước hàng ngày Ông Chủ mô tả.
+  return { billed, collected, owed: billed-collected };
 }
 /// Công nợ 1 nhà cung cấp — chiều ngược lại: Phải Trả (tổng tiền thực
 /// phải trả mỏ từ mọi công trình gắn nhà cung cấp này, đã gồm VAT nếu có)
@@ -5617,7 +5620,9 @@ function computeSupplierDebt(supplierId){
     }
   }
   const paid = state.supplierPayments.filter(p=>p.supplierId===supplierId).reduce((sum,p)=>sum+(Number(p.amount)||0),0);
-  return { payable, paid, owed: Math.max(0, payable-paid) };
+  // Tương tự — âm nghĩa là Ông Chủ đã tạm ứng cho mỏ NHIỀU HƠN số thực
+  // phải trả tính đến giờ.
+  return { payable, paid, owed: payable-paid };
 }
 function computeAllSiteBilledEvents(){
   const map = {};
@@ -6413,7 +6418,7 @@ function renderCustomerSupplierDebtOverview(){
         <tbody>
           ${custRows.map(c=>`<tr class="cust-debt-row" data-id="${c.id}">
             <td>${escapeHtml(c.name)}${c.holdbackPercent?` <span class="hint">(thường giữ ~${c.holdbackPercent}%)</span>`:''}</td>
-            <td style="color:${c.debt.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(c.debt.owed)}</td>
+            <td style="color:${c.debt.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(c.debt.owed)}${c.debt.owed<0?' <span class="hint" style="font-weight:400;">(khách tạm ứng dư)</span>':''}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -6426,7 +6431,7 @@ function renderCustomerSupplierDebtOverview(){
         <tbody>
           ${supRows.map(s=>`<tr class="sup-debt-row" data-id="${s.id}">
             <td>${escapeHtml(s.name)}</td>
-            <td style="color:${s.debt.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(s.debt.owed)}</td>
+            <td style="color:${s.debt.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(s.debt.owed)}${s.debt.owed<0?' <span class="hint" style="font-weight:400;">(anh tạm ứng dư)</span>':''}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -6460,7 +6465,7 @@ function openCustomerDetail(customerId){
       <div class="card">
         <div class="summary-row"><span>Phải thu (tổng)</span><span class="val">${fmtVND(debt.billed)}</span></div>
         <div class="summary-row"><span>Đã nhận (tổng)</span><span class="val">${fmtVND(debt.collected)}</span></div>
-        <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}</span></div>
+        <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (khách tạm ứng dư)':''}</span></div>
       </div>
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
     </section>
@@ -6588,7 +6593,7 @@ function openSupplierDetail(supplierId){
       <div class="card">
         <div class="summary-row"><span>Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
         <div class="summary-row"><span>Đã trả (tổng)</span><span class="val">${fmtVND(debt.paid)}</span></div>
-        <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}</span></div>
+        <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (anh tạm ứng dư)':''}</span></div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
