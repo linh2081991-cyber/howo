@@ -601,7 +601,17 @@ let state = {
   shiftArchiveDriverTab: null, // tab tài xế đang chọn RIÊNG cho màn xem lại tháng cũ — tách biệt với state.shiftDriverTab của Danh Sách Ca bình thường
   resultsRange: null,
   resultsRoadFeeOverride: null, // nếu có gõ đè, ưu tiên số này hơn số tính từ Tiền Luật Đường Theo Tháng cho kỳ đang xem
-  sitePayments: [], // {id, siteName, date, partnerName, amount, notes} — money RECEIVED from a construction site's client
+  sitePayments: [], // {id, siteName, date, partnerName, customerId (mới — gắn đúng Khách Hàng nếu có), amount, notes} — money RECEIVED from a construction site's client
+  // Khách Hàng (đối tác mua hàng) — khai 1 lần, dùng lại cho mọi công
+  // trình thương mại bán cho đúng khách đó. holdbackPercent CHỈ để ghi
+  // chú tham khảo (khách này thường giữ khoảng bao nhiêu % chờ hoá đơn) —
+  // KHÔNG dùng để tự trừ vào công nợ, vì khách tạm ứng tự do không theo tỷ
+  // lệ cố định. Công nợ luôn = Phải Thu − Đã Nhận (số thật).
+  customers: [], // {id, name, phone, address, notes, holdbackPercent}
+  // Sổ tiền Ông Chủ đã bank cho nhà cung cấp (mỏ) — chiều ngược lại của
+  // sitePayments, cùng vai trò nuôi dữ liệu Công Nợ Nhà Cung Cấp + Dòng
+  // Tiền Thuần.
+  supplierPayments: [], // {id, supplierId, date, amount, notes}
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' — which screen is showing inside the "Trợ Lý" tab right now
   appraisalAnalysis: { loading: false, error: null, result: null, generatedAt: null }, // expert pros/cons + recommendation for the project appraisal comparison, powered by the same Gemini pipeline as strategyAnalysis
@@ -1008,7 +1018,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1020,7 +1030,9 @@ async function loadAll(){
       sharedDataRef('siteAppraisals').get(),
       sharedDataRef('monthlyBonuses').get(),
       sharedDataRef('roadFeeByMonth').get(),
-      sharedDataRef('suppliers').get()
+      sharedDataRef('suppliers').get(),
+      sharedDataRef('customers').get(),
+      sharedDataRef('supplierPayments').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1044,6 +1056,10 @@ async function loadAll(){
     state.roadFeeByMonth = roadFeeData && Array.isArray(roadFeeData.list) ? roadFeeData.list : [];
     const supplierData = supplierSnap.exists ? supplierSnap.data() : null;
     state.suppliers = supplierData && Array.isArray(supplierData.list) ? supplierData.list : [];
+    const customerData = customerSnap.exists ? customerSnap.data() : null;
+    state.customers = customerData && Array.isArray(customerData.list) ? customerData.list : [];
+    const supplierPaymentData = supplierPaymentSnap.exists ? supplierPaymentSnap.data() : null;
+    state.supplierPayments = supplierPaymentData && Array.isArray(supplierPaymentData.list) ? supplierPaymentData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -1058,6 +1074,14 @@ async function saveDrivers(){
 async function saveSuppliers(){
   try { await sharedDataRef('suppliers').set({ list: state.suppliers }); }
   catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp — kiểm tra mạng.'); }
+}
+async function saveCustomers(){
+  try { await sharedDataRef('customers').set({ list: state.customers }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu khách hàng — kiểm tra mạng.'); }
+}
+async function saveSupplierPayments(){
+  try { await sharedDataRef('supplierPayments').set({ list: state.supplierPayments }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); }
 }
 async function saveShifts(){
   try { await sharedDataRef('shifts').set({ list: state.shifts }); }
@@ -1305,6 +1329,7 @@ function shiftTypeLabel(key){ return (SHIFT_TYPES.find(s=>s.key===key)||{}).labe
 
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function supplierById(id){ return state.suppliers.find(x=>x.id===id); }
+function customerById(id){ return state.customers.find(x=>x.id===id); }
 /// Modal quản lý Nhà Cung Cấp / Điểm Múc — thêm/sửa/xoá. Sửa 1 nhà cung
 /// cấp ở đây tự động áp dụng lại cho MỌI công trình (cũ lẫn mới) đang gắn
 /// với nó, vì các hàm tính (siteVatRateFraction, siteMissingDocumentedVolume,
@@ -1392,6 +1417,93 @@ function renderSupplierManagerModal(editingId, linkToSiteIdx){
     await saveSuppliers();
     finishAndLink(savedId);
     showToast(canLink ? 'Đã lưu và gắn nhà cung cấp cho công trình này.' : 'Đã lưu nhà cung cấp.');
+  });
+}
+/// Modal quản lý Khách Hàng — thêm/sửa/xoá, mirror y hệt Nhà Cung Cấp.
+/// holdbackPercent CHỈ để ghi chú tham khảo (khách này thường giữ khoảng
+/// bao nhiêu % chờ hoá đơn) — KHÔNG dùng để tự trừ vào công nợ, vì khách
+/// tạm ứng tự do không theo tỷ lệ cố định. Công nợ luôn tính bằng đúng số
+/// tiền Phải Thu trừ đúng số tiền Đã Nhận (sitePayments), không suy đoán
+/// theo %.
+function renderCustomerManagerModal(editingId, linkToSiteIdx){
+  const editing = editingId ? customerById(editingId) : null;
+  const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
+  const canLink = linkToSiteIdx!==undefined && linkToSiteIdx!==null && !Number.isNaN(linkToSiteIdx);
+  const listHtml = state.customers.length ? state.customers.map(cus=>`
+    <div class="summary-row" style="align-items:center;">
+      <span>${escapeHtml(cus.name)}</span>
+      <span>
+        ${canLink?`<button class="btn btn-ghost btn-sm cusUseBtn" data-id="${cus.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Dùng cho công trình này</button>`:''}
+        <button class="btn btn-ghost btn-sm cusEditBtn" data-id="${cus.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
+        <button class="btn btn-ghost btn-sm cusDelBtn" data-id="${cus.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
+      </span>
+    </div>`).join('') : '<div class="hint">Chưa có khách hàng nào.</div>';
+
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🧑‍💼 Khách Hàng</h3>
+    <div style="margin-bottom:14px;">${listHtml}</div>
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <h3>${editing?'Sửa Khách Hàng':'Thêm Khách Hàng Mới'}</h3>
+    <div class="field">
+      <label>Tên khách hàng</label>
+      <input type="text" id="cus_name" value="${escapeHtml(val(editing,'name'))}" placeholder="VD: Công ty XYZ">
+    </div>
+    <div class="field">
+      <label>Số điện thoại</label>
+      <input type="text" inputmode="tel" id="cus_phone" value="${escapeHtml(val(editing,'phone'))}">
+    </div>
+    <div class="field">
+      <label>Địa chỉ</label>
+      <input type="text" id="cus_address" value="${escapeHtml(val(editing,'address'))}">
+    </div>
+    <div class="field">
+      <label>% giữ lại chờ hoá đơn (chỉ để ghi chú tham khảo)</label>
+      <input type="text" inputmode="decimal" id="cus_holdback" placeholder="VD: 20" value="${val(editing,'holdbackPercent')}">
+      <div class="hint" style="margin-top:4px;">Không dùng để tự trừ vào công nợ — chỉ hiện cạnh số công nợ để Ông Chủ nhớ tình hình. Công nợ thật luôn tính bằng Phải Thu trừ đúng số tiền đã ghi nhận thu được.</div>
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Ghi chú</label>
+      <input type="text" id="cus_notes" value="${escapeHtml(val(editing,'notes'))}">
+    </div>
+    ${canLink?`<div class="hint" style="margin:10px 0; color:var(--accent);">Lưu xong sẽ TỰ ĐỘNG gắn khách hàng này cho công trình đang mở.</div>`:''}
+    <button class="btn btn-accent" id="saveCustomerBtn" style="margin-top:10px;">${editing?'💾 Lưu Thay Đổi':'+ Thêm Khách Hàng'}</button>
+  `);
+  const finishAndLink = (customerId)=>{
+    if(canLink && state.draftShift && state.draftShift.siteLogs[linkToSiteIdx]){
+      state.draftShift.siteLogs[linkToSiteIdx].customerId = customerId;
+    }
+    closeModal();
+    if(typeof renderSiteRows==='function' && state.view==='form') { renderSiteRows(); updateSummary(); }
+  };
+  document.querySelectorAll('.cusUseBtn').forEach(btn=>btn.addEventListener('click', ()=>{
+    finishAndLink(btn.dataset.id);
+    showToast('Đã gắn khách hàng cho công trình này.');
+  }));
+  document.querySelectorAll('.cusEditBtn').forEach(btn=>btn.addEventListener('click', ()=>renderCustomerManagerModal(btn.dataset.id, linkToSiteIdx)));
+  document.querySelectorAll('.cusDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá khách hàng này? Các công trình đang gắn sẽ về trạng thái "chưa gắn".')) return;
+    state.customers = state.customers.filter(x=>x.id!==btn.dataset.id);
+    await saveCustomers();
+    renderCustomerManagerModal(null, linkToSiteIdx);
+  }));
+  document.getElementById('saveCustomerBtn').addEventListener('click', async ()=>{
+    const name = document.getElementById('cus_name').value.trim();
+    if(!name){ showToast('Nhập tên khách hàng.'); return; }
+    const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
+    const data = {
+      name,
+      phone: document.getElementById('cus_phone').value.trim(),
+      address: document.getElementById('cus_address').value.trim(),
+      holdbackPercent: parseVN(document.getElementById('cus_holdback').value),
+      notes: document.getElementById('cus_notes').value.trim()
+    };
+    let savedId;
+    if(editing){ Object.assign(editing, data); savedId = editing.id; }
+    else { savedId = uid('customer'); state.customers.push({ id: savedId, ...data }); }
+    await saveCustomers();
+    finishAndLink(savedId);
+    showToast(canLink ? 'Đã lưu và gắn khách hàng cho công trình này.' : 'Đã lưu khách hàng.');
   });
 }
 
@@ -2520,8 +2632,9 @@ function renderSiteRows(){
       </div>`;
     const nameField = `
       <div class="field">
-        <label>Tên công trình</label>
+        <label>${isCommercial?'Điểm Múc - Điểm Đổ (mô tả, không phải định danh chính)':'Tên công trình'}</label>
         <input type="text" class="site-input" data-idx="${i}" data-field="siteName" list="siteNamesList" value="${escapeHtml(s.siteName||'')}">
+        ${isCommercial?'<div class="hint" style="margin-top:4px;">Chỉ để mô tả/phân biệt hiển thị — Nhà Cung Cấp và Khách Hàng bên dưới mới là định danh chính dùng để tính công nợ/thuế.</div>':''}
       </div>`;
     let body;
     if(isCommercial){
@@ -2565,6 +2678,15 @@ function renderSiteRows(){
           </select>
           <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" data-idx="${i}" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
           <div class="hint" style="margin-top:6px;">Chọn đúng mỏ đang lấy hàng — % hoá đơn mỏ xuất, hệ số quy đổi, thuế suất VAT sẽ tự áp theo đúng nhà cung cấp này ở MỌI công trình dùng chung mỏ, không cần gõ lại mỗi lần đổi điểm đổ. Chỉ khi lấy hàng ở mỏ khác mới cần chọn/thêm nhà cung cấp khác. Sửa lại thông tin nhà cung cấp sẽ tự cập nhật cho cả công trình cũ.</div>
+        </div>
+        <div class="field">
+          <label>Khách Hàng / Điểm Đổ</label>
+          <select class="site-input" data-idx="${i}" data-field="customerId">
+            <option value="">— Chưa gắn —</option>
+            ${state.customers.map(cus=>`<option value="${cus.id}" ${s.customerId===cus.id?'selected':''}>${escapeHtml(cus.name)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm manageCustomersBtn" data-idx="${i}" style="margin-top:8px;">🧑‍💼 Thêm / Sửa Khách Hàng</button>
+          <div class="hint" style="margin-top:6px;">Chọn đúng khách đang giao hàng cho chuyến này — dùng để tính đúng công nợ (Phải Thu − Đã Nhận) theo đúng khách, không lẫn giữa các khách khác nhau dù đổ hàng ở điểm nào.</div>
         </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
         <button class="btn btn-ghost btn-sm addTripBtn" data-idx="${i}" style="margin-bottom:10px;">+ Thêm Chuyến</button>
@@ -2656,7 +2778,7 @@ function bindSiteRowEvents(){
       const s = sh.siteLogs[idx];
       const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','invoiceSupplementPercent'];
       const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
-      if(field==='siteName' || field==='supplierId') s[field] = inp.value;
+      if(field==='siteName' || field==='supplierId' || field==='customerId') s[field] = inp.value;
       else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
       else s[field] = Number(inp.value);
       updateSiteCalc(idx); updateSummary();
@@ -2698,6 +2820,9 @@ function bindSiteRowEvents(){
   });
   wrap.querySelectorAll('.manageSuppliersBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>renderSupplierManagerModal(null, Number(btn.dataset.idx)));
+  });
+  wrap.querySelectorAll('.manageCustomersBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>renderCustomerManagerModal(null, Number(btn.dataset.idx)));
   });
   wrap.querySelectorAll('.addTripBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -5457,6 +5582,34 @@ const ALL_TIME_TO = '2999-12-31';
 
 /// Every construction site's full, all-time list of billed amounts —
 /// one entry per shift-site contribution, dated by the shift's date.
+/// Công nợ 1 khách hàng — ĐÚNG như Ông Chủ chốt: Phải Thu (tổng số tiền
+/// đúng ra phải thu từ mọi công trình gắn khách này) trừ Đã Nhận (tổng
+/// tiền khách đã thực bank vào, ghi nhận ở sitePayments theo customerId) —
+/// KHÔNG dùng % giữ lại để suy đoán, vì khách tạm ứng tự do không theo tỷ
+/// lệ cố định.
+function computeCustomerDebt(customerId){
+  let billed = 0;
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.customerId===customerId) billed += siteBilledAmount(s);
+    }
+  }
+  const collected = state.sitePayments.filter(p=>p.customerId===customerId).reduce((sum,p)=>sum+(Number(p.amount)||0),0);
+  return { billed, collected, owed: Math.max(0, billed-collected) };
+}
+/// Công nợ 1 nhà cung cấp — chiều ngược lại: Phải Trả (tổng tiền thực
+/// phải trả mỏ từ mọi công trình gắn nhà cung cấp này, đã gồm VAT nếu có)
+/// trừ Đã Trả (tổng tiền đã thực bank cho mỏ, ghi ở supplierPayments).
+function computeSupplierDebt(supplierId){
+  let payable = 0;
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType==='commercial' && s.supplierId===supplierId) payable += commercialCashToSupplier(s);
+    }
+  }
+  const paid = state.supplierPayments.filter(p=>p.supplierId===supplierId).reduce((sum,p)=>sum+(Number(p.amount)||0),0);
+  return { payable, paid, owed: Math.max(0, payable-paid) };
+}
 function computeAllSiteBilledEvents(){
   const map = {};
   for(const sh of state.shifts){
@@ -6125,6 +6278,12 @@ function renderResults(){
       <div id="partnersOverviewWrap"></div>
     </section>
 
+    <section class="group">
+      <h3>🏔️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</h3>
+      <div class="hint" style="margin-bottom:10px;">Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại — không dùng tỷ lệ % nào để suy đoán, chỉ lấy đúng số đã phải thu/trả trừ đúng số tiền đã ghi nhận thật.</div>
+      <div id="customerSupplierDebtWrap"></div>
+    </section>
+
     ${insights.length>0 ? `
     <section class="group">
       <h3>🧭 Tư Vấn Chiến Lược</h3>
@@ -6147,6 +6306,7 @@ function renderResults(){
 
   renderRepairList(repairsHere);
   renderPartnersOverview();
+  renderCustomerSupplierDebtOverview();
 
   document.getElementById('res_from').addEventListener('change', e=>{
     state.resultsRange.from = e.target.value; state.resultsRoadFeeOverride=null; renderResults();
@@ -6183,6 +6343,228 @@ function renderResults(){
 /// log (money received from the site's client/contractor) with add/edit.
 /// Renders the all-time partner list (sorted by amount owed, worst first)
 /// into the #partnersOverviewWrap placeholder inside renderResults().
+/// Bảng tổng hợp công nợ Khách Hàng + Nhà Cung Cấp (thương mại, gắn theo
+/// customerId/supplierId) — hiện trong Kết Quả Kinh Doanh, riêng biệt với
+/// hệ thống Đối Tác cũ (theo tên công trình tự do) ở trên.
+function renderCustomerSupplierDebtOverview(){
+  const wrap = document.getElementById('customerSupplierDebtWrap');
+  if(!wrap) return;
+  const custRows = state.customers.map(c=>({ ...c, debt: computeCustomerDebt(c.id) }));
+  const supRows = state.suppliers.map(s=>({ ...s, debt: computeSupplierDebt(s.id) }));
+  wrap.innerHTML = `
+    <div style="font-weight:700; margin-bottom:6px;">Khách Hàng</div>
+    ${custRows.length===0 ? '<div class="hint" style="margin-bottom:12px;">Chưa có khách hàng nào — thêm ở form nhập ca, mục công trình thương mại.</div>' : `
+    <div class="card dash-wrap" style="padding:0; margin-bottom:14px;">
+      <table class="dash">
+        <thead><tr><th>Khách Hàng</th><th>Còn Nợ</th></tr></thead>
+        <tbody>
+          ${custRows.map(c=>`<tr class="cust-debt-row" data-id="${c.id}">
+            <td>${escapeHtml(c.name)}${c.holdbackPercent?` <span class="hint">(thường giữ ~${c.holdbackPercent}%)</span>`:''}</td>
+            <td style="color:${c.debt.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(c.debt.owed)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`}
+    <div style="font-weight:700; margin-bottom:6px;">Nhà Cung Cấp</div>
+    ${supRows.length===0 ? '<div class="hint">Chưa có nhà cung cấp nào.</div>' : `
+    <div class="card dash-wrap" style="padding:0;">
+      <table class="dash">
+        <thead><tr><th>Nhà Cung Cấp</th><th>Còn Nợ (Ông Chủ phải trả)</th></tr></thead>
+        <tbody>
+          ${supRows.map(s=>`<tr class="sup-debt-row" data-id="${s.id}">
+            <td>${escapeHtml(s.name)}</td>
+            <td style="color:${s.debt.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(s.debt.owed)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`}
+    <div class="hint" style="margin-top:8px;">Bấm vào 1 dòng để xem chi tiết và ghi nhận thêm khoản đã thu/đã trả.</div>
+  `;
+  wrap.querySelectorAll('.cust-debt-row').forEach(row=>row.addEventListener('click', ()=>{ saveMainScroll(); openCustomerDetail(row.dataset.id); }));
+  wrap.querySelectorAll('.sup-debt-row').forEach(row=>row.addEventListener('click', ()=>{ saveMainScroll(); openSupplierDetail(row.dataset.id); }));
+}
+
+function openCustomerDetail(customerId){
+  saveMainScroll();
+  const cus = customerById(customerId);
+  const app = document.getElementById('app');
+  if(!cus){ renderAll(); return; }
+  const debt = computeCustomerDebt(customerId);
+  const payments = state.sitePayments.filter(p=>p.customerId===customerId).sort((a,b)=>b.date.localeCompare(a.date));
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="custDetailBackBtn">← Quay Lại Kết Quả</button>
+    </section>
+    <section class="group">
+      <div class="card">
+        <h3 style="margin-top:0;">${escapeHtml(cus.name)}</h3>
+        ${cus.phone?`<div class="summary-row"><span>SĐT</span><span class="val">${escapeHtml(cus.phone)}</span></div>`:''}
+        ${cus.address?`<div class="summary-row"><span>Địa chỉ</span><span class="val">${escapeHtml(cus.address)}</span></div>`:''}
+        ${cus.holdbackPercent?`<div class="hint" style="margin-top:6px;">Ghi chú: khách này thường giữ lại khoảng ${cus.holdbackPercent}% chờ đủ hoá đơn mới thanh toán hết (chỉ tham khảo, không dùng để tính công nợ).</div>`:''}
+      </div>
+    </section>
+    <section class="group">
+      <div class="card">
+        <div class="summary-row"><span>Phải thu (tổng)</span><span class="val">${fmtVND(debt.billed)}</span></div>
+        <div class="summary-row"><span>Đã nhận (tổng)</span><span class="val">${fmtVND(debt.collected)}</span></div>
+        <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}</span></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
+    </section>
+    <section class="group">
+      <h3>Lịch Sử Đã Thu</h3>
+      ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':payments.map(p=>`
+        <div class="card" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" data-id="${p.id}" onclick="openCustomerPaymentEditor('${p.id}','${customerId}')">
+          <div class="summary-row"><span>${formatDateVN(p.date)}</span><span class="val" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</span></div>
+          ${p.notes?`<div class="hint">${escapeHtml(p.notes)}</div>`:''}
+        </div>`).join('')}
+    </section>
+  `;
+  document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>openCustomerPaymentEditor(null, customerId));
+}
+function openCustomerPaymentEditor(id, customerId){
+  const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
+  const cid = customerId || (existing && existing.customerId);
+  const cus = customerById(cid);
+  const draft = existing ? {...existing} : { id: uid('pay'), siteName: cus?cus.name:'', customerId: cid, partnerName: cus?cus.name:'', date: todayLocalDateStr(), amount:0, notes:'' };
+  const goBack = () => { openCustomerDetail(draft.customerId); restoreMainScroll(); };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(cus?cus.name:'')}</h3>
+      <div class="card">
+        <div class="field">
+          <label>Ngày nhận tiền</label>
+          <input type="date" id="cp_date" value="${draft.date}">
+        </div>
+        <div class="field">
+          <label>Số tiền thu về</label>
+          <input type="text" inputmode="decimal" id="cp_amount">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Nội dung / ghi chú</label>
+          <input type="text" id="cp_notes" value="${escapeHtml(draft.notes)}">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delCustPaymentBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelCustPaymentBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveCustPaymentBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+  attachMoneyInput(document.getElementById('cp_amount'), draft.amount, v=>draft.amount=v);
+  document.getElementById('saveCustPaymentBtn').addEventListener('click', async ()=>{
+    draft.date = document.getElementById('cp_date').value || draft.date;
+    draft.notes = document.getElementById('cp_notes').value.trim();
+    const idx = state.sitePayments.findIndex(p=>p.id===draft.id);
+    if(idx>=0) state.sitePayments[idx]=draft; else state.sitePayments.push(draft);
+    await saveSitePayments();
+    showToast('Đã lưu khoản thu.');
+    goBack();
+  });
+  document.getElementById('cancelCustPaymentBtn').addEventListener('click', goBack);
+  const delBtn = document.getElementById('delCustPaymentBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá khoản thu này?')){
+      state.sitePayments = state.sitePayments.filter(p=>p.id!==draft.id);
+      await saveSitePayments();
+      showToast('Đã xoá.');
+      goBack();
+    }
+  });
+}
+
+function openSupplierDetail(supplierId){
+  saveMainScroll();
+  const sup = supplierById(supplierId);
+  const app = document.getElementById('app');
+  if(!sup){ renderAll(); return; }
+  const debt = computeSupplierDebt(supplierId);
+  const payments = state.supplierPayments.filter(p=>p.supplierId===supplierId).sort((a,b)=>b.date.localeCompare(a.date));
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="supDetailBackBtn">← Quay Lại Kết Quả</button>
+    </section>
+    <section class="group">
+      <div class="card">
+        <h3 style="margin-top:0;">${escapeHtml(sup.name)}</h3>
+      </div>
+    </section>
+    <section class="group">
+      <div class="card">
+        <div class="summary-row"><span>Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
+        <div class="summary-row"><span>Đã trả (tổng)</span><span class="val">${fmtVND(debt.paid)}</span></div>
+        <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}</span></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
+    </section>
+    <section class="group">
+      <h3>Lịch Sử Đã Trả</h3>
+      ${payments.length===0?'<div class="hint">Chưa có khoản trả nào.</div>':payments.map(p=>`
+        <div class="card" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" data-id="${p.id}" onclick="openSupplierPaymentEditor('${p.id}','${supplierId}')">
+          <div class="summary-row"><span>${formatDateVN(p.date)}</span><span class="val" style="color:var(--loss); font-weight:700;">−${fmtVND(p.amount)}</span></div>
+          ${p.notes?`<div class="hint">${escapeHtml(p.notes)}</div>`:''}
+        </div>`).join('')}
+    </section>
+  `;
+  document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>openSupplierPaymentEditor(null, supplierId));
+}
+function openSupplierPaymentEditor(id, supplierId){
+  const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
+  const sid = supplierId || (existing && existing.supplierId);
+  const sup = supplierById(sid);
+  const draft = existing ? {...existing} : { id: uid('spay'), supplierId: sid, date: todayLocalDateStr(), amount:0, notes:'' };
+  const goBack = () => { openSupplierDetail(draft.supplierId); restoreMainScroll(); };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Đã Bank Cho Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
+      <div class="card">
+        <div class="field">
+          <label>Ngày chuyển tiền</label>
+          <input type="date" id="sp2_date" value="${draft.date}">
+        </div>
+        <div class="field">
+          <label>Số tiền đã chuyển</label>
+          <input type="text" inputmode="decimal" id="sp2_amount">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Nội dung / ghi chú</label>
+          <input type="text" id="sp2_notes" value="${escapeHtml(draft.notes)}">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delSupPaymentBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelSupPaymentBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveSupPaymentBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+  attachMoneyInput(document.getElementById('sp2_amount'), draft.amount, v=>draft.amount=v);
+  document.getElementById('saveSupPaymentBtn').addEventListener('click', async ()=>{
+    draft.date = document.getElementById('sp2_date').value || draft.date;
+    draft.notes = document.getElementById('sp2_notes').value.trim();
+    const idx = state.supplierPayments.findIndex(p=>p.id===draft.id);
+    if(idx>=0) state.supplierPayments[idx]=draft; else state.supplierPayments.push(draft);
+    await saveSupplierPayments();
+    showToast('Đã lưu khoản đã trả mỏ.');
+    goBack();
+  });
+  document.getElementById('cancelSupPaymentBtn').addEventListener('click', goBack);
+  const delBtn = document.getElementById('delSupPaymentBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá khoản đã trả này?')){
+      state.supplierPayments = state.supplierPayments.filter(p=>p.id!==draft.id);
+      await saveSupplierPayments();
+      showToast('Đã xoá.');
+      goBack();
+    }
+  });
+}
+
 function renderPartnersOverview(){
   const wrap = document.getElementById('partnersOverviewWrap');
   if(!wrap) return;
