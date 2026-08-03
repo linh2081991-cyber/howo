@@ -1486,11 +1486,13 @@ function commercialVatPayable(s){
 /// đúng phần VAT mỗi khi giá đã gồm VAT — sửa lại cho đúng tại đây.
 function siteBilledAmount(s){
   if(s.siteType==='commercial') return commercialCashFromCustomer(s);
-  const gross = (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
-  // Cùng nguyên tắc như bên thương mại: nếu giá đã gồm VAT thì đúng bằng
-  // số gộp đã nhập; nếu giá là net thì khách phải trả thêm VAT khi xuất
-  // hoá đơn — công nợ phải ghi đủ số đó, không phải số net.
-  return s.priceIncludesVat ? gross : gross*(1+vatRateFraction());
+  // Chở cước: số khách phải trả LUÔN đúng bằng số đã nhập (khối lượng ×
+  // đơn giá × số chuyến) — cờ "giá đã gồm VAT" chỉ ảnh hưởng cách tính
+  // "Doanh thu" cho P&L nội bộ (bóc VAT ra để báo cáo), KHÔNG có nghĩa là
+  // cộng thêm VAT lên số đã thu/phải thu của khách. Không được tự cộng
+  // thêm VAT ở đây — làm vậy sẽ khiến đối tác cũ ĐÃ TRẢ ĐỦ tự dưng hiện
+  // còn nợ đúng phần VAT đó.
+  return (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
 }
 function commercialCashFromCustomer(s){
   const entered = commercialGrossSell(s);
