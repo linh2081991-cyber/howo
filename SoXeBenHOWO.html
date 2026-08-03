@@ -2637,7 +2637,7 @@ function bindSiteRowEvents(){
     });
   });
   wrap.querySelectorAll('.site-input:not(.site-money)').forEach(inp=>{
-    inp.addEventListener('input', ()=>{
+    const handle = ()=>{
       const idx = Number(inp.dataset.idx), field=inp.dataset.field;
       const s = sh.siteLogs[idx];
       const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','invoiceSupplementPercent'];
@@ -2646,7 +2646,13 @@ function bindSiteRowEvents(){
       else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
       else s[field] = Number(inp.value);
       updateSiteCalc(idx); updateSummary();
-    });
+    };
+    // Gắn CẢ 'input' lẫn 'change' — thẻ <select> (ô chọn Nhà Cung Cấp) trên
+    // 1 số bản Safari/iOS chỉ bắn 'change', không bắn 'input', khiến chọn
+    // xong mà màn Dòng Tiền Thực Tế không cập nhật gì (đúng hiện tượng
+    // Ông Chủ báo).
+    inp.addEventListener('input', handle);
+    inp.addEventListener('change', handle);
   });
   wrap.querySelectorAll('.site-money').forEach(inp=>{
     inp.addEventListener('input', ()=>{
@@ -2715,6 +2721,28 @@ function updateSiteCalc(idx){
   const el = document.querySelector(`.site-calc[data-idx="${idx}"]`);
   if(!el) return;
   if(s.siteType==='commercial'){
+    const sup = s.supplierId ? supplierById(s.supplierId) : null;
+    // Khối "Đang áp dụng" — LUÔN hiện, không phụ thuộc có thiếu chứng từ
+    // hay không, để Ông Chủ thấy ngay từng số đang lấy TỪ ĐÂU (nhà cung
+    // cấp / gõ tay riêng / mặc định chung Cài Đặt) — hết mơ hồ "nhập rồi
+    // mà không thấy đổi gì".
+    const resolve = (supKey, siteKey, defVal, defLabel) => {
+      if(sup && sup[supKey]!==undefined && sup[supKey]!==null && sup[supKey]!=='') return { val: sup[supKey], src: `nhà cung cấp "${sup.name}"` };
+      if(s[siteKey]!==undefined && s[siteKey]!==null && s[siteKey]!=='') return { val: s[siteKey], src: 'gõ tay riêng cho công trình này' };
+      return { val: defVal, src: defLabel };
+    };
+    const rVat = resolve('vatRatePercent','vatRatePercent', Number(state.settings.vatRatePercent)||0, 'mặc định chung Cài Đặt');
+    const rInv = resolve('invoicedBuyPercent','invoicedBuyPercent', 100, 'mặc định (coi như đủ 100% hoá đơn)');
+    const rDen = resolve('densityRatio','densityRatio', null, 'chưa khai — không quy đổi được');
+    const rSup = resolve('invoiceSupplementPercent','invoiceSupplementPercent', 30, 'mặc định 30%');
+    const appliedBlock = `
+      <div class="cb-sec" style="margin-bottom:10px;">
+        <div class="cb-title">⚙️ Đang áp dụng ${sup?`(nhà cung cấp: <b>${escapeHtml(sup.name)}</b>)`:'(chưa gắn nhà cung cấp)'}</div>
+        <div class="cb-line"><span class="cb-lbl">Thuế suất VAT</span><span class="cb-val">${rVat.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rVat.src})</span></span></div>
+        <div class="cb-line"><span class="cb-lbl">% hoá đơn mỏ xuất được</span><span class="cb-val">${rInv.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rInv.src})</span></span></div>
+        <div class="cb-line"><span class="cb-lbl">Hệ số quy đổi (tấn/khối)</span><span class="cb-val">${rDen.val!==null?rDen.val:'—'} <span style="color:var(--ink-soft); font-weight:400;">(${rDen.src})</span></span></div>
+        <div class="cb-line"><span class="cb-lbl">% chi phí mua hoá đơn bù</span><span class="cb-val">${rSup.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rSup.src})</span></span></div>
+      </div>`;
     const cashIn = commercialCashFromCustomer(s);
     const cashToSupplier = commercialCashToSupplier(s);
     const vatToState = commercialVatPayable(s);
@@ -2742,10 +2770,14 @@ function updateSiteCalc(idx){
           <div class="cb-line"><span class="cb-lbl">Khối lượng thiếu (đã quy đổi)</span><span class="cb-val cb-out">${missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
           <div class="cb-line"><span class="cb-lbl">Giá trị phần thiếu</span><span class="cb-val cb-out">${fmtVND(missingValue)}</span></div>
           <div class="cb-line"><span class="cb-lbl">Chi phí mua hoá đơn bù</span><span class="cb-val cb-out">−${fmtVND(supplementCost)}</span></div>
-        </div>` : '';
+        </div>` : `
+        <div class="cb-sec" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
+          <div class="hint">Không có khối lượng thiếu chứng từ (mỏ xuất đủ hoá đơn, hoặc chưa khai đủ 2 ô "% hoá đơn" + "hệ số quy đổi" ở trên).</div>
+        </div>`;
 
     el.innerHTML = `
       <div class="cbreak">
+        ${appliedBlock}
         <div class="cb-sec">
           <div class="cb-title">💵 Dòng tiền thực tế</div>
           <div class="cb-line"><span class="cb-lbl">Khách trả (tiền vào)</span><span class="cb-val cb-in">+${fmtVND(cashIn)}</span></div>
