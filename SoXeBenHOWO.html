@@ -1754,6 +1754,15 @@ function shiftTotalCost(sh){
        + (Number(sh.roadFeeIncidental)||0) + shiftMaterialCost(sh) + shiftInvoiceSupplementCost(sh);
 }
 function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); }
+/// Chi phí vận hành THUẦN TIỀN MẶT của 1 ca — giống shiftTotalCost() nhưng
+/// KHÔNG gồm giá vốn hàng mua / chi phí bổ sung chứng từ (2 khoản này đã
+/// được theo dõi riêng qua Sổ Tiền Bank Cho Mỏ ở Dòng Tiền Thuần, tránh
+/// tính trùng 2 lần).
+function shiftOperatingCashCost(sh){
+  return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
+       + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
+       + (Number(sh.roadFeeIncidental)||0);
+}
 
 // ---- Repair/depreciation responsibility (who pays for a breakage) ----
 const REPAIR_RESPONSIBILITY_OPTIONS = [
@@ -5996,6 +6005,25 @@ function renderResults(){
   // ra số của mốc đó, không cần làm riêng từng mốc cố định). Không áp
   // dụng khi kỳ đang lỗ (không có thuế trên số âm).
   const citEstimate = Math.max(0, finalNetProfit) * (Number(state.settings.citRatePercent)||0)/100;
+  // VAT phải nộp trong kỳ — cộng dồn đúng từng công trình thương mại đã
+  // tính (commercialVatPayable), đây là số BẮT BUỘC theo luật, không tuỳ
+  // chọn được.
+  const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
+  // TNDN dự kiến do Ông Chủ tự gõ tay (KT thuế tư vấn, có thể tối ưu thấp
+  // hơn cách tính % đơn giản) — lưu riêng theo đúng khoảng ngày đang xem,
+  // không tự tính theo %.
+  const citPeriodKey = `${from}_${to}`;
+  const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey];
+
+  // ===== DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (phương pháp trực tiếp) =====
+  // Dùng đúng tiền THẬT đã ghi nhận (2 sổ tiền khách bank vào / bank cho
+  // mỏ) thay vì suy luận từ số dồn tích (doanh thu/công nợ) — đơn giản,
+  // dễ đối chiếu với KT thuế, đúng chuẩn báo cáo lưu chuyển tiền tệ
+  // phương pháp trực tiếp.
+  const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const operatingCashCost = inRange.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
+  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthly;
 
   // Data-integrity check: any ca in range with real fuel consumed but no
   // đơn giá dầu entered contributes 0đ to Tiền dầu tiêu hao (consumed × 0),
@@ -6084,8 +6112,23 @@ function renderResults(){
         <div class="summary-row total"><span>LỢI NHUẬN THỰC TẾ</span><span class="val" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</span></div>
         <div class="hint" style="margin-top:6px;">4 khoản khấu hao/vay/bảo hiểm/đăng kiểm lấy từ Cài Đặt (đ/tháng cố định) — vào tab Cài Đặt để sửa nếu cần.</div>
         <div class="formula-divider" style="margin:10px 0;"></div>
-        <div class="summary-row"><span>Thuế TNDN dự kiến (${Number(state.settings.citRatePercent)||0}% trên lợi nhuận thực tế)</span><span class="val" style="color:var(--loss);">${citEstimate>0?'−':''}${fmtVND(citEstimate)}</span></div>
-        <div class="hint" style="margin-top:2px;">Ước tính tham khảo theo đúng khoảng ngày đang chọn ở trên — đổi "Từ ngày/Đến ngày" thành đúng quý/năm cần xem là ra ngay số dự kiến của mốc đó. Không phải số quyết toán chính thức — KT thuế mới là người tối ưu số thật phải nộp.</div>
+        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">CÁC KHOẢN THUẾ TRONG KỲ</div>
+        <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
+        <div class="field" style="margin-top:8px; margin-bottom:0;">
+          <label>Thuế TNDN dự kiến (KT thuế tư vấn — Ông Chủ tự nhập theo đúng kỳ này)</label>
+          <input type="text" inputmode="decimal" id="res_manualCit" placeholder="Chưa nhập">
+        </div>
+        <div class="hint" style="margin-top:4px;">Không tự tính theo %, vì KT có thể tối ưu thấp hơn qua các cách hợp pháp app không mô phỏng được — Ông Chủ gõ đúng số KT đưa cho đúng kỳ đang xem, app chỉ hiển thị lại.</div>
+
+        <div class="formula-divider" style="margin:14px 0;"></div>
+        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH</div>
+        <div class="summary-row"><span>Tiền khách bank vào (thật, trong kỳ)</span><span class="val" style="color:var(--profit);">+${fmtVND(cashIn)}</span></div>
+        <div class="summary-row"><span>− Tiền bank cho mỏ (thật, trong kỳ)</span><span class="val">${fmtVND(cashOutToSuppliers)}</span></div>
+        <div class="summary-row"><span>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(operatingCashCost)}</span></div>
+        <div class="summary-row"><span>− Sửa chữa + luật đường + cố định khác</span><span class="val">${fmtVND(repairTotal+roadFee+otherFixedMonthly)}</span></div>
+        <div class="summary-row total" style="font-size:17px;"><span>DÒNG TIỀN THUẦN</span><span class="val" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</span></div>
+        <div class="hint" style="margin-top:4px;">Tính theo tiền THẬT đã ghi ở Sổ Tiền Khách Bank Vào + Sổ Tiền Bank Cho Mỏ (mục Công Nợ bên dưới) — khác với Lợi Nhuận Thực Tế ở trên (tính theo doanh thu/chi phí đã phát sinh, kể cả phần chưa thu/chưa trả tiền). 2 số này lệch nhau đúng bằng phần công nợ còn treo.</div>
+
         <div class="field" style="margin-top:14px; margin-bottom:0;">
           <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
           <input type="text" inputmode="decimal" id="res_roadFee">
@@ -6303,6 +6346,11 @@ function renderResults(){
     state.resultsRoadFeeOverride = v;
     renderResults();
   });
+  attachMoneyInput(document.getElementById('res_manualCit'), manualCitValue||0, async v=>{
+    if(!state.settings.manualCitByPeriod) state.settings.manualCitByPeriod = {};
+    state.settings.manualCitByPeriod[citPeriodKey] = v;
+    await saveSettings();
+  });
 
   renderRepairList(repairsHere);
   renderPartnersOverview();
@@ -6476,6 +6524,45 @@ function openCustomerPaymentEditor(id, customerId){
   });
 }
 
+/// Tick/bỏ tick hàng loạt "Đã nhận hóa đơn MUA" cho MỌI công trình gắn
+/// đúng 1 nhà cung cấp, trong 1 khoảng ngày — vì mỏ thường xuất hoá đơn
+/// gộp nhiều chuyến 1 lần, tick tay từng ca sẽ rất mất công.
+function openBulkInvoiceTickModal(supplierId){
+  const sup = supplierById(supplierId);
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>✅ Tick Hàng Loạt Hoá Đơn Đã Nhận — ${escapeHtml(sup?sup.name:'')}</h3>
+    <div class="hint" style="margin-bottom:12px;">Chọn đúng khoảng ngày mỏ vừa xuất hoá đơn — app tự tick "Đã nhận hóa đơn MUA" cho MỌI công trình gắn đúng nhà cung cấp này trong khoảng ngày đó, không cần mở từng ca.</div>
+    <div class="date-range">
+      <div class="field"><label>Từ ngày</label><input type="date" id="bulk_from" value="${todayLocalDateStr()}"></div>
+      <div class="field"><label>Đến ngày</label><input type="date" id="bulk_to" value="${todayLocalDateStr()}"></div>
+    </div>
+    <button class="btn btn-accent btn-block" id="bulkTickBtn">✅ Tick Hàng Loạt</button>
+    <button class="btn btn-ghost btn-block" id="bulkUntickBtn" style="margin-top:8px;">↩️ Bỏ Tick Lại (nếu lỡ tick nhầm)</button>
+  `);
+  const doBulk = async (setTo) => {
+    const from = document.getElementById('bulk_from').value;
+    const to = document.getElementById('bulk_to').value;
+    if(!from || !to){ showToast('Chọn đủ khoảng ngày.'); return; }
+    let count = 0;
+    for(const sh of state.shifts){
+      if(sh.date<from || sh.date>to) continue;
+      for(const s of (sh.siteLogs||[])){
+        if(s.siteType==='commercial' && s.supplierId===supplierId){
+          s.buyHasInvoice = setTo;
+          count++;
+        }
+      }
+    }
+    await saveShifts();
+    closeModal();
+    showToast(`Đã ${setTo?'tick':'bỏ tick'} ${count} công trình.`);
+    openSupplierDetail(supplierId);
+  };
+  document.getElementById('bulkTickBtn').addEventListener('click', ()=>doBulk(true));
+  document.getElementById('bulkUntickBtn').addEventListener('click', ()=>doBulk(false));
+}
+
 function openSupplierDetail(supplierId){
   saveMainScroll();
   const sup = supplierById(supplierId);
@@ -6499,6 +6586,7 @@ function openSupplierDetail(supplierId){
         <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}</span></div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
+      <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Trả</h3>
@@ -6511,6 +6599,7 @@ function openSupplierDetail(supplierId){
   `;
   document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>openSupplierPaymentEditor(null, supplierId));
+  document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId));
 }
 function openSupplierPaymentEditor(id, supplierId){
   const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
