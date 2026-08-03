@@ -2445,7 +2445,7 @@ function renderSiteRows(){
         </div>
         <div class="field">
           <label>Thuế suất VAT áp dụng cho công trình này (%)</label>
-          <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="vatRatePercent" placeholder="Mặc định ${Number(state.settings.vatRatePercent)||0}% (theo Cài Đặt)" value="${s.vatRatePercent!==undefined&&s.vatRatePercent!==null?s.vatRatePercent:''}">
+          <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="vatRatePercent" placeholder="Mặc định ${Number(state.settings.vatRatePercent)||0}% (theo Cài Đặt)" value="${s.vatRatePercent!==undefined&&s.vatRatePercent!==null?s.vatRatePercent:''}">
           <div class="hint" style="margin-top:4px;">Để trống = dùng đúng mức chung ở Cài Đặt. Gõ số khác nếu KT thuế áp mức riêng cho công trình này (VD 8% thay vì 10%).</div>
         </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
@@ -2464,16 +2464,16 @@ function renderSiteRows(){
           <div style="font-weight:700; font-size:14px; margin-bottom:8px;">Khối lượng thiếu chứng từ (mỏ thiếu hoá đơn / lệch số đo)</div>
           <div class="field">
             <label>% khối lượng mỏ xuất được hoá đơn</label>
-            <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoicedBuyPercent" placeholder="Mặc định 100% (đủ hoá đơn)" value="${s.invoicedBuyPercent!==undefined&&s.invoicedBuyPercent!==null?s.invoicedBuyPercent:''}">
+            <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoicedBuyPercent" placeholder="Mặc định 100% (đủ hoá đơn)" value="${s.invoicedBuyPercent!==undefined&&s.invoicedBuyPercent!==null?s.invoicedBuyPercent:''}">
           </div>
           <div class="two-col" style="margin-bottom:0;">
             <div class="field" style="margin-bottom:0;">
               <label>Hệ số quy đổi (tấn/khối)</label>
-              <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="densityRatio" placeholder="VD 1,7" value="${s.densityRatio!==undefined&&s.densityRatio!==null?s.densityRatio:''}">
+              <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="densityRatio" placeholder="VD 1,7" value="${s.densityRatio!==undefined&&s.densityRatio!==null?s.densityRatio:''}">
             </div>
             <div class="field" style="margin-bottom:0;">
               <label>% chi phí mua hoá đơn bù</label>
-              <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoiceSupplementPercent" placeholder="Mặc định 30%" value="${s.invoiceSupplementPercent!==undefined&&s.invoiceSupplementPercent!==null?s.invoiceSupplementPercent:''}">
+              <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoiceSupplementPercent" placeholder="Mặc định 30%" value="${s.invoiceSupplementPercent!==undefined&&s.invoiceSupplementPercent!==null?s.invoiceSupplementPercent:''}">
             </div>
           </div>
           <div class="hint" style="margin-top:6px;">Để trống nếu mỏ xuất đủ 100% hoá đơn, không có khối lượng thiếu. Chỉ điền khi thực sự có tình trạng thiếu chứng từ — app tự tính khối lượng/giá trị/chi phí bù ở khối "Dòng tiền thực tế" bên dưới.</div>
@@ -2555,8 +2555,9 @@ function bindSiteRowEvents(){
       const idx = Number(inp.dataset.idx), field=inp.dataset.field;
       const s = sh.siteLogs[idx];
       const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','invoiceSupplementPercent'];
+      const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
       if(field==='siteName') s[field] = inp.value;
-      else if(emptyMeansDefault.includes(field)) s[field] = inp.value==='' ? undefined : Number(inp.value); // rỗng = dùng mặc định, không phải 0
+      else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
       else s[field] = Number(inp.value);
       updateSiteCalc(idx); updateSummary();
     });
