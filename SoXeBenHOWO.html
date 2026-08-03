@@ -577,7 +577,7 @@ let state = {
   repairs: [], // {id, date, item, invoiceCode, amount, notes}
   settings: { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
               monthlyFixedRoadFee: 25000000, geminiApiKey: '',
-              currentFuelUnitPrice: 0, vatRatePercent: 10,
+              currentFuelUnitPrice: 0, vatRatePercent: 10, citRatePercent: 20,
               // Ca "vượt" ngày công chuẩn/tháng (VD ca thứ 29/30/31 khi
               // chuẩn là 28) — lương cứng ngày đó tính CỐ ĐỊNH theo mức
               // này, không chia đều theo dailyBaseSalary() nữa. Xem
@@ -1346,6 +1346,12 @@ function dailyHousing(driver, dateStr){
 }
 
 function vatRateFraction(){ return (Number(state.settings.vatRatePercent)||0)/100; }
+/// Thuế suất VAT áp cho riêng 1 công trình thương mại — Ông Chủ có thể gõ
+/// tay khác mức chung (VD KT thuế đang áp 8% cho giao dịch này thay vì
+/// 10% mặc định). Bỏ trống = dùng đúng mức chung ở Cài Đặt.
+function siteVatRateFraction(s){
+  return (s.vatRatePercent!==undefined && s.vatRatePercent!==null && s.vatRatePercent!=='') ? Number(s.vatRatePercent)/100 : vatRateFraction();
+}
 // Số chuyến của 1 công trình — chở cước dùng ô "trips"; thương mại đếm số
 // dòng chuyến đã khai (mỗi dòng 1 chuyến, vì khối lượng mua/bán mỗi chuyến
 // khác nhau nên phải khai riêng từng chuyến).
@@ -1371,22 +1377,67 @@ function siteTripCount(s){
 //    tháng (VAT nộp cuối tháng = phần đã thu dư của khách, không phải lãi mất đi).
 function siteRevenue(s){
   if(s.siteType==='commercial'){
-    return commercialNetSell(s) - commercialNetBuy(s);
+    return commercialNetSell(s);
   }
   const gross = (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
   return s.priceIncludesVat ? gross/(1+vatRateFraction()) : gross;
 }
+/// Giá vốn hàng mua (net, đã bóc VAT) — CHỈ có ở công trình thương mại (mua
+/// rồi bán lại); công trình chở cước không có "hàng mua" nên luôn 0. Đây là
+/// khoản trước đây bị trừ NGẦM vào "Doanh thu" (siteRevenue = bán − mua);
+/// giờ tách thành 1 dòng chi phí riêng, đúng chuẩn kế toán Doanh thu / Giá
+/// vốn / Lợi nhuận gộp — khớp đúng cách trình bày file KT thuế đang dùng.
+function siteMaterialCost(s){
+  return s.siteType==='commercial' ? commercialNetBuy(s) : 0;
+}
+function shiftMaterialCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteMaterialCost(s),0); }
+/// Khối lượng MUA "có chứng từ hợp lệ", quy đổi ra ĐÚNG đơn vị bán (VD mua
+/// theo tấn, bán theo khối, dùng hệ số densityRatio Ông Chủ tự nhập theo
+/// đúng loại vật liệu). Chỉ tính khi Ông Chủ có khai % hoá đơn mỏ xuất
+/// được (< 100%) VÀ hệ số quy đổi — nếu để trống (mỏ xuất đủ 100%, hoặc
+/// mua/bán cùng đơn vị không cần quy đổi) thì coi như không thiếu gì.
+function siteMissingDocumentedVolume(s){
+  if(s.siteType!=='commercial') return 0;
+  const invoicedPct = (s.invoicedBuyPercent===undefined||s.invoicedBuyPercent===null||s.invoicedBuyPercent==='') ? 100 : Number(s.invoicedBuyPercent);
+  const density = Number(s.densityRatio)||0;
+  if(invoicedPct>=100 || density<=0) return 0;
+  const totalBuyVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0),0);
+  const totalSellVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0),0);
+  const documentedVolume = (totalBuyVolume * invoicedPct/100) / density;
+  return Math.max(0, totalSellVolume - documentedVolume);
+}
+/// Giá trị (net, theo đơn giá mua BÌNH QUÂN của công trình) của phần khối
+/// lượng thiếu chứng từ ở trên.
+function siteMissingDocumentedValue(s){
+  const missingVol = siteMissingDocumentedVolume(s);
+  if(missingVol<=0) return 0;
+  const totalBuyVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0),0);
+  const totalBuyGross = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0),0);
+  const avgBuyUnitPrice = totalBuyVolume>0 ? totalBuyGross/totalBuyVolume : 0;
+  return missingVol * avgBuyUnitPrice;
+}
+/// Chi phí THẬT phải trả để mua hoá đơn bù đắp phần thiếu chứng từ —
+/// đúng công thức KT thuế: bóc VAT khỏi giá trị thiếu rồi nhân % chi phí
+/// mua hoá đơn (mặc định 30%, Ông Chủ tự chỉnh nếu mức khác theo thời
+/// điểm/đầu mối).
+function siteInvoiceSupplementCost(s){
+  const missingValue = siteMissingDocumentedValue(s);
+  if(missingValue<=0) return 0;
+  const pct = (s.invoiceSupplementPercent===undefined||s.invoiceSupplementPercent===null||s.invoiceSupplementPercent==='') ? 30 : Number(s.invoiceSupplementPercent);
+  return (missingValue/(1+siteVatRateFraction(s))) * (pct/100);
+}
+function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementCost(s),0); }
 // Tổng tiền MUA quy về NET (chưa VAT) — chỉ để tính lãi gộp. Nếu giá nhập
 // đã gồm VAT thì bóc ra; nếu giá nhập là net thì giữ nguyên. LƯU Ý: việc
 // "giá đã gồm VAT hay chưa" (buyIncludesVat) KHÁC với việc "có được khấu
 // trừ VAT đầu vào hay không" (buyHasInvoice) — 2 chuyện độc lập.
 function commercialNetBuy(s){
   const grossBuy = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0),0);
-  return s.buyIncludesVat ? grossBuy/(1+vatRateFraction()) : grossBuy;
+  return s.buyIncludesVat ? grossBuy/(1+siteVatRateFraction(s)) : grossBuy;
 }
 function commercialNetSell(s){
   const grossSell = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0),0);
-  return s.sellIncludesVat ? grossSell/(1+vatRateFraction()) : grossSell;
+  return s.sellIncludesVat ? grossSell/(1+siteVatRateFraction(s)) : grossSell;
 }
 // Tiền GỘP mỗi đầu (đúng số Ông Chủ gõ: nếu chọn "có VAT" thì đây là số
 // đối tác trả / mình trả gồm cả VAT; nếu "chưa VAT" thì bằng luôn số net).
@@ -1416,20 +1467,35 @@ function buyIsDeductible(s){
 //     1 chuyến lãi 200.000đ thì nộp 20.000đ.
 function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
-  const vat = vatRateFraction();
+  const vat = siteVatRateFraction(s);
   const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vat : 0);
-  const inputVat = buyIsDeductible(s) ? (commercialNetBuy(s) * vat) : 0;
-  return Math.max(0, outputVat - inputVat);
+  const inputVatFromBuy = buyIsDeductible(s) ? (commercialNetBuy(s) * vat) : 0;
+  const missingValueNet = siteMissingDocumentedValue(s) / (1+vat);
+  const inputVatFromSupplement = missingValueNet * vat; // hoá đơn bù luôn có VAT được khấu trừ, không phụ thuộc buyIsDeductible
+  return Math.max(0, outputVat - inputVatFromBuy - inputVatFromSupplement);
 }
 // ---- DÒNG TIỀN THỰC TẾ (tiền mặt thật vào/ra), để hiển thị cho Ông Chủ
 // thấy rõ không phải bỏ túi trả thuế. Ba dòng dưới đây LUÔN cân đúng:
 //   Khách trả − Trả mỏ − VAT nộp nhà nước = Lãi bỏ túi (= net bán − net mua).
 // Tiền khách THỰC trả: nếu giá bán đã gồm VAT thì là số đã nhập; nếu giá bán
 // là net và có xuất hoá đơn thì khách trả thêm VAT.
+/// Số tiền THỰC SỰ khách phải trả/còn nợ — KHÁC với siteRevenue() (Doanh
+/// thu kế toán, đã bóc VAT). Công nợ phải theo đúng số khách cầm hoá đơn
+/// ra trả, tức số GỘP (có VAT nếu có), không phải doanh thu đã trừ VAT.
+/// Trước đây "Đối Tác & Công Nợ" dùng nhầm siteRevenue() nên bị tính THIẾU
+/// đúng phần VAT mỗi khi giá đã gồm VAT — sửa lại cho đúng tại đây.
+function siteBilledAmount(s){
+  if(s.siteType==='commercial') return commercialCashFromCustomer(s);
+  const gross = (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
+  // Cùng nguyên tắc như bên thương mại: nếu giá đã gồm VAT thì đúng bằng
+  // số gộp đã nhập; nếu giá là net thì khách phải trả thêm VAT khi xuất
+  // hoá đơn — công nợ phải ghi đủ số đó, không phải số net.
+  return s.priceIncludesVat ? gross : gross*(1+vatRateFraction());
+}
 function commercialCashFromCustomer(s){
   const entered = commercialGrossSell(s);
   if(s.sellIncludesVat) return entered;            // số nhập đã gồm VAT = tiền khách trả
-  return s.sellHasInvoice ? entered*(1+vatRateFraction()) : entered; // bán net + có hoá đơn → khách trả thêm VAT
+  return s.sellHasInvoice ? entered*(1+siteVatRateFraction(s)) : entered; // bán net + có hoá đơn → khách trả thêm VAT
 }
 // Tiền THỰC trả nhà cung cấp: nếu giá mua đã gồm VAT thì là số đã nhập; nếu
 // giá mua là net và CÓ hoá đơn thì trả thêm phần VAT (được khấu trừ sau);
@@ -1437,7 +1503,7 @@ function commercialCashFromCustomer(s){
 function commercialCashToSupplier(s){
   const entered = commercialGrossBuy(s);
   if(s.buyIncludesVat) return entered;             // số nhập đã gồm VAT = tiền trả mỏ
-  return buyIsDeductible(s) ? entered*(1+vatRateFraction()) : entered; // mua net + có hoá đơn → trả net + VAT
+  return buyIsDeductible(s) ? entered*(1+siteVatRateFraction(s)) : entered; // mua net + có hoá đơn → trả net + VAT
 }
 // VAT đầu vào tính trên tiền mặt thực (dùng cho dòng phụ "gồm VAT" khi hiển thị)
 function commercialCashInputVat(s){ return commercialCashToSupplier(s) - commercialNetBuy(s); }
@@ -1457,7 +1523,7 @@ function shiftTotalTripWage(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+si
 function shiftTotalCost(sh){
   return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
-       + (Number(sh.roadFeeIncidental)||0);
+       + (Number(sh.roadFeeIncidental)||0) + shiftMaterialCost(sh) + shiftInvoiceSupplementCost(sh);
 }
 function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); }
 
@@ -2375,6 +2441,11 @@ function renderSiteRows(){
             </div>
           </div>
         </div>
+        <div class="field">
+          <label>Thuế suất VAT áp dụng cho công trình này (%)</label>
+          <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="vatRatePercent" placeholder="Mặc định ${Number(state.settings.vatRatePercent)||0}% (theo Cài Đặt)" value="${s.vatRatePercent!==undefined&&s.vatRatePercent!==null?s.vatRatePercent:''}">
+          <div class="hint" style="margin-top:4px;">Để trống = dùng đúng mức chung ở Cài Đặt. Gõ số khác nếu KT thuế áp mức riêng cho công trình này (VD 8% thay vì 10%).</div>
+        </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
         <button class="btn btn-ghost btn-sm addTripBtn" data-idx="${i}" style="margin-bottom:10px;">+ Thêm Chuyến</button>
         <div class="card" style="background:var(--bg); margin-bottom:10px; padding:10px;">
@@ -2386,6 +2457,24 @@ function renderSiteRows(){
             <input type="checkbox" class="site-chk" data-idx="${i}" data-field="sellHasInvoice" ${s.sellHasInvoice?'checked':''}>
             <span>Đã xuất hóa đơn BÁN</span>
           </label>
+        </div>
+        <div class="card" style="background:var(--bg); margin-bottom:10px; padding:10px;">
+          <div style="font-weight:700; font-size:14px; margin-bottom:8px;">Khối lượng thiếu chứng từ (mỏ thiếu hoá đơn / lệch số đo)</div>
+          <div class="field">
+            <label>% khối lượng mỏ xuất được hoá đơn</label>
+            <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoicedBuyPercent" placeholder="Mặc định 100% (đủ hoá đơn)" value="${s.invoicedBuyPercent!==undefined&&s.invoicedBuyPercent!==null?s.invoicedBuyPercent:''}">
+          </div>
+          <div class="two-col" style="margin-bottom:0;">
+            <div class="field" style="margin-bottom:0;">
+              <label>Hệ số quy đổi (tấn/khối)</label>
+              <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="densityRatio" placeholder="VD 1,7" value="${s.densityRatio!==undefined&&s.densityRatio!==null?s.densityRatio:''}">
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>% chi phí mua hoá đơn bù</label>
+              <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoiceSupplementPercent" placeholder="Mặc định 30%" value="${s.invoiceSupplementPercent!==undefined&&s.invoiceSupplementPercent!==null?s.invoiceSupplementPercent:''}">
+            </div>
+          </div>
+          <div class="hint" style="margin-top:6px;">Để trống nếu mỏ xuất đủ 100% hoá đơn, không có khối lượng thiếu. Chỉ điền khi thực sự có tình trạng thiếu chứng từ — app tự tính khối lượng/giá trị/chi phí bù ở khối "Dòng tiền thực tế" bên dưới.</div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Lương / chuyến (đ)</label>
@@ -2463,7 +2552,10 @@ function bindSiteRowEvents(){
     inp.addEventListener('input', ()=>{
       const idx = Number(inp.dataset.idx), field=inp.dataset.field;
       const s = sh.siteLogs[idx];
-      s[field] = (field==='siteName') ? inp.value : Number(inp.value);
+      const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','invoiceSupplementPercent'];
+      if(field==='siteName') s[field] = inp.value;
+      else if(emptyMeansDefault.includes(field)) s[field] = inp.value==='' ? undefined : Number(inp.value); // rỗng = dùng mặc định, không phải 0
+      else s[field] = Number(inp.value);
       updateSiteCalc(idx); updateSummary();
     });
   });
@@ -2534,17 +2626,31 @@ function updateSiteCalc(idx){
     const cashIn = commercialCashFromCustomer(s);
     const cashToSupplier = commercialCashToSupplier(s);
     const vatToState = commercialVatPayable(s);
-    const takeHome = cashIn - cashToSupplier - vatToState; // luôn = net bán − net mua
+    const supplementCost = siteInvoiceSupplementCost(s);
+    // takeHome LUÔN = net bán − net mua − chi phí bổ sung chứng từ (nếu
+    // có) — chi phí bổ sung chứng từ là tiền mặt thật trả riêng để mua hoá
+    // đơn, TÁCH khỏi "trả nhà cung cấp" (đó là trả mỏ). VAT nộp đã tự giảm
+    // nhờ khấu trừ thêm từ hoá đơn bù rồi, không cộng lại ở đây kẻo tính 2 lần.
+    const takeHome = cashIn - cashToSupplier - vatToState - supplementCost;
     const outVatCash = commercialCashOutputVat(s);
     const inVatCash = commercialCashInputVat(s);
     const deductible = buyIsDeductible(s);
     const wage = siteWageTotal(s);
+    const missingVol = siteMissingDocumentedVolume(s);
+    const missingValue = siteMissingDocumentedValue(s);
 
     // Dòng "gồm VAT ..." chỉ hiện khi thực sự có VAT ở đầu đó
     const sellSub = outVatCash>0 ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>` : '';
     const buySub = inVatCash>0
       ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT đã trả mỏ ${deductible?'(được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
       : '';
+    const missingBlock = missingVol>0 ? `
+        <div class="cb-sec" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
+          <div class="cb-title">⚠️ Khối lượng thiếu chứng từ</div>
+          <div class="cb-line"><span class="cb-lbl">Khối lượng thiếu (đã quy đổi)</span><span class="cb-val cb-out">${missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+          <div class="cb-line"><span class="cb-lbl">Giá trị phần thiếu</span><span class="cb-val cb-out">${fmtVND(missingValue)}</span></div>
+          <div class="cb-line"><span class="cb-lbl">Chi phí mua hoá đơn bù</span><span class="cb-val cb-out">−${fmtVND(supplementCost)}</span></div>
+        </div>` : '';
 
     el.innerHTML = `
       <div class="cbreak">
@@ -2556,6 +2662,7 @@ function updateSiteCalc(idx){
           ${buySub}
           <div class="cb-line"><span class="cb-lbl">Nộp VAT nhà nước cuối tháng</span><span class="cb-val cb-out">−${fmtVND(vatToState)}</span></div>
         </div>
+        ${missingBlock}
         <div class="cb-profit">
           <span class="cb-lbl">THỰC LÃI BỎ TÚI</span>
           <span class="cb-val">${takeHome>=0?'+':''}${fmtVND(takeHome)}</span>
@@ -2579,6 +2686,8 @@ function shiftFinancialSummaryHtml(sh){
   const costItems = [
     { label:'Tiền dầu tiêu hao', value: shiftFuelCost(sh) },
     { label:'Lương chuyến', value: shiftTotalTripWage(sh) },
+    { label:'Giá vốn hàng mua (thương mại)', value: shiftMaterialCost(sh) },
+    { label:'Chi phí bổ sung chứng từ (khối lượng thiếu)', value: shiftInvoiceSupplementCost(sh) },
     { label:'Lương cứng phân bổ', value: Number(sh.baseSalaryAllocation)||0 },
     { label:'Tiền ăn', value: Number(sh.foodAllowance)||0 },
     { label:'Tiền nhà phân bổ', value: Number(sh.housingAllocation)||0 },
@@ -2778,6 +2887,23 @@ function renderDrivers(){
     </section>
 
     <section class="group">
+      <h3>Thuế Suất Áp Dụng</h3>
+      <div class="card">
+        <div class="field" style="margin-bottom:14px;">
+          <label>Thuế suất VAT mặc định (%)</label>
+          <input type="number" inputmode="decimal" id="tax_vatRate" value="${Number(s.vatRatePercent)||0}">
+          <div class="hint" style="margin-top:4px;">Dùng khi 1 công trình thương mại không tự khai riêng thuế suất — có thể ghi đè riêng từng công trình ở form nhập ca.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Thuế suất TNDN dự kiến (%)</label>
+          <input type="number" inputmode="decimal" id="tax_citRate" value="${Number(s.citRatePercent)||0}">
+          <div class="hint" style="margin-top:4px;">Mặc định 20% (mức phổ thông) — sửa lại nếu KT thuế xác định công ty thuộc diện ưu đãi khác. Chỉ dùng để ước tính tham khảo ở Kết Quả Kinh Doanh, không phải số quyết toán chính thức.</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="saveTaxRatesBtn" style="margin-top:10px;">💾 Lưu Thuế Suất</button>
+    </section>
+
+    <section class="group">
       <h3>Danh Sách Tài Xế</h3>
       ${state.drivers.length===0 ? '<div class="empty"><div class="big">👤</div>Chưa có tài xế nào.</div>' :
         state.drivers.map(d=>`
@@ -2833,6 +2959,14 @@ function renderDrivers(){
     }
     renderAll();
     showToast('Đã lưu Công Chuẩn Toàn Đội.');
+  });
+
+  document.getElementById('saveTaxRatesBtn').addEventListener('click', async ()=>{
+    s.vatRatePercent = Number(document.getElementById('tax_vatRate').value)||0;
+    s.citRatePercent = Number(document.getElementById('tax_citRate').value)||0;
+    await saveSettings();
+    renderAll();
+    showToast('Đã lưu Thuế Suất.');
   });
 
   document.getElementById('addDriverBtn').addEventListener('click', async ()=>{
@@ -3544,17 +3678,18 @@ function computeHiringAdvisorMetrics(draft){
 
   // ----- Lãi gộp/chuyến thực tế trong khoảng Ông Chủ tự chọn — dựa trên
   // cùng nguồn số liệu với "Dự Đoán Hoà Vốn Cả Tháng"
-  // (computeMonthlyBreakEvenProjection), nhưng CHỈ trừ dầu + lương chuyến
-  // (2 khoản lặp lại đều đặn, lường trước được mỗi chuyến). Theo yêu cầu
-  // Ông Chủ, CỐ Ý không trừ incidentalCost/roadFeeIncidental (chi phí phát
-  // sinh, tiền luật phát sinh, tiền phạt...) vì đây là biến số không lường
-  // trước được — đưa vào sẽ làm méo dự đoán tuyển người. Sửa chữa xe cũng
-  // không đưa vào vì luôn không đều giữa các tháng. -----
+  // (computeMonthlyBreakEvenProjection), trừ dầu + lương chuyến + giá vốn
+  // hàng mua (nếu công trình thương mại) — đều là chi phí lặp lại đều đặn,
+  // lường trước được mỗi chuyến. Theo yêu cầu Ông Chủ, CỐ Ý không trừ
+  // incidentalCost/roadFeeIncidental (chi phí phát sinh, tiền luật phát
+  // sinh, tiền phạt...) vì đây là biến số không lường trước được — đưa vào
+  // sẽ làm méo dự đoán tuyển người. Sửa chữa xe cũng không đưa vào vì luôn
+  // không đều giữa các tháng. -----
   const excludedShiftIds = getExcludedRecentShiftIds();
   const rangeShifts = state.shifts.filter(sh=>sh.date>=draft.from && sh.date<=draft.to && !excludedShiftIds.has(sh.id));
   const totalTrips = rangeShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = rangeShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
-  const variableCost = rangeShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh),0);
+  const variableCost = rangeShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+shiftMaterialCost(sh),0);
   const marginPerTrip = totalTrips>0 ? (totalRevenue-variableCost)/totalTrips : null;
   const daysInRange = Math.max(1, daysBetweenDates(new Date(draft.from+'T00:00:00'), new Date(draft.to+'T00:00:00'))+1);
 
@@ -4907,7 +5042,7 @@ function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal, otherFixe
   // hiểm xe + Đăng kiểm/Đăng ký/Phù hiệu vận tải (Cài Đặt) — cộng thêm
   // vào chi phí cố định, cùng cách roadFee đã được cộng từ trước.
   const fixedCost = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.housingAllocation)||0),0) + roadFee + repairTotal + otherFixedMonthly;
-  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0),0);
+  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
   const grossProfit = totalRevenue - variableCost;
 
   const base = { dayTrips, nightTrips, dayRevenue, nightRevenue, totalTrips, totalRevenue, fixedCost, variableCost, grossProfit, roadFee, repairTotal, otherFixedMonthly };
@@ -4954,7 +5089,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id));
   const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
-  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0),0);
+  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
 
   const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost };
   if(totalTrips===0) return { ...base, breakEvenTrips:null, note:`Chưa có chuyến nào trong ${marginWindowDays} ngày gần nhất để tính lãi gộp bình quân.` };
@@ -5189,7 +5324,7 @@ function computeAllSiteBilledEvents(){
   for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
       const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
-      const rev = siteRevenue(s);
+      const rev = siteBilledAmount(s);
       if(rev<=0) continue;
       if(!map[name]) map[name] = [];
       map[name].push({ date: sh.date, amount: rev });
@@ -5565,6 +5700,11 @@ function renderResults(){
   // và Cảnh Báo Tài Chính, giống hệt cách chi phí luật đường đã được cộng.
   const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - otherFixedMonthly;
+  // Thuế TNDN dự kiến — ước tính tham khảo, tính trên đúng khoảng ngày
+  // đang chọn (Ông Chủ đổi Từ ngày/Đến ngày thành đúng quý/năm cần xem là
+  // ra số của mốc đó, không cần làm riêng từng mốc cố định). Không áp
+  // dụng khi kỳ đang lỗ (không có thuế trên số âm).
+  const citEstimate = Math.max(0, finalNetProfit) * (Number(state.settings.citRatePercent)||0)/100;
 
   // Data-integrity check: any ca in range with real fuel consumed but no
   // đơn giá dầu entered contributes 0đ to Tiền dầu tiêu hao (consumed × 0),
@@ -5652,6 +5792,9 @@ function renderResults(){
         <div class="summary-row"><span>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</span><span class="val">${fmtVND(state.settings.monthlyRegistrationFee||0)}</span></div>
         <div class="summary-row total"><span>LỢI NHUẬN THỰC TẾ</span><span class="val" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</span></div>
         <div class="hint" style="margin-top:6px;">4 khoản khấu hao/vay/bảo hiểm/đăng kiểm lấy từ Cài Đặt (đ/tháng cố định) — vào tab Cài Đặt để sửa nếu cần.</div>
+        <div class="formula-divider" style="margin:10px 0;"></div>
+        <div class="summary-row"><span>Thuế TNDN dự kiến (${Number(state.settings.citRatePercent)||0}% trên lợi nhuận thực tế)</span><span class="val" style="color:var(--loss);">${citEstimate>0?'−':''}${fmtVND(citEstimate)}</span></div>
+        <div class="hint" style="margin-top:2px;">Ước tính tham khảo theo đúng khoảng ngày đang chọn ở trên — đổi "Từ ngày/Đến ngày" thành đúng quý/năm cần xem là ra ngay số dự kiến của mốc đó. Không phải số quyết toán chính thức — KT thuế mới là người tối ưu số thật phải nộp.</div>
         <div class="field" style="margin-top:14px; margin-bottom:0;">
           <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
           <input type="text" inputmode="decimal" id="res_roadFee">
@@ -7092,7 +7235,7 @@ function renderSettings(){
     if(confirm('Khôi phục toàn bộ Cài Đặt về mặc định gốc? (Không xoá dữ liệu ca/tài xế)')){
       state.settings = { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
         monthlyFixedRoadFee: 25000000, geminiApiKey: state.settings.geminiApiKey,
-        currentFuelUnitPrice: state.settings.currentFuelUnitPrice, vatRatePercent: 10,
+        currentFuelUnitPrice: state.settings.currentFuelUnitPrice, vatRatePercent: 10, citRatePercent: 20,
         extraDayBaseSalary: 1000000 };
       await saveSettings();
       renderAll(); showToast('Đã khôi phục cài đặt gốc.');
@@ -7270,6 +7413,7 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   out.push(['− Bảo hiểm xe/tháng', Math.round(state.settings.monthlyInsurance||0)]);
   out.push(['− Đăng kiểm/Đăng ký/Phù hiệu vận tải/tháng', Math.round(state.settings.monthlyRegistrationFee||0)]);
   out.push(['LỢI NHUẬN THỰC TẾ', Math.round(finalNetProfit)]);
+  out.push([`Thuế TNDN dự kiến (${Number(state.settings.citRatePercent)||0}%, ước tính tham khảo)`, Math.round(Math.max(0,finalNetProfit)*(Number(state.settings.citRatePercent)||0)/100)]);
   out.push([]);
   out.push(['TỔNG QUAN SỨC KHOẺ TÀI CHÍNH', 'Ca Ngày', 'Ca Đêm', 'Tổng Cộng']);
   overviewRows.forEach(([label, fn]) => { out.push([label, fn(gDay), fn(gNight), fn(gTotal)]); });
