@@ -1311,13 +1311,15 @@ function supplierById(id){ return state.suppliers.find(x=>x.id===id); }
 /// siteInvoiceSupplementCost) tra cứu trực tiếp từ state.suppliers, không
 /// copy số vào từng site log — đúng theo yêu cầu Ông Chủ không phải sửa
 /// tay từng ca cũ.
-function renderSupplierManagerModal(editingId){
+function renderSupplierManagerModal(editingId, linkToSiteIdx){
   const editing = editingId ? supplierById(editingId) : null;
   const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
+  const canLink = linkToSiteIdx!==undefined && linkToSiteIdx!==null && !Number.isNaN(linkToSiteIdx);
   const listHtml = state.suppliers.length ? state.suppliers.map(sup=>`
     <div class="summary-row" style="align-items:center;">
       <span>${escapeHtml(sup.name)}</span>
       <span>
+        ${canLink?`<button class="btn btn-ghost btn-sm supUseBtn" data-id="${sup.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Dùng cho công trình này</button>`:''}
         <button class="btn btn-ghost btn-sm supEditBtn" data-id="${sup.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
         <button class="btn btn-ghost btn-sm supDelBtn" data-id="${sup.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
       </span>
@@ -1352,14 +1354,26 @@ function renderSupplierManagerModal(editingId){
       </div>
     </div>
     <div class="hint" style="margin-bottom:10px;">Để trống các ô % hoá đơn/quy đổi nếu mỏ này xuất đủ 100% hoá đơn, không có khối lượng thiếu chứng từ.</div>
+    ${canLink?`<div class="hint" style="margin-bottom:10px; color:var(--accent);">Lưu xong sẽ TỰ ĐỘNG gắn nhà cung cấp này cho công trình đang mở — không cần chọn lại ở dropdown.</div>`:''}
     <button class="btn btn-accent" id="saveSupplierBtn">${editing?'💾 Lưu Thay Đổi':'+ Thêm Nhà Cung Cấp'}</button>
   `);
-  document.querySelectorAll('.supEditBtn').forEach(btn=>btn.addEventListener('click', ()=>renderSupplierManagerModal(btn.dataset.id)));
+  const finishAndLink = (supplierId)=>{
+    if(canLink && state.draftShift && state.draftShift.siteLogs[linkToSiteIdx]){
+      state.draftShift.siteLogs[linkToSiteIdx].supplierId = supplierId;
+    }
+    closeModal();
+    if(typeof renderSiteRows==='function' && state.view==='form') { renderSiteRows(); updateSummary(); }
+  };
+  document.querySelectorAll('.supUseBtn').forEach(btn=>btn.addEventListener('click', ()=>{
+    finishAndLink(btn.dataset.id);
+    showToast('Đã gắn nhà cung cấp cho công trình này.');
+  }));
+  document.querySelectorAll('.supEditBtn').forEach(btn=>btn.addEventListener('click', ()=>renderSupplierManagerModal(btn.dataset.id, linkToSiteIdx)));
   document.querySelectorAll('.supDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
     if(!confirm('Xoá nhà cung cấp này? Các công trình đang gắn sẽ về trạng thái "chưa gắn" (dùng mặc định chung ở Cài Đặt).')) return;
     state.suppliers = state.suppliers.filter(x=>x.id!==btn.dataset.id);
     await saveSuppliers();
-    renderSupplierManagerModal(null);
+    renderSupplierManagerModal(null, linkToSiteIdx);
   }));
   document.getElementById('saveSupplierBtn').addEventListener('click', async ()=>{
     const name = document.getElementById('sup_name').value.trim();
@@ -1372,12 +1386,12 @@ function renderSupplierManagerModal(editingId){
       densityRatio: parseVN(document.getElementById('sup_density').value),
       invoiceSupplementPercent: parseVN(document.getElementById('sup_supplementPct').value)
     };
-    if(editing) Object.assign(editing, data);
-    else state.suppliers.push({ id: uid('supplier'), ...data });
+    let savedId;
+    if(editing){ Object.assign(editing, data); savedId = editing.id; }
+    else { savedId = uid('supplier'); state.suppliers.push({ id: savedId, ...data }); }
     await saveSuppliers();
-    closeModal();
-    if(typeof renderSiteRows==='function' && state.view==='form') { renderSiteRows(); updateSummary(); }
-    showToast('Đã lưu nhà cung cấp.');
+    finishAndLink(savedId);
+    showToast(canLink ? 'Đã lưu và gắn nhà cung cấp cho công trình này.' : 'Đã lưu nhà cung cấp.');
   });
 }
 
@@ -2549,7 +2563,7 @@ function renderSiteRows(){
             <option value="">— Chưa gắn (dùng mặc định chung ở Cài Đặt) —</option>
             ${state.suppliers.map(sup=>`<option value="${sup.id}" ${s.supplierId===sup.id?'selected':''}>${escapeHtml(sup.name)}</option>`).join('')}
           </select>
-          <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
+          <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" data-idx="${i}" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
           <div class="hint" style="margin-top:6px;">Chọn đúng mỏ đang lấy hàng — % hoá đơn mỏ xuất, hệ số quy đổi, thuế suất VAT sẽ tự áp theo đúng nhà cung cấp này ở MỌI công trình dùng chung mỏ, không cần gõ lại mỗi lần đổi điểm đổ. Chỉ khi lấy hàng ở mỏ khác mới cần chọn/thêm nhà cung cấp khác. Sửa lại thông tin nhà cung cấp sẽ tự cập nhật cho cả công trình cũ.</div>
         </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
@@ -2683,7 +2697,7 @@ function bindSiteRowEvents(){
     });
   });
   wrap.querySelectorAll('.manageSuppliersBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>renderSupplierManagerModal(null));
+    btn.addEventListener('click', ()=>renderSupplierManagerModal(null, Number(btn.dataset.idx)));
   });
   wrap.querySelectorAll('.addTripBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
