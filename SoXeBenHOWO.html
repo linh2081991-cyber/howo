@@ -5623,6 +5623,11 @@ function computeAllSiteBilledEvents(){
   const map = {};
   for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
+      // Thương mại giờ theo dõi công nợ riêng qua đúng Khách Hàng/Nhà Cung
+      // Cấp (renderCustomerSupplierDebtOverview) — KHÔNG gộp vào bảng Đối
+      // Tác cũ này nữa, tránh 1 khách bị tách thành nhiều dòng chỉ vì mô
+      // tả Điểm Múc-Điểm Đổ khác nhau giữa các chuyến.
+      if(s.siteType==='commercial') continue;
       const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
       const rev = siteBilledAmount(s);
       if(rev<=0) continue;
@@ -6316,8 +6321,8 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>🤝 Đối Tác & Công Nợ (Toàn Bộ, Không Theo Kỳ)</h3>
-      <div class="hint" style="margin-bottom:10px;">Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày Ông Chủ chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
+      <h3>🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</h3>
+      <div class="hint" style="margin-bottom:10px;">Chỉ tính công trình CHỞ CƯỚC (theo tên công trình tự do). Công nợ THƯƠNG MẠI (mua/bán vật liệu) xem ở mục "Nhà Cung Cấp & Khách Hàng" ngay bên dưới — đúng theo Nhà Cung Cấp/Khách Hàng thật, không lẫn theo Điểm Múc-Điểm Đổ nữa. Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày Ông Chủ chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
       <div id="partnersOverviewWrap"></div>
     </section>
 
