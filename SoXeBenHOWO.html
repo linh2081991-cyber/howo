@@ -606,6 +606,12 @@ let state = {
   strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' — which screen is showing inside the "Trợ Lý" tab right now
   appraisalAnalysis: { loading: false, error: null, result: null, generatedAt: null }, // expert pros/cons + recommendation for the project appraisal comparison, powered by the same Gemini pipeline as strategyAnalysis
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
+  // Nhà cung cấp / điểm múc (mỏ) — khai 1 lần, dùng lại cho mọi công trình
+  // thương mại lấy hàng từ đúng mỏ đó. Sửa 1 nhà cung cấp ở đây tự động áp
+  // dụng lại cho MỌI công trình cũ lẫn mới đang gắn với nó (siteMissingDocumentedVolume/
+  // siteVatRateFraction tra cứu trực tiếp từ đây, không copy số vào từng
+  // site log), đúng theo yêu cầu Ông Chủ — không cần sửa tay từng ca cũ.
+  suppliers: [], // {id, name, vatRatePercent, invoicedBuyPercent, densityRatio, invoiceSupplementPercent}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [], // {id, siteName, totalContractValue, notes}
   siteAppraisals: [], // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice,
@@ -1002,7 +1008,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1013,7 +1019,8 @@ async function loadAll(){
       sharedDataRef('siteContracts').get(),
       sharedDataRef('siteAppraisals').get(),
       sharedDataRef('monthlyBonuses').get(),
-      sharedDataRef('roadFeeByMonth').get()
+      sharedDataRef('roadFeeByMonth').get(),
+      sharedDataRef('suppliers').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1035,6 +1042,8 @@ async function loadAll(){
     state.siteAppraisals = appraisalData && Array.isArray(appraisalData.list) ? appraisalData.list : [];
     state.monthlyBonuses = bonusData && Array.isArray(bonusData.list) ? bonusData.list : [];
     state.roadFeeByMonth = roadFeeData && Array.isArray(roadFeeData.list) ? roadFeeData.list : [];
+    const supplierData = supplierSnap.exists ? supplierSnap.data() : null;
+    state.suppliers = supplierData && Array.isArray(supplierData.list) ? supplierData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -1045,6 +1054,10 @@ async function loadAll(){
 async function saveDrivers(){
   try { await sharedDataRef('drivers').set({ list: state.drivers }); }
   catch(e){ showToast('Lỗi lưu dữ liệu tài xế — kiểm tra mạng.'); }
+}
+async function saveSuppliers(){
+  try { await sharedDataRef('suppliers').set({ list: state.suppliers }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp — kiểm tra mạng.'); }
 }
 async function saveShifts(){
   try { await sharedDataRef('shifts').set({ list: state.shifts }); }
@@ -1291,6 +1304,82 @@ function statusColorStyle(key){
 function shiftTypeLabel(key){ return (SHIFT_TYPES.find(s=>s.key===key)||{}).label || key; }
 
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
+function supplierById(id){ return state.suppliers.find(x=>x.id===id); }
+/// Modal quản lý Nhà Cung Cấp / Điểm Múc — thêm/sửa/xoá. Sửa 1 nhà cung
+/// cấp ở đây tự động áp dụng lại cho MỌI công trình (cũ lẫn mới) đang gắn
+/// với nó, vì các hàm tính (siteVatRateFraction, siteMissingDocumentedVolume,
+/// siteInvoiceSupplementCost) tra cứu trực tiếp từ state.suppliers, không
+/// copy số vào từng site log — đúng theo yêu cầu Ông Chủ không phải sửa
+/// tay từng ca cũ.
+function renderSupplierManagerModal(editingId){
+  const editing = editingId ? supplierById(editingId) : null;
+  const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
+  const listHtml = state.suppliers.length ? state.suppliers.map(sup=>`
+    <div class="summary-row" style="align-items:center;">
+      <span>${escapeHtml(sup.name)}</span>
+      <span>
+        <button class="btn btn-ghost btn-sm supEditBtn" data-id="${sup.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
+        <button class="btn btn-ghost btn-sm supDelBtn" data-id="${sup.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
+      </span>
+    </div>`).join('') : '<div class="hint">Chưa có nhà cung cấp nào.</div>';
+
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🏔️ Nhà Cung Cấp / Điểm Múc</h3>
+    <div style="margin-bottom:14px;">${listHtml}</div>
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <h3>${editing?'Sửa Nhà Cung Cấp':'Thêm Nhà Cung Cấp Mới'}</h3>
+    <div class="field">
+      <label>Tên nhà cung cấp / mỏ</label>
+      <input type="text" id="sup_name" value="${escapeHtml(val(editing,'name'))}" placeholder="VD: Mỏ Hà Nam">
+    </div>
+    <div class="field">
+      <label>Thuế suất VAT (%)</label>
+      <input type="text" inputmode="decimal" id="sup_vat" placeholder="Mặc định ${Number(state.settings.vatRatePercent)||0}% (theo Cài Đặt)" value="${val(editing,'vatRatePercent')}">
+    </div>
+    <div class="field">
+      <label>% khối lượng mỏ xuất được hoá đơn</label>
+      <input type="text" inputmode="decimal" id="sup_invoicedPct" placeholder="Mặc định 100% (đủ hoá đơn)" value="${val(editing,'invoicedBuyPercent')}">
+    </div>
+    <div class="two-col">
+      <div class="field">
+        <label>Hệ số quy đổi (tấn/khối)</label>
+        <input type="text" inputmode="decimal" id="sup_density" placeholder="VD 1,7" value="${val(editing,'densityRatio')}">
+      </div>
+      <div class="field">
+        <label>% chi phí mua hoá đơn bù</label>
+        <input type="text" inputmode="decimal" id="sup_supplementPct" placeholder="Mặc định 30%" value="${val(editing,'invoiceSupplementPercent')}">
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:10px;">Để trống các ô % hoá đơn/quy đổi nếu mỏ này xuất đủ 100% hoá đơn, không có khối lượng thiếu chứng từ.</div>
+    <button class="btn btn-accent" id="saveSupplierBtn">${editing?'💾 Lưu Thay Đổi':'+ Thêm Nhà Cung Cấp'}</button>
+  `);
+  document.querySelectorAll('.supEditBtn').forEach(btn=>btn.addEventListener('click', ()=>renderSupplierManagerModal(btn.dataset.id)));
+  document.querySelectorAll('.supDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá nhà cung cấp này? Các công trình đang gắn sẽ về trạng thái "chưa gắn" (dùng mặc định chung ở Cài Đặt).')) return;
+    state.suppliers = state.suppliers.filter(x=>x.id!==btn.dataset.id);
+    await saveSuppliers();
+    renderSupplierManagerModal(null);
+  }));
+  document.getElementById('saveSupplierBtn').addEventListener('click', async ()=>{
+    const name = document.getElementById('sup_name').value.trim();
+    if(!name){ showToast('Nhập tên nhà cung cấp.'); return; }
+    const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
+    const data = {
+      name,
+      vatRatePercent: parseVN(document.getElementById('sup_vat').value),
+      invoicedBuyPercent: parseVN(document.getElementById('sup_invoicedPct').value),
+      densityRatio: parseVN(document.getElementById('sup_density').value),
+      invoiceSupplementPercent: parseVN(document.getElementById('sup_supplementPct').value)
+    };
+    if(editing) Object.assign(editing, data);
+    else state.suppliers.push({ id: uid('supplier'), ...data });
+    await saveSuppliers();
+    closeModal();
+    if(typeof renderSiteRows==='function' && state.view==='form') { renderSiteRows(); updateSummary(); }
+    showToast('Đã lưu nhà cung cấp.');
+  });
+}
 
 function daysInMonth(dateStr){
   const d = new Date(dateStr+'T00:00:00');
@@ -1346,10 +1435,14 @@ function dailyHousing(driver, dateStr){
 }
 
 function vatRateFraction(){ return (Number(state.settings.vatRatePercent)||0)/100; }
-/// Thuế suất VAT áp cho riêng 1 công trình thương mại — Ông Chủ có thể gõ
-/// tay khác mức chung (VD KT thuế đang áp 8% cho giao dịch này thay vì
-/// 10% mặc định). Bỏ trống = dùng đúng mức chung ở Cài Đặt.
+/// Thuế suất VAT áp cho 1 công trình thương mại — ưu tiên lấy theo Nhà
+/// Cung Cấp đã gắn (s.supplierId), vì đây thường là đặc tính của MỎ/loại
+/// vật liệu chứ không phải của điểm đổ. Nếu chưa gắn nhà cung cấp, dùng
+/// tạm mức đã gõ tay trực tiếp trên công trình (dữ liệu cũ trước khi có
+/// Nhà Cung Cấp). Bỏ trống hết = dùng mức chung ở Cài Đặt.
 function siteVatRateFraction(s){
+  const sup = s.supplierId ? supplierById(s.supplierId) : null;
+  if(sup && sup.vatRatePercent!==undefined && sup.vatRatePercent!==null && sup.vatRatePercent!=='') return Number(sup.vatRatePercent)/100;
   return (s.vatRatePercent!==undefined && s.vatRatePercent!==null && s.vatRatePercent!=='') ? Number(s.vatRatePercent)/100 : vatRateFraction();
 }
 // Số chuyến của 1 công trình — chở cước dùng ô "trips"; thương mại đếm số
@@ -1398,8 +1491,11 @@ function shiftMaterialCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+sit
 /// mua/bán cùng đơn vị không cần quy đổi) thì coi như không thiếu gì.
 function siteMissingDocumentedVolume(s){
   if(s.siteType!=='commercial') return 0;
-  const invoicedPct = (s.invoicedBuyPercent===undefined||s.invoicedBuyPercent===null||s.invoicedBuyPercent==='') ? 100 : Number(s.invoicedBuyPercent);
-  const density = Number(s.densityRatio)||0;
+  const sup = s.supplierId ? supplierById(s.supplierId) : null;
+  const rawPct = sup && sup.invoicedBuyPercent!==undefined && sup.invoicedBuyPercent!==null && sup.invoicedBuyPercent!=='' ? sup.invoicedBuyPercent : s.invoicedBuyPercent;
+  const rawDensity = sup && sup.densityRatio!==undefined && sup.densityRatio!==null && sup.densityRatio!=='' ? sup.densityRatio : s.densityRatio;
+  const invoicedPct = (rawPct===undefined||rawPct===null||rawPct==='') ? 100 : Number(rawPct);
+  const density = Number(rawDensity)||0;
   if(invoicedPct>=100 || density<=0) return 0;
   const totalBuyVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0),0);
   const totalSellVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0),0);
@@ -1423,7 +1519,9 @@ function siteMissingDocumentedValue(s){
 function siteInvoiceSupplementCost(s){
   const missingValue = siteMissingDocumentedValue(s);
   if(missingValue<=0) return 0;
-  const pct = (s.invoiceSupplementPercent===undefined||s.invoiceSupplementPercent===null||s.invoiceSupplementPercent==='') ? 30 : Number(s.invoiceSupplementPercent);
+  const sup = s.supplierId ? supplierById(s.supplierId) : null;
+  const rawPct = sup && sup.invoiceSupplementPercent!==undefined && sup.invoiceSupplementPercent!==null && sup.invoiceSupplementPercent!=='' ? sup.invoiceSupplementPercent : s.invoiceSupplementPercent;
+  const pct = (rawPct===undefined||rawPct===null||rawPct==='') ? 30 : Number(rawPct);
   return (missingValue/(1+siteVatRateFraction(s))) * (pct/100);
 }
 function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementCost(s),0); }
@@ -1470,8 +1568,10 @@ function commercialVatPayable(s){
   const vat = siteVatRateFraction(s);
   const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vat : 0);
   const inputVatFromBuy = buyIsDeductible(s) ? (commercialNetBuy(s) * vat) : 0;
-  const missingValueNet = siteMissingDocumentedValue(s) / (1+vat);
-  const inputVatFromSupplement = missingValueNet * vat; // hoá đơn bù luôn có VAT được khấu trừ, không phụ thuộc buyIsDeductible
+  // siteMissingDocumentedValue() đã là giá trị NET (tính từ đơn giá MUA vốn
+  // là giá net) — KHÔNG chia thêm cho (1+vat) nữa, làm vậy sẽ bóc nhầm VAT
+  // ra khỏi 1 số vốn dĩ chưa từng có VAT trong đó, khấu trừ bị tính thiếu.
+  const inputVatFromSupplement = siteMissingDocumentedValue(s) * vat; // hoá đơn bù luôn có VAT được khấu trừ, không phụ thuộc buyIsDeductible
   return Math.max(0, outputVat - inputVatFromBuy - inputVatFromSupplement);
 }
 // ---- DÒNG TIỀN THỰC TẾ (tiền mặt thật vào/ra), để hiển thị cho Ông Chủ
@@ -2444,9 +2544,13 @@ function renderSiteRows(){
           </div>
         </div>
         <div class="field">
-          <label>Thuế suất VAT áp dụng cho công trình này (%)</label>
-          <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="vatRatePercent" placeholder="Mặc định ${Number(state.settings.vatRatePercent)||0}% (theo Cài Đặt)" value="${s.vatRatePercent!==undefined&&s.vatRatePercent!==null?s.vatRatePercent:''}">
-          <div class="hint" style="margin-top:4px;">Để trống = dùng đúng mức chung ở Cài Đặt. Gõ số khác nếu KT thuế áp mức riêng cho công trình này (VD 8% thay vì 10%).</div>
+          <label>Nhà Cung Cấp / Điểm Múc</label>
+          <select class="site-input" data-idx="${i}" data-field="supplierId">
+            <option value="">— Chưa gắn (dùng mặc định chung ở Cài Đặt) —</option>
+            ${state.suppliers.map(sup=>`<option value="${sup.id}" ${s.supplierId===sup.id?'selected':''}>${escapeHtml(sup.name)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
+          <div class="hint" style="margin-top:6px;">Chọn đúng mỏ đang lấy hàng — % hoá đơn mỏ xuất, hệ số quy đổi, thuế suất VAT sẽ tự áp theo đúng nhà cung cấp này ở MỌI công trình dùng chung mỏ, không cần gõ lại mỗi lần đổi điểm đổ. Chỉ khi lấy hàng ở mỏ khác mới cần chọn/thêm nhà cung cấp khác. Sửa lại thông tin nhà cung cấp sẽ tự cập nhật cho cả công trình cũ.</div>
         </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
         <button class="btn btn-ghost btn-sm addTripBtn" data-idx="${i}" style="margin-bottom:10px;">+ Thêm Chuyến</button>
@@ -2459,24 +2563,6 @@ function renderSiteRows(){
             <input type="checkbox" class="site-chk" data-idx="${i}" data-field="sellHasInvoice" ${s.sellHasInvoice?'checked':''}>
             <span>Đã xuất hóa đơn BÁN</span>
           </label>
-        </div>
-        <div class="card" style="background:var(--bg); margin-bottom:10px; padding:10px;">
-          <div style="font-weight:700; font-size:14px; margin-bottom:8px;">Khối lượng thiếu chứng từ (mỏ thiếu hoá đơn / lệch số đo)</div>
-          <div class="field">
-            <label>% khối lượng mỏ xuất được hoá đơn</label>
-            <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoicedBuyPercent" placeholder="Mặc định 100% (đủ hoá đơn)" value="${s.invoicedBuyPercent!==undefined&&s.invoicedBuyPercent!==null?s.invoicedBuyPercent:''}">
-          </div>
-          <div class="two-col" style="margin-bottom:0;">
-            <div class="field" style="margin-bottom:0;">
-              <label>Hệ số quy đổi (tấn/khối)</label>
-              <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="densityRatio" placeholder="VD 1,7" value="${s.densityRatio!==undefined&&s.densityRatio!==null?s.densityRatio:''}">
-            </div>
-            <div class="field" style="margin-bottom:0;">
-              <label>% chi phí mua hoá đơn bù</label>
-              <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="invoiceSupplementPercent" placeholder="Mặc định 30%" value="${s.invoiceSupplementPercent!==undefined&&s.invoiceSupplementPercent!==null?s.invoiceSupplementPercent:''}">
-            </div>
-          </div>
-          <div class="hint" style="margin-top:6px;">Để trống nếu mỏ xuất đủ 100% hoá đơn, không có khối lượng thiếu. Chỉ điền khi thực sự có tình trạng thiếu chứng từ — app tự tính khối lượng/giá trị/chi phí bù ở khối "Dòng tiền thực tế" bên dưới.</div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Lương / chuyến (đ)</label>
@@ -2556,7 +2642,7 @@ function bindSiteRowEvents(){
       const s = sh.siteLogs[idx];
       const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','invoiceSupplementPercent'];
       const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
-      if(field==='siteName') s[field] = inp.value;
+      if(field==='siteName' || field==='supplierId') s[field] = inp.value;
       else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
       else s[field] = Number(inp.value);
       updateSiteCalc(idx); updateSummary();
@@ -2589,6 +2675,9 @@ function bindSiteRowEvents(){
       sh.siteLogs[idx].commercialTrips[tidx][field] = num;
       updateSiteCalc(idx); updateSummary();
     });
+  });
+  wrap.querySelectorAll('.manageSuppliersBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>renderSupplierManagerModal(null));
   });
   wrap.querySelectorAll('.addTripBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
