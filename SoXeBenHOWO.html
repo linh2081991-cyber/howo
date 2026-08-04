@@ -613,7 +613,9 @@ let state = {
   // Tiền Thuần.
   supplierPayments: [], // {id, supplierId, date, amount, notes}
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
-  strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' — which screen is showing inside the "Trợ Lý" tab right now
+  strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' | 'bonus' — which screen is showing inside the "Trợ Lý" tab right now
+  bonusAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null,
+    budgetPercent: 2.5, attitudeScores: {} }, // attitudeScores: driverId -> 1..10, Ông Chủ tự chấm (không có trong số liệu app)
   appraisalAnalysis: { loading: false, error: null, result: null, generatedAt: null }, // expert pros/cons + recommendation for the project appraisal comparison, powered by the same Gemini pipeline as strategyAnalysis
   documents: [], // {id, scope:'vehicle'|'driver', driverId (if scope='driver'), type, expiryDate, notes}
   // Nhà cung cấp / điểm múc (mỏ) — khai 1 lần, dùng lại cho mọi công trình
@@ -3900,6 +3902,104 @@ async function callGeminiText(promptText, onRetry){
 /// so runStrategyAnalysis() below always finishes the truck that's
 /// actually on screen right now, even if Ông Chủ switched tabs away and
 /// back while a long retry chain was still running in the background.
+/// Gom số liệu THẬT của từng tài xế trong kỳ, để AI đề xuất thưởng dựa
+/// trên đóng góp thực tế — không suy đoán, mọi số đều lấy từ các hàm tính
+/// đã được kiểm chứng (siteRevenue/shiftTotalCost/shiftNetProfit...).
+/// attitudeScore (1-10, Ông Chủ tự chấm) là YẾU TỐ DUY NHẤT không có sẵn
+/// trong dữ liệu vận hành — gộp thêm vào để AI cân nhắc cùng số liệu khách quan.
+function aggregateBonusData(from, to){
+  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const periodSummary = computePeriodSummary(from, to);
+  const budgetPercent = Number(state.bonusAnalysis.budgetPercent)||0;
+  const budgetAmount = Math.max(0, Math.round(periodSummary.finalNetProfit * budgetPercent/100));
+
+  const byDriver = {};
+  for(const sh of inRange){
+    const driver = driverById(sh.driverId);
+    const name = driver?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
+    if(!byDriver[name]) byDriver[name] = { driverId: driver?.id||null, shifts:0, activeShifts:0, leaveDays:0,
+      km:0, fuelLiters:0, fuelCost:0, revenue:0, profitContribution:0, repairIncidents:0, repairAmountResponsible:0 };
+    const b = byDriver[name];
+    b.shifts += 1;
+    if(sh.status==='active') b.activeShifts += 1;
+    if(sh.status==='onLeave') b.leaveDays += 1;
+    b.km += shiftOdoDriven(sh);
+    b.fuelLiters += shiftFuelConsumed(sh);
+    b.fuelCost += shiftFuelCost(sh);
+    b.revenue += shiftTotalRevenue(sh);
+    b.profitContribution += shiftNetProfit(sh);
+  }
+  const repairsHere = repairsInRange(from, to);
+  for(const rep of repairsHere){
+    if(!rep.responsibleDriverId) continue;
+    const driver = driverById(rep.responsibleDriverId);
+    if(!driver || !byDriver[driver.name]) continue;
+    byDriver[driver.name].repairIncidents += 1;
+    byDriver[driver.name].repairAmountResponsible += repairDriverResponsibleAmount(rep);
+  }
+  const driverStats = Object.entries(byDriver).map(([name,b])=>({
+    name, shifts:b.shifts, activeShifts:b.activeShifts, leaveDays:b.leaveDays,
+    totalKm: Math.round(b.km), fuelPerKm: b.km>0 ? +(b.fuelLiters/b.km).toFixed(3) : 0,
+    revenue: Math.round(b.revenue), profitContribution: Math.round(b.profitContribution),
+    repairIncidents: b.repairIncidents, repairAmountResponsible: Math.round(b.repairAmountResponsible),
+    attitudeScore: b.driverId ? (state.bonusAnalysis.attitudeScores[b.driverId] ?? null) : null
+  }));
+  return { from, to, budgetPercent, budgetAmount, periodNetProfit: Math.round(periodSummary.finalNetProfit), driverStats };
+}
+function buildBonusPrompt(summary){
+  return `Mày đang đóng vai 1 chuyên gia Quản Trị Nhân Sự (C&B — Compensation & Benefits), tư vấn cho chủ 1 đội xe ben HOWO tại Việt Nam về việc THƯỞNG CUỐI THÁNG cho tài xế.
+
+Ngân sách thưởng đã được chủ xe định sẵn — KHÔNG được đề xuất vượt quá tổng ngân sách này:
+- Lợi nhuận thực tế trong kỳ: ${summary.periodNetProfit} đồng
+- % trích quỹ thưởng: ${summary.budgetPercent}%
+- Tổng ngân sách thưởng khả dụng: ${summary.budgetAmount} đồng (tổng đề xuất cho TẤT CẢ tài xế cộng lại KHÔNG được vượt số này)
+
+Dữ liệu từng tài xế trong kỳ (đã tính sẵn bằng công thức kế toán của app, không cần tính lại). attitudeScore (thang 1-10, có thể null nếu chủ xe chưa chấm) là điểm THÁI ĐỘ/Ý THỨC do chủ xe tự đánh giá, không suy ra được từ số liệu vận hành:
+
+${JSON.stringify(summary.driverStats, null, 2)}
+
+Hãy phân tích và CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
+{
+  "driverBonuses": [ { "driverName": "<đúng tên trong driverStats>", "rank": <số thứ hạng đóng góp, 1 là cao nhất>,
+    "suggestedAmount": <số tiền đề xuất, đơn vị đồng, số nguyên>, "reasoning": "<lý do cụ thể — dựa vào đóng góp lợi nhuận, chuyên cần, ý thức giữ xe (số lần hỏng hóc), tiêu hao dầu, và điểm thái độ nếu có>" } ],
+  "totalProposed": <tổng tất cả suggestedAmount cộng lại — PHẢI xấp xỉ hoặc thấp hơn budgetAmount, không được vượt>,
+  "allocationPrinciple": "<giải thích ngắn gọn nguyên tắc phân bổ đã dùng, VD: theo tỷ lệ đóng góp lợi nhuận có điều chỉnh theo chuyên cần và ý thức>",
+  "overallNote": "<nhận xét tổng thể, có thể gợi ý nếu 1 tài xế nào đó cần cải thiện điều gì tháng sau>"
+}
+Chỉ đưa đề xuất dựa trên số liệu thực tế ở trên, không suy đoán số liệu không có. Nếu chỉ có 1 tài xế, vẫn phải đề xuất 1 mức thưởng hợp lý cho người đó dựa trên đóng góp so với ngân sách, không bỏ trống mảng.`;
+}
+async function runBonusAnalysis(){
+  const ba = state.bonusAnalysis;
+  ba.loading = true; ba.error = null;
+  renderBonusAdvisor();
+  try{
+    const summary = aggregateBonusData(ba.from, ba.to);
+    if(summary.driverStats.length===0){
+      ba.error = 'Chưa có ca nào trong khoảng thời gian này để phân tích.';
+      ba.loading = false;
+      if(activeBonusTruckRun) await activeBonusTruckRun.finish();
+      if(state.currentTab==='strategy' && state.strategyView==='bonus') renderBonusAdvisor();
+      return;
+    }
+    const prompt = buildBonusPrompt(summary);
+    const result = await callGeminiText(prompt, (attempt)=>{
+      if(activeBonusTruckRun) activeBonusTruckRun.retry();
+      if(attempt>=3){
+        const hintEl = document.getElementById('bonusRetryHint');
+        if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
+      }
+    });
+    ba.result = result;
+    ba.generatedAt = new Date().toISOString();
+  }catch(e){
+    ba.error = e.message || 'Không phân tích được — thử lại.';
+  }
+  ba.loading = false;
+  if(activeBonusTruckRun) await activeBonusTruckRun.finish();
+  if(state.currentTab==='strategy' && state.strategyView==='bonus') renderBonusAdvisor();
+}
+let activeBonusTruckRun = null;
+
 let activeStrategyTruckRun = null;
 
 async function runStrategyAnalysis(){
@@ -4183,10 +4283,19 @@ function renderStrategyHub(){
         <button class="btn btn-accent btn-block" id="hubGoHiringBtn">👥 CÓ NÊN TUYỂN THÊM LÁI XE?</button>
       </div>
     </section>
+    <section class="group">
+      <div class="card" style="text-align:center; padding:26px 18px;">
+        <div style="font-size:42px; margin-bottom:8px;">🎁</div>
+        <div style="font-weight:700; font-size:15.5px; margin-bottom:6px;">Đề Xuất Thưởng Cuối Tháng</div>
+        <div class="hint" style="margin-bottom:16px;">AI đọc đúng KQ kinh doanh + đóng góp thực tế từng tài xế trong kỳ, đề xuất mức thưởng hợp lý trong đúng ngân sách Ông Chủ định trước.</div>
+        <button class="btn btn-accent btn-block" id="hubGoBonusBtn">🎁 ĐỀ XUẤT THƯỞNG CUỐI THÁNG</button>
+      </div>
+    </section>
   `;
   document.getElementById('hubGoStrategyBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategy(); });
   document.getElementById('hubGoAppraisalBtn').addEventListener('click', ()=>{ saveMainScroll(); renderProjectAppraisal(); });
   document.getElementById('hubGoHiringBtn').addEventListener('click', ()=>{ saveMainScroll(); renderHiringAdvisor(); });
+  document.getElementById('hubGoBonusBtn').addEventListener('click', ()=>{ saveMainScroll(); renderBonusAdvisor(); });
 }
 
 function renderStrategy(){
@@ -4248,6 +4357,111 @@ function renderStrategy(){
   document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
+}
+
+/// Trang "🎁 Đề Xuất Thưởng Cuối Tháng" — cùng khuôn với Trợ Lý Chiến Lược
+/// (date range + nút chạy + hoạt cảnh xe + retry), chỉ khác dữ liệu gửi AI
+/// và có thêm phần Ông Chủ tự chấm điểm thái độ từng tài xế trước khi chạy.
+function renderBonusAdvisor(){
+  state.strategyView = 'bonus';
+  const app = document.getElementById('app');
+  const ba = state.bonusAnalysis;
+  if(!ba.from || !ba.to){ const r = currentMonthRange(); ba.from = r.from; ba.to = r.to; }
+  const hasKey = !!(state.settings.geminiApiKey || '').trim();
+  const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="bonusBackBtn">← Quay Lại</button>
+    </section>
+    ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key thì mới phân tích được.</div>` : ''}
+    <section class="group">
+      <h3>🎁 Đề Xuất Thưởng Cuối Tháng</h3>
+      <div class="hint" style="margin-bottom:10px;">AI đọc đúng số liệu đóng góp thực tế của từng tài xế trong khoảng ngày đã chọn (doanh thu, lợi nhuận, chuyên cần, ý thức giữ xe, tiêu hao dầu), cộng thêm điểm thái độ Ông Chủ tự chấm, để đề xuất mức thưởng hợp lý trong đúng ngân sách đã định — không phải quyết định cuối cùng, Ông Chủ toàn quyền chỉnh lại.</div>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="bonus_from" value="${ba.from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="bonus_to" value="${ba.to}">
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>% lợi nhuận trích quỹ thưởng</label>
+        <input type="text" inputmode="decimal" id="bonus_budgetPct" value="${ba.budgetPercent}">
+      </div>
+    </section>
+
+    ${activeDrivers.length>0 ? `
+    <section class="group">
+      <h3>Chấm Điểm Thái Độ (Tuỳ Chọn)</h3>
+      <div class="hint" style="margin-bottom:10px;">Thang 1-10 — bỏ trống nếu không muốn chấm, AI sẽ chỉ dùng số liệu khách quan.</div>
+      ${activeDrivers.map(d=>`
+        <div class="field" style="margin-bottom:10px;">
+          <label>${escapeHtml(d.name)}</label>
+          <input type="text" inputmode="numeric" class="bonus-attitude-input" data-driverid="${d.id}" value="${ba.attitudeScores[d.id]!==undefined?ba.attitudeScores[d.id]:''}" placeholder="1-10, bỏ trống nếu không chấm">
+        </div>`).join('')}
+    </section>` : ''}
+
+    <section class="group">
+      <button class="btn btn-accent btn-block ${ba.loading?'strategy-run-line':''}" id="runBonusBtn" ${ba.loading?'disabled':''}>
+        ${ba.loading ? 'Đang phân tích...' : '🎁 Tạo Đề Xuất'}
+        ${ba.loading ? HOWO_TRUCK_HTML : ''}
+      </button>
+      ${ba.loading ? `<div class="hint" id="bonusRetryHint" style="margin-top:8px;"></div>` : ''}
+      ${ba.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(ba.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
+    </section>
+
+    ${ba.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(ba.error)}</div></section>` : ''}
+
+    ${ba.result ? renderBonusResult(ba.result) : (!ba.loading && !ba.error ? `
+      <section class="group">
+        <div class="empty"><div class="big">🎁</div>Bấm "Tạo Đề Xuất" để AI đọc số liệu và đề xuất mức thưởng cho từng tài xế.</div>
+      </section>
+    ` : '')}
+  `;
+
+  if(ba.loading){
+    activeBonusTruckRun = startTruckRun(document.getElementById('runBonusBtn'));
+  } else {
+    activeBonusTruckRun = null;
+  }
+
+  document.getElementById('bonusBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('bonus_from').addEventListener('change', e=>{ ba.from = e.target.value || ba.from; ba.result=null; ba.error=null; });
+  document.getElementById('bonus_to').addEventListener('change', e=>{ ba.to = e.target.value || ba.to; ba.result=null; ba.error=null; });
+  document.getElementById('bonus_budgetPct').addEventListener('input', e=>{ ba.budgetPercent = Number(String(e.target.value).replace(',','.'))||0; });
+  document.querySelectorAll('.bonus-attitude-input').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const id = inp.dataset.driverid;
+      const v = inp.value.trim();
+      if(v===''){ delete ba.attitudeScores[id]; return; }
+      const n = Math.max(1, Math.min(10, Number(v)||0));
+      ba.attitudeScores[id] = n;
+    });
+  });
+  document.getElementById('runBonusBtn').addEventListener('click', runBonusAnalysis);
+}
+function renderBonusResult(result){
+  const bonuses = Array.isArray(result.driverBonuses) ? [...result.driverBonuses].sort((a,b)=>(a.rank||99)-(b.rank||99)) : [];
+  return `
+    <section class="group">
+      <h3>Đề Xuất Mức Thưởng</h3>
+      ${bonuses.map(b=>`
+        <div class="card" style="margin-bottom:10px;">
+          <div class="summary-row"><span style="font-weight:700;">#${b.rank||'?'} — ${escapeHtml(b.driverName||'')}</span>
+            <span class="val" style="font-weight:800; color:var(--profit); font-size:16px;">${fmtVND(b.suggestedAmount||0)}</span></div>
+          <div class="hint" style="margin-top:4px;">${escapeHtml(b.reasoning||'')}</div>
+        </div>`).join('')}
+      <div class="card">
+        <div class="summary-row total"><span>Tổng đề xuất</span><span class="val">${fmtVND(result.totalProposed||0)}</span></div>
+      </div>
+    </section>
+    ${result.allocationPrinciple ? `<section class="group"><h3>Nguyên Tắc Phân Bổ</h3><div class="card"><div class="hint" style="color:var(--ink); font-size:14px;">${escapeHtml(result.allocationPrinciple)}</div></div></section>` : ''}
+    ${result.overallNote ? `<section class="group"><h3>Nhận Xét Chung</h3><div class="card"><div class="hint" style="color:var(--ink); font-size:14px;">${escapeHtml(result.overallNote)}</div></div></section>` : ''}
+  `;
 }
 
 function renderStrategyResult(result){
