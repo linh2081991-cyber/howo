@@ -1851,16 +1851,27 @@ function findPreviousShift(dateStr, shiftType, excludeId){
   return best;
 }
 
+/// Gợi ý tên công trình khi gõ — CHỈ những công trình còn hoạt động (lần
+/// gần nhất được chọn cách đây DƯỚI 10 ngày). Công trình quá 10 ngày
+/// không thấy chọn lại coi như đã ngừng chạy, không hiện gợi ý nữa cho đỡ
+/// rối — vẫn xem lại được bình thường trong lịch sử ca cũ, chỉ không gợi
+/// ý khi gõ tên mới.
 function allSiteNames(){
-  const seen=new Set(), out=[];
-  const sorted=[...state.shifts].sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
-  for(const sh of sorted){
+  const lastSeen = {}; // tên công trình -> ngày gần nhất xuất hiện
+  for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
       const n=(s.siteName||'').trim();
-      if(n && !seen.has(n)){ seen.add(n); out.push(n); }
+      if(!n) continue;
+      if(!lastSeen[n] || sh.date>lastSeen[n]) lastSeen[n]=sh.date;
     }
   }
-  return out;
+  const todayStr = todayLocalDateStr();
+  const names = Object.keys(lastSeen).filter(n=>{
+    const days = daysBetweenDates(new Date(lastSeen[n]+'T00:00:00'), new Date(todayStr+'T00:00:00'));
+    return days < 10;
+  });
+  names.sort((a,b)=>lastSeen[b].localeCompare(lastSeen[a])); // gần nhất trước
+  return names;
 }
 
 // ========================= TOAST =========================
