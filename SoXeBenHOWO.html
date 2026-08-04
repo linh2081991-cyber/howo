@@ -5635,6 +5635,28 @@ function computeSupplierDebt(supplierId){
   // phải trả tính đến giờ.
   return { payable, paid, owed: payable-paid };
 }
+/// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
+/// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
+/// xuất cho KT thuế, đảm bảo 2 nơi luôn khớp nhau tuyệt đối.
+function computePeriodSummary(from, to){
+  const excludedShiftIds = getExcludedRecentShiftIds();
+  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
+  const gTotal = computeResultsGroup(inRange);
+  const repairsHere = repairsInRange(from, to);
+  const repairTotal = repairsHere.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const roadFee = roadFeeForRange(from, to);
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - otherFixedMonthly;
+  const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
+  const citPeriodKey = `${from}_${to}`;
+  const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey] || 0;
+  const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const operatingCashCost = inRange.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
+  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthly;
+  return { from, to, inRange, gTotal, repairTotal, roadFee, otherFixedMonthly, finalNetProfit,
+           vatPayableInRange, manualCitValue, cashIn, cashOutToSuppliers, operatingCashCost, netOperatingCashFlow };
+}
 function computeAllSiteBilledEvents(){
   const map = {};
   for(const sh of state.shifts){
@@ -6009,17 +6031,21 @@ function renderResults(){
 
   const gDay = computeResultsGroup(dayShifts);
   const gNight = computeResultsGroup(nightShifts);
-  const gTotal = computeResultsGroup(inRange);
+  const periodSummary = computePeriodSummary(from, to);
+  const gTotal = periodSummary.gTotal;
 
   const repairsHere = repairsInRange(from, to);
-  const repairTotal = repairsHere.reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const roadFee = state.resultsRoadFeeOverride!==null ? state.resultsRoadFeeOverride : roadFeeForRange(from, to);
+  const repairTotal = periodSummary.repairTotal;
+  const roadFee = state.resultsRoadFeeOverride!==null ? state.resultsRoadFeeOverride : periodSummary.roadFee;
   // Chi phí cố định hàng tháng khác — Khấu hao xe dự kiến + Gốc/lãi vay
   // ngân hàng + Bảo hiểm xe + Đăng kiểm/Đăng ký/Phù hiệu vận tải (Cài Đặt).
   // Trước đây các khoản này KHÔNG hề được cộng vào bất kỳ công thức tài
   // chính nào; nay được cộng đồng bộ vào Lợi Nhuận Thực Tế, Điểm Hoà Vốn
   // và Cảnh Báo Tài Chính, giống hệt cách chi phí luật đường đã được cộng.
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = periodSummary.otherFixedMonthly;
+  // roadFee có thể bị Ông Chủ ghi đè riêng cho màn hình này (state.resultsRoadFeeOverride)
+  // nên finalNetProfit tính lại tại đây thay vì lấy thẳng periodSummary.finalNetProfit,
+  // để tôn trọng đúng giá trị đang hiển thị trên màn hình.
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - otherFixedMonthly;
   // Thuế TNDN dự kiến — ước tính tham khảo, tính trên đúng khoảng ngày
   // đang chọn (Ông Chủ đổi Từ ngày/Đến ngày thành đúng quý/năm cần xem là
@@ -6029,7 +6055,7 @@ function renderResults(){
   // VAT phải nộp trong kỳ — cộng dồn đúng từng công trình thương mại đã
   // tính (commercialVatPayable), đây là số BẮT BUỘC theo luật, không tuỳ
   // chọn được.
-  const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
+  const vatPayableInRange = periodSummary.vatPayableInRange;
   // TNDN dự kiến do Ông Chủ tự gõ tay (KT thuế tư vấn, có thể tối ưu thấp
   // hơn cách tính % đơn giản) — lưu riêng theo đúng khoảng ngày đang xem,
   // không tự tính theo %.
@@ -6040,10 +6066,13 @@ function renderResults(){
   // Dùng đúng tiền THẬT đã ghi nhận (2 sổ tiền khách bank vào / bank cho
   // mỏ) thay vì suy luận từ số dồn tích (doanh thu/công nợ) — đơn giản,
   // dễ đối chiếu với KT thuế, đúng chuẩn báo cáo lưu chuyển tiền tệ
-  // phương pháp trực tiếp.
-  const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const operatingCashCost = inRange.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
+  // phương pháp trực tiếp. cashIn/cashOutToSuppliers/operatingCashCost lấy
+  // thẳng từ periodSummary (không phụ thuộc roadFee); chỉ netOperatingCashFlow
+  // tính lại tại đây để tôn trọng đúng roadFee đang hiển thị (có thể bị
+  // Ông Chủ ghi đè riêng cho màn này).
+  const cashIn = periodSummary.cashIn;
+  const cashOutToSuppliers = periodSummary.cashOutToSuppliers;
+  const operatingCashCost = periodSummary.operatingCashCost;
   const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthly;
 
   // Data-integrity check: any ca in range with real fuel consumed but no
@@ -6118,6 +6147,7 @@ function renderResults(){
         </div>
       </div>
       <button class="btn btn-accent btn-block" id="exportResultsBtn">⬇️ Xuất Kết Quả Kỳ Này Ra Excel</button>
+      <button class="btn btn-ghost btn-block" id="exportKTThueBtn" style="margin-top:8px;">📦 Xuất Trọn Gói Cho KT Thuế</button>
     </section>
 
     <section class="group">
@@ -6395,6 +6425,9 @@ function renderResults(){
   if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
+  });
+  document.getElementById('exportKTThueBtn').addEventListener('click', ()=>{
+    exportKTThueBundle(from, to);
   });
   document.querySelectorAll('.site-detail-row').forEach(row=>{
     row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, from, to); });
@@ -8176,6 +8209,223 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
 // File riêng của ĐÚNG 1 tài xế, chỉ hiện TIỀN HỌ NHẬN — tuyệt đối không có
 // doanh thu, đơn giá vật liệu, tiền mua/bán thương mại, lãi gộp hay VAT
 // (mọi khoản của Ông Chủ). In ra đưa thẳng cho tài xế.
+// ============ XUẤT TRỌN GÓI CHO KT THUẾ (nhiều sheet, ExcelJS) ============
+const KT_FONT = 'Times New Roman';
+const KT_NUMFMT = '#,##0" đ"';
+const KT_HEAD_FILL = 'FFEDEDED';
+function ktCell(ws, addr, val, opts={}){
+  const c = ws.getCell(addr);
+  c.value = val;
+  c.font = { name:KT_FONT, size:opts.size||11, bold:!!opts.bold, color:opts.color?{argb:opts.color}:undefined };
+  c.alignment = { vertical:'middle', horizontal:opts.align||'left', wrapText:!!opts.wrap };
+  if(opts.fill) c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:opts.fill} };
+  if(opts.numFmt) c.numFmt = opts.numFmt;
+  if(opts.border!==false) c.border = { top:{style:'thin',color:{argb:'FFBBBBBB'}}, left:{style:'thin',color:{argb:'FFBBBBBB'}}, bottom:{style:'thin',color:{argb:'FFBBBBBB'}}, right:{style:'thin',color:{argb:'FFBBBBBB'}} };
+  return c;
+}
+/// Vẽ 1 hàng tiêu đề bảng (nền xám, chữ đậm, canh giữa, tự xuống dòng) —
+/// dùng chung cho mọi sheet để nhìn đồng nhất.
+function ktHeaderRow(ws, r, headers){
+  headers.forEach((h,i)=>ktCell(ws, ws.getCell(r,i+1).address, h, {bold:true, fill:KT_HEAD_FILL, align:'center', wrap:true}));
+  ws.getRow(r).height = 34;
+}
+function ktBuildTongQuan(wb, S, companyName, mst){
+  const ws = wb.addWorksheet('Tong Quan');
+  ws.columns = [{width:40},{width:26}]; // rộng hơn mức "đủ chữ" thông thường vì Times New Roman to hơn Calibri mặc định
+  let r=1;
+  const setH=(h)=>{ ws.getRow(r).height=h; r++; };
+  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,companyName,{bold:true,size:15,align:'center',border:false}); setH(28);
+  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,`MST: ${mst||'—'}`,{align:'center',color:'FF666666',border:false}); setH(20);
+  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,`Kỳ báo cáo: ${formatDateVN(S.from)} — ${formatDateVN(S.to)}`,{align:'center',bold:true,border:false}); setH(24);
+  setH(10);
+  const line=(label,val,opts={})=>{
+    ktCell(ws,`A${r}`,label,{bold:opts.bold});
+    ktCell(ws,`B${r}`,Math.round(val),{align:'right',numFmt:KT_NUMFMT,bold:opts.bold,color:opts.color});
+    setH(24);
+  };
+  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'KẾT QUẢ KINH DOANH',{bold:true,fill:KT_HEAD_FILL}); setH(26);
+  line('Doanh thu', S.gTotal.revenue);
+  line('Giá vốn + chi phí vận hành', S.gTotal.opCost);
+  line('LỢI NHUẬN THỰC TẾ', S.finalNetProfit, {bold:true, color:S.finalNetProfit>=0?'FF1F7A4D':'FFB23A2E'});
+  r++; setH(10);
+  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'NGHĨA VỤ THUẾ',{bold:true,fill:KT_HEAD_FILL}); setH(26);
+  line('VAT phải nộp trong kỳ (bắt buộc)', S.vatPayableInRange, {color:'FFB23A2E'});
+  line('Thuế TNDN dự kiến (KT thuế tư vấn)', S.manualCitValue, {color:'FFB23A2E'});
+  r++; setH(10);
+  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (trực tiếp)',{bold:true,fill:KT_HEAD_FILL,wrap:true}); setH(30);
+  line('Tiền khách bank vào (thật)', S.cashIn, {color:'FF1F7A4D'});
+  line('Tiền bank cho mỏ (thật)', -S.cashOutToSuppliers);
+  line('Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)', -S.operatingCashCost);
+  line('Sửa chữa + luật đường + khấu hao/vay/bảo hiểm/đăng kiểm', -(S.repairTotal+S.roadFee+S.otherFixedMonthly));
+  line('DÒNG TIỀN THUẦN', S.netOperatingCashFlow, {bold:true, color:S.netOperatingCashFlow>=0?'FF1F7A4D':'FFB23A2E'});
+}
+function ktBuildHoaDonRa(wb, taxData, from, to){
+  const ws = wb.addWorksheet('Hoa Don Ra');
+  ws.columns = [{width:14},{width:32},{width:16},{width:12},{width:18},{width:14},{width:16},{width:18},{width:18}];
+  ktHeaderRow(ws,1,['Tháng','Tên Khách/Công Trình','Loại GD','Thuế Suất','Đã Xuất HĐ','Số HĐ','Ngày Xuất','Doanh Thu Chốt','Ghi Chú']);
+  let r=2;
+  const rows = (taxData && Array.isArray(taxData.invOut)) ? taxData.invOut.filter(x=>{
+    return x.thang>=from.slice(0,7) && x.thang<=to.slice(0,7);
+  }) : [];
+  if(rows.length===0){ ws.mergeCells(`A${r}:I${r}`); ktCell(ws,`A${r}`,'Không có dữ liệu trong kỳ (hoặc chưa lấy được dữ liệu Sổ Thuế — kiểm tra mạng và thử lại).',{align:'center'}); ws.getRow(r).height=24; }
+  else rows.forEach(x=>{
+    ktCell(ws,`A${r}`,x.thang,{align:'center'});
+    ktCell(ws,`B${r}`,x.ten||'');
+    ktCell(ws,`C${r}`,x.loaiGD==='hang'?'Bán hàng hoá':'Chạy cước',{align:'center'});
+    ktCell(ws,`D${r}`,(x.thueSuat||0)+'%',{align:'center'});
+    ktCell(ws,`E${r}`,x.daXuat?'Đã xuất':'Chưa xuất',{align:'center'});
+    ktCell(ws,`F${r}`,x.soHD||'');
+    ktCell(ws,`G${r}`,x.ngayXuat?formatDateVN(x.ngayXuat):'',{align:'center'});
+    ktCell(ws,`H${r}`,Math.round(x.dtChot||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`I${r}`,'');
+    ws.getRow(r).height=22; r++;
+  });
+}
+function ktBuildChungTu(wb, taxData, from, to){
+  const ws = wb.addWorksheet('Chung Tu Mua Vao');
+  ws.columns = [{width:14},{width:26},{width:16},{width:14},{width:16},{width:16},{width:16},{width:16},{width:24}];
+  ktHeaderRow(ws,1,['Ngày','Nhà Cung Cấp','MST NCC','Khoản Chi','Số HĐ','Tiền Hàng','Tiền VAT','Tổng Thanh Toán','Hình Thức TT']);
+  let r=2;
+  const rows = (taxData && Array.isArray(taxData.invIn)) ? taxData.invIn.filter(x=>x.ngay>=from && x.ngay<=to).sort((a,b)=>a.ngay<b.ngay?-1:1) : [];
+  if(rows.length===0){ ws.mergeCells(`A${r}:I${r}`); ktCell(ws,`A${r}`,'Không có dữ liệu trong kỳ (hoặc chưa lấy được dữ liệu Sổ Thuế).',{align:'center'}); ws.getRow(r).height=24; }
+  else rows.forEach(x=>{
+    ktCell(ws,`A${r}`,formatDateVN(x.ngay),{align:'center'});
+    ktCell(ws,`B${r}`,x.ncc||'');
+    ktCell(ws,`C${r}`,x.mst||'',{align:'center'});
+    ktCell(ws,`D${r}`,x.loai||'',{align:'center'});
+    ktCell(ws,`E${r}`,x.soHD||'');
+    ktCell(ws,`F${r}`,Math.round(x.tienHang||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`G${r}`,Math.round(x.vat||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`H${r}`,Math.round(x.tong||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`I${r}`,x.ttoan==='ck'?'Chuyển khoản':'Tiền mặt',{align:'center'});
+    ws.getRow(r).height=22; r++;
+  });
+}
+function ktBuildBangKe(wb, taxData, from, to){
+  const ws = wb.addWorksheet('Bang Ke Mua Khong HD');
+  ws.columns = [{width:14},{width:24},{width:24},{width:14},{width:20},{width:12},{width:10},{width:16},{width:16},{width:16}];
+  ktHeaderRow(ws,1,['Ngày','Người Bán','Địa Chỉ','CCCD','Mặt Hàng','Số Lượng','ĐVT','Đơn Giá','Thành Tiền','Hình Thức TT']);
+  let r=2;
+  const rows = (taxData && Array.isArray(taxData.bangKe)) ? taxData.bangKe.filter(x=>x.ngay>=from && x.ngay<=to).sort((a,b)=>a.ngay<b.ngay?-1:1) : [];
+  if(rows.length===0){ ws.mergeCells(`A${r}:J${r}`); ktCell(ws,`A${r}`,'Không có dữ liệu trong kỳ.',{align:'center'}); ws.getRow(r).height=24; }
+  else rows.forEach(x=>{
+    ktCell(ws,`A${r}`,formatDateVN(x.ngay),{align:'center'});
+    ktCell(ws,`B${r}`,x.nguoiBan||'');
+    ktCell(ws,`C${r}`,x.diaChi||'');
+    ktCell(ws,`D${r}`,x.cccd||'',{align:'center'});
+    ktCell(ws,`E${r}`,x.matHang||'');
+    ktCell(ws,`F${r}`,x.soLuong||0,{align:'right'});
+    ktCell(ws,`G${r}`,x.dvt||'',{align:'center'});
+    ktCell(ws,`H${r}`,Math.round(x.donGia||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`I${r}`,Math.round(x.thanhTien||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`J${r}`,x.ttoan==='ck'?'Chuyển khoản':'Tiền mặt',{align:'center'});
+    ws.getRow(r).height=22; r++;
+  });
+}
+function ktBuildNhatKy(wb, inRangeShifts){
+  const ws = wb.addWorksheet('Nhat Ky Van Hanh');
+  ws.columns = [{width:13},{width:9},{width:18},{width:34},{width:9},{width:16},{width:18},{width:18},{width:20}];
+  ktHeaderRow(ws,1,['Ngày','Ca','Tài Xế','Công Trình','Số Chuyến','Doanh Thu','Tổng Chi Phí','Lợi Nhuận Ròng','Ghi Chú']);
+  let r=2;
+  const sorted = [...inRangeShifts].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
+  sorted.forEach(sh=>{
+    const driverName = driverById(sh.driverId)?.name || sh.driverNameSnapshot || '';
+    const trips = (sh.siteLogs||[]).reduce((s,l)=>s+siteTripCount(l),0);
+    const siteNames = (sh.siteLogs||[]).map(l=>l.siteName).filter(Boolean).join(', ');
+    ktCell(ws,`A${r}`,formatDateVN(sh.date),{align:'center'});
+    ktCell(ws,`B${r}`,shiftTypeLabel(sh.shiftType),{align:'center'});
+    ktCell(ws,`C${r}`,driverName);
+    ktCell(ws,`D${r}`,siteNames);
+    ktCell(ws,`E${r}`,trips,{align:'right'});
+    ktCell(ws,`F${r}`,Math.round(shiftTotalRevenue(sh)),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`G${r}`,Math.round(shiftTotalCost(sh)),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`H${r}`,Math.round(shiftNetProfit(sh)),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`I${r}`,sh.notes||'');
+    ws.getRow(r).height=22; r++;
+  });
+}
+function ktBuildSoTien(wb, sheetName, headerLabel, records, nameResolver){
+  const ws = wb.addWorksheet(sheetName);
+  ws.columns = [{width:14},{width:30},{width:20},{width:30}];
+  ktHeaderRow(ws,1,['Ngày', headerLabel, 'Số Tiền', 'Ghi Chú']);
+  let r=2;
+  const sorted = [...records].sort((a,b)=>a.date<b.date?-1:1);
+  if(sorted.length===0){ ws.mergeCells(`A${r}:D${r}`); ktCell(ws,`A${r}`,'Chưa có khoản nào được ghi nhận trong kỳ.',{align:'center'}); ws.getRow(r).height=24; }
+  else sorted.forEach(p=>{
+    ktCell(ws,`A${r}`,formatDateVN(p.date),{align:'center'});
+    ktCell(ws,`B${r}`,nameResolver(p));
+    ktCell(ws,`C${r}`,Math.round(p.amount||0),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`D${r}`,p.notes||'');
+    ws.getRow(r).height=22; r++;
+  });
+}
+function ktBuildCongNo(wb){
+  const ws = wb.addWorksheet('Cong No Con Lai');
+  ws.columns = [{width:12},{width:30},{width:20},{width:20},{width:22}];
+  let r=1;
+  ws.mergeCells(`A${r}:E${r}`); ktCell(ws,`A${r}`,'Công nợ tính đến ngày xuất file — không theo kỳ',{bold:true,italic:true,border:false}); ws.getRow(r).height=22; r++;
+  r++;
+  ktHeaderRow(ws,r,['Loại','Tên','Phải Thu/Trả','Đã Nhận/Trả','Còn Nợ']); r++;
+  state.customers.forEach(c=>{
+    const d = computeCustomerDebt(c.id);
+    ktCell(ws,`A${r}`,'Khách hàng',{align:'center'});
+    ktCell(ws,`B${r}`,c.name);
+    ktCell(ws,`C${r}`,Math.round(d.billed),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`D${r}`,Math.round(d.collected),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`E${r}`,Math.round(d.owed),{align:'right',numFmt:KT_NUMFMT,bold:true,color:d.owed>0?'FFB23A2E':'FF1F7A4D'});
+    ws.getRow(r).height=22; r++;
+  });
+  state.suppliers.forEach(s=>{
+    const d = computeSupplierDebt(s.id);
+    ktCell(ws,`A${r}`,'Nhà cung cấp',{align:'center'});
+    ktCell(ws,`B${r}`,s.name);
+    ktCell(ws,`C${r}`,Math.round(d.payable),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`D${r}`,Math.round(d.paid),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`E${r}`,Math.round(d.owed),{align:'right',numFmt:KT_NUMFMT,bold:true,color:d.owed>0?'FFB23A2E':'FF1F7A4D'});
+    ws.getRow(r).height=22; r++;
+  });
+  if(state.customers.length===0 && state.suppliers.length===0){
+    ws.mergeCells(`A${r}:E${r}`); ktCell(ws,`A${r}`,'Chưa có khách hàng/nhà cung cấp nào.',{align:'center'}); ws.getRow(r).height=24;
+  }
+}
+async function exportKTThueBundle(from, to){
+  if(typeof ExcelJS === 'undefined'){ showToast('Đang tải thư viện xuất file, thử lại sau vài giây (cần mạng).'); return; }
+  showToast('Đang gom dữ liệu cho KT thuế, vui lòng đợi...');
+  // Sổ Thuế (thue.html) dùng CHUNG Firebase project/space nên đọc thẳng
+  // được đúng tài liệu taxLedger của nó qua sharedDataRef — không cần
+  // Ông Chủ tự vào Sổ Thuế xuất riêng.
+  let taxData = null;
+  try{ const snap = await sharedDataRef('taxLedger').get(); taxData = snap.exists ? snap.data() : null; }
+  catch(e){ showToast('Không lấy được dữ liệu Sổ Thuế (kiểm tra mạng) — vẫn xuất tiếp phần Sổ Xe Ben.'); }
+
+  const wb = new ExcelJS.Workbook();
+  const S = computePeriodSummary(from, to);
+  const companyName = (taxData&&taxData.cfg&&taxData.cfg.tenCty) || 'CÔNG TY TNHH TM&VT LINH CHÍ THÀNH';
+  const mst = (taxData&&taxData.cfg&&taxData.cfg.mst) || '';
+
+  ktBuildTongQuan(wb, S, companyName, mst);
+  ktBuildHoaDonRa(wb, taxData, from, to);
+  ktBuildChungTu(wb, taxData, from, to);
+  ktBuildBangKe(wb, taxData, from, to);
+  ktBuildNhatKy(wb, S.inRange);
+  ktBuildSoTien(wb, 'So Tien Khach Bank Vao', 'Khách Hàng',
+    state.sitePayments.filter(p=>p.date>=from && p.date<=to),
+    p=>(p.customerId&&customerById(p.customerId)?.name) || p.partnerName || p.siteName || '');
+  ktBuildSoTien(wb, 'So Tien Bank Cho Mo', 'Nhà Cung Cấp',
+    state.supplierPayments.filter(p=>p.date>=from && p.date<=to),
+    p=>(p.supplierId&&supplierById(p.supplierId)?.name) || '');
+  ktBuildCongNo(wb);
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `KTThue_LinhChiThanh_${from}_den_${to}.xlsx`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  showToast('Đã xuất file trọn gói cho KT thuế — 8 sheet đầy đủ.');
+}
+
 async function exportDriverPayslipXLSX(driverId){
   if(typeof ExcelJS === 'undefined'){ showToast('Đang tải thư viện xuất file, thử lại sau vài giây (cần mạng).'); return; }
   const driver = driverById(driverId);
