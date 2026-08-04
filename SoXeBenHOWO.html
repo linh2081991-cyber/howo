@@ -2635,6 +2635,18 @@ function renderShiftForm(){
   bindFormEvents();
 }
 
+/// Tự ghép s.siteName từ các ghi chú "Điểm Múc - Điểm Đổ" của từng chuyến
+/// — vì ô nhập tên công trình cấp-cả-site đã bỏ (theo yêu cầu Ông Chủ, đưa
+/// thẳng xuống từng chuyến), nhưng rất nhiều nơi khác trong app (phiếu
+/// lương, Nhật Ký Vận Hành, thẻ ca, file xuất KT thuế...) vẫn đọc
+/// s.siteName để hiện nhãn công trình — không tự đồng bộ thì các chỗ đó
+/// sẽ hiện trống trơn cho mọi công trình thương mại tạo mới từ giờ.
+function syncSiteNameFromTrips(s){
+  if(s.siteType!=='commercial') return;
+  const locs = (s.commercialTrips||[]).map(t=>(t.tripLocation||'').trim()).filter(Boolean);
+  const unique = [...new Set(locs)];
+  s.siteName = unique.join(', ');
+}
 function renderSiteRows(){
   const wrap = document.getElementById('siteRowsWrap');
   const sh = state.draftShift;
@@ -2652,11 +2664,10 @@ function renderSiteRows(){
           <button type="button" data-idx="${i}" data-type="commercial" class="${isCommercial?'active':''}">Thương Mại</button>
         </div>
       </div>`;
-    const nameField = `
+    const nameField = isCommercial ? '' : `
       <div class="field">
-        <label>${isCommercial?'Điểm Múc - Điểm Đổ (mô tả, không phải định danh chính)':'Tên công trình'}</label>
+        <label>Tên công trình</label>
         <input type="text" class="site-input" data-idx="${i}" data-field="siteName" list="siteNamesList" value="${escapeHtml(s.siteName||'')}">
-        ${isCommercial?'<div class="hint" style="margin-top:4px;">Chỉ để mô tả/phân biệt hiển thị — Nhà Cung Cấp và Khách Hàng bên dưới mới là định danh chính dùng để tính công nợ/thuế.</div>':''}
       </div>`;
     let body;
     if(isCommercial){
@@ -2666,6 +2677,10 @@ function renderSiteRows(){
         : trips.map((t,ti)=>`
           <div class="commercial-trip" style="border:1px dashed var(--border); border-radius:10px; padding:8px; margin-bottom:8px;">
             <div class="site-head" style="margin-bottom:6px;"><strong>Chuyến ${ti+1}</strong><button class="link-btn removeTripBtn" data-idx="${i}" data-tidx="${ti}">Xoá</button></div>
+            <div class="field">
+              <label>Điểm Múc - Điểm Đổ</label>
+              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="siteNamesList" value="${escapeHtml(t.tripLocation||'')}">
+            </div>
             <div class="two-col">
               <div class="field"><label>KL mua (tấn)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="buyVolume" placeholder="0" value="${blankIfZero(t.buyVolume)}"></div>
               <div class="field"><label>Đơn giá mua (đ/tấn)</label><input type="text" inputmode="decimal" class="ctrip-money" data-idx="${i}" data-tidx="${ti}" data-field="buyUnitPrice" placeholder="0" value="${t.buyUnitPrice?toIntSafe(t.buyUnitPrice).toLocaleString('vi-VN'):''}"></div>
@@ -2676,6 +2691,22 @@ function renderSiteRows(){
             </div>
           </div>`).join('');
       body = `
+        <div class="field">
+          <label>Nhà Cung Cấp / Điểm Múc</label>
+          <select class="site-input" data-idx="${i}" data-field="supplierId">
+            <option value="">— Chưa gắn (dùng mặc định chung ở Cài Đặt) —</option>
+            ${state.suppliers.map(sup=>`<option value="${sup.id}" ${s.supplierId===sup.id?'selected':''}>${escapeHtml(sup.name)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" data-idx="${i}" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
+        </div>
+        <div class="field">
+          <label>Khách Hàng / Điểm Đổ</label>
+          <select class="site-input" data-idx="${i}" data-field="customerId">
+            <option value="">— Chưa gắn —</option>
+            ${state.customers.map(cus=>`<option value="${cus.id}" ${s.customerId===cus.id?'selected':''}>${escapeHtml(cus.name)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm manageCustomersBtn" data-idx="${i}" style="margin-top:8px;">🧑‍💼 Thêm / Sửa Khách Hàng</button>
+        </div>
         <div class="two-col">
           <div class="field">
             <label>Giá MUA</label>
@@ -2691,24 +2722,6 @@ function renderSiteRows(){
               <button type="button" data-idx="${i}" data-vatfield="sellIncludesVat" data-val="1" class="${s.sellIncludesVat?'active':''}">Có VAT</button>
             </div>
           </div>
-        </div>
-        <div class="field">
-          <label>Nhà Cung Cấp / Điểm Múc</label>
-          <select class="site-input" data-idx="${i}" data-field="supplierId">
-            <option value="">— Chưa gắn (dùng mặc định chung ở Cài Đặt) —</option>
-            ${state.suppliers.map(sup=>`<option value="${sup.id}" ${s.supplierId===sup.id?'selected':''}>${escapeHtml(sup.name)}</option>`).join('')}
-          </select>
-          <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" data-idx="${i}" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
-          <div class="hint" style="margin-top:6px;">Chọn đúng mỏ đang lấy hàng — % hoá đơn mỏ xuất, hệ số quy đổi, thuế suất VAT sẽ tự áp theo đúng nhà cung cấp này ở MỌI công trình dùng chung mỏ, không cần gõ lại mỗi lần đổi điểm đổ. Chỉ khi lấy hàng ở mỏ khác mới cần chọn/thêm nhà cung cấp khác. Sửa lại thông tin nhà cung cấp sẽ tự cập nhật cho cả công trình cũ.</div>
-        </div>
-        <div class="field">
-          <label>Khách Hàng / Điểm Đổ</label>
-          <select class="site-input" data-idx="${i}" data-field="customerId">
-            <option value="">— Chưa gắn —</option>
-            ${state.customers.map(cus=>`<option value="${cus.id}" ${s.customerId===cus.id?'selected':''}>${escapeHtml(cus.name)}</option>`).join('')}
-          </select>
-          <button type="button" class="btn btn-ghost btn-sm manageCustomersBtn" data-idx="${i}" style="margin-top:8px;">🧑‍💼 Thêm / Sửa Khách Hàng</button>
-          <div class="hint" style="margin-top:6px;">Chọn đúng khách đang giao hàng cho chuyến này — dùng để tính đúng công nợ (Phải Thu − Đã Nhận) theo đúng khách, không lẫn giữa các khách khác nhau dù đổ hàng ở điểm nào.</div>
         </div>
         <div style="margin-bottom:8px;">${tripRows}</div>
         <button class="btn btn-ghost btn-sm addTripBtn" data-idx="${i}" style="margin-bottom:10px;">+ Thêm Chuyến</button>
@@ -2830,6 +2843,14 @@ function bindSiteRowEvents(){
       updateSiteCalc(idx); updateSummary();
     });
   });
+  wrap.querySelectorAll('.ctrip-text').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const idx=Number(inp.dataset.idx), tidx=Number(inp.dataset.tidx), field=inp.dataset.field;
+      const s = sh.siteLogs[idx];
+      s.commercialTrips[tidx][field] = inp.value;
+      syncSiteNameFromTrips(s);
+    });
+  });
   wrap.querySelectorAll('.ctrip-money').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       const idx=Number(inp.dataset.idx), tidx=Number(inp.dataset.tidx), field=inp.dataset.field;
@@ -2850,7 +2871,8 @@ function bindSiteRowEvents(){
     btn.addEventListener('click', ()=>{
       const idx = Number(btn.dataset.idx);
       if(!Array.isArray(sh.siteLogs[idx].commercialTrips)) sh.siteLogs[idx].commercialTrips = [];
-      sh.siteLogs[idx].commercialTrips.push({ buyVolume:0, buyUnitPrice:0, sellVolume:0, sellUnitPrice:0 });
+      sh.siteLogs[idx].commercialTrips.push({ tripLocation:'', buyVolume:0, buyUnitPrice:0, sellVolume:0, sellUnitPrice:0 });
+      syncSiteNameFromTrips(sh.siteLogs[idx]);
       renderSiteRows(); updateSummary();
     });
   });
@@ -2858,6 +2880,7 @@ function bindSiteRowEvents(){
     btn.addEventListener('click', ()=>{
       const idx=Number(btn.dataset.idx), tidx=Number(btn.dataset.tidx);
       sh.siteLogs[idx].commercialTrips.splice(tidx,1);
+      syncSiteNameFromTrips(sh.siteLogs[idx]);
       renderSiteRows(); updateSummary();
     });
   });
