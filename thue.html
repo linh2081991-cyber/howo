@@ -671,10 +671,24 @@ function dauThang(ym){
 }
 
 /* ══════════ HẠN THUẾ ══════════ */
-const cuoiThang = (y,m) => new Date(y, m, 0).toISOString().slice(0,10);
+// SỬA LỖI MÚI GIỜ: trước đây dùng .toISOString() (luôn quy về UTC) để lấy
+// chuỗi ngày — ở múi giờ Việt Nam (UTC+7), nửa đêm giờ địa phương của
+// "ngày cuối tháng" khi quy về UTC bị lùi về NGÀY HÔM TRƯỚC (VD 31/07 00:00
+// giờ VN = 30/07 17:00 UTC), nên hạn GTGT luôn hiện sớm hơn thật 1 ngày
+// (31/07 hiện thành 30/07, trùng ngày với hạn TNDN vốn dĩ đúng là ngày 30
+// — 2 hạn khác nhau bị trùng ngày chỉ do lỗi này). Giờ lấy đúng thành phần
+// ngày/tháng/năm theo giờ ĐỊA PHƯƠNG, giống hệt cách homNay() đang làm.
+const cuoiThang = (y,m) => { const d=new Date(y,m,0); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 function hanThue(){
   const t=homNay(), y=new Date().getFullYear(), out=[];
+  // Ngày thành lập DN — quý nào kết thúc TRƯỚC ngày này nghĩa là DN CHƯA
+  // TỒN TẠI trong suốt quý đó, không hề có nghĩa vụ khai/nộp cho quý đó.
+  // VD thành lập 09/07/2026: Quý 1 (hết 31/03) và Quý 2 (hết 30/06) đều
+  // trước ngày thành lập → bỏ hẳn, không hiện hạn cho 2 quý này nữa.
+  const ngayLap = S.cfg.ngayDKKD || null;
   for(let q=1;q<=4;q++){
+    const quyKetThuc = cuoiThang(y, q*3);
+    if(ngayLap && quyKetThuc < ngayLap) continue;
     const m=q*3+1, yy=m>12?y+1:y, mm=m>12?1:m;
     out.push({ten:`Tờ khai thuế GTGT quý ${q}/${y}`, ngay:cuoiThang(yy,mm),
       ghi:'Chậm nhất ngày cuối của tháng đầu quý sau.'});
@@ -682,8 +696,13 @@ function hanThue(){
       ngay:`${yy}-${String(mm).padStart(2,'0')}-30`,
       ghi:'Chậm nhất ngày 30 của tháng đầu quý sau.'});
   }
-  out.push({ten:`Quyết toán thuế TNDN & Báo cáo tài chính ${y-1}`, ngay:`${y}-03-31`,
-    ghi:'Kèm phụ lục giao dịch liên kết vì anh có giao dịch với chính công ty mình.'});
+  // Quyết toán năm trước — chỉ áp dụng nếu DN đã tồn tại ít nhất 1 ngày
+  // trong năm đó (không thì năm trước DN chưa hề thành lập, không có gì
+  // để quyết toán).
+  if(!ngayLap || ngayLap <= `${y-1}-12-31`){
+    out.push({ten:`Quyết toán thuế TNDN & Báo cáo tài chính ${y-1}`, ngay:`${y}-03-31`,
+      ghi:'Kèm phụ lục giao dịch liên kết vì anh có giao dịch với chính công ty mình.'});
+  }
   return out.filter(h=>soNgay(t,h.ngay)>=-20).sort((a,b)=>a.ngay<b.ngay?-1:1);
 }
 
