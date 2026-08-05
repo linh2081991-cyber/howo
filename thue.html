@@ -1642,6 +1642,16 @@ function vHoSo(){
     </div>`).join('') : `<div class="card"><div class="sub">Chưa có khách nào.</div></div>`}
   <button class="btn ghost" onclick="fKhach()">+ Thêm khách hàng</button>
 
+  <div class="eyebrow">Hợp đồng vận chuyển</div>
+  ${S.hopDong.length?S.hopDong.map(h=>{
+    const k=S.khach.find(x=>x.id===h.khachId), con=h.hetHan?soNgay(t,h.hetHan):null;
+    return `<div class="card tap" onclick="fHD('${h.id}')">
+      <div class="row"><b style="font-size:15px">Số ${esc(h.so||'—')}</b>
+        ${con!==null?`<span class="chip ${con<0?'bad':con<=30?'warn':'ok'}">${con<0?'hết hạn':'còn '+con+' ngày'}</span>`:''}</div>
+      <div class="sub">${k?esc(k.ten):'chưa gắn khách'} · ký ${dmy(h.ngayKy)}${h.hetHan?' · hết hạn '+dmy(h.hetHan):''}</div>
+    </div>`;}).join('') : `<div class="card"><div class="sub">Chưa có hợp đồng nào. Chạy bằng lời nói là nguồn tranh chấp công nợ lớn nhất.</div></div>`}
+  <button class="btn ghost" onclick="fHD()">+ Thêm hợp đồng</button>
+
   <div class="eyebrow">Khách Hàng & Nhà Cung Cấp — Thương Mại</div>
   ${coTM ? `<div class="card alert mid">
     ${tm.khachThieu.length?`<div class="t">${tm.khachThieu.length} Khách Hàng (điểm đổ, thương mại) chưa có hồ sơ thuế</div>
@@ -1654,16 +1664,10 @@ function vHoSo(){
       <div class="sub" style="margin-top:5px">${tm.nccChuaGan.map(n=>`<span class="chip warn">${esc(n)}</span>`).join('')}</div>`:''}
     <div class="fix">Khách Hàng/Nhà Cung Cấp lấy đúng theo tên đã gắn bên sổ ca (app chính, tab Kết Quả) — bấm vào tên để tạo hồ sơ thuế. Công trình báo "chưa gắn" thì phải vào sổ ca gắn đúng Khách Hàng/Nhà Cung Cấp trước, hồ sơ thuế không tự tạo thay được.</div>
   </div>` : ''}
-
-  <div class="eyebrow">Hợp đồng vận chuyển</div>
-  ${S.hopDong.length?S.hopDong.map(h=>{
-    const k=S.khach.find(x=>x.id===h.khachId), con=h.hetHan?soNgay(t,h.hetHan):null;
-    return `<div class="card tap" onclick="fHD('${h.id}')">
-      <div class="row"><b style="font-size:15px">Số ${esc(h.so||'—')}</b>
-        ${con!==null?`<span class="chip ${con<0?'bad':con<=30?'warn':'ok'}">${con<0?'hết hạn':'còn '+con+' ngày'}</span>`:''}</div>
-      <div class="sub">${k?esc(k.ten):'chưa gắn khách'} · ký ${dmy(h.ngayKy)}${h.hetHan?' · hết hạn '+dmy(h.hetHan):''}</div>
-    </div>`;}).join('') : `<div class="card"><div class="sub">Chưa có hợp đồng nào. Chạy bằng lời nói là nguồn tranh chấp công nợ lớn nhất.</div></div>`}
-  <button class="btn ghost" onclick="fHD()">+ Thêm hợp đồng</button>
+  <div style="display:flex; gap:8px;">
+    <button class="btn ghost" onclick="fKhach()" style="flex:1;">+ Thêm Khách hàng</button>
+    <button class="btn ghost" onclick="fHD()" style="flex:1;">+ Thêm Hợp Đồng</button>
+  </div>
 
   <div class="eyebrow">Định mức nhiên liệu ${qm('dinhmuc')}</div>
   <div class="card ${!c.dmCoTai?'alert mid':''}">
