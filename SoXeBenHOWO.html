@@ -467,7 +467,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #53';
+const APP_BUILD = '2026-08-05 · #54';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -2841,6 +2841,7 @@ function renderSiteRows(){
           <div class="field">
             <label>Số chuyến</label>
             <input type="number" inputmode="numeric" class="site-input" data-idx="${i}" data-field="trips" placeholder="0" value="${blankIfZero(s.trips)}">
+            <button type="button" class="btn btn-ghost btn-sm addFreightTripBtn" data-idx="${i}" style="margin-top:8px;">+ Thêm Chuyến</button>
           </div>
           <div class="field">
             <label>Lương / chuyến</label>
@@ -2952,6 +2953,18 @@ function bindSiteRowEvents(){
       if(!Array.isArray(sh.siteLogs[idx].commercialTrips)) sh.siteLogs[idx].commercialTrips = [];
       sh.siteLogs[idx].commercialTrips.push({ tripLocation:'', buyVolume:0, buyUnitPrice:0, sellVolume:0, sellUnitPrice:0 });
       syncSiteNameFromTrips(sh.siteLogs[idx]);
+      renderSiteRows(); updateSummary();
+    });
+  });
+  // Chở cước: các chuyến trong cùng 1 công trình/ca luôn đồng giá + đồng
+  // tải (khác thương mại hay biến thiên từng chuyến) — nên "+ Thêm Chuyến"
+  // ở đây CHỈ cần tăng thêm 1 vào đúng ô "Số chuyến" đang dùng chung cho
+  // Khối lượng/chuyến × Đơn giá, KHÔNG tách thành mảng từng chuyến riêng
+  // như bên thương mại — theo đúng yêu cầu Ông Chủ (Hướng A).
+  wrap.querySelectorAll('.addFreightTripBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const idx = Number(btn.dataset.idx);
+      sh.siteLogs[idx].trips = (Number(sh.siteLogs[idx].trips)||0) + 1;
       renderSiteRows(); updateSummary();
     });
   });
