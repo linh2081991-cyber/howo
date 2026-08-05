@@ -467,7 +467,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #54';
+const APP_BUILD = '2026-08-05 · #55';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -2190,7 +2190,7 @@ function renderShiftList(){
       <input type="month" id="shiftArchiveMonthPicker" style="flex:1;">
       <button class="btn btn-ghost" id="viewOtherMonthBtn">+ Thêm Tháng Mới</button>
     </div>
-    <div class="search-bar-hint" style="margin-top:4px;">Xem lại nguyên 1 tháng đã qua (VD Tháng 7 khi đang ở Tháng 8) — màn xem lại chỉ đọc, không sửa/xoá được.</div>`;
+    <div class="search-bar-hint" style="margin-top:4px;">Xem lại nguyên 1 tháng đã qua (VD Tháng 7 khi đang ở Tháng 8)</div>`;
 
   if(state.shifts.length===0){
     app.innerHTML = warningsBannerHtml + searchBarHtml + `
@@ -6444,6 +6444,32 @@ Chênh lệch = +${ctx.increasePct.toFixed(0)}%</div>
 // What remains here is pure opportunity/comparison commentary — never a
 // "something is broken" message — so it stays out of the Cảnh Báo Tài
 // Chính block and never needs a [Chi Tiết] fix-it flow of its own.
+/// Danh sách "công trình" ĐÚNG dùng riêng cho các insight có hiển thị TÊN
+/// (mục "Đang nhận diện N công trình" bên dưới) — KHÔNG dùng thẳng
+/// siteRanking[].name cho công trình thương mại, vì siteRanking nhóm theo
+/// s.siteName (chuỗi tự ghép "Điểm Múc - Điểm Đổ" của từng chuyến, xem
+/// syncSiteNameFromTrips bên trên) — 1 khách hàng thương mại thật có thể
+/// bị đếm thành NHIỀU "công trình" khác nhau chỉ vì đổi điểm giao hàng
+/// giữa các chuyến, làm số đếm sai và danh sách hiện tên dài dòng vô
+/// nghĩa (đúng lỗi Ông Chủ chỉ ra). Chở cước giữ NGUYÊN theo tên đã nhập
+/// trực tiếp — không đổi, vì tên đó vốn đã ổn định, không bị lỗi ghép
+/// chuỗi. Hàm này CHỈ phục vụ hiển thị tên trong insight — không đụng
+/// computeSiteRanking() hay bất kỳ số doanh thu/chuyến nào đang dùng ở
+/// Trợ Lý Chiến Lược / xuất Excel.
+function insightSiteLabels(inRangeShifts){
+  const freightNames = new Set();
+  const commercialLabels = new Set();
+  (inRangeShifts||[]).forEach(sh=>(sh.siteLogs||[]).forEach(s=>{
+    if(siteRevenue(s)<=0) return;
+    if(s.siteType==='commercial'){
+      const cus = s.customerId ? customerById(s.customerId) : null;
+      commercialLabels.add(cus ? cus.name : '(thương mại chưa gắn Khách Hàng)');
+    } else {
+      freightNames.add((s.siteName||'').trim() || '(chưa đặt tên)');
+    }
+  }));
+  return [...freightNames, ...commercialLabels];
+}
 function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts, from, to, siteRanking}){
   const insights = [];
 
@@ -6486,7 +6512,8 @@ function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, ro
   // riêng để tránh mỗi khi có thêm công trình mới, Ông Chủ lại tưởng app
   // chỉ "nhận diện" đúng 2 công trình được nhắc ở mục 3 phía trên).
   if(siteRanking.length > 0){
-    insights.push({icon:'📋', title:`Đang nhận diện ${siteRanking.length} công trình trong kỳ này`, text: siteRanking.map(s=>s.name).join(', ')});
+    const labels = insightSiteLabels(inRangeShifts);
+    insights.push({icon:'📋', title:`Đang nhận diện ${labels.length} công trình trong kỳ này`, text: labels.join(', ')});
   }
 
   return insights;
