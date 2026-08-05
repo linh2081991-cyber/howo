@@ -8228,7 +8228,7 @@ function autoFitColumns(ws, rows){
 function buildOperationLogRows(){
   const header = ['Ngày','Ca','Cường Độ','Tài Xế','Trạng Thái','Odo Đầu','Odo Cuối','Odo Chạy (Km)',
     'Chỉ Số Dầu Đầu','Chỉ Số Dầu Cuối','Dầu Đổ Thêm (Lít)','Dầu Tiêu Hao (Lít)','Đơn Giá Dầu/Lít','Tiền Dầu Tiêu Hao',
-    'Công Trình','Loại Công Trình','Khối Lượng/Chuyến (Chở Cước)','Đơn Giá Vật Liệu/Cước','Tổng Mua (TM)','Tổng Bán (TM)','Số Chuyến','Thành Tiền / Lãi Gộp Công Trình',
+    'Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại Công Trình','Khối Lượng/Chuyến (Chở Cước)','Đơn Giá Vật Liệu/Cước','Tổng Mua (TM)','Tổng Bán (TM)','Số Chuyến','Thành Tiền / Lãi Gộp Công Trình',
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến Tổng',
     'Tổng Doanh Thu Ca','Lương Cứng Phân Bổ','Tiền Ăn','Tiền Nhà+Điện Nước',
     'Tiền Luật Phát Sinh','Chi Phí Phát Sinh','Ghi Chú Phát Sinh','Ứng Lương/Đền Bù','Người Nhận Ứng','Ghi Chú Ca',
@@ -8245,14 +8245,17 @@ function buildOperationLogRows(){
       sh.roadFeeIncidental||0, sh.incidentalCost||0, sh.incidentalNotes||'', sh.advanceAmount||0, sh.advanceRecipientName||'',
       sh.notes||'', shiftTotalCost(sh), shiftNetProfit(sh)];
     if((sh.siteLogs||[]).length===0){
-      rows.push([...shared, '','','','','','','','','','', ...trailing]);
+      rows.push([...shared, '','','','','','','','','','','','', ...trailing]);
     } else {
       for(const s of sh.siteLogs){
         const isC = s.siteType==='commercial';
+        // Công Trình (cột cước, GIỮ NGUYÊN như trước) và Điểm Múc-Điểm Đổ
+        // (cột riêng cho thương mại) — mỗi loại chỉ điền đúng cột của
+        // mình, cột kia để trống, không lẫn 2 khái niệm vào cùng 1 cột nữa.
         const siteFields = isC
-          ? [s.siteName||'', 'Thương Mại', '', '', Math.round(commercialNetBuy(s)), Math.round(commercialNetSell(s)), siteTripCount(s), Math.round(siteRevenue(s)),
+          ? ['', s.siteName||'', 'Thương Mại', '', '', Math.round(commercialNetBuy(s)), Math.round(commercialNetSell(s)), siteTripCount(s), Math.round(siteRevenue(s)),
              s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)]
-          : [s.siteName||'', 'Chở Cước', s.volumePerTrip||0, s.materialUnitPrice||0, '', '', siteTripCount(s), Math.round(siteRevenue(s)),
+          : [s.siteName||'', '', 'Chở Cước', s.volumePerTrip||0, s.materialUnitPrice||0, '', '', siteTripCount(s), Math.round(siteRevenue(s)),
              s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)];
         rows.push([...shared, ...siteFields, ...trailing]);
       }
@@ -8323,7 +8326,7 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   dailyBreakdown.forEach(d => { out.push([formatDateVN(d.date), Math.round(d.revenue), Math.round(d.cost), Math.round(d.profit)]); });
   out.push([]);
   out.push(['XẾP HẠNG CÔNG TRÌNH THEO DOANH THU/CHUYẾN']);
-  out.push(['Công Trình','Doanh Thu','Số Chuyến','Doanh Thu/Chuyến']);
+  out.push(['Công Trình / Điểm Múc-Điểm Đổ','Doanh Thu','Số Chuyến','Doanh Thu/Chuyến']);
   siteRanking.forEach(s => { out.push([s.name, Math.round(s.revenue), s.trips, Math.round(s.revenuePerTrip)]); });
   return out;
 }
@@ -8405,10 +8408,10 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push([]);
 
   rows.push(['CHI TIẾT TỪNG CA']);
-  const detailHeader = ['Ngày','Ca','Cường Độ','Trạng Thái','Công Trình','Loại','Khối Lượng/Chuyến','Đơn Giá','Số Chuyến',
+  const detailHeader = ['Ngày','Ca','Cường Độ','Trạng Thái','Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại','Khối Lượng/Chuyến','Đơn Giá','Số Chuyến',
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến (Ca Này)','Lương Cứng (Ca Này)','Tiền Ăn (Ca Này)','Ứng Lương (Ca Này)','Ghi Chú Ca'];
   rows.push(detailHeader);
-  const emptySiteFields = ['','','','','','','',''];
+  const emptySiteFields = ['','','','','','','','',''];
   const sorted = [...shiftsForDriver].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
   for(const sh of sorted){
     const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
@@ -8419,7 +8422,7 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
     } else {
       sh.siteLogs.forEach((s,idx)=>{
         const isC = s.siteType==='commercial';
-        const siteFields = [s.siteName||'', isC?'Thương Mại':'Chở Cước',
+        const siteFields = [isC?'':(s.siteName||''), isC?(s.siteName||''):'', isC?'Thương Mại':'Chở Cước',
           isC?'':(s.volumePerTrip||0), isC?'':(s.materialUnitPrice||0), siteTripCount(s),
           s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)];
         // Lương Cứng/Tiền Ăn/Ứng Lương chỉ hiện ở DÒNG ĐẦU của ca — tránh
@@ -8561,23 +8564,25 @@ function ktBuildBangKe(wb, taxData, from, to){
 }
 function ktBuildNhatKy(wb, inRangeShifts){
   const ws = wb.addWorksheet('Nhat Ky Van Hanh');
-  ws.columns = [{width:13},{width:9},{width:18},{width:34},{width:9},{width:16},{width:18},{width:18},{width:20}];
-  ktHeaderRow(ws,1,['Ngày','Ca','Tài Xế','Công Trình','Số Chuyến','Doanh Thu','Tổng Chi Phí','Lợi Nhuận Ròng','Ghi Chú']);
+  ws.columns = [{width:13},{width:9},{width:18},{width:26},{width:26},{width:9},{width:16},{width:18},{width:18},{width:20}];
+  ktHeaderRow(ws,1,['Ngày','Ca','Tài Xế','Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Số Chuyến','Doanh Thu','Tổng Chi Phí','Lợi Nhuận Ròng','Ghi Chú']);
   let r=2;
   const sorted = [...inRangeShifts].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
   sorted.forEach(sh=>{
     const driverName = driverById(sh.driverId)?.name || sh.driverNameSnapshot || '';
     const trips = (sh.siteLogs||[]).reduce((s,l)=>s+siteTripCount(l),0);
-    const siteNames = (sh.siteLogs||[]).map(l=>l.siteName).filter(Boolean).join(', ');
+    const freightNames = (sh.siteLogs||[]).filter(l=>l.siteType!=='commercial').map(l=>l.siteName).filter(Boolean).join(', ');
+    const commercialLocations = (sh.siteLogs||[]).filter(l=>l.siteType==='commercial').map(l=>l.siteName).filter(Boolean).join(', ');
     ktCell(ws,`A${r}`,formatDateVN(sh.date),{align:'center'});
     ktCell(ws,`B${r}`,shiftTypeLabel(sh.shiftType),{align:'center'});
     ktCell(ws,`C${r}`,driverName);
-    ktCell(ws,`D${r}`,siteNames);
-    ktCell(ws,`E${r}`,trips,{align:'right'});
-    ktCell(ws,`F${r}`,Math.round(shiftTotalRevenue(sh)),{align:'right',numFmt:KT_NUMFMT});
-    ktCell(ws,`G${r}`,Math.round(shiftTotalCost(sh)),{align:'right',numFmt:KT_NUMFMT});
-    ktCell(ws,`H${r}`,Math.round(shiftNetProfit(sh)),{align:'right',numFmt:KT_NUMFMT});
-    ktCell(ws,`I${r}`,sh.notes||'');
+    ktCell(ws,`D${r}`,freightNames);
+    ktCell(ws,`E${r}`,commercialLocations);
+    ktCell(ws,`F${r}`,trips,{align:'right'});
+    ktCell(ws,`G${r}`,Math.round(shiftTotalRevenue(sh)),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`H${r}`,Math.round(shiftTotalCost(sh)),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`I${r}`,Math.round(shiftNetProfit(sh)),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`J${r}`,sh.notes||'');
     ws.getRow(r).height=22; r++;
   });
 }
@@ -8726,7 +8731,7 @@ async function exportDriverPayslipXLSX(driverId){
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); nextRow(24);
   const headRow = r;
-  const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình','Số chuyến','Lương/chuyến','Thành tiền chuyến'];
+  const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến','Thành tiền chuyến'];
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
   nextRow(32);
 
