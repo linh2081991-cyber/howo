@@ -203,10 +203,10 @@
   .cbreak .cb-line .cb-val{ font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
   .cbreak .cb-line .cb-val.cb-in{ color:var(--profit); }
   .cbreak .cb-line .cb-val.cb-out{ color:var(--loss); }
-  /* Chỉ thụt lề CHỮ (cb-lbl), KHÔNG thụt lề cả dòng — để số tiền (cb-val)
-     luôn thẳng cột với các dòng cha phía trên/dưới, không bị lệch phải. */
+  /* Ông Chủ yêu cầu dòng phụ (VD "Trong đó VAT...") canh THẲNG HÀNG với
+     dòng cha (VD "Khách trả (tiền vào)") — bỏ hẳn thụt lề, chỉ phân biệt
+     bằng cỡ chữ nhỏ hơn + màu nhạt hơn. */
   .cbreak .cb-line.cb-sub{ font-size:12.5px; color:var(--ink-soft); }
-  .cbreak .cb-line.cb-sub .cb-lbl{ padding-left:12px; }
   .cbreak .cb-line.cb-sub .cb-val{ font-weight:500; }
   .cbreak .cb-line.cb-net{ font-weight:700; }
   .cbreak .cb-profit{ background:var(--profit-soft); padding:11px 12px; display:flex; justify-content:space-between; align-items:center; }
@@ -461,7 +461,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #47';
+const APP_BUILD = '2026-08-05 · #48';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -3085,75 +3085,94 @@ function renderCommercialCashDetailModal(s){
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
     <h3>🧾 Diễn Giải Chi Tiết Dòng Tiền${sup?` — ${escapeHtml(sup.name)}`:''}</h3>
-    <div class="hint" style="margin-bottom:10px;">Số liệu dưới đây lấy đúng từ dữ liệu công trình đang nhập — trình bày theo chuẩn kế toán: Doanh thu / Giá vốn / Thuế GTGT / Dòng tiền mặt thật, tách bạch rõ ràng.</div>
+    <div class="hint" style="margin-bottom:10px;">Số liệu dưới đây lấy đúng từ dữ liệu công trình đang nhập — trình bày theo chuẩn kế toán: Doanh thu / Giá vốn / Thuế GTGT / Dòng tiền mặt thật, mỗi khoản tách riêng 1 dòng cho dễ đọc.</div>
 
     <div class="modal-step">
       <div class="st-title">Bước 1 — Doanh thu ghi nhận (net, chưa VAT)</div>
-      <div class="st-body">Tổng tiền BÁN đã khai là ${fmtVND(grossSell)}. Doanh thu kế toán là phần CHƯA VAT — vì VAT (nếu có) là tiền giữ hộ nhà nước, không phải doanh thu thật của Ông Chủ.</div>
-      <div class="st-formula">${s.sellIncludesVat
-        ? `Doanh thu net = ${fmtVND(grossSell)} ÷ (1 + ${vatPct}%) = ${fmtVND(netSell)}\nVAT đầu ra (trong giá bán) = ${fmtVND(outputVatBook)}`
-        : `Doanh thu net = ${fmtVND(grossSell)} (giá đã khai là giá CHƯA VAT)`}</div>
+      <div class="st-body">Doanh thu kế toán là phần CHƯA VAT — vì VAT (nếu có) là tiền giữ hộ nhà nước, không phải doanh thu thật của Ông Chủ.</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">Tổng tiền BÁN đã khai</span><span class="cb-val">${fmtVND(grossSell)}</span></div>
+        ${s.sellIncludesVat ? `
+        <div class="cb-line cb-sub"><span class="cb-lbl">Trong đó VAT đầu ra (${vatPct}%)</span><span class="cb-val">${fmtVND(outputVatBook)}</span></div>
+        <div class="cb-line cb-net" style="border-top:1px dashed var(--border); margin-top:4px; padding-top:6px;"><span class="cb-lbl">Doanh thu net (chưa VAT)</span><span class="cb-val">${fmtVND(netSell)}</span></div>`
+        : `<div class="hint" style="margin-top:4px;">Giá bán đang để "Chưa VAT" → Doanh thu net = đúng số đã khai.</div>`}
+      </div></div>
     </div>
 
     <div class="modal-step">
       <div class="st-title">Bước 2 — Giá vốn hàng mua (net, chưa VAT)</div>
-      <div class="st-body">Tổng tiền MUA đã khai là ${fmtVND(grossBuy)}. ${deductible?'Đã tick "Đã nhận hóa đơn MUA" → phần VAT trong giá mua ĐƯỢC khấu trừ khi tính VAT phải nộp.':'CHƯA tick "Đã nhận hóa đơn MUA" → KHÔNG có VAT nào được khấu trừ từ khoản mua này.'}</div>
-      <div class="st-formula">${s.buyIncludesVat
-        ? `Giá vốn net = ${fmtVND(grossBuy)} ÷ (1 + ${vatPct}%) = ${fmtVND(netBuy)}\nVAT đầu vào (trong giá mua) = ${fmtVND(inputVatBook)}${deductible?' (được khấu trừ)':' (KHÔNG được khấu trừ)'}`
-        : `Giá vốn net = ${fmtVND(grossBuy)} (giá đã khai là giá CHƯA VAT)`}</div>
+      <div class="st-body">${deductible?'Đã tick "Đã nhận hóa đơn MUA" → phần VAT trong giá mua ĐƯỢC khấu trừ ở Bước 4.':'CHƯA tick "Đã nhận hóa đơn MUA" → KHÔNG có VAT nào được khấu trừ từ khoản mua này.'}</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">Tổng tiền MUA đã khai</span><span class="cb-val">${fmtVND(grossBuy)}</span></div>
+        ${s.buyIncludesVat ? `
+        <div class="cb-line cb-sub"><span class="cb-lbl">Trong đó VAT đầu vào (${vatPct}%)${deductible?' — được khấu trừ':' — KHÔNG được khấu trừ'}</span><span class="cb-val">${fmtVND(inputVatBook)}</span></div>
+        <div class="cb-line cb-net" style="border-top:1px dashed var(--border); margin-top:4px; padding-top:6px;"><span class="cb-lbl">Giá vốn net (chưa VAT)</span><span class="cb-val">${fmtVND(netBuy)}</span></div>`
+        : `<div class="hint" style="margin-top:4px;">Giá mua đang để "Chưa VAT" → Giá vốn net = đúng số đã khai.</div>`}
+      </div></div>
     </div>
 
     <div class="modal-step">
       <div class="st-title">Bước 3 — Tiền mặt thật: thu của khách, trả cho mỏ</div>
-      <div class="st-body">Đây là số tiền THẬT chuyển khoản/tiền mặt — khác với Doanh thu/Giá vốn kế toán ở trên vì có gồm phần VAT (khi có xuất/nhận hoá đơn).</div>
-      <div class="st-formula">Khách phải trả (tiền vào) = ${fmtVND(cashIn)}${outVatCash>0?`  (gồm VAT giữ hộ ${fmtVND(outVatCash)})`:''}
-Trả nhà cung cấp (tiền ra) = ${fmtVND(cashOut)}${inVatCash>0?`  (gồm VAT đã trả mỏ ${fmtVND(inVatCash)})`:''}</div>
+      <div class="st-body">Số tiền THẬT chuyển khoản/tiền mặt — khác Doanh thu/Giá vốn kế toán ở trên vì có gồm phần VAT (khi có xuất/nhận hoá đơn).</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">Khách phải trả (tiền vào)</span><span class="cb-val cb-in">+${fmtVND(cashIn)}</span></div>
+        ${outVatCash>0?`<div class="cb-line cb-sub"><span class="cb-lbl">Trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>`:''}
+        <div class="cb-line"><span class="cb-lbl">Trả nhà cung cấp (tiền ra)</span><span class="cb-val cb-out">−${fmtVND(cashOut)}</span></div>
+        ${inVatCash>0?`<div class="cb-line cb-sub"><span class="cb-lbl">Trong đó VAT đã trả mỏ${deductible?' (được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`:''}
+      </div></div>
     </div>
 
     <div class="modal-step">
       <div class="st-title">Bước 4 — VAT phải nộp nhà nước cuối tháng</div>
-      <div class="st-body">VAT nộp = VAT đầu ra (thu của khách, chỉ tính khi giá bán CÓ VAT) trừ VAT đầu vào ĐƯỢC khấu trừ (từ tiền mua có hoá đơn) trừ tiếp VAT khấu trừ thêm từ hoá đơn bù${mb.applicable?' (chi tiết ở Bước 5)':''}. Khoản này Ông Chủ đang GIỮ HỘ nhà nước — không phải lãi, cũng không phải lỗ.</div>
-      <div class="st-formula">VAT đầu ra = Doanh thu net × Thuế suất VAT
-  = ${fmtVND(netSell)} × ${s.sellIncludesVat?vatPct+'%':'0% (giá bán đang để "Chưa VAT" → chưa xuất hoá đơn bán)'} = ${fmtVND(vb.outputVat)}
-VAT đầu vào được khấu trừ (từ tiền mua có hoá đơn)
-  = ${deductible?`${fmtVND(netBuy)} × ${vatPct}% = ${fmtVND(vb.inputVatFromBuy)}`:`0đ (chưa tick "Đã nhận hóa đơn MUA")`}
-VAT khấu trừ thêm từ hoá đơn bù (Bước 5)
-  = ${fmtVND(vb.inputVatFromSupplement)}
-VAT nộp nhà nước = VAT đầu ra − VAT đầu vào (mua) − VAT khấu trừ (hoá đơn bù)
-  = ${fmtVND(vb.outputVat)} − ${fmtVND(vb.inputVatFromBuy)} − ${fmtVND(vb.inputVatFromSupplement)} = ${fmtVND(vatPayable)}</div>
+      <div class="st-body">Khoản này Ông Chủ đang GIỮ HỘ nhà nước — không phải lãi, cũng không phải lỗ.</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">VAT đầu ra (doanh thu net × ${vatPct}%)</span><span class="cb-val cb-in">+${fmtVND(vb.outputVat)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">VAT đầu vào được khấu trừ (mua có hoá đơn)</span><span class="cb-val cb-out">−${fmtVND(vb.inputVatFromBuy)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">VAT khấu trừ thêm từ hoá đơn bù${mb.applicable?` (Bước ${step5Num})`:''}</span><span class="cb-val cb-out">−${fmtVND(vb.inputVatFromSupplement)}</span></div>
+        <div class="cb-line cb-net" style="border-top:1px dashed var(--border); margin-top:4px; padding-top:6px;"><span class="cb-lbl">VAT nộp nhà nước</span><span class="cb-val">${fmtVND(vatPayable)}</span></div>
+      </div></div>
     </div>
 
     ${mb.applicable ? `
     <div class="modal-step">
       <div class="st-title">Bước ${step5Num} — Khối lượng thiếu chứng từ &amp; hoá đơn bù</div>
       <div class="st-body">Tính xem hoá đơn mỏ cấp đủ cho bao nhiêu khối lượng đã bán ra, phần còn lại là thiếu chứng từ, phải mua hoá đơn bù để hợp thức hoá.</div>
-      <div class="st-formula">Tổng khối lượng MUA cả công trình = ${mb.totalBuyVolume.toLocaleString('vi-VN')} tấn
-Mỏ chỉ xuất hoá đơn hợp lệ cho ${mb.invoicedPct}% khối lượng mua
-  = ${mb.totalBuyVolume.toLocaleString('vi-VN')} × ${mb.invoicedPct}% = ${(mb.totalBuyVolume*mb.invoicedPct/100).toLocaleString('vi-VN',{maximumFractionDigits:2})} tấn có hoá đơn
-Quy đổi sang khối (hệ số quy đổi ${mb.density} tấn/khối)
-  = ${(mb.totalBuyVolume*mb.invoicedPct/100).toLocaleString('vi-VN',{maximumFractionDigits:2})} ÷ ${mb.density} = ${mb.documentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối có chứng từ hợp lệ
-Tổng khối lượng đã BÁN ra = ${mb.totalSellVolume.toLocaleString('vi-VN')} khối
-Khối lượng THIẾU chứng từ = Đã bán − Có chứng từ hợp lệ
-  = ${mb.totalSellVolume.toLocaleString('vi-VN')} − ${mb.documentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} = ${mb.missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối
-${mb.missingVol>0 ? `Đơn giá mua bình quân = ${fmtVND(mb.totalBuyGross)} ÷ ${mb.totalBuyVolume.toLocaleString('vi-VN')} tấn = ${fmtVND(mb.avgBuyUnitPrice)}/tấn
-Giá trị phần thiếu = ${mb.missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} × ${fmtVND(mb.avgBuyUnitPrice)} = ${fmtVND(mb.missingValue)}
-Chi phí mua hoá đơn bù = (${fmtVND(mb.missingValue)} ÷ (1 + ${vatPct}%)) × ${supPct}% = ${fmtVND(supplementCost)} (tiền mặt thật phải trả)` : 'Không thiếu chứng từ — hoá đơn mỏ đã cấp đủ cho toàn bộ khối lượng đã bán ra.'}</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">Tổng khối lượng MUA</span><span class="cb-val">${mb.totalBuyVolume.toLocaleString('vi-VN')} tấn</span></div>
+        <div class="cb-line cb-sub"><span class="cb-lbl">Mỏ xuất hoá đơn hợp lệ cho ${mb.invoicedPct}%</span><span class="cb-val">${(mb.totalBuyVolume*mb.invoicedPct/100).toLocaleString('vi-VN',{maximumFractionDigits:2})} tấn có hoá đơn</span></div>
+        <div class="cb-line cb-sub"><span class="cb-lbl">Quy đổi ÷ hệ số ${mb.density} tấn/khối</span><span class="cb-val">${mb.documentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối có chứng từ</span></div>
+        <div class="cb-line"><span class="cb-lbl">Tổng khối lượng đã BÁN</span><span class="cb-val">${mb.totalSellVolume.toLocaleString('vi-VN')} khối</span></div>
+        <div class="cb-line cb-net" style="border-top:1px dashed var(--border); margin-top:4px; padding-top:6px;"><span class="cb-lbl">Khối lượng THIẾU chứng từ</span><span class="cb-val cb-out">${mb.missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+        ${mb.missingVol>0 ? `
+        <div class="cb-line" style="margin-top:6px;"><span class="cb-lbl">Đơn giá mua bình quân</span><span class="cb-val">${fmtVND(mb.avgBuyUnitPrice)}/tấn</span></div>
+        <div class="cb-line"><span class="cb-lbl">Giá trị phần thiếu</span><span class="cb-val cb-out">${fmtVND(mb.missingValue)}</span></div>
+        <div class="cb-line cb-net" style="border-top:1px dashed var(--border); margin-top:4px; padding-top:6px;"><span class="cb-lbl">Chi phí mua hoá đơn bù (${supPct}% giá trị thiếu, chưa VAT)</span><span class="cb-val cb-out">−${fmtVND(supplementCost)}</span></div>`
+        : `<div class="hint" style="margin-top:6px;">Không thiếu chứng từ — hoá đơn mỏ đã cấp đủ cho toàn bộ khối lượng đã bán ra.</div>`}
+      </div></div>
     </div>` : ''}
 
     <div class="modal-step">
       <div class="st-title">Bước ${reconcileStepNum} — Đối chiếu VAT: tiền mặt thực tế so với sổ sách</div>
-      <div class="st-body">Về nguyên tắc, VAT thu của khách trừ VAT trả mỏ trừ VAT nộp nhà nước phải bằng 0 (vì VAT chỉ là tiền giữ hộ, không phải lãi/lỗ). Nếu khác 0, chênh lệch là tiền THẬT — thường phát sinh khi mua hoá đơn bù khối lượng thiếu chứng từ (chi phí mua hoá đơn chỉ bằng 1 phần giá trị thiếu, nhưng vẫn được khấu trừ VAT trên toàn bộ giá trị đó ở Bước 4).</div>
-      <div class="st-formula">Chênh lệch = VAT giữ hộ của khách − VAT đã trả mỏ − VAT nộp nhà nước
-= ${fmtVND(outVatCash)} − ${fmtVND(inVatCash)} − ${fmtVND(vatPayable)}
-= ${gap>=0?'+':''}${fmtVND(gap)}${gap>0?'  (tiền thật, được CỘNG vào Thực Lãi Bỏ Túi)':gap<0?'  (bị TRỪ khỏi Thực Lãi Bỏ Túi)':'  (không có chênh lệch)'}</div>
+      <div class="st-body">Về nguyên tắc, VAT thu của khách trừ VAT trả mỏ trừ VAT nộp nhà nước phải bằng 0 (VAT chỉ là tiền giữ hộ, không phải lãi/lỗ). Nếu khác 0, chênh lệch là tiền THẬT — thường phát sinh khi mua hoá đơn bù khối lượng thiếu chứng từ (chi phí mua hoá đơn chỉ bằng 1 phần giá trị thiếu, nhưng vẫn được khấu trừ VAT trên toàn bộ giá trị đó ở Bước 4).</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">VAT giữ hộ của khách</span><span class="cb-val cb-in">+${fmtVND(outVatCash)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">VAT đã trả mỏ</span><span class="cb-val cb-out">−${fmtVND(inVatCash)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">VAT nộp nhà nước</span><span class="cb-val cb-out">−${fmtVND(vatPayable)}</span></div>
+        <div class="cb-line cb-net" style="border-top:1px dashed var(--border); margin-top:4px; padding-top:6px;"><span class="cb-lbl">Chênh lệch</span><span class="cb-val" style="color:${gap>=0?'var(--profit)':'var(--loss)'}">${gap>=0?'+':''}${fmtVND(gap)}</span></div>
+      </div></div>
+      ${gap!==0 ? `<div class="hint" style="margin-top:6px;">${gap>0?'Tiền thật, được CỘNG vào Thực Lãi Bỏ Túi.':'Bị TRỪ khỏi Thực Lãi Bỏ Túi.'}</div>` : ''}
     </div>
 
     <div class="modal-step">
       <div class="st-title">Kết luận — Thực Lãi Bỏ Túi</div>
       <div class="st-body">Số tiền THẬT còn lại trong túi Ông Chủ sau khi trừ hết tiền mua hàng, VAT nộp nhà nước và chi phí mua hoá đơn bù (nếu có) — CHƯA trừ lương chuyến trả tài xế và các chi phí cố định khác của cả ca (xem khối "Tổng Kết Ca" bên dưới).</div>
-      <div class="st-formula">Thực lãi bỏ túi = Khách trả − Trả mỏ − VAT nộp − Chi phí mua hoá đơn bù
-= ${fmtVND(cashIn)} − ${fmtVND(cashOut)} − ${fmtVND(vatPayable)} − ${fmtVND(supplementCost)}
-= ${takeHome>=0?'+':''}${fmtVND(takeHome)}</div>
+      <div class="cbreak" style="margin-top:8px;"><div class="cb-sec">
+        <div class="cb-line"><span class="cb-lbl">Khách trả</span><span class="cb-val cb-in">+${fmtVND(cashIn)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">Trả nhà cung cấp</span><span class="cb-val cb-out">−${fmtVND(cashOut)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">VAT nộp nhà nước</span><span class="cb-val cb-out">−${fmtVND(vatPayable)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">Chi phí mua hoá đơn bù</span><span class="cb-val cb-out">−${fmtVND(supplementCost)}</span></div>
+        <div class="cb-profit"><span class="cb-lbl">THỰC LÃI BỎ TÚI</span><span class="cb-val">${takeHome>=0?'+':''}${fmtVND(takeHome)}</span></div>
+      </div></div>
     </div>
   `);
 }
