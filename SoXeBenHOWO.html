@@ -467,7 +467,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #50';
+const APP_BUILD = '2026-08-05 · #51';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -607,7 +607,8 @@ let state = {
               monthlyLoanPayment: 0,        // Gốc + lãi vay ngân hàng (đ/tháng) — SỐ ĐÃ TÍNH SẴN, được ghi tự động bởi recomputeBankLoanMonthlyPayment() mỗi lần render, mọi công thức chi phí cố định trong app đọc thẳng biến này, không đọc bankLoan bên dưới.
               bankLoan: { principal: 0, termMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [] }, // Dữ liệu GỐC của Công Cụ Tính Gốc + Lãi Tự Động (Cài Đặt) — dùng để TÍNH RA monthlyLoanPayment ở trên, không dùng trực tiếp trong công thức tài chính nào khác. rateSchedule: [{id, effectiveFrom:'YYYY-MM-DD', ratePercent}] — hỗ trợ lãi suất đổi theo từng giai đoạn. lastPaidMonth: 'YYYY-MM' của kỳ đã bấm "Đã Trả Tiền Ngân Hàng" gần nhất, dùng để tắt cảnh báo đúng kỳ đó.
               monthlyInsurance: 0,          // Bảo hiểm xe (đ/tháng)
-              monthlyRegistrationFee: 0 },  // Đăng kiểm/Đăng ký/Phù hiệu vận tải (đ/tháng)
+              monthlyRegistrationFee: 0,    // Đăng kiểm/Đăng ký/Phù hiệu vận tải (đ/tháng)
+              monthlyBridgeTollFee: 0 },    // Chi phí cầu đường VÉ THÁNG (đ/tháng) — chỉ áp dụng khi mua vé tháng cố định. Vé NGÀY (mua lẻ từng chuyến) KHÔNG ghi ở đây — ghi thẳng vào "Tiền luật phát sinh" của đúng ca hôm đó.
   currentTab: 'shifts',
   view: 'list', // 'list' | 'form'
   draftShift: null,
@@ -4054,7 +4055,7 @@ function aggregateStrategyData(from, to){
   const todayYM = todayLocalDateStr();
   const financialSnapshot = {
     roadFeeThisMonth: Math.round(roadFeeForRange(todayYM, todayYM)),
-    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
+    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0) + (Number(state.settings.monthlyBridgeTollFee)||0))
   };
 
   return {
@@ -4329,7 +4330,7 @@ function computeHiringAdvisorMetrics(draft){
   const currentMonthlyFood = activeDrivers.reduce((s,d)=>s+(Number(d.dailyFoodAllowance)||0),0)*workDays;
   const today = todayLocalDateStr();
   const monthlyRoadFee = roadFeeForRange(today, today);
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0) + (Number(state.settings.monthlyBridgeTollFee)||0);
   const currentFixedCost = currentMonthlySalary + currentMonthlyHousing + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   // ----- Kịch bản HIỆN TẠI (1 lái) — quy đổi nhịp độ thực tế trong khoảng
@@ -5824,7 +5825,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
   const today = todayLocalDateStr();
   const monthlyRoadFee = roadFeeForRange(today, today);
-  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0) + (Number(s.monthlyBridgeTollFee)||0);
   const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   const toDate = today;
@@ -6107,7 +6108,7 @@ function computePeriodSummary(from, to){
   const repairsHere = repairsInRange(from, to);
   const repairTotal = repairsHere.reduce((s,r)=>s+(Number(r.amount)||0),0);
   const roadFee = roadFeeForRange(from, to);
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0) + (Number(state.settings.monthlyBridgeTollFee)||0);
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - otherFixedMonthly;
   const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
   const citPeriodKey = `${from}_${to}`;
@@ -6623,6 +6624,7 @@ function renderResults(){
         <div class="summary-row"><span>− Gốc + lãi vay ngân hàng / tháng</span><span class="val">${fmtVND(state.settings.monthlyLoanPayment||0)}</span></div>
         <div class="summary-row"><span>− Bảo hiểm xe / tháng</span><span class="val">${fmtVND(state.settings.monthlyInsurance||0)}</span></div>
         <div class="summary-row"><span>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</span><span class="val">${fmtVND(state.settings.monthlyRegistrationFee||0)}</span></div>
+        <div class="summary-row"><span>− Chi phí cầu đường / tháng (vé tháng)</span><span class="val">${fmtVND(state.settings.monthlyBridgeTollFee||0)}</span></div>
         <div class="summary-row total"><span>LỢI NHUẬN THỰC TẾ</span><span class="val" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</span></div>
         <div class="hint" style="margin-top:6px;">4 khoản khấu hao/vay/bảo hiểm/đăng kiểm lấy từ Cài Đặt (đ/tháng cố định) — vào tab Cài Đặt để sửa nếu cần.</div>
         <div class="formula-divider" style="margin:10px 0;"></div>
@@ -8021,10 +8023,15 @@ function renderSettings(){
           <label>Bảo hiểm xe / tháng</label>
           <input type="text" inputmode="decimal" id="s_insurance">
         </div>
-        <div class="field" style="margin-bottom:0;">
+        <div class="field">
           <label>Đăng kiểm / Đăng ký / Phù hiệu vận tải / tháng</label>
           <input type="text" inputmode="decimal" id="s_registration">
         </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Chi phí cầu đường / tháng (vé tháng)</label>
+          <input type="text" inputmode="decimal" id="s_bridgeToll">
+        </div>
+        <div class="hint" style="margin-top:6px;">Chỉ gõ ở đây nếu mua VÉ THÁNG cầu đường cố định. Nếu mua vé lẻ theo NGÀY, ghi thẳng vào ô "Tiền luật phát sinh" của đúng ca hôm đó — không ghi trùng cả 2 chỗ.</div>
         <div class="hint">Tất cả các khoản trên (kể cả sửa chữa/khấu hao phát sinh thực tế, và Gốc+Lãi vay ngân hàng tính tự động ở khối bên dưới) đều được trừ vào Lợi Nhuận Gộp để ra Lợi Nhuận Thực Tế Cuối Cùng, và được cộng vào chi phí cố định khi tính Điểm Hoà Vốn — xem ở tab "Kết Quả".</div>
       </div>
     </section>
@@ -8110,10 +8117,11 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:24px;">Lưu Cài Đặt</button>
   `;
 
-  const sVals = { depreciation: s.monthlyVehicleDepreciation||0, insurance: s.monthlyInsurance||0, registration: s.monthlyRegistrationFee||0 };
+  const sVals = { depreciation: s.monthlyVehicleDepreciation||0, insurance: s.monthlyInsurance||0, registration: s.monthlyRegistrationFee||0, bridgeToll: s.monthlyBridgeTollFee||0 };
   attachMoneyInput(document.getElementById('s_depreciation'), sVals.depreciation, v=>sVals.depreciation=v);
   attachMoneyInput(document.getElementById('s_insurance'), sVals.insurance, v=>sVals.insurance=v);
   attachMoneyInput(document.getElementById('s_registration'), sVals.registration, v=>sVals.registration=v);
+  attachMoneyInput(document.getElementById('s_bridgeToll'), sVals.bridgeToll, v=>sVals.bridgeToll=v);
 
   // ---- Công Cụ Tính Gốc + Lãi Vay Ngân Hàng Tự Động — xem trước trực
   // tiếp (gõ tới đâu tính tới đó), chỉ thực sự lưu khi bấm "Lưu Cài Đặt".
@@ -8326,6 +8334,7 @@ function renderSettings(){
     recomputeBankLoanMonthlyPayment(); // ghi lại state.settings.monthlyLoanPayment từ bankLoan vừa nhập, đúng ngày hôm nay
     s.monthlyInsurance = sVals.insurance;
     s.monthlyRegistrationFee = sVals.registration;
+    s.monthlyBridgeTollFee = sVals.bridgeToll;
     state.roadFeeByMonth.forEach(e=>{ if(rfVals[e.id]!==undefined) e.amount = rfVals[e.id]; });
     await saveRoadFeeByMonth();
     const keyInput = document.getElementById('s_geminiKey');
@@ -8541,6 +8550,7 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   out.push(['− Gốc + lãi vay ngân hàng/tháng', Math.round(state.settings.monthlyLoanPayment||0)]);
   out.push(['− Bảo hiểm xe/tháng', Math.round(state.settings.monthlyInsurance||0)]);
   out.push(['− Đăng kiểm/Đăng ký/Phù hiệu vận tải/tháng', Math.round(state.settings.monthlyRegistrationFee||0)]);
+  out.push(['− Chi phí cầu đường/tháng (vé tháng)', Math.round(state.settings.monthlyBridgeTollFee||0)]);
   out.push(['LỢI NHUẬN THỰC TẾ', Math.round(finalNetProfit)]);
   out.push([`Thuế TNDN dự kiến (${Number(state.settings.citRatePercent)||0}%, ước tính tham khảo)`, Math.round(Math.max(0,finalNetProfit)*(Number(state.settings.citRatePercent)||0)/100)]);
   out.push([]);
