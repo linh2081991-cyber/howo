@@ -172,7 +172,7 @@
   /* chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho */
   /* input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả */
   /* năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần). */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; }
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; min-height:48px; line-height:20px; display:flex; align-items:center; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; }
   .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
   .seg button{ flex:1; padding:13px 0; border:none; background:var(--surface); font-size:15.5px; font-weight:600; color:var(--ink-soft); }
@@ -190,13 +190,17 @@
   .cbreak{ margin-top:10px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
   .cbreak .cb-sec{ padding:10px 12px; }
   .cbreak .cb-sec + .cb-sec{ border-top:1px solid var(--border); }
-  .cbreak .cb-title{ font-size:11.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
+  .cbreak .cb-title{ font-size:11.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .cbreak .cb-detail-btn{ text-transform:none; letter-spacing:normal; font-weight:700; font-size:11.5px; color:var(--accent); background:var(--accent-soft); border:none; border-radius:6px; padding:4px 10px; cursor:pointer; flex-shrink:0; }
   .cbreak .cb-line{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding:3px 0; font-size:13.5px; }
   .cbreak .cb-line .cb-lbl{ color:var(--ink); }
   .cbreak .cb-line .cb-val{ font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
   .cbreak .cb-line .cb-val.cb-in{ color:var(--profit); }
   .cbreak .cb-line .cb-val.cb-out{ color:var(--loss); }
-  .cbreak .cb-line.cb-sub{ font-size:12.5px; color:var(--ink-soft); padding-left:12px; }
+  /* Chỉ thụt lề CHỮ (cb-lbl), KHÔNG thụt lề cả dòng — để số tiền (cb-val)
+     luôn thẳng cột với các dòng cha phía trên/dưới, không bị lệch phải. */
+  .cbreak .cb-line.cb-sub{ font-size:12.5px; color:var(--ink-soft); }
+  .cbreak .cb-line.cb-sub .cb-lbl{ padding-left:12px; }
   .cbreak .cb-line.cb-sub .cb-val{ font-weight:500; }
   .cbreak .cb-line.cb-net{ font-weight:700; }
   .cbreak .cb-profit{ background:var(--profit-soft); padding:11px 12px; display:flex; justify-content:space-between; align-items:center; }
@@ -451,7 +455,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-07-30 · #45';
+const APP_BUILD = '2026-08-05 · #46';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -1755,7 +1759,27 @@ function shiftTotalCost(sh){
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
        + (Number(sh.roadFeeIncidental)||0) + shiftMaterialCost(sh) + shiftInvoiceSupplementCost(sh);
 }
-function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); }
+function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh) + shiftVatReconciliationGap(sh); }
+/// Chênh lệch đối chiếu VAT: TIỀN MẶT THẬT (thu của khách − trả mỏ − nộp
+/// nhà nước) so với LÃI GỘP KẾ TOÁN DỒN TÍCH (net bán − net mua). Về lý
+/// thuyết 2 cách tính phải khớp nhau (VAT chỉ là tiền giữ hộ, trung tính
+/// với lãi/lỗ) — bình thường = 0. CHỈ khác 0 khi mua hoá đơn bù khối
+/// lượng thiếu chứng từ: tiền mua hoá đơn bù (siteInvoiceSupplementCost)
+/// chỉ tốn 1 phần giá trị thiếu, nhưng vẫn được khấu trừ VAT trên ĐỦ giá
+/// trị thiếu đó (xem commercialVatPayable) → phần chênh là tiền THẬT nằm
+/// trong túi Ông Chủ mà lãi gộp kế toán chưa từng ghi nhận. Theo yêu cầu
+/// Ông Chủ (phiên đối chiếu THỰC LÃI BỎ TÚI vs LỢI NHUẬN RÒNG), cộng
+/// khoản này vào lợi nhuận ròng ở MỌI nơi dùng shiftNetProfit/
+/// computeResultsGroup — hiển thị TÁCH RIÊNG thành 1 dòng minh bạch, và
+/// KHÔNG đụng bất kỳ hàm VAT/dòng tiền GỐC nào (commercialCashFromCustomer,
+/// commercialCashToSupplier, commercialVatPayable... giữ nguyên 100%).
+function siteVatReconciliationGap(s){
+  if(s.siteType!=='commercial') return 0;
+  return commercialCashOutputVat(s) - commercialCashInputVat(s) - commercialVatPayable(s);
+}
+function shiftVatReconciliationGap(sh){
+  return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteVatReconciliationGap(s),0);
+}
 /// Chi phí vận hành THUẦN TIỀN MẶT của 1 ca — giống shiftTotalCost() nhưng
 /// KHÔNG gồm giá vốn hàng mua / chi phí bổ sung chứng từ (2 khoản này đã
 /// được theo dõi riêng qua Sổ Tiền Bank Cho Mỏ ở Dòng Tiền Thuần, tránh
@@ -2910,11 +2934,16 @@ function updateSiteCalc(idx){
     // hay không, để Ông Chủ thấy ngay từng số đang lấy TỪ ĐÂU (nhà cung
     // cấp / gõ tay riêng / mặc định chung Cài Đặt) — hết mơ hồ "nhập rồi
     // mà không thấy đổi gì".
+    // fromSupplier=true → KHÔNG lặp lại chú thích tên nhà cung cấp trên
+    // từng dòng nữa (tiêu đề khối đã nêu tên 1 lần rồi, đỡ rối mắt); vẫn
+    // GIỮ chú thích khi số liệu KHÔNG theo nhà cung cấp (gõ tay riêng /
+    // mặc định Cài Đặt) — vì đó là thông tin quan trọng làm đổi số tiền.
     const resolve = (supKey, siteKey, defVal, defLabel) => {
-      if(sup && sup[supKey]!==undefined && sup[supKey]!==null && sup[supKey]!=='') return { val: sup[supKey], src: `nhà cung cấp "${sup.name}"` };
-      if(s[siteKey]!==undefined && s[siteKey]!==null && s[siteKey]!=='') return { val: s[siteKey], src: 'gõ tay riêng cho công trình này' };
-      return { val: defVal, src: defLabel };
+      if(sup && sup[supKey]!==undefined && sup[supKey]!==null && sup[supKey]!=='') return { val: sup[supKey], src: '', fromSupplier: true };
+      if(s[siteKey]!==undefined && s[siteKey]!==null && s[siteKey]!=='') return { val: s[siteKey], src: 'gõ tay riêng cho công trình này', fromSupplier: false };
+      return { val: defVal, src: defLabel, fromSupplier: false };
     };
+    const srcTag = r => r.fromSupplier ? '' : ` <span style="color:var(--ink-soft); font-weight:400;">(${r.src})</span>`;
     const rVat = resolve('vatRatePercent','vatRatePercent', Number(state.settings.vatRatePercent)||0, 'mặc định chung Cài Đặt');
     const rInv = resolve('invoicedBuyPercent','invoicedBuyPercent', 100, 'mặc định (coi như đủ 100% hoá đơn)');
     const rDen = resolve('densityRatio','densityRatio', null, 'chưa khai — không quy đổi được');
@@ -2922,10 +2951,10 @@ function updateSiteCalc(idx){
     const appliedBlock = `
       <div class="cb-sec" style="margin-bottom:10px;">
         <div class="cb-title">⚙️ Đang áp dụng ${sup?`(nhà cung cấp: <b>${escapeHtml(sup.name)}</b>)`:'(chưa gắn nhà cung cấp)'}</div>
-        <div class="cb-line"><span class="cb-lbl">Thuế suất VAT</span><span class="cb-val">${rVat.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rVat.src})</span></span></div>
-        <div class="cb-line"><span class="cb-lbl">% hoá đơn mỏ xuất được</span><span class="cb-val">${rInv.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rInv.src})</span></span></div>
-        <div class="cb-line"><span class="cb-lbl">Hệ số quy đổi (tấn/khối)</span><span class="cb-val">${rDen.val!==null?rDen.val:'—'} <span style="color:var(--ink-soft); font-weight:400;">(${rDen.src})</span></span></div>
-        <div class="cb-line"><span class="cb-lbl">% chi phí mua hoá đơn bù</span><span class="cb-val">${rSup.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rSup.src})</span></span></div>
+        <div class="cb-line"><span class="cb-lbl">Thuế suất VAT</span><span class="cb-val">${rVat.val}%${srcTag(rVat)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">% hoá đơn mỏ xuất được</span><span class="cb-val">${rInv.val}%${srcTag(rInv)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">Hệ số quy đổi (tấn/khối)</span><span class="cb-val">${rDen.val!==null?rDen.val:'—'}${srcTag(rDen)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">% chi phí mua hoá đơn bù</span><span class="cb-val">${rSup.val}%${srcTag(rSup)}</span></div>
       </div>`;
     const cashIn = commercialCashFromCustomer(s);
     const cashToSupplier = commercialCashToSupplier(s);
@@ -2944,9 +2973,9 @@ function updateSiteCalc(idx){
     const missingValue = siteMissingDocumentedValue(s);
 
     // Dòng "gồm VAT ..." chỉ hiện khi thực sự có VAT ở đầu đó
-    const sellSub = outVatCash>0 ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>` : '';
+    const sellSub = outVatCash>0 ? `<div class="cb-line cb-sub"><span class="cb-lbl">Trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>` : '';
     const buySub = inVatCash>0
-      ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT đã trả mỏ ${deductible?'(được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
+      ? `<div class="cb-line cb-sub"><span class="cb-lbl">Trong đó VAT đã trả mỏ ${deductible?'(được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
       : '';
     const missingBlock = missingVol>0 ? `
         <div class="cb-sec" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
@@ -2963,7 +2992,7 @@ function updateSiteCalc(idx){
       <div class="cbreak">
         ${appliedBlock}
         <div class="cb-sec">
-          <div class="cb-title">💵 Dòng tiền thực tế</div>
+          <div class="cb-title"><span>💵 Dòng tiền thực tế</span><button type="button" class="cb-detail-btn" data-idx="${idx}">Chi Tiết</button></div>
           <div class="cb-line"><span class="cb-lbl">Khách trả (tiền vào)</span><span class="cb-val cb-in">+${fmtVND(cashIn)}</span></div>
           ${sellSub}
           <div class="cb-line"><span class="cb-lbl">Trả nhà cung cấp (tiền ra)</span><span class="cb-val cb-out">−${fmtVND(cashToSupplier)}</span></div>
@@ -2983,6 +3012,96 @@ function updateSiteCalc(idx){
   }
 }
 
+/// Modal "Chi Tiết" giải trình toàn bộ công thức của khối "Dòng tiền thực
+/// tế" cho 1 công trình thương mại — CHỈ đọc lại số từ các hàm tính GỐC đã
+/// có sẵn (commercialCashFromCustomer, commercialVatPayable...), KHÔNG
+/// tính lại bất kỳ công thức nào ở đây, để tuyệt đối không lệch với số đã
+/// hiển thị trên thẻ. Dùng lại đúng khung .modal-step/.st-title/.st-body/
+/// .st-formula của modal giải trình Điểm Hoà Vốn cho đồng bộ giao diện.
+function renderCommercialCashDetailModal(s){
+  const sup = s.supplierId ? supplierById(s.supplierId) : null;
+  const vatPct = siteVatRateFraction(s)*100;
+  const grossSell = commercialGrossSell(s), netSell = commercialNetSell(s), outputVatBook = commercialOutputVat(s);
+  const grossBuy = commercialGrossBuy(s), netBuy = commercialNetBuy(s), inputVatBook = commercialInputVat(s);
+  const deductible = buyIsDeductible(s);
+  const cashIn = commercialCashFromCustomer(s), cashOut = commercialCashToSupplier(s);
+  const outVatCash = commercialCashOutputVat(s), inVatCash = commercialCashInputVat(s);
+  const missingVol = siteMissingDocumentedVolume(s), missingValue = siteMissingDocumentedValue(s);
+  const supplementCost = siteInvoiceSupplementCost(s);
+  const vatPayable = commercialVatPayable(s);
+  const gap = siteVatReconciliationGap(s);
+  const takeHome = cashIn - cashOut - vatPayable - supplementCost;
+
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🧾 Diễn Giải Chi Tiết Dòng Tiền${sup?` — ${escapeHtml(sup.name)}`:''}</h3>
+    <div class="hint" style="margin-bottom:10px;">Số liệu dưới đây lấy đúng từ dữ liệu công trình đang nhập — trình bày theo chuẩn kế toán: Doanh thu / Giá vốn / Thuế GTGT / Dòng tiền mặt thật, tách bạch rõ ràng.</div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 1 — Doanh thu ghi nhận (net, chưa VAT)</div>
+      <div class="st-body">Tổng tiền BÁN đã khai là ${fmtVND(grossSell)}. Doanh thu kế toán là phần CHƯA VAT — vì VAT (nếu có) là tiền giữ hộ nhà nước, không phải doanh thu thật của Ông Chủ.</div>
+      <div class="st-formula">${s.sellIncludesVat
+        ? `Doanh thu net = ${fmtVND(grossSell)} ÷ (1 + ${vatPct}%) = ${fmtVND(netSell)}\nVAT đầu ra (trong giá bán) = ${fmtVND(outputVatBook)}`
+        : `Doanh thu net = ${fmtVND(grossSell)} (giá đã khai là giá CHƯA VAT)`}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 2 — Giá vốn hàng mua (net, chưa VAT)</div>
+      <div class="st-body">Tổng tiền MUA đã khai là ${fmtVND(grossBuy)}. ${deductible?'Đã tick "Đã nhận hóa đơn MUA" → phần VAT trong giá mua ĐƯỢC khấu trừ khi tính VAT phải nộp.':'CHƯA tick "Đã nhận hóa đơn MUA" → KHÔNG có VAT nào được khấu trừ từ khoản mua này.'}</div>
+      <div class="st-formula">${s.buyIncludesVat
+        ? `Giá vốn net = ${fmtVND(grossBuy)} ÷ (1 + ${vatPct}%) = ${fmtVND(netBuy)}\nVAT đầu vào (trong giá mua) = ${fmtVND(inputVatBook)}${deductible?' (được khấu trừ)':' (KHÔNG được khấu trừ)'}`
+        : `Giá vốn net = ${fmtVND(grossBuy)} (giá đã khai là giá CHƯA VAT)`}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 3 — Tiền mặt thật: thu của khách, trả cho mỏ</div>
+      <div class="st-body">Đây là số tiền THẬT chuyển khoản/tiền mặt — khác với Doanh thu/Giá vốn kế toán ở trên vì có gồm phần VAT (khi có xuất/nhận hoá đơn).</div>
+      <div class="st-formula">Khách phải trả (tiền vào) = ${fmtVND(cashIn)}${outVatCash>0?`  (gồm VAT giữ hộ ${fmtVND(outVatCash)})`:''}
+Trả nhà cung cấp (tiền ra) = ${fmtVND(cashOut)}${inVatCash>0?`  (gồm VAT đã trả mỏ ${fmtVND(inVatCash)})`:''}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 4 — VAT phải nộp nhà nước cuối tháng</div>
+      <div class="st-body">VAT nộp = VAT đầu ra (thu của khách) trừ VAT đầu vào ĐƯỢC khấu trừ (từ tiền mua có hoá đơn, cộng VAT khấu trừ từ hoá đơn bù nếu có ở Bước 5). Khoản này Ông Chủ đang GIỮ HỘ nhà nước — không phải lãi, cũng không phải lỗ.</div>
+      <div class="st-formula">VAT nộp nhà nước = ${fmtVND(vatPayable)}</div>
+    </div>
+
+    ${missingVol>0 ? `
+    <div class="modal-step">
+      <div class="st-title">Bước 5 — Khối lượng thiếu chứng từ &amp; hoá đơn bù</div>
+      <div class="st-body">Mỏ không xuất đủ hoá đơn cho toàn bộ khối lượng đã bán ra → thiếu ${missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối chứng từ, trị giá ${fmtVND(missingValue)}. Ông Chủ phải mua hoá đơn bù để hợp thức hoá phần thiếu này.</div>
+      <div class="st-formula">Chi phí mua hoá đơn bù (tiền mặt thật phải trả) = ${fmtVND(supplementCost)}</div>
+    </div>` : ''}
+
+    <div class="modal-step">
+      <div class="st-title">Bước ${missingVol>0?'6':'5'} — Đối chiếu VAT: tiền mặt thực tế so với sổ sách</div>
+      <div class="st-body">Về nguyên tắc, VAT thu của khách trừ VAT trả mỏ trừ VAT nộp nhà nước phải bằng 0 (vì VAT chỉ là tiền giữ hộ, không phải lãi/lỗ). Nếu khác 0, chênh lệch là tiền THẬT — thường phát sinh khi mua hoá đơn bù khối lượng thiếu chứng từ (chi phí mua hoá đơn chỉ bằng 1 phần giá trị thiếu, nhưng vẫn được khấu trừ VAT trên toàn bộ giá trị đó ở Bước 4).</div>
+      <div class="st-formula">Chênh lệch = VAT giữ hộ của khách − VAT đã trả mỏ − VAT nộp nhà nước
+= ${fmtVND(outVatCash)} − ${fmtVND(inVatCash)} − ${fmtVND(vatPayable)}
+= ${gap>=0?'+':''}${fmtVND(gap)}${gap>0?'  (tiền thật, được CỘNG vào Thực Lãi Bỏ Túi)':gap<0?'  (bị TRỪ khỏi Thực Lãi Bỏ Túi)':'  (không có chênh lệch)'}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Kết luận — Thực Lãi Bỏ Túi</div>
+      <div class="st-body">Số tiền THẬT còn lại trong túi Ông Chủ sau khi trừ hết tiền mua hàng, VAT nộp nhà nước và chi phí mua hoá đơn bù (nếu có) — CHƯA trừ lương chuyến trả tài xế và các chi phí cố định khác của cả ca (xem khối "Tổng Kết Ca" bên dưới).</div>
+      <div class="st-formula">Thực lãi bỏ túi = Khách trả − Trả mỏ − VAT nộp − Chi phí mua hoá đơn bù
+= ${fmtVND(cashIn)} − ${fmtVND(cashOut)} − ${fmtVND(vatPayable)} − ${fmtVND(supplementCost)}
+= ${takeHome>=0?'+':''}${fmtVND(takeHome)}</div>
+    </div>
+  `);
+}
+// Delegated 1 LẦN DUY NHẤT ở scope ngoài cùng (không nằm trong hàm nào bị
+// gọi lại nhiều lần) — vì nút .cb-detail-btn nằm trong innerHTML bị
+// updateSiteCalc() render lại liên tục mỗi khi Ông Chủ gõ số, nếu bind
+// trực tiếp vào nút sẽ mất listener ngay sau lần gõ đầu tiên.
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('.cb-detail-btn');
+  if(!btn) return;
+  const idx = Number(btn.dataset.idx);
+  const s = state.draftShift && state.draftShift.siteLogs[idx];
+  if(s) renderCommercialCashDetailModal(s);
+});
+
 /// Khối "Tổng doanh thu / từng khoản chi phí / Tổng chi phí / Lợi nhuận
 /// ròng" — dùng chung cho cả form sửa ca (updateSummary) lẫn trang xem lại
 /// chỉ đọc (renderShiftReadOnlyDetail), để 2 nơi luôn hiển thị khớp nhau
@@ -2990,7 +3109,8 @@ function updateSiteCalc(idx){
 function shiftFinancialSummaryHtml(sh){
   const revenue = shiftTotalRevenue(sh);
   const cost = shiftTotalCost(sh);
-  const profit = shiftNetProfit(sh);
+  const gap = shiftVatReconciliationGap(sh); // xem shiftVatReconciliationGap() — đã cộng sẵn bên trong shiftNetProfit()
+  const profit = shiftNetProfit(sh); // = revenue - cost + gap
   const costItems = [
     { label:'Tiền dầu tiêu hao', value: shiftFuelCost(sh) },
     { label:'Lương chuyến', value: shiftTotalTripWage(sh) },
@@ -3002,11 +3122,13 @@ function shiftFinancialSummaryHtml(sh){
     { label:'Chi phí phát sinh', value: Number(sh.incidentalCost)||0 },
     { label:'Tiền luật phát sinh', value: Number(sh.roadFeeIncidental)||0 }
   ];
+  const gapRow = gap!==0 ? `<div class="summary-row" style="color:${gap>=0?'var(--profit)':'var(--loss)'};"><span>${gap>=0?'+':'−'} Chênh lệch đối chiếu VAT hoá đơn bổ sung</span><span class="val">${fmtVND(Math.abs(gap))}</span></div>` : '';
   return `
     <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${costItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
     <div class="summary-row total" style="font-size:15.5px;"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
+    ${gapRow}
     <div class="formula-divider" style="margin:8px 0;"></div>
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
   `;
@@ -5471,7 +5593,12 @@ function currentMonthRange(){
 function computeResultsGroup(shifts){
   const revenue = shifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
   const opCost = shifts.reduce((s,sh)=>s+shiftTotalCost(sh),0);
-  const grossProfit = revenue - opCost;
+  // Chênh lệch đối chiếu VAT (xem giải thích đầy đủ tại shiftVatReconciliationGap)
+  // — cộng vào đây để LỢI NHUẬN THỰC TẾ / Thuế TNDN dự kiến / Ngân sách
+  // thưởng tài xế ở tab Kết Quả đều khớp đúng với THỰC LÃI BỎ TÚI hiển thị
+  // ở từng ca, theo đúng yêu cầu Ông Chủ.
+  const gap = shifts.reduce((s,sh)=>s+shiftVatReconciliationGap(sh),0);
+  const grossProfit = revenue - opCost + gap;
   const margin = revenue>0 ? (grossProfit/revenue*100) : 0;
   const totalKm = shifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
   const totalTrips = shifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
@@ -5480,7 +5607,7 @@ function computeResultsGroup(shifts){
   const fuelPerKm = totalKm>0 ? fuelCost/totalKm : 0;
   const revenuePerKm = totalKm>0 ? revenue/totalKm : 0;
   const profitPerTrip = totalTrips>0 ? grossProfit/totalTrips : 0;
-  return { revenue, opCost, grossProfit, margin, totalKm, totalTrips, fuelLiters, fuelCost, fuelPerKm, revenuePerKm, profitPerTrip };
+  return { revenue, opCost, gap, grossProfit, margin, totalKm, totalTrips, fuelLiters, fuelCost, fuelPerKm, revenuePerKm, profitPerTrip };
 }
 
 function fmtShortVND(n){
@@ -6391,6 +6518,7 @@ function renderResults(){
       <h3>💰 Lợi Nhuận Thực Tế Cuối Cùng</h3>
       <div class="card">
         <div class="summary-row"><span>Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
+        ${gTotal.gap ? `<div class="summary-row" style="padding-left:12px; font-size:12.5px; color:var(--ink-soft);"><span>Trong đó chênh lệch đối chiếu VAT hoá đơn bổ sung</span><span class="val" style="color:${gTotal.gap>=0?'var(--profit)':'var(--loss)'}">${gTotal.gap>=0?'+':''}${fmtVND(gTotal.gap)}</span></div>` : ''}
         <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
         <div class="summary-row"><span>− Chi phí luật đường (kỳ này)</span><span class="val">${fmtVND(roadFee)}</span></div>
         <div class="summary-row"><span>− Khấu hao xe dự kiến / tháng</span><span class="val">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</span></div>
