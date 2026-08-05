@@ -467,7 +467,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #52';
+const APP_BUILD = '2026-08-05 · #53';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -6809,14 +6809,14 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>🤝 Công Nợ Nhà Thầu — Chở Cước (Toàn Bộ, Không Theo Kỳ)</h3>
-      <div class="hint" style="margin-bottom:10px;">Chở cước: nhà thầu cố định cả điểm múc lẫn điểm đổ → nhóm đúng theo tên công trình. Công nợ THƯƠNG MẠI (mua/bán vật liệu) xem ở mục "Công Nợ Nhà Thầu — Thương Mại" ngay bên dưới — đúng theo Nhà Cung Cấp/Khách Hàng thật, không lẫn theo Điểm Múc-Điểm Đổ nữa. Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày Ông Chủ chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
+      <h3>🤝 Công Nợ Nhà Thầu — Chở Cước</h3>
+      <div class="hint" style="margin-bottom:10px;">Chở cước: nhà thầu cố định cả điểm múc lẫn điểm đổ → nhóm đúng theo tên công trình.</div>
       <div id="partnersOverviewWrap"></div>
     </section>
 
     <section class="group">
       <h3>🏔️🧑‍💼 Công Nợ Nhà Thầu — Thương Mại (Nhà Cung Cấp &amp; Khách Hàng)</h3>
-      <div class="hint" style="margin-bottom:10px;">Thương mại: điểm múc (mỏ lấy hàng) do Ông Chủ quyết định → theo dõi ở "Nhà Cung Cấp" (tiền Ông Chủ phải trả); điểm đổ (ai trả tiền) do nhà thầu quyết định → theo dõi ở "Khách Hàng" (tiền Ông Chủ phải thu). Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại — không dùng tỷ lệ % nào để suy đoán, chỉ lấy đúng số đã phải thu/trả trừ đúng số tiền đã ghi nhận thật.</div>
+      <div class="hint" style="margin-bottom:10px;">Thương mại: điểm múc (mỏ lấy hàng) do Ông Chủ quyết định → theo dõi ở "Nhà Cung Cấp" (tiền Ông Chủ phải trả); điểm đổ (ai trả tiền) do nhà thầu quyết định → theo dõi ở "Khách Hàng" (tiền Ông Chủ phải thu).</div>
       <div id="customerSupplierDebtWrap"></div>
     </section>
 
@@ -6925,6 +6925,84 @@ function renderCustomerSupplierDebtOverview(){
   wrap.querySelectorAll('.sup-debt-row').forEach(row=>row.addEventListener('click', ()=>{ saveMainScroll(); openSupplierDetail(row.dataset.id); }));
 }
 
+/// Gộp toàn bộ chuyến (chở cước lẫn thương mại) theo THÁNG rồi theo TÀI
+/// XẾ — dùng CHUNG cho cả 3 trang chi tiết (Đối Tác/Khách Hàng/Nhà Cung
+/// Cấp), mỗi trang chỉ truyền đúng điều kiện lọc site-log của riêng mình.
+/// Chở cước: 1 dòng nhật ký = 1 lần ghé công trình đó trong 1 ca (dữ liệu
+/// gốc không tách được từng chuyến lẻ trong 1 ca — "trips" là số gộp).
+/// Thương mại: 1 dòng nhật ký = ĐÚNG 1 chuyến khai trong commercialTrips
+/// (mỗi chuyến có Điểm Múc-Điểm Đổ + khối lượng/giá mua-bán RIÊNG) — tách
+/// được tới từng chuyến thật, hiển thị luôn theo đúng độ chi tiết đó.
+/// moneyMode CHỈ áp dụng cho thương mại (chở cước luôn dùng doanh thu công
+/// trình, không phân biệt mua/bán): 'sell' cho trang Khách Hàng (tiền BÁN,
+/// Ông Chủ phải THU), 'buy' cho trang Nhà Cung Cấp (tiền MUA, Ông Chủ phải
+/// TRẢ mỏ) — bắt buộc truyền đúng, không thì trang Nhà Cung Cấp sẽ hiện
+/// nhầm số tiền bán thay vì tiền mua, gây hiểu sai công nợ phải trả.
+function buildMonthlyDriverBreakdown(matchFn, moneyMode){
+  const months = {};
+  for(const sh of state.shifts){
+    const driverName = driverById(sh.driverId)?.name || sh.driverNameSnapshot || '(chưa gán tài xế)';
+    const ym = sh.date.slice(0,7);
+    for(const s of (sh.siteLogs||[])){
+      if(!matchFn(s, sh)) continue;
+      if(!months[ym]) months[ym] = { month: ym, drivers: {} };
+      const M = months[ym];
+      if(!M.drivers[driverName]) M.drivers[driverName] = { trips: 0, amount: 0, entries: [] };
+      const D = M.drivers[driverName];
+      if(s.siteType==='commercial'){
+        (s.commercialTrips||[]).forEach(t=>{
+          const sellVol = Number(t.sellVolume)||0, sellPrice = Number(t.sellUnitPrice)||0;
+          const buyVol = Number(t.buyVolume)||0, buyPrice = Number(t.buyUnitPrice)||0;
+          if(sellVol<=0 && buyVol<=0) return; // dòng chuyến trống hoàn toàn — bỏ qua, không tính là 1 chuyến
+          const tripAmount = moneyMode==='buy' ? buyVol*buyPrice : sellVol*sellPrice;
+          D.trips += 1;
+          D.amount += tripAmount;
+          D.entries.push({ date: sh.date, location: t.tripLocation||'(chưa ghi điểm)', kind:'commercial', buyVol, buyPrice, sellVol, sellPrice, amount: tripAmount, moneyMode: moneyMode||'sell' });
+        });
+      } else {
+        const trips = siteTripCount(s);
+        if(trips<=0) continue;
+        const rev = siteRevenue(s);
+        D.trips += trips;
+        D.amount += rev;
+        D.entries.push({ date: sh.date, location: s.siteName||'(chưa đặt tên)', kind:'freight', trips, volumePerTrip: s.volumePerTrip||0, unitPrice: s.materialUnitPrice||0, amount: rev });
+      }
+    }
+  }
+  return Object.values(months)
+    .map(M=>({ month: M.month, drivers: Object.fromEntries(Object.entries(M.drivers).filter(([,D])=>D.trips>0)) }))
+    .filter(M=>Object.keys(M.drivers).length>0)
+    .sort((a,b)=>b.month.localeCompare(a.month));
+}
+function renderMonthlyDriverBreakdownHtml(monthlyData){
+  if(monthlyData.length===0) return '<div class="hint">Chưa có chuyến nào được ghi nhận.</div>';
+  return monthlyData.map(M=>{
+    const driverEntries = Object.entries(M.drivers).sort((a,b)=>b[1].trips-a[1].trips);
+    const monthTrips = driverEntries.reduce((s,[,D])=>s+D.trips,0);
+    const monthAmount = driverEntries.reduce((s,[,D])=>s+D.amount,0);
+    return `
+      <div class="card" style="margin-bottom:10px;">
+        <div class="summary-row" style="font-weight:800; font-size:15.5px; margin-bottom:6px;"><span>Tháng ${monthLabelVN(M.month)}</span><span class="val">${monthTrips} chuyến · ${fmtVND(monthAmount)}</span></div>
+        ${driverEntries.map(([name,D])=>`
+          <div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);">
+            <div class="summary-row" style="font-weight:700;"><span>🧑‍✈️ ${escapeHtml(name)}</span><span class="val">${D.trips} chuyến · ${fmtVND(D.amount)}</span></div>
+            <table class="dash" style="margin-top:6px;">
+              <thead><tr><th>Ngày</th><th>Điểm</th><th>Khối lượng / Giá</th><th>Tiền</th></tr></thead>
+              <tbody>
+                ${D.entries.map(e=> e.kind==='commercial'
+                  ? (e.moneyMode==='buy'
+                      ? `<tr><td>${formatDateVN(e.date)}</td><td>${escapeHtml(e.location)}</td><td>Mua ${e.buyVol.toLocaleString('vi-VN')} × ${fmtVND(e.buyPrice)}</td><td>${fmtVND(e.amount)}</td></tr>`
+                      : `<tr><td>${formatDateVN(e.date)}</td><td>${escapeHtml(e.location)}</td><td>Bán ${e.sellVol.toLocaleString('vi-VN')} × ${fmtVND(e.sellPrice)}</td><td>${fmtVND(e.amount)}</td></tr>`)
+                  : `<tr><td>${formatDateVN(e.date)}</td><td>${escapeHtml(e.location)}</td><td>${e.trips} chuyến × ${e.volumePerTrip.toLocaleString('vi-VN')} × ${fmtVND(e.unitPrice)}</td><td>${fmtVND(e.amount)}</td></tr>`
+                ).join('')}
+              </tbody>
+            </table>
+          </div>
+        `).join('')}
+      </div>`;
+  }).join('');
+}
+
 function openCustomerDetail(customerId){
   saveMainScroll();
   const cus = customerById(customerId);
@@ -6951,6 +7029,10 @@ function openCustomerDetail(customerId){
         <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (khách tạm ứng dư)':''}</span></div>
       </div>
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
+    </section>
+    <section class="group">
+      <h3>📆 Chuyến & Tài Xế Theo Tháng</h3>
+      ${renderMonthlyDriverBreakdownHtml(buildMonthlyDriverBreakdown((s)=>s.siteType==='commercial' && s.customerId===customerId, 'sell'))}
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Thu</h3>
@@ -7082,6 +7164,10 @@ function openSupplierDetail(supplierId){
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
     <section class="group">
+      <h3>📆 Chuyến & Tài Xế Theo Tháng</h3>
+      ${renderMonthlyDriverBreakdownHtml(buildMonthlyDriverBreakdown((s)=>s.siteType==='commercial' && s.supplierId===supplierId, 'buy'))}
+    </section>
+    <section class="group">
       <h3>Lịch Sử Đã Trả</h3>
       ${payments.length===0?'<div class="hint">Chưa có khoản trả nào.</div>':payments.map(p=>`
         <div class="card" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" data-id="${p.id}" onclick="openSupplierPaymentEditor('${p.id}','${supplierId}')">
@@ -7186,6 +7272,7 @@ function openPartnerDetail(partnerName){
   const partners = computePartnersOverview();
   const P = partners.find(x=>x.name===partnerName);
   if(!P){ renderAll(); return; }
+  const partnerSiteNames = new Set(P.sites.map(s=>s.siteName));
 
   const allPayments = state.sitePayments
     .filter(p=>P.sites.some(s=>s.siteName===p.siteName))
@@ -7208,6 +7295,14 @@ function openPartnerDetail(partnerName){
         </div>
         <div class="hint" style="margin-top:8px;">Đã nhận ${P.paymentCount} lần thanh toán${P.lastPaymentDate ? ', gần nhất ngày '+formatDateVN(P.lastPaymentDate) : ''}.</div>
       </div>
+    </section>
+
+    <section class="group">
+      <h3>📆 Chuyến & Tài Xế Theo Tháng</h3>
+      ${renderMonthlyDriverBreakdownHtml(buildMonthlyDriverBreakdown((s)=>{
+        const nm = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
+        return s.siteType!=='commercial' && partnerSiteNames.has(nm);
+      }))}
     </section>
 
     <section class="group">
