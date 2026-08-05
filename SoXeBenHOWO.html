@@ -467,7 +467,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #49';
+const APP_BUILD = '2026-08-05 · #50';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -1973,7 +1973,7 @@ function renderHeader(){
       sub.textContent = state.draftShift.date;
       const back=document.createElement('button');
       back.className='btn btn-ghost btn-sm'; back.textContent='Đóng';
-      back.onclick=()=>{ state.view='list'; state.draftShift=null; renderAll(); };
+      back.onclick=()=>{ state.view='list'; state.draftShift=null; renderAll(); restoreMainScroll(); };
       action.appendChild(back);
     } else if(state.shiftArchiveMonth){
       title.textContent = 'Tháng ' + monthLabelVN(state.shiftArchiveMonth);
@@ -2416,6 +2416,7 @@ function escapeHtml(s){
 function openShift(id){
   const sh = state.shifts.find(s=>s.id===id);
   if(!sh) return;
+  saveMainScroll();
   state.draftShift = JSON.parse(JSON.stringify(sh));
   state.draftShift.isNew=false;
   state.view='form';
@@ -2427,6 +2428,7 @@ function startNewShift(){
     showToast('Hãy thêm tài xế trước ở tab "Tài Xế".');
     return;
   }
+  saveMainScroll();
   const today=new Date();
   const dateStr=todayLocalDateStr();
   const shiftType='day';
@@ -3323,6 +3325,7 @@ function bindFormEvents(){
       saveShifts();
       state.view='list'; state.draftShift=null;
       renderAll();
+      restoreMainScroll();
       showToast('Đã xoá ca.');
     }
   });
@@ -3362,6 +3365,7 @@ async function saveDraftShift(){
   await saveShifts();
   state.view='list'; state.draftShift=null;
   renderAll();
+  restoreMainScroll();
   showToast('Đã lưu ca thành công.');
 }
 
