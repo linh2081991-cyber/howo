@@ -244,6 +244,7 @@ let shifts = [];
 // ĐỐI CHIẾU tên, không ghi/sửa gì vào 2 file này.
 let howoCustomers = [];
 let howoSuppliers = [];
+let howoSettings = {};
 let tab='thang', thangXem=null, cheDoCT='hd';
 
 /* ══════════ TIỆN ÍCH ══════════ */
@@ -332,10 +333,11 @@ const qm = k => `<button class="qm" onclick="event.stopPropagation();hoc('${k}')
 /* ══════════ TẢI / LƯU ══════════ */
 async function tai(){
   try{
-    const [s,t,hc,hs] = await Promise.all([ ref('shifts').get(), ref('taxLedger').get(), ref('customers').get(), ref('suppliers').get() ]);
+    const [s,t,hc,hs,hset] = await Promise.all([ ref('shifts').get(), ref('taxLedger').get(), ref('customers').get(), ref('suppliers').get(), ref('settings').get() ]);
     shifts = s.exists && Array.isArray(s.data().list) ? s.data().list : [];
     howoCustomers = hc.exists && Array.isArray(hc.data().list) ? hc.data().list : [];
     howoSuppliers = hs.exists && Array.isArray(hs.data().list) ? hs.data().list : [];
+    howoSettings = hset.exists ? (hset.data()||{}) : {};
     if(t.exists){
       const d = t.data();
       S.cfg = Object.assign({...MAC_DINH}, d.cfg||{});
@@ -356,7 +358,41 @@ async function luu(){
 }
 
 /* ══════════ DOANH THU — đọc từ sổ ca, gom theo bí danh ══════════ */
-const dtSite = s => (Number(s.volumePerTrip)||0)*(Number(s.materialUnitPrice)||0)*(Number(s.trips)||0);
+/** Thuế suất VAT áp cho 1 công trình thương mại — SAO CHÉP Y NGUYÊN công
+    thức siteVatRateFraction() bên SoXeBenHOWO.html (ưu tiên Nhà Cung Cấp
+    đã gắn → gõ tay riêng trên công trình → mặc định chung Cài Đặt) để 2
+    app tính ra ĐÚNG 1 con số, không lệch nhau. */
+function howoVatRateFraction(s){
+  const sup = s.supplierId ? howoSuppliers.find(x=>x.id===s.supplierId) : null;
+  if(sup && sup.vatRatePercent!==undefined && sup.vatRatePercent!==null && sup.vatRatePercent!=='') return Number(sup.vatRatePercent)/100;
+  if(s.vatRatePercent!==undefined && s.vatRatePercent!==null && s.vatRatePercent!=='') return Number(s.vatRatePercent)/100;
+  return (Number(howoSettings.vatRatePercent)||0)/100;
+}
+/** Doanh thu NET (chưa VAT) của 1 công trình thương mại — SAO CHÉP Y
+    NGUYÊN công thức commercialNetSell() bên SoXeBenHOWO.html: tổng
+    (KL bán × đơn giá bán) của từng chuyến, bóc VAT ra nếu giá bán đã gồm
+    VAT (sellIncludesVat), giữ nguyên nếu giá bán đã là giá net. */
+function commercialNetSellThue(s){
+  const grossSell = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0),0);
+  return s.sellIncludesVat ? grossSell/(1+howoVatRateFraction(s)) : grossSell;
+}
+/** Số chuyến thương mại hoàn chỉnh — SAO CHÉP Y NGUYÊN nhánh thương mại
+    của siteTripCount() bên SoXeBenHOWO.html (chỉ tính chuyến đã nhập ĐỦ
+    4 số mua/bán). */
+function commercialTripCountThue(s){
+  return (s.commercialTrips||[]).filter(t=>
+    (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+    (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0)
+  ).length;
+}
+/** Doanh thu 1 dòng site-log — chở cước dùng công thức cũ (không đổi);
+    thương mại giờ tính ĐÚNG doanh thu bán hàng thật, thay vì luôn ra 0
+    (trước đây dtSite chỉ đọc field của chở cước, công trình thương mại
+    không có field đó nên luôn tính ra 0 — đây chính là lý do tháng nào
+    chạy toàn công trình thương mại thì hiện "Chưa có ca chạy nào"). */
+const dtSite = s => s.siteType==='commercial'
+  ? commercialNetSellThue(s)
+  : (Number(s.volumePerTrip)||0)*(Number(s.materialUnitPrice)||0)*(Number(s.trips)||0);
 
 /** Tìm khách theo tên công trình, có xét bí danh. */
 function timKhach(ten){
@@ -372,12 +408,32 @@ function doanhThuThang(ym){
   const map = {};
   shifts.filter(sh=>(sh.date||'').slice(0,7)===ym).forEach(sh=>{
     (sh.siteLogs||[]).forEach(s=>{
-      const ten = (s.siteName||'').trim() || 'Chưa đặt tên công trình';
       const dt = dtSite(s); if(dt<=0) return;
+      if(s.siteType==='commercial'){
+        // Thương mại gom theo ĐÚNG customerId thật (điểm đổ/nhà thầu) —
+        // KHÔNG theo s.siteName (chuỗi ghép Điểm Múc-Điểm Đổ) — và để
+        // KHOÁ RIÊNG hẳn với chở cước (tiền tố 'c:'/'ct:' khác 'k:'/'t:')
+        // dù trùng cùng 1 khách hàng thật, vì thuế suất 2 loại giao dịch
+        // khác nhau (8% dịch vụ vs 10% hàng hoá) — gộp chung sẽ không thể
+        // áp đúng thuế suất riêng từng loại cho cùng 1 dòng tổng.
+        const custName = s.customerId ? ((howoCustomers.find(x=>x.id===s.customerId)||{}).name||'') : '';
+        const nhan = custName || (s.siteName||'').trim() || 'Chưa gắn Khách Hàng (thương mại)';
+        const key = s.customerId ? 'c:'+s.customerId : 'ct:'+chuan(nhan);
+        if(!map[key]){
+          const k = timKhach(nhan);
+          map[key] = { key, ten: k? k.ten : nhan, khachId: k? k.id : null, loaiMacDinh:'hang',
+                       tenGoc:new Set(), doanhThu:0, chuyen:0 };
+        }
+        map[key].tenGoc.add(nhan);
+        map[key].doanhThu += dt;
+        map[key].chuyen += commercialTripCountThue(s);
+        return;
+      }
+      const ten = (s.siteName||'').trim() || 'Chưa đặt tên công trình';
       const key = khoaGom(ten);
       if(!map[key]){
         const k = timKhach(ten);
-        map[key] = { key, ten: k? k.ten : ten, khachId: k? k.id : null,
+        map[key] = { key, ten: k? k.ten : ten, khachId: k? k.id : null, loaiMacDinh:'cuoc',
                      tenGoc:new Set(), doanhThu:0, chuyen:0 };
       }
       map[key].tenGoc.add(ten);
@@ -454,7 +510,7 @@ const LOAI_GD = {
   cuoc:{ ten:'Chạy cước',    mo:'Dịch vụ vận tải hàng hoá',        suat:VAT_RA  },
   hang:{ ten:'Bán hàng hoá', mo:'Đá, cát, sỏi — sản phẩm khai khoáng', suat:VAT_HANG }
 };
-function loaiDong(ym,x){ const r=traRa(ym,x.key); return (r&&r.loaiGD)||'cuoc'; }
+function loaiDong(ym,x){ const r=traRa(ym,x.key); return (r&&r.loaiGD)||x.loaiMacDinh||'cuoc'; }
 function suatDong(ym,x){
   const r=traRa(ym,x.key);
   if(r && Number(r.thueSuat)>0) return Number(r.thueSuat);
