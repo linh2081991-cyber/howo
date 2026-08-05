@@ -467,7 +467,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-05 · #51';
+const APP_BUILD = '2026-08-05 · #52';
 // Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
 // thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
 // liên quan gì đến APP_BUILD ở trên.
@@ -6809,37 +6809,14 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>🏗️ Công Nợ Công Trình</h3>
-      ${siteRanking.length===0 ? '<div class="hint">Chưa có công trình nào trong kỳ này.</div>' : `
-      <div class="card dash-wrap" style="padding:0;">
-        <table class="dash">
-          <thead><tr><th>Công Trình</th><th>Đã Thu</th><th>Còn Nợ</th></tr></thead>
-          <tbody>
-            ${siteRanking
-              .map(s=>({ name:s.name, det: computeSiteDetail(s.name, from, to) }))
-              .sort((a,b)=>b.det.owed-a.det.owed)
-              .map(({name, det})=>`
-              <tr class="site-detail-row" data-site="${escapeHtml(name)}">
-                <td>${escapeHtml(name)}</td>
-                <td>${fmtVND(det.collected)}</td>
-                <td style="color:${det.owed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(det.owed)}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div class="hint" style="margin-top:8px;">Bấm vào một công trình để xem chi tiết: tài xế nào chạy bao nhiêu chuyến, dòng tiền thu về từng ngày. Công trình nợ nhiều nhất luôn hiện lên đầu.</div>
-      `}
-    </section>
-
-    <section class="group">
-      <h3>🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</h3>
-      <div class="hint" style="margin-bottom:10px;">Chỉ tính công trình CHỞ CƯỚC (theo tên công trình tự do). Công nợ THƯƠNG MẠI (mua/bán vật liệu) xem ở mục "Nhà Cung Cấp & Khách Hàng" ngay bên dưới — đúng theo Nhà Cung Cấp/Khách Hàng thật, không lẫn theo Điểm Múc-Điểm Đổ nữa. Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày Ông Chủ chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
+      <h3>🤝 Công Nợ Nhà Thầu — Chở Cước (Toàn Bộ, Không Theo Kỳ)</h3>
+      <div class="hint" style="margin-bottom:10px;">Chở cước: nhà thầu cố định cả điểm múc lẫn điểm đổ → nhóm đúng theo tên công trình. Công nợ THƯƠNG MẠI (mua/bán vật liệu) xem ở mục "Công Nợ Nhà Thầu — Thương Mại" ngay bên dưới — đúng theo Nhà Cung Cấp/Khách Hàng thật, không lẫn theo Điểm Múc-Điểm Đổ nữa. Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày Ông Chủ chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
       <div id="partnersOverviewWrap"></div>
     </section>
 
     <section class="group">
-      <h3>🏔️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</h3>
-      <div class="hint" style="margin-bottom:10px;">Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại — không dùng tỷ lệ % nào để suy đoán, chỉ lấy đúng số đã phải thu/trả trừ đúng số tiền đã ghi nhận thật.</div>
+      <h3>🏔️🧑‍💼 Công Nợ Nhà Thầu — Thương Mại (Nhà Cung Cấp &amp; Khách Hàng)</h3>
+      <div class="hint" style="margin-bottom:10px;">Thương mại: điểm múc (mỏ lấy hàng) do Ông Chủ quyết định → theo dõi ở "Nhà Cung Cấp" (tiền Ông Chủ phải trả); điểm đổ (ai trả tiền) do nhà thầu quyết định → theo dõi ở "Khách Hàng" (tiền Ông Chủ phải thu). Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại — không dùng tỷ lệ % nào để suy đoán, chỉ lấy đúng số đã phải thu/trả trừ đúng số tiền đã ghi nhận thật.</div>
       <div id="customerSupplierDebtWrap"></div>
     </section>
 
@@ -6893,9 +6870,6 @@ function renderResults(){
   });
   document.getElementById('exportKTThueBtn').addEventListener('click', ()=>{
     exportKTThueBundle(from, to);
-  });
-  document.querySelectorAll('.site-detail-row').forEach(row=>{
-    row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, from, to); });
   });
   document.querySelectorAll('.fin-warning-detail-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
