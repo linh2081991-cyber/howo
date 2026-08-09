@@ -439,7 +439,6 @@
     <button data-tab="strategy"><span class="ic">🧭</span>Trợ Lý</button>
     <button data-tab="drivers"><span class="ic">👤</span>Tài Xế</button>
     <button data-tab="results"><span class="ic">📊</span>Kết Quả</button>
-    <button data-tab="taxLedger"><span class="ic">🧾</span>Sổ Thuế</button>
     <button data-tab="settings"><span class="ic">⚙️</span>Cài Đặt</button>
   </nav>
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
@@ -453,10 +452,6 @@
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
 const APP_BUILD = '2026-07-30 · #45';
-// Đổi số này MỖI KHI thue.html có thay đổi (khớp với TAX_BUILD bên
-// thue.html) — chỉ dùng để phá cache trình duyệt cho khung Sổ Thuế, không
-// liên quan gì đến APP_BUILD ở trên.
-const TAX_LEDGER_BUILD = '5';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1444,8 +1439,10 @@ function invoiceLotCoverageReport(lotId, goodsType){
   const rows = [];
   allShiftsForLedger().forEach(sh=>{
     (sh.siteLogs||[]).forEach((s,idx)=>{
-      if(s.siteType!=='commercial' || normGoodsType(s.goodsType)!==normGoodsType(goodsType)) return;
-      const rec = ledger.bySiteLog[siteLogKey(sh, idx)];
+      if(s.siteType!=='commercial') return;
+      const g = siteGoodsTypeGroups(s).find(x=>normGoodsType(x.goodsType)===normGoodsType(goodsType));
+      if(!g) return;
+      const rec = ledger.bySiteLog[siteLogGroupKey(sh, idx, goodsType)];
       if(!rec) return;
       const a = rec.allocations.find(x=>x.lotId===lotId);
       if(!a) return;
@@ -1875,28 +1872,50 @@ function shiftMaterialCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+sit
 /// đúng loại vật liệu). Chỉ tính khi Ông Chủ có khai % hoá đơn mỏ xuất
 /// được (< 100%) VÀ hệ số quy đổi — nếu để trống (mỏ xuất đủ 100%, hoặc
 /// mua/bán cùng đơn vị không cần quy đổi) thì coi như không thiếu gì.
-function siteMissingDocumentedVolume(s){
-  if(s.siteType!=='commercial') return 0;
+/// Khối lượng MUA "có chứng từ hợp lệ" và khối lượng THIẾU chứng từ được
+/// tính THEO TỪNG NHÓM LOẠI HÀNG trong công trình (Ông Chủ xác nhận: hoá
+/// đơn 1 loại hàng KHÔNG thể hợp thức hoá cho loại hàng khác, nên không
+/// được gộp chung). % hoá đơn mỏ xuất được + hệ số quy đổi vẫn dùng CHUNG
+/// 1 mức cho cả công trình (đúng cách khai hiện có, không thêm field mới)
+/// — chỉ khác là áp dụng công thức đó RIÊNG cho từng nhóm rồi cộng lại.
+/// Khi công trình chỉ có 1 loại hàng (mọi ca TRƯỚC khi có ô "Loại hàng" ở
+/// từng chuyến), kết quả giống hệt công thức gộp cũ — đã chứng minh đại số
+/// và được Ông Chủ xác nhận trước khi sửa.
+function siteGoodsTypeGroups(s){
+  if(s.siteType!=='commercial') return [];
   const sup = s.supplierId ? supplierById(s.supplierId) : null;
   const rawPct = sup && sup.invoicedBuyPercent!==undefined && sup.invoicedBuyPercent!==null && sup.invoicedBuyPercent!=='' ? sup.invoicedBuyPercent : s.invoicedBuyPercent;
   const rawDensity = sup && sup.densityRatio!==undefined && sup.densityRatio!==null && sup.densityRatio!=='' ? sup.densityRatio : s.densityRatio;
   const invoicedPct = (rawPct===undefined||rawPct===null||rawPct==='') ? 100 : Number(rawPct);
   const density = Number(rawDensity)||0;
-  if(invoicedPct>=100 || density<=0) return 0;
-  const totalBuyVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0),0);
-  const totalSellVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0),0);
-  const documentedVolume = (totalBuyVolume * invoicedPct/100) / density;
-  return Math.max(0, totalSellVolume - documentedVolume);
+  const noShortfallConfig = (invoicedPct>=100 || density<=0);
+
+  const byType = {};
+  (s.commercialTrips||[]).forEach(t=>{
+    const key = normGoodsType(t.goodsType);
+    if(!byType[key]) byType[key] = { goodsType: (t.goodsType||'').trim(), buyVolume:0, buyGross:0, sellVolume:0 };
+    byType[key].buyVolume += Number(t.buyVolume)||0;
+    byType[key].buyGross += (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
+    byType[key].sellVolume += Number(t.sellVolume)||0;
+  });
+  return Object.values(byType).map(g=>{
+    const avgBuyUnitPrice = g.buyVolume>0 ? g.buyGross/g.buyVolume : 0;
+    let missingVolume = 0;
+    if(!noShortfallConfig){
+      const documentedVolume = (g.buyVolume * invoicedPct/100) / density;
+      missingVolume = Math.max(0, g.sellVolume - documentedVolume);
+    }
+    return { goodsType: g.goodsType, buyVolume: g.buyVolume, sellVolume: g.sellVolume,
+      avgBuyUnitPrice, missingVolume, missingValue: missingVolume*avgBuyUnitPrice };
+  });
 }
-/// Giá trị (net, theo đơn giá mua BÌNH QUÂN của công trình) của phần khối
-/// lượng thiếu chứng từ ở trên.
+function siteMissingDocumentedVolume(s){
+  return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingVolume, 0);
+}
+/// Giá trị (net, theo đơn giá mua BÌNH QUÂN của TỪNG NHÓM loại hàng) của
+/// phần khối lượng thiếu chứng từ — cộng dồn qua các nhóm.
 function siteMissingDocumentedValue(s){
-  const missingVol = siteMissingDocumentedVolume(s);
-  if(missingVol<=0) return 0;
-  const totalBuyVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0),0);
-  const totalBuyGross = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0),0);
-  const avgBuyUnitPrice = totalBuyVolume>0 ? totalBuyGross/totalBuyVolume : 0;
-  return missingVol * avgBuyUnitPrice;
+  return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingValue, 0);
 }
 /// ==== KHO HOÁ ĐƠN BÙ (mua theo lô lớn, rút dần cho từng ca thiếu chứng
 /// từ) — khớp theo LOẠI HÀNG (VD Base A, Base B...), KHÔNG còn ràng buộc
@@ -1912,9 +1931,10 @@ function siteMissingDocumentedValue(s){
 // trắng thừa (VD "Base A" và "base a " phải được coi là cùng 1 loại).
 function normGoodsType(v){ return String(v||'').trim().toLowerCase(); }
 
-// site log không có field id riêng — ghép sh.id + vị trí trong mảng để có
-// khoá ổn định dùng cho sổ cái rút kho.
-function siteLogKey(sh, idx){ return sh.id + '::' + idx; }
+// 1 site log giờ có thể gồm NHIỀU nhóm loại hàng (mỗi chuyến 1 loại) —
+// khoá rút kho phải xuống tới cấp NHÓM (site log + loại hàng), không còn
+// dừng ở cấp site log như trước.
+function siteLogGroupKey(sh, idx, goodsType){ return sh.id + '::' + idx + '::' + normGoodsType(goodsType); }
 
 // Gộp state.shifts với state.draftShift (ca đang sửa dở, chưa lưu) để sổ
 // cái phản ánh đúng số liệu ĐANG XEM trên form, không chỉ số đã lưu.
@@ -1938,11 +1958,13 @@ function findSiteLogContext(s){
 }
 
 const _invoiceLedgerCache = { key:null, data:null };
-/// Dựng sổ cái rút kho cho 1 LOẠI HÀNG: xếp toàn bộ NHU CẦU (mọi ca thiếu
-/// chứng từ đúng loại hàng này, theo thời gian tăng dần) và toàn bộ NGUỒN
-/// CUNG (mọi lô đã mua đúng loại hàng này, theo ngày mua tăng dần), rồi
-/// rút FIFO. Cache trong 1 chu kỳ vẽ UI (khoá cache đổi ngay khi dữ liệu
-/// ca/lô đổi).
+/// Dựng sổ cái rút kho cho 1 LOẠI HÀNG: xếp toàn bộ NHU CẦU (mọi NHÓM loại
+/// hàng, trong bất kỳ công trình nào, đúng loại hàng này và có thiếu chứng
+/// từ, theo thời gian tăng dần) và toàn bộ NGUỒN CUNG (mọi lô đã mua đúng
+/// loại hàng này, theo ngày mua tăng dần), rồi rút FIFO. 1 công trình có
+/// thể vừa là nguồn nhu cầu cho NHIỀU loại hàng khác nhau cùng lúc (mỗi
+/// nhóm loại hàng trong đó tính riêng, độc lập). Cache trong 1 chu kỳ vẽ
+/// UI (khoá cache đổi ngay khi dữ liệu ca/lô đổi).
 function buildInvoiceLotLedger(goodsType){
   const gt = normGoodsType(goodsType);
   if(!gt) return { bySiteLog:{}, byLot:{} };
@@ -1954,10 +1976,11 @@ function buildInvoiceLotLedger(goodsType){
   const demand = [];
   allSh.forEach(sh=>{
     (sh.siteLogs||[]).forEach((s,idx)=>{
-      if(s.siteType!=='commercial' || normGoodsType(s.goodsType)!==gt) return;
-      const vol = siteMissingDocumentedVolume(s);
-      if(vol<=0) return;
-      demand.push({ key: siteLogKey(sh, idx), date: sh.date, shiftType: sh.shiftType, volume: vol });
+      if(s.siteType!=='commercial') return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)!==gt || g.missingVolume<=0) return;
+        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType, volume: g.missingVolume });
+      });
     });
   });
   demand.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
@@ -2001,39 +2024,52 @@ function buildInvoiceLotLedger(goodsType){
   return data;
 }
 
-/// Trả về chi tiết rút kho của đúng 1 site log — dùng cho modal xem chi
-/// tiết. shortfallVolume > 0 nghĩa là kho không đủ, cần mua thêm lô.
-function siteInvoiceLotBreakdown(s){
-  const missingVol = siteMissingDocumentedVolume(s);
-  if(missingVol<=0) return { allocations:[], shortfallVolume:0 };
+/// Chi tiết rút kho của đúng 1 NHÓM loại hàng bên trong 1 site log —
+/// shortfallVolume > 0 nghĩa là kho không đủ cho riêng nhóm này.
+function siteInvoiceGroupBreakdown(s, goodsType){
+  const groups = siteGoodsTypeGroups(s);
+  const g = groups.find(x=>normGoodsType(x.goodsType)===normGoodsType(goodsType));
+  if(!g || g.missingVolume<=0) return { allocations:[], shortfallVolume:0 };
   const ctx = findSiteLogContext(s);
-  if(!ctx || !normGoodsType(s.goodsType)) return { allocations:[], shortfallVolume: missingVol };
-  const ledger = buildInvoiceLotLedger(s.goodsType);
-  const rec = ledger.bySiteLog[siteLogKey(ctx.sh, ctx.idx)];
-  return rec ? { allocations: rec.allocations, shortfallVolume: rec.shortfall } : { allocations:[], shortfallVolume: missingVol };
+  if(!ctx || !normGoodsType(goodsType)) return { allocations:[], shortfallVolume: g.missingVolume };
+  const ledger = buildInvoiceLotLedger(goodsType);
+  const rec = ledger.bySiteLog[siteLogGroupKey(ctx.sh, ctx.idx, goodsType)];
+  return rec ? { allocations: rec.allocations, shortfallVolume: rec.shortfall } : { allocations:[], shortfallVolume: g.missingVolume };
+}
+
+/// Chi tiết rút kho GỘP CẢ CÔNG TRÌNH — cộng dồn qua mọi nhóm loại hàng
+/// đang thiếu chứng từ trong site log này, mỗi dòng allocation có gắn kèm
+/// đúng loại hàng để hiển thị modal không lẫn lộn giữa các loại.
+function siteInvoiceLotBreakdown(s){
+  const groups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0);
+  const perGroup = groups.map(g=>({ goodsType: g.goodsType, ...siteInvoiceGroupBreakdown(s, g.goodsType) }));
+  const allocations = perGroup.flatMap(pg=>pg.allocations.map(a=>({ ...a, goodsType: pg.goodsType })));
+  const shortfallVolume = perGroup.reduce((sum,pg)=>sum+pg.shortfallVolume, 0);
+  return { allocations, shortfallVolume, byGroup: perGroup };
 }
 
 /// Chi phí THẬT của phần thiếu chứng từ = tổng chi phí NET của các lô đã
-/// rút cho đúng ca này (net = giá trị hoá đơn của lô − tiền mặt nhận lại
-/// của lô, chia đều theo khối lượng). Phần chưa đủ lô để rút (shortfall)
-/// KHÔNG tính chi phí — tránh bịa số khi chưa thật sự mua lô mới.
+/// rút cho đúng ca này, cộng dồn qua MỌI nhóm loại hàng (net = giá trị hoá
+/// đơn của lô − tiền mặt nhận lại của lô, chia đều theo khối lượng). Phần
+/// chưa đủ lô để rút (shortfall) KHÔNG tính chi phí — tránh bịa số khi
+/// chưa thật sự mua lô mới.
 function siteInvoiceSupplementCost(s){
   if(s.siteType!=='commercial') return 0;
   return siteInvoiceLotBreakdown(s).allocations.reduce((sum,a)=>sum+a.cost, 0);
 }
-/// VAT khấu trừ được từ các lô đã rút cho ca này — tính đúng theo VAT suất
-/// GHI TRÊN TỪNG LÔ hoá đơn thật, không dùng ước lượng nội bộ nữa.
+/// VAT khấu trừ được từ các lô đã rút cho ca này, cộng dồn qua mọi nhóm
+/// loại hàng — tính đúng theo VAT suất GHI TRÊN TỪNG LÔ hoá đơn thật.
 function siteInvoiceSupplementVatCredit(s){
   if(s.siteType!=='commercial') return 0;
   return siteInvoiceLotBreakdown(s).allocations.reduce((sum,a)=>sum+a.vat, 0);
 }
 function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementCost(s),0); }
 
-/// Bảng đối soát theo khoảng ngày cho 1 loại hàng — mỗi dòng đúng 1 công
-/// trình/ca trong khoảng ngày đó có phát sinh thiếu chứng từ đúng loại
-/// hàng này: tài xế, số chuyến, khối lượng bán, mỏ xuất được bao nhiêu
-/// (đã quy đổi), còn thiếu bao nhiêu — để Ông Chủ đối chiếu với KT Thuế,
-/// không phải tin 1 con số tổng suông.
+/// Bảng đối soát theo khoảng ngày cho 1 loại hàng — mỗi dòng đúng 1 NHÓM
+/// loại hàng (trong 1 công trình/ca) trong khoảng ngày đó có phát sinh
+/// thiếu chứng từ đúng loại hàng này: tài xế, số chuyến CÙNG LOẠI, khối
+/// lượng bán, mỏ xuất được bao nhiêu (đã quy đổi), còn thiếu bao nhiêu —
+/// để Ông Chủ đối chiếu với KT Thuế, không phải tin 1 con số tổng suông.
 function invoiceDemandByDateRange(goodsType, from, to){
   const gt = normGoodsType(goodsType);
   const rows = [];
@@ -2041,11 +2077,11 @@ function invoiceDemandByDateRange(goodsType, from, to){
   allShiftsForLedger().forEach(sh=>{
     if(sh.date<from || sh.date>to) return;
     (sh.siteLogs||[]).forEach(s=>{
-      if(s.siteType!=='commercial' || normGoodsType(s.goodsType)!==gt) return;
-      const missingVol = siteMissingDocumentedVolume(s);
-      const sellVolume = (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0),0);
-      const tripsCount = (s.commercialTrips||[]).length;
-      if(sellVolume<=0 && missingVol<=0) return;
+      if(s.siteType!=='commercial') return;
+      const g = siteGoodsTypeGroups(s).find(x=>normGoodsType(x.goodsType)===gt);
+      if(!g) return;
+      if(g.sellVolume<=0 && g.missingVolume<=0) return;
+      const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
       const driver = driverById(sh.driverId);
       const customer = s.customerId ? customerById(s.customerId) : null;
       rows.push({
@@ -2053,9 +2089,9 @@ function invoiceDemandByDateRange(goodsType, from, to){
         driverName: driver ? driver.name : '(chưa gắn tài xế)',
         siteName: s.siteName || '',
         customerName: customer ? customer.name : '(chưa gắn khách hàng)',
-        tripsCount, sellVolume,
-        documentedVolume: Math.max(0, sellVolume - missingVol),
-        missingVolume: missingVol
+        tripsCount, sellVolume: g.sellVolume,
+        documentedVolume: Math.max(0, g.sellVolume - g.missingVolume),
+        missingVolume: g.missingVolume
       });
     });
   });
@@ -2326,8 +2362,6 @@ function renderHeader(){
     title.textContent='Trợ Lý'; sub.textContent='Chọn tác vụ cần thực hiện';
   } else if(state.currentTab==='results'){
     title.textContent='Kết Quả Kinh Doanh'; sub.textContent='Theo khoảng thời gian';
-  } else if(state.currentTab==='taxLedger'){
-    title.textContent='Sổ Thuế'; sub.textContent='Hóa đơn, VAT, công nợ mỏ';
   } else {
     title.textContent='Cài Đặt'; sub.textContent='Định mức & tuỳ chỉnh';
   }
@@ -3088,6 +3122,10 @@ function renderSiteRows(){
           <div class="commercial-trip" style="border:1px dashed var(--border); border-radius:10px; padding:8px; margin-bottom:8px;">
             <div class="site-head" style="margin-bottom:6px;"><strong>Chuyến ${ti+1}</strong><button class="link-btn removeTripBtn" data-idx="${i}" data-tidx="${ti}">Xoá</button></div>
             <div class="field">
+              <label>Loại hàng (VD Base A, Base B... — điền sau khi mua xong)</label>
+              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="goodsType" list="goodsTypesList" value="${escapeHtml(t.goodsType||'')}">
+            </div>
+            <div class="field">
               <label>Điểm Múc - Điểm Đổ</label>
               <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="siteNamesList" value="${escapeHtml(t.tripLocation||'')}">
             </div>
@@ -3108,11 +3146,6 @@ function renderSiteRows(){
             ${state.suppliers.map(sup=>`<option value="${sup.id}" ${s.supplierId===sup.id?'selected':''}>${escapeHtml(sup.name)}</option>`).join('')}
           </select>
           <button type="button" class="btn btn-ghost btn-sm manageSuppliersBtn" data-idx="${i}" style="margin-top:8px;">🏔️ Thêm / Sửa Nhà Cung Cấp</button>
-        </div>
-        <div class="field">
-          <label>Loại hàng (VD Base A, Base B...)</label>
-          <input type="text" class="site-input" data-idx="${i}" data-field="goodsType" list="goodsTypesList" value="${escapeHtml(s.goodsType||'')}">
-          <div class="hint">Dùng để khớp đúng Kho Hoá Đơn Bù — công trình nào khai đúng loại hàng nào, rút đúng kho loại đó.</div>
         </div>
         <div class="field">
           <label>Khách Hàng / Điểm Đổ</label>
@@ -3228,7 +3261,7 @@ function bindSiteRowEvents(){
       const s = sh.siteLogs[idx];
       const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','invoiceSupplementPercent'];
       const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
-      if(field==='siteName' || field==='supplierId' || field==='customerId' || field==='goodsType') s[field] = inp.value;
+      if(field==='siteName' || field==='supplierId' || field==='customerId') s[field] = inp.value;
       else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
       else s[field] = Number(inp.value);
       updateSiteCalc(idx); updateSummary();
@@ -3264,6 +3297,7 @@ function bindSiteRowEvents(){
       const s = sh.siteLogs[idx];
       s.commercialTrips[tidx][field] = inp.value;
       syncSiteNameFromTrips(s);
+      updateSiteCalc(idx); updateSummary(); // goodsType đổi → nhóm thiếu chứng từ đổi, phải tính lại ngay
     });
   });
   wrap.querySelectorAll('.ctrip-money').forEach(inp=>{
@@ -3286,7 +3320,7 @@ function bindSiteRowEvents(){
     btn.addEventListener('click', ()=>{
       const idx = Number(btn.dataset.idx);
       if(!Array.isArray(sh.siteLogs[idx].commercialTrips)) sh.siteLogs[idx].commercialTrips = [];
-      sh.siteLogs[idx].commercialTrips.push({ tripLocation:'', buyVolume:0, buyUnitPrice:0, sellVolume:0, sellUnitPrice:0 });
+      sh.siteLogs[idx].commercialTrips.push({ tripLocation:'', goodsType:'', buyVolume:0, buyUnitPrice:0, sellVolume:0, sellUnitPrice:0 });
       syncSiteNameFromTrips(sh.siteLogs[idx]);
       renderSiteRows(); updateSummary();
     });
@@ -3363,24 +3397,31 @@ function updateSiteCalc(idx){
     const buySub = inVatCash>0
       ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT đã trả mỏ ${deductible?'(được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
       : '';
-    const lotInfo = missingVol>0 ? siteInvoiceLotBreakdown(s) : { allocations:[], shortfallVolume:0 };
-    const lotLines = lotInfo.allocations.map(a=>
-      `<div class="cb-line cb-sub"><span class="cb-lbl">Rút lô ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'}</span><span class="cb-val">${a.volume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối — ${fmtVND(a.cost)}</span></div>`
-    ).join('');
-    const shortfallLine = lotInfo.shortfallVolume>0.001 ? `
-          <div class="cb-line" style="color:var(--loss); font-weight:700;"><span class="cb-lbl">⚠️ Kho không đủ, còn thiếu</span><span class="cb-val">${lotInfo.shortfallVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-          <div class="hint" style="color:var(--loss);">Chưa có hoá đơn kho để bù phần này — vào "Kho Hoá Đơn Bù" mua thêm lô mới.</div>` : '';
+    const lotInfo = missingVol>0 ? siteInvoiceLotBreakdown(s) : { allocations:[], shortfallVolume:0, byGroup:[] };
+    const missingGroups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0.001);
+    const groupBlocks = missingGroups.map(g=>{
+      const allocs = lotInfo.allocations.filter(a=>normGoodsType(a.goodsType)===normGoodsType(g.goodsType));
+      const groupInfo = (lotInfo.byGroup||[]).find(pg=>normGoodsType(pg.goodsType)===normGoodsType(g.goodsType));
+      const groupShortfall = groupInfo ? groupInfo.shortfallVolume : g.missingVolume;
+      const allocLines = allocs.map(a=>
+        `<div class="cb-line cb-sub"><span class="cb-lbl">↳ Rút lô ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'}</span><span class="cb-val">${a.volume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối — ${fmtVND(a.cost)}</span></div>`
+      ).join('');
+      const shortLine = groupShortfall>0.001 ? `
+          <div class="cb-line" style="color:var(--loss); font-weight:700;"><span class="cb-lbl">⚠️ Kho "${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}" không đủ, còn thiếu</span><span class="cb-val">${groupShortfall.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>` : '';
+      return `
+          <div class="cb-line"><span class="cb-lbl"><strong>${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}</strong> — thiếu</span><span class="cb-val cb-out">${g.missingVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+          ${allocLines}${shortLine}`;
+    }).join('<div class="formula-divider" style="margin:6px 0;"></div>');
     const missingBlock = missingVol>0 ? `
         <div class="cb-sec" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
-          <div class="cb-title">⚠️ Khối lượng thiếu chứng từ</div>
-          <div class="cb-line"><span class="cb-lbl">Khối lượng thiếu (đã quy đổi)</span><span class="cb-val cb-out">${missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+          <div class="cb-title">⚠️ Khối lượng thiếu chứng từ (theo từng loại hàng)</div>
+          <div class="cb-line"><span class="cb-lbl">Tổng khối lượng thiếu (mọi loại hàng)</span><span class="cb-val cb-out">${missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
           <div class="cb-line cb-sub"><span class="cb-lbl">giá trị quy đổi nội bộ (tham khảo)</span><span class="cb-val">${fmtVND(missingValue)}</span></div>
-          ${lotLines}
-          <div class="cb-line"><span class="cb-lbl">Chi phí mua hoá đơn bù (từ Kho Hoá Đơn Bù)</span><span class="cb-val cb-out">−${fmtVND(supplementCost)}</span></div>
-          ${shortfallLine}
+          ${groupBlocks}
+          <div class="cb-line"><span class="cb-lbl">Tổng chi phí mua hoá đơn bù (từ Kho Hoá Đơn Bù)</span><span class="cb-val cb-out">−${fmtVND(supplementCost)}</span></div>
         </div>` : `
         <div class="cb-sec" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
-          <div class="hint">Không có khối lượng thiếu chứng từ (mỏ xuất đủ hoá đơn, hoặc chưa khai đủ 2 ô "% hoá đơn" + "hệ số quy đổi" ở trên).</div>
+          <div class="hint">Không có khối lượng thiếu chứng từ (mỏ xuất đủ hoá đơn, hoặc chưa khai đủ 2 ô "% hoá đơn" + "hệ số quy đổi" ở trên, hoặc chuyến chưa khai Loại hàng).</div>
         </div>`;
 
     el.innerHTML = `
@@ -3518,7 +3559,7 @@ function bindFormEvents(){
 
   document.getElementById('addSiteBtn').addEventListener('click', ()=>{
     sh.siteLogs.push({ siteType:'freight', siteName:'', volumePerTrip:0, materialUnitPrice:0, priceIncludesVat:false, trips:0, driverWagePerTrip:0, wageQualifyingTripsOverride:null,
-      commercialTrips:[], buyIncludesVat:false, sellIncludesVat:false, buyHasInvoice:false, sellHasInvoice:false, goodsType:'' });
+      commercialTrips:[], buyIncludesVat:false, sellIncludesVat:false, buyHasInvoice:false, sellHasInvoice:false });
     renderSiteRows(); updateSummary();
   });
 
@@ -8009,9 +8050,6 @@ function openRepairEditor(id){
 /// "Đổi Key", and even then the field always starts EMPTY (never
 /// re-displays the previously saved key), per spec.
 let showGeminiKeyInput = false;
-// Theo dõi listener đo chiều cao khung Sổ Thuế, để gỡ đúng listener cũ mỗi
-// khi rời tab (tránh chồng chất nhiều listener sau nhiều lần bấm qua lại).
-let taxLedgerResizeHandler = null;
 
 // ==== CÔNG CỤ TÍNH GỐC + LÃI VAY NGÂN HÀNG TỰ ĐỘNG (DƯ NỢ GIẢM DẦN) ====
 // Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng
@@ -9289,39 +9327,6 @@ function exportCSV(){
 
 // ========================= NAV & INIT =========================
 
-/// Tab "Sổ Thuế" — nhúng nguyên app thue.html (đã có sẵn chế độ nhúng
-/// `?embed=1`: tự ẩn header riêng, đẩy thanh tab con lên đầu để không đè
-/// thanh tab của app này) qua iframe. thue.html dùng ĐÚNG Firebase project
-/// + không gian dữ liệu (howo-29e-69112) nên tự động đăng nhập sẵn (không
-/// cần đăng nhập lại lần 2), và nó tự đọc dữ liệu ca làm việc + tự lưu sổ
-/// thuế riêng trực tiếp qua Firestore của NÓ — hoàn toàn không đụng tới
-/// state/dữ liệu đang chạy của app chính. Nếu chưa upload thue.html lên
-/// cùng thư mục với SoXeBenHOWO.html trên GitHub Pages, tab này sẽ không
-/// tải được — cần đưa 2 file vào chung 1 thư mục khi deploy.
-function renderTaxLedger(){
-  const app = document.getElementById('app');
-  app.style.cssText = 'padding:0; overflow:hidden;';
-  app.innerHTML = `<iframe src="thue.html?embed=1&v=${TAX_LEDGER_BUILD}" title="Sổ Thuế" id="taxLedgerFrame"
-    style="width:100%; border:none; display:block;"></iframe>`;
-  // Đo chiều cao THẬT bằng JS thay vì dựa vào height:100%/position:absolute
-  // qua flexbox — cách cũ vẫn phụ thuộc hành vi tính % chiều cao của trình
-  // duyệt (không ổn định trên mọi máy, có máy ra 0 khiến trắng cả trang).
-  // Đo trực tiếp header + nav rồi trừ vào chiều cao màn hình luôn cho ra
-  // đúng số px thật, không phụ thuộc CSS mập mờ nào nữa.
-  const header = document.querySelector('header.top');
-  const nav = document.querySelector('nav.tabbar');
-  const frame = document.getElementById('taxLedgerFrame');
-  function sizeTaxLedgerFrame(){
-    if(!frame.isConnected) return; // Ông Chủ đã rời tab này, dừng đo
-    const used = (header?.getBoundingClientRect().height||0) + (nav?.getBoundingClientRect().height||0);
-    frame.style.height = Math.max(window.innerHeight - used, 300) + 'px';
-  }
-  sizeTaxLedgerFrame();
-  if(taxLedgerResizeHandler) window.removeEventListener('resize', taxLedgerResizeHandler);
-  taxLedgerResizeHandler = sizeTaxLedgerFrame;
-  window.addEventListener('resize', taxLedgerResizeHandler);
-}
-
 function renderAll(){
   recomputeBankLoanMonthlyPayment(); // luôn làm mới Gốc+Lãi/tháng theo đúng dư nợ giảm dần hôm nay TRƯỚC khi bất kỳ tab nào (Kết Quả, Trợ Lý...) đọc state.settings.monthlyLoanPayment
   // Tháng đang "xem lại" mà lại trùng đúng THÁNG HIỆN TẠI THẬT — dù do Ông
@@ -9335,8 +9340,6 @@ function renderAll(){
   renderHeader();
   refreshSiteDatalist();
   refreshGoodsTypesDatalist();
-  document.getElementById('app').removeAttribute('style'); // xoá style riêng của tab Sổ Thuế (nếu có) trước khi vẽ tab khác
-  if(taxLedgerResizeHandler){ window.removeEventListener('resize', taxLedgerResizeHandler); taxLedgerResizeHandler = null; }
   if(state.currentTab==='shifts'){
     if(state.view==='form') renderShiftForm();
     else if(state.shiftArchiveMonth) renderShiftMonthArchive();
@@ -9347,8 +9350,6 @@ function renderAll(){
     renderStrategyHub();
   } else if(state.currentTab==='results'){
     renderResults();
-  } else if(state.currentTab==='taxLedger'){
-    renderTaxLedger();
   } else {
     renderSettings();
   }
@@ -9360,11 +9361,11 @@ function refreshSiteDatalist(){
   const dl=document.getElementById('siteNamesList');
   dl.innerHTML = allSiteNames().map(n=>`<option value="${escapeHtml(n)}">`).join('');
 }
-/// Danh sách LOẠI HÀNG đã dùng — gom từ cả công trình đã khai lẫn lô hoá
+/// Danh sách LOẠI HÀNG đã dùng — gom từ từng CHUYẾN đã khai lẫn lô hoá
 /// đơn đã mua, để gõ tay không bị lệch chính tả (VD "Base A" vs "base a").
 function allGoodsTypes(){
   const set = new Set();
-  state.shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>{ const n=(s.goodsType||'').trim(); if(n) set.add(n); }));
+  state.shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>(s.commercialTrips||[]).forEach(t=>{ const n=(t.goodsType||'').trim(); if(n) set.add(n); })));
   state.invoiceLots.forEach(l=>{ const n=(l.goodsType||'').trim(); if(n) set.add(n); });
   return [...set].sort();
 }
