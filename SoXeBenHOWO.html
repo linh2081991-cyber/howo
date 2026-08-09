@@ -5936,7 +5936,17 @@ function computeResultsGroup(shifts){
   const fuelPerKm = totalKm>0 ? fuelCost/totalKm : 0;
   const revenuePerKm = totalKm>0 ? revenue/totalKm : 0;
   const profitPerTrip = totalTrips>0 ? grossProfit/totalTrips : 0;
-  return { revenue, opCost, grossProfit, margin, totalKm, totalTrips, fuelLiters, fuelCost, fuelPerKm, revenuePerKm, profitPerTrip };
+  // Tách grossProfit thành 2 tầng để hiển thị rõ "Thực Lãi Bỏ Túi" làm tổng
+  // phụ, đúng yêu cầu Ông Chủ — CÙNG 1 công thức grossProfit như cũ (không
+  // đổi), chỉ tách ra: (Doanh thu − Giá vốn hàng − Chi phí mua hoá đơn bù)
+  // − Chi phí vận hành = grossProfit y hệt (đã kiểm chứng bằng số, khớp
+  // tuyệt đối). Không có số nào đổi, chỉ đổi cách trình bày.
+  const materialCost = shifts.reduce((s,sh)=>s+shiftMaterialCost(sh),0);
+  const supplementCost = shifts.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  const operatingCashCost = shifts.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
+  const takeHomeTotal = revenue - materialCost - supplementCost;
+  return { revenue, opCost, grossProfit, margin, totalKm, totalTrips, fuelLiters, fuelCost, fuelPerKm, revenuePerKm, profitPerTrip,
+    materialCost, supplementCost, operatingCashCost, takeHomeTotal };
 }
 
 function fmtShortVND(n){
@@ -6225,17 +6235,31 @@ function lastActivityDateForSite(siteName){
   }
   return latest;
 }
+/// CHỈ tính công trình CHỞ CƯỚC (siteType='freight') — công trình thương
+/// mại có danh tính thật là Nhà Cung Cấp + Khách Hàng (đã có sổ riêng ở
+/// mục "Nhà Cung Cấp & Khách Hàng"), không phải tên tự do Điểm Múc-Điểm
+/// Đổ, nên gộp chung vào đây theo tên tự do sẽ vừa sai khái niệm vừa dễ
+/// vỡ vụn do gõ tay lệch chính tả. Cũng LOẠI hẳn công trình đã quá 7 ngày
+/// không có ca nào chạy (coi như đã xong/ngừng chạy) — chỉ hiện công
+/// trình chở cước đang thật sự còn hoạt động, đúng yêu cầu Ông Chủ.
 function computeSiteRanking(inRangeShifts){
   const bySite = {};
   for(const sh of inRangeShifts){
     for(const s of (sh.siteLogs||[])){
+      if(s.siteType==='commercial') continue;
       const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
       if(!bySite[name]) bySite[name] = { name, revenue:0, trips:0 };
       bySite[name].revenue += siteRevenue(s);
       bySite[name].trips += siteTripCount(s);
     }
   }
+  const todayStr = todayLocalDateStr();
   return Object.values(bySite)
+    .filter(x=>{
+      const last = lastActivityDateForSite(x.name);
+      const daysSince = last ? daysBetweenDates(new Date(last+'T00:00:00'), new Date(todayStr+'T00:00:00')) : null;
+      return !(daysSince!==null && daysSince>7);
+    })
     .map(x=>({ ...x, revenuePerTrip: x.trips>0 ? x.revenue/x.trips : 0 }))
     .sort((a,b)=>b.revenuePerTrip-a.revenuePerTrip);
 }
@@ -6846,7 +6870,12 @@ function renderResults(){
     <section class="group">
       <h3>💰 Lợi Nhuận Thực Tế Cuối Cùng</h3>
       <div class="card">
-        <div class="summary-row"><span>Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
+        <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(gTotal.revenue)}</span></div>
+        <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
+        <div class="summary-row"><span>− Chi phí mua hoá đơn bù (Kho Hoá Đơn Bù)</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
+        <div class="summary-row total" style="font-size:16px;"><span>= THỰC LÃI BỎ TÚI</span><span class="val">${fmtVND(gTotal.takeHomeTotal)}</span></div>
+        <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(gTotal.operatingCashCost)}</span></div>
+        <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px;"><span>= Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
         <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
         <div class="summary-row"><span>− Chi phí luật đường (kỳ này)</span><span class="val">${fmtVND(roadFee)}</span></div>
         <div class="summary-row"><span>− Khấu hao xe dự kiến / tháng</span><span class="val">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</span></div>
