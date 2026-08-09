@@ -3352,20 +3352,28 @@ function updateSiteCalc(idx){
     // hay không, để Ông Chủ thấy ngay từng số đang lấy TỪ ĐÂU (nhà cung
     // cấp / gõ tay riêng / mặc định chung Cài Đặt) — hết mơ hồ "nhập rồi
     // mà không thấy đổi gì".
+    // Tiêu đề khối đã nêu rõ tên nhà cung cấp đang áp dụng — nên KHÔNG lặp
+    // lại "(nhà cung cấp "...")" ở từng dòng bên dưới nữa (thừa, rối mắt).
+    // Chỉ hiện chú thích khi giá trị KHÁC với đúng nhà cung cấp đã nêu ở
+    // tiêu đề (VD: gõ tay riêng cho công trình này, hoặc đang dùng mặc
+    // định vì chưa khai) — vì đó là NGOẠI LỆ Ông Chủ cần biết. Đổi nhà
+    // cung cấp khác cho công trình này, khối này tự cập nhật lại toàn bộ
+    // ngay (không có gì hardcode), kể cả tên ở tiêu đề.
     const resolve = (supKey, siteKey, defVal, defLabel) => {
-      if(sup && sup[supKey]!==undefined && sup[supKey]!==null && sup[supKey]!=='') return { val: sup[supKey], src: `nhà cung cấp "${sup.name}"` };
+      if(sup && sup[supKey]!==undefined && sup[supKey]!==null && sup[supKey]!=='') return { val: sup[supKey], src: null };
       if(s[siteKey]!==undefined && s[siteKey]!==null && s[siteKey]!=='') return { val: s[siteKey], src: 'gõ tay riêng cho công trình này' };
       return { val: defVal, src: defLabel };
     };
     const rVat = resolve('vatRatePercent','vatRatePercent', Number(state.settings.vatRatePercent)||0, 'mặc định chung Cài Đặt');
     const rInv = resolve('invoicedBuyPercent','invoicedBuyPercent', 100, 'mặc định (coi như đủ 100% hoá đơn)');
     const rDen = resolve('densityRatio','densityRatio', null, 'chưa khai — không quy đổi được');
+    const srcTag = r => r.src ? ` <span style="color:var(--ink-soft); font-weight:400;">(${r.src})</span>` : '';
     const appliedBlock = `
       <div class="cb-sec" style="margin-bottom:10px;">
         <div class="cb-title">⚙️ Đang áp dụng ${sup?`(nhà cung cấp: <b>${escapeHtml(sup.name)}</b>)`:'(chưa gắn nhà cung cấp)'}</div>
-        <div class="cb-line"><span class="cb-lbl">Thuế suất VAT</span><span class="cb-val">${rVat.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rVat.src})</span></span></div>
-        <div class="cb-line"><span class="cb-lbl">% hoá đơn mỏ xuất được</span><span class="cb-val">${rInv.val}% <span style="color:var(--ink-soft); font-weight:400;">(${rInv.src})</span></span></div>
-        <div class="cb-line"><span class="cb-lbl">Hệ số quy đổi (tấn/khối)</span><span class="cb-val">${rDen.val!==null?rDen.val:'—'} <span style="color:var(--ink-soft); font-weight:400;">(${rDen.src})</span></span></div>
+        <div class="cb-line"><span class="cb-lbl">Thuế suất VAT</span><span class="cb-val">${rVat.val}%${srcTag(rVat)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">% hoá đơn mỏ xuất được</span><span class="cb-val">${rInv.val}%${srcTag(rInv)}</span></div>
+        <div class="cb-line"><span class="cb-lbl">Hệ số quy đổi (tấn/khối)</span><span class="cb-val">${rDen.val!==null?rDen.val:'—'}${srcTag(rDen)}</span></div>
       </div>`;
     const cashIn = commercialCashFromCustomer(s);
     const cashToSupplier = commercialCashToSupplier(s);
