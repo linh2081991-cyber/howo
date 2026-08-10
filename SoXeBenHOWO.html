@@ -4316,23 +4316,44 @@ function driverAdvanceBalance(driverId){
 }
 /// Bảng lịch sử gộp (Ứng + Báo Cáo Đã Chi) của 1 tài xế, mới nhất trước —
 /// bảng kẻ ô đủ 4 cạnh (.grid-table) đúng theo yêu cầu Ông Chủ trước đó.
-function renderDriverAdvanceHistoryHtml(driverId){
-  const items = [
-    ...state.driverAdvances.filter(a=>a.driverId===driverId).map(a=>({ id:a.id, date:a.date, amount:Number(a.amount)||0, type:'advance', label: a.note||'Ứng tiền' })),
-    ...state.driverExpenseReports.filter(r=>r.driverId===driverId).map(r=>({ id:r.id, date:r.date, amount:Number(r.amount)||0, type:'expense', label: r.item ? (r.item + (r.note?' — '+r.note:'')) : (r.note||'Đã chi') }))
-  ].sort((a,b)=>b.date.localeCompare(a.date));
-  if(items.length===0) return '<div class="hint">Chưa có lần ứng hoặc báo cáo chi nào.</div>';
+/// Lịch Sử ỨNG TIỀN riêng của 1 tài xế — bảng kẻ ô đầy đủ cột.
+function renderDriverAdvanceOnlyHistoryHtml(driverId){
+  const items = state.driverAdvances.filter(a=>a.driverId===driverId).sort((a,b)=>b.date.localeCompare(a.date));
+  if(items.length===0) return '<div class="hint">Chưa có lần ứng nào.</div>';
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Ngày</th><th>Loại</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+        <thead><tr><th>Ngày</th><th>Ghi Chú</th><th class="num">Số Tiền</th></tr></thead>
         <tbody>
-          ${items.map(it=>`
-          <tr class="grid-clickable-row" data-id="${it.id}" onclick="${it.type==='advance'?'openDriverAdvanceEditor':'openDriverExpenseReportEditor'}('${it.id}','${driverId}')">
-            <td>${formatDateVN(it.date)}</td>
-            <td>${it.type==='advance'?'💵 Ứng':'🧾 Đã Chi'}</td>
-            <td>${escapeHtml(it.label)}</td>
-            <td class="num" style="color:${it.type==='advance'?'var(--profit)':'var(--loss)'}; font-weight:700;">${it.type==='advance'?'+':'−'}${fmtVND(it.amount)}</td>
+          ${items.map(a=>`
+          <tr class="grid-clickable-row" onclick="openDriverAdvanceEditor('${a.id}','${driverId}')">
+            <td>${formatDateVN(a.date)}</td>
+            <td>${a.note?escapeHtml(a.note):'—'}</td>
+            <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(Number(a.amount)||0)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+/// Lịch Sử BÁO CÁO ĐÃ CHI riêng của 1 tài xế — bảng kẻ ô đầy đủ cột: Ngày,
+/// Hạng Mục, Ghi Chú, Số Tiền — hiển thị RÕ, TÁCH RIÊNG khỏi lịch sử ứng
+/// tiền (yêu cầu Ông Chủ 2026-08-10: minh bạch, khoa học, rõ ràng). Dùng
+/// lại ở cả màn Tạm Ứng Chi Phí lẫn ngay trong màn Ghi Báo Cáo Đã Chi để
+/// tiện theo dõi khi đang thêm mới.
+function renderDriverExpenseReportHistoryHtml(driverId){
+  const items = state.driverExpenseReports.filter(r=>r.driverId===driverId).sort((a,b)=>b.date.localeCompare(a.date));
+  if(items.length===0) return '<div class="hint">Chưa có báo cáo đã chi nào.</div>';
+  return `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Ngày</th><th>Hạng Mục</th><th>Ghi Chú</th><th class="num">Số Tiền</th></tr></thead>
+        <tbody>
+          ${items.map(r=>`
+          <tr class="grid-clickable-row" onclick="openDriverExpenseReportEditor('${r.id}','${driverId}')">
+            <td>${formatDateVN(r.date)}</td>
+            <td>${r.item?escapeHtml(r.item):'—'}</td>
+            <td>${r.note?escapeHtml(r.note):'—'}</td>
+            <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(Number(r.amount)||0)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -4360,8 +4381,12 @@ function openDriverAdvanceDetail(driverId){
       </div>
     </section>
     <section class="group">
-      <h3>Lịch Sử</h3>
-      ${renderDriverAdvanceHistoryHtml(driverId)}
+      <h3>Lịch Sử Ứng Tiền</h3>
+      ${renderDriverAdvanceOnlyHistoryHtml(driverId)}
+    </section>
+    <section class="group">
+      <h3>Lịch Sử Báo Cáo Đã Chi</h3>
+      ${renderDriverExpenseReportHistoryHtml(driverId)}
     </section>
   `;
   document.getElementById('advDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
@@ -4491,6 +4516,10 @@ function openDriverExpenseReportEditor(id, driverId){
         <button class="btn btn-ghost" id="cancelExpBtn">Huỷ</button>
         <button class="btn btn-accent btn-block" id="saveExpBtn">Lưu</button>
       </div>
+    </section>
+    <section class="group">
+      <h3>Lịch Sử Báo Cáo Đã Chi — ${escapeHtml(d?d.name:'')}</h3>
+      ${renderDriverExpenseReportHistoryHtml(did)}
     </section>
   `;
   attachMoneyInput(document.getElementById('de_amount'), draft.amount, v=>draft.amount=v);
