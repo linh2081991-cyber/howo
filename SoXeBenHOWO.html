@@ -670,10 +670,20 @@ let state = {
   // fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly (tất cả đ/tháng),
   // roadFeeEstimate (đóng THEO THÁNG), estimatedTripsPerShift, shiftStructure ('single'|'double')}
   // — prospective-project appraisal module, fully isolated from shift logs
-  monthlyBonuses: [] // {id, driverId, yearMonth:'YYYY-MM', amount, note} — tiền tip/thưởng
+  monthlyBonuses: [], // {id, driverId, yearMonth:'YYYY-MM', amount, note} — tiền tip/thưởng
   // CUỐI THÁNG của tài xế. Mỗi driverId+yearMonth chỉ nên có 1 dòng; cộng
   // vào LƯƠNG THỰC NHẬN của đúng tháng đó ở màn hình Chi Tiết Vận Hành
   // Tài Xế và khi xuất Excel.
+  // ---- TẠM ỨNG CHI PHÍ TÀI XẾ (yêu cầu Ông Chủ 2026-08-10) — PHASE 1
+  // (sổ theo dõi độc lập, CHƯA cộng vào bất kỳ công thức Lợi Nhuận Ròng/
+  // Điểm Hoà Vốn/Cảnh Báo Tài Chính nào — việc đó là Phase 2, làm sau khi
+  // Phase 1 test ổn). Ứng 1 lần dùng cho nhiều ca liên tiếp (không gắn
+  // cứng vào 1 ca cụ thể) — số dư tài xế đang giữ = tổng driverAdvances −
+  // tổng driverExpenseReports của đúng driverId đó, DỒN LIÊN TỤC theo
+  // thời gian (không "chốt sổ" theo kỳ) — dư ứng kỳ này tự động mang sang
+  // kỳ ứng tiếp theo, đúng theo yêu cầu Ông Chủ.
+  driverAdvances: [], // {id, driverId, date, amount, note} — mỗi lần Ông Chủ ĐƯA tiền cho tài xế
+  driverExpenseReports: [] // {id, driverId, date, amount, item, note} — mỗi lần tài xế BÁO CÁO đã chi (chi phí THẬT, khác với tiền đã ứng)
 };
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -1058,7 +1068,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1073,7 +1083,9 @@ async function loadAll(){
       sharedDataRef('suppliers').get(),
       sharedDataRef('customers').get(),
       sharedDataRef('supplierPayments').get(),
-      sharedDataRef('invoiceLots').get()
+      sharedDataRef('invoiceLots').get(),
+      sharedDataRef('driverAdvances').get(),
+      sharedDataRef('driverExpenseReports').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1103,6 +1115,10 @@ async function loadAll(){
     state.supplierPayments = supplierPaymentData && Array.isArray(supplierPaymentData.list) ? supplierPaymentData.list : [];
     const invoiceLotData = invoiceLotSnap.exists ? invoiceLotSnap.data() : null;
     state.invoiceLots = invoiceLotData && Array.isArray(invoiceLotData.list) ? invoiceLotData.list : [];
+    const driverAdvanceData = driverAdvanceSnap.exists ? driverAdvanceSnap.data() : null;
+    state.driverAdvances = driverAdvanceData && Array.isArray(driverAdvanceData.list) ? driverAdvanceData.list : [];
+    const driverExpenseReportData = driverExpenseReportSnap.exists ? driverExpenseReportSnap.data() : null;
+    state.driverExpenseReports = driverExpenseReportData && Array.isArray(driverExpenseReportData.list) ? driverExpenseReportData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -1121,6 +1137,14 @@ async function saveSuppliers(){
 async function saveInvoiceLots(){
   try { await sharedDataRef('invoiceLots').set({ list: state.invoiceLots }); }
   catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù — kiểm tra mạng.'); }
+}
+async function saveDriverAdvances(){
+  try { await sharedDataRef('driverAdvances').set({ list: state.driverAdvances }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu tạm ứng chi phí tài xế — kiểm tra mạng.'); }
+}
+async function saveDriverExpenseReports(){
+  try { await sharedDataRef('driverExpenseReports').set({ list: state.driverExpenseReports }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu báo cáo chi phí tài xế — kiểm tra mạng.'); }
 }
 async function saveCustomers(){
   try { await sharedDataRef('customers').set({ list: state.customers }); }
@@ -1275,6 +1299,8 @@ function exportBackupFile(){
     siteContracts: state.siteContracts,
     monthlyBonuses: state.monthlyBonuses,
     roadFeeByMonth: state.roadFeeByMonth,
+    driverAdvances: state.driverAdvances,
+    driverExpenseReports: state.driverExpenseReports,
     settings: state.settings
   };
   const json = JSON.stringify(backup, null, 2);
@@ -1312,10 +1338,13 @@ async function handleRestoreFile(file){
     state.siteContracts = Array.isArray(backup.siteContracts) ? backup.siteContracts : [];
     state.monthlyBonuses = Array.isArray(backup.monthlyBonuses) ? backup.monthlyBonuses : [];
     state.roadFeeByMonth = Array.isArray(backup.roadFeeByMonth) ? backup.roadFeeByMonth : [];
+    state.driverAdvances = Array.isArray(backup.driverAdvances) ? backup.driverAdvances : [];
+    state.driverExpenseReports = Array.isArray(backup.driverExpenseReports) ? backup.driverExpenseReports : [];
     if(backup.settings) state.settings = Object.assign(state.settings, backup.settings);
     await saveDrivers(); await saveShifts(); await saveRepairs(); await saveSitePayments();
     await saveDocuments(); await saveMaintenanceSchedules(); await saveSiteContracts(); await saveSettings();
     await saveMonthlyBonuses(); await saveRoadFeeByMonth();
+    await saveDriverAdvances(); await saveDriverExpenseReports();
     renderAll();
     showToast('Đã phục hồi dữ liệu thành công.');
   }catch(e){
@@ -4019,9 +4048,11 @@ function renderDrivers(){
             <div class="driver-cv-item"><span class="k">Bằng lái</span><span class="v">${escapeHtml(d.licenseInfo||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tình trạng sức khoẻ</span><span class="v">${escapeHtml(d.healthStatus||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--loss)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ</span><span class="v" style="color:${driverAdvanceBalance(d.id)>=0?'inherit':'var(--loss)'}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
           <button class="btn btn-ghost btn-block viewDriverDetailBtn" data-id="${d.id}" style="margin-top:10px;">📊 Xem Chi Tiết Vận Hành →</button>
+          <button class="btn btn-ghost btn-block viewDriverAdvanceBtn" data-id="${d.id}" style="margin-top:8px;">💰 Tạm Ứng Chi Phí →</button>
           <button class="btn btn-ghost btn-block toggleDriverActiveBtn" data-id="${d.id}" style="margin-top:8px; ${d.isActive===false?'':'color:var(--loss); border-color:var(--loss);'}">${d.isActive===false ? '✅ Kích Hoạt Lại' : '⛔ Ngừng Hoạt Động (Lái Xe Đã Nghỉ Hẳn)'}</button>
         </div>
       `).join('')}
@@ -4089,6 +4120,9 @@ function renderDrivers(){
   });
   document.querySelectorAll('.viewDriverDetailBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverDetail(btn.dataset.id); });
+  });
+  document.querySelectorAll('.viewDriverAdvanceBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openDriverAdvanceDetail(btn.dataset.id));
   });
   document.querySelectorAll('.toggleDriverActiveBtn').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
@@ -4265,6 +4299,185 @@ function renderShiftReadOnlyDetail(shiftId){
   document.getElementById('shiftReadOnlySummary').innerHTML = shiftFinancialSummaryHtml(sh);
   document.getElementById('shiftReadOnlyBackBtn').addEventListener('click', ()=>{ renderShiftMonthArchive(); restoreMainScroll(); });
 }
+
+// ========================= TẠM ỨNG CHI PHÍ TÀI XẾ (PHASE 1) =========================
+// Sổ theo dõi độc lập — CHƯA cộng vào Lợi Nhuận Ròng/Điểm Hoà Vốn/Cảnh
+// Báo Tài Chính (Phase 2, làm sau khi Phase 1 test ổn). Ứng 1 lần dùng
+// nhiều ca liên tiếp, số dư dồn liên tục theo thời gian, không chốt theo
+// kỳ — xem comment tại state.driverAdvances/driverExpenseReports.
+
+/// Số dư tạm ứng chi phí đang giữ của 1 tài xế = Tổng đã ứng − Tổng đã
+/// chi được xác nhận. Dương = tài xế còn giữ tiền công ty (bình thường).
+/// Âm = tài xế đã chi vượt số ứng, công ty đang nợ lại phần chênh.
+function driverAdvanceBalance(driverId){
+  const advanced = state.driverAdvances.filter(a=>a.driverId===driverId).reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const spent = state.driverExpenseReports.filter(r=>r.driverId===driverId).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  return advanced - spent;
+}
+/// Bảng lịch sử gộp (Ứng + Báo Cáo Đã Chi) của 1 tài xế, mới nhất trước —
+/// bảng kẻ ô đủ 4 cạnh (.grid-table) đúng theo yêu cầu Ông Chủ trước đó.
+function renderDriverAdvanceHistoryHtml(driverId){
+  const items = [
+    ...state.driverAdvances.filter(a=>a.driverId===driverId).map(a=>({ id:a.id, date:a.date, amount:Number(a.amount)||0, type:'advance', label: a.note||'Ứng tiền' })),
+    ...state.driverExpenseReports.filter(r=>r.driverId===driverId).map(r=>({ id:r.id, date:r.date, amount:Number(r.amount)||0, type:'expense', label: r.item ? (r.item + (r.note?' — '+r.note:'')) : (r.note||'Đã chi') }))
+  ].sort((a,b)=>b.date.localeCompare(a.date));
+  if(items.length===0) return '<div class="hint">Chưa có lần ứng hoặc báo cáo chi nào.</div>';
+  return `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Ngày</th><th>Loại</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+        <tbody>
+          ${items.map(it=>`
+          <tr class="grid-clickable-row" data-id="${it.id}" onclick="${it.type==='advance'?'openDriverAdvanceEditor':'openDriverExpenseReportEditor'}('${it.id}','${driverId}')">
+            <td>${formatDateVN(it.date)}</td>
+            <td>${it.type==='advance'?'💵 Ứng':'🧾 Đã Chi'}</td>
+            <td>${escapeHtml(it.label)}</td>
+            <td class="num" style="color:${it.type==='advance'?'var(--profit)':'var(--loss)'}; font-weight:700;">${it.type==='advance'?'+':'−'}${fmtVND(it.amount)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+function openDriverAdvanceDetail(driverId){
+  saveMainScroll();
+  const d = driverById(driverId);
+  const app = document.getElementById('app');
+  if(!d){ renderAll(); return; }
+  const balance = driverAdvanceBalance(driverId);
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="advDetailBackBtn">← Quay Lại Tài Xế</button>
+    </section>
+    <section class="group">
+      <div class="card">
+        <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)}</h3>
+        <div class="summary-row total"><span>Số dư đang giữ</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
+        <div class="hint" style="margin-top:4px;">${balance>=0 ? 'Tài xế còn giữ tiền công ty — bình thường, dư sẽ dồn sang lần ứng sau.' : 'Tài xế đã chi vượt số ứng — công ty đang nợ lại phần này.'}</div>
+      </div>
+      <div class="two-col" style="margin-top:10px;">
+        <button class="btn btn-accent" id="addAdvanceBtn">+ Ghi Ứng Thêm</button>
+        <button class="btn btn-ghost" id="addExpenseReportBtn">+ Báo Cáo Đã Chi</button>
+      </div>
+    </section>
+    <section class="group">
+      <h3>Lịch Sử</h3>
+      ${renderDriverAdvanceHistoryHtml(driverId)}
+    </section>
+  `;
+  document.getElementById('advDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('addAdvanceBtn').addEventListener('click', ()=>openDriverAdvanceEditor(null, driverId));
+  document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>openDriverExpenseReportEditor(null, driverId));
+}
+function openDriverAdvanceEditor(id, driverId){
+  const existing = id ? state.driverAdvances.find(a=>a.id===id) : null;
+  const did = driverId || (existing && existing.driverId);
+  const d = driverById(did);
+  const draft = existing ? {...existing} : { id: uid('advc'), driverId: did, date: todayLocalDateStr(), amount:0, note:'' };
+  const goBack = () => { openDriverAdvanceDetail(draft.driverId); restoreMainScroll(); };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Ghi'} Khoản Ứng Cho — ${escapeHtml(d?d.name:'')}</h3>
+      <div class="card">
+        <div class="field">
+          <label>Ngày đưa tiền</label>
+          <input type="date" id="da_date" value="${draft.date}">
+        </div>
+        <div class="field">
+          <label>Số tiền ứng</label>
+          <input type="text" inputmode="decimal" id="da_amount">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="da_note" value="${escapeHtml(draft.note)}">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delAdvBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelAdvBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveAdvBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+  attachMoneyInput(document.getElementById('da_amount'), draft.amount, v=>draft.amount=v);
+  document.getElementById('saveAdvBtn').addEventListener('click', async ()=>{
+    draft.date = document.getElementById('da_date').value || draft.date;
+    draft.note = document.getElementById('da_note').value.trim();
+    const idx = state.driverAdvances.findIndex(a=>a.id===draft.id);
+    if(idx>=0) state.driverAdvances[idx]=draft; else state.driverAdvances.push(draft);
+    await saveDriverAdvances();
+    showToast('Đã lưu khoản ứng.');
+    goBack();
+  });
+  document.getElementById('cancelAdvBtn').addEventListener('click', goBack);
+  const delBtn = document.getElementById('delAdvBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá khoản ứng này?')){
+      state.driverAdvances = state.driverAdvances.filter(a=>a.id!==draft.id);
+      await saveDriverAdvances();
+      showToast('Đã xoá.');
+      goBack();
+    }
+  });
+}
+function openDriverExpenseReportEditor(id, driverId){
+  const existing = id ? state.driverExpenseReports.find(r=>r.id===id) : null;
+  const did = driverId || (existing && existing.driverId);
+  const d = driverById(did);
+  const draft = existing ? {...existing} : { id: uid('dexp'), driverId: did, date: todayLocalDateStr(), amount:0, item:'', note:'' };
+  const goBack = () => { openDriverAdvanceDetail(draft.driverId); restoreMainScroll(); };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>${existing?'Sửa':'Ghi'} Báo Cáo Đã Chi — ${escapeHtml(d?d.name:'')}</h3>
+      <div class="card">
+        <div class="field">
+          <label>Ngày chi</label>
+          <input type="date" id="de_date" value="${draft.date}">
+        </div>
+        <div class="field">
+          <label>Hạng mục (VD vé phà, gửi xe qua đêm...)</label>
+          <input type="text" id="de_item" value="${escapeHtml(draft.item)}">
+        </div>
+        <div class="field">
+          <label>Số tiền đã chi</label>
+          <input type="text" inputmode="decimal" id="de_amount">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú thêm</label>
+          <input type="text" id="de_note" value="${escapeHtml(draft.note)}">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delExpBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelExpBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveExpBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+  attachMoneyInput(document.getElementById('de_amount'), draft.amount, v=>draft.amount=v);
+  document.getElementById('saveExpBtn').addEventListener('click', async ()=>{
+    draft.date = document.getElementById('de_date').value || draft.date;
+    draft.item = document.getElementById('de_item').value.trim();
+    draft.note = document.getElementById('de_note').value.trim();
+    const idx = state.driverExpenseReports.findIndex(r=>r.id===draft.id);
+    if(idx>=0) state.driverExpenseReports[idx]=draft; else state.driverExpenseReports.push(draft);
+    await saveDriverExpenseReports();
+    showToast('Đã lưu báo cáo chi.');
+    goBack();
+  });
+  document.getElementById('cancelExpBtn').addEventListener('click', goBack);
+  const delBtn = document.getElementById('delExpBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá báo cáo chi này?')){
+      state.driverExpenseReports = state.driverExpenseReports.filter(r=>r.id!==draft.id);
+      await saveDriverExpenseReports();
+      showToast('Đã xoá.');
+      goBack();
+    }
+  });
+}
+
 function openDriverDetail(driverId){
   const driver = driverById(driverId);
   if(!driver){ renderAll(); return; }
