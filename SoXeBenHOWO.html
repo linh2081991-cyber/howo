@@ -6427,6 +6427,58 @@ function computeSupplierDebt(supplierId){
   // phải trả tính đến giờ.
   return { payable, paid, owed: payable-paid };
 }
+/// Chi tiết TỪNG "lần giao dịch" (1 dòng = 1 công trình thương mại trong
+/// 1 ca) gắn với đúng khách hàng/nhà cung cấp — Ngày, Tài Xế, Số Chuyến,
+/// Loại Hàng, Số Tiền. Chỉ để HIỂN THỊ cho Ông Chủ đối chiếu nhanh khi
+/// cần xử lý dòng tiền gấp với đối tác, không tính lại công nợ ở đây —
+/// số tiền mỗi dòng lấy ĐÚNG công thức siteBilledAmount()/
+/// commercialCashToSupplier() y hệt computeCustomerDebt()/
+/// computeSupplierDebt() đang dùng, nên cộng dồn lại luôn khớp đúng
+/// "Phải thu"/"Phải trả" ở trên — không có rủi ro lệch số.
+/// side: 'customer' hoặc 'supplier'.
+function partnerTransactionRows(partnerId, side){
+  const rows = [];
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      const match = side==='customer' ? s.customerId===partnerId : s.supplierId===partnerId;
+      if(!match) continue;
+      const trips = s.commercialTrips||[];
+      const goodsTypes = [...new Set(trips.map(t=>(t.goodsType||'').trim()).filter(Boolean))];
+      rows.push({
+        date: sh.date,
+        driverName: (driverById(sh.driverId)||{}).name || '—',
+        tripCount: siteTripCount(s),
+        goodsTypeLabel: goodsTypes.length ? goodsTypes.join(', ') : '(chưa khai loại hàng)',
+        amount: side==='customer' ? siteBilledAmount(s) : commercialCashToSupplier(s)
+      });
+    }
+  }
+  rows.sort((a,b)=>b.date.localeCompare(a.date)); // mới nhất trước
+  return rows;
+}
+/// Render sẵn bảng .dash dùng chung cho cả màn Khách Hàng lẫn Nhà Cung
+/// Cấp — tránh lặp code giữa openCustomerDetail()/openSupplierDetail().
+function partnerTransactionTableHtml(partnerId, side){
+  const rows = partnerTransactionRows(partnerId, side);
+  if(rows.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
+  return `
+    <div class="card dash-wrap" style="padding:0;">
+      <table class="dash">
+        <thead><tr><th>Ngày</th><th>Tài Xế</th><th>Số Chuyến</th><th>Loại Hàng</th><th>Số Tiền</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`
+          <tr>
+            <td>${formatDateVN(r.date)}</td>
+            <td>${escapeHtml(r.driverName)}</td>
+            <td>${r.tripCount}</td>
+            <td>${escapeHtml(r.goodsTypeLabel)}</td>
+            <td style="font-weight:700; white-space:nowrap;">${fmtVND(r.amount)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
 /// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
 /// xuất cho KT thuế, đảm bảo 2 nơi luôn khớp nhau tuyệt đối.
@@ -7142,13 +7194,12 @@ function renderResults(){
 
     <section class="group">
       <h3>🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</h3>
-      <div class="hint" style="margin-bottom:10px;">Chỉ tính công trình CHỞ CƯỚC (theo tên công trình tự do). Công nợ THƯƠNG MẠI (mua/bán vật liệu) xem ở mục "Nhà Cung Cấp & Khách Hàng" ngay bên dưới — đúng theo Nhà Cung Cấp/Khách Hàng thật, không lẫn theo Điểm Múc-Điểm Đổ nữa. Đây là công nợ CÒN LẠI thực tế tính đến hôm nay, không đổi theo khoảng ngày Ông Chủ chọn ở trên — vì nợ là con số dồn từ trước tới giờ, không phải theo kỳ. Tiền thu về sau sẽ tự trừ vào khoản nợ CŨ NHẤT trước (đúng kiểu kế toán thật).</div>
       <div id="partnersOverviewWrap"></div>
     </section>
 
     <section class="group">
       <h3>🏔️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</h3>
-      <div class="hint" style="margin-bottom:10px;">Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại — không dùng tỷ lệ % nào để suy đoán, chỉ lấy đúng số đã phải thu/trả trừ đúng số tiền đã ghi nhận thật.</div>
+      <div class="hint" style="margin-bottom:10px;">Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại.</div>
       <div id="customerSupplierDebtWrap"></div>
     </section>
 
@@ -7294,6 +7345,10 @@ function openCustomerDetail(customerId){
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
     </section>
     <section class="group">
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
+      ${partnerTransactionTableHtml(customerId, 'customer')}
+    </section>
+    <section class="group">
       <h3>Lịch Sử Đã Thu</h3>
       ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':payments.map(p=>`
         <div class="card" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" data-id="${p.id}" onclick="openCustomerPaymentEditor('${p.id}','${customerId}')">
@@ -7421,6 +7476,10 @@ function openSupplierDetail(supplierId){
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
+    </section>
+    <section class="group">
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
+      ${partnerTransactionTableHtml(supplierId, 'supplier')}
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Trả</h3>
