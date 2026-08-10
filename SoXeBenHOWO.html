@@ -407,7 +407,7 @@
   .modal-step:first-of-type{ border-top:none; }
   .modal-step .st-title{ font-weight:700; font-size:13px; margin-bottom:3px; }
   .modal-step .st-body{ font-size:12.5px; color:var(--ink-soft); line-height:1.5; }
-  .modal-step .st-formula{ font-family:ui-monospace,Menlo,monospace; font-size:12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; word-break:break-word; }
+  .modal-step .st-formula{ font-family:ui-monospace,Menlo,monospace; font-size:12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; word-break:break-word; white-space:pre-line; }
 
   .resp-badge{ display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:6px; vertical-align:middle; }
   .resp-badge.driver_full{ background:var(--loss-soft); color:var(--loss); }
@@ -3487,12 +3487,166 @@ function updateSiteCalc(idx){
           <span class="cb-lbl">THỰC LÃI BỎ TÚI</span>
           <span class="cb-val">${takeHome>=0?'+':''}${fmtVND(takeHome)}</span>
         </div>
+        <button type="button" class="btn btn-ghost btn-sm cashflow-detail-btn" data-idx="${idx}" style="width:100%; margin-top:8px;">🔍 Chi Tiết Cách Tính</button>
         <div class="cb-vat-note">Tiền VAT nộp nhà nước lấy từ tiền khách đã trả — KHÔNG phải tiền túi của Ông Chủ. ${!deductible && inVatCash===0 && commercialGrossBuy(s)>0 ? 'Lưu ý: chưa tick "Đã nhận hóa đơn MUA" nên chưa khấu trừ VAT đầu vào — số VAT nộp đang hiện cao hơn thực tế.' : ''}</div>
         ${wage>0 ? `<div class="cb-wage"><span>Lương chuyến trả tài xế</span><span class="cb-val">${fmtVND(wage)}</span></div>` : ''}
       </div>`;
+    const detailBtn = el.querySelector('.cashflow-detail-btn');
+    if(detailBtn) detailBtn.addEventListener('click', ()=>renderSiteCashFlowExplainerModal(s));
   } else {
     el.textContent = `Thành tiền: ${fmtVND(siteRevenue(s))}  ·  Lương chuyến: ${fmtVND(siteWageTotal(s))}`;
   }
+}
+
+/// Giải trình chi tiết TOÀN BỘ cách tính khối "Dòng Tiền Thực Tế" của 1
+/// công trình thương mại — mở từ nút [🔍 Chi Tiết Cách Tính] trong
+/// updateSiteCalc(). Đi đủ từng bước, không tắt bớt hạng mục nào (yêu
+/// cầu Ông Chủ). QUAN TRỌNG: mọi số hiển thị ở đây được lấy TRỰC TIẾP từ
+/// đúng các hàm đang chạy thật trong app (commercialGrossBuy/Sell,
+/// commercialNetBuy/Sell, commercialCashToSupplier/FromCustomer,
+/// commercialVatPayable, siteGoodsTypeGroups, siteInvoiceLotBreakdown...)
+/// — KHÔNG tính lại bằng công thức riêng, để tuyệt đối không có rủi ro
+/// hiển thị 1 số khác với số thật đang dùng để tính THỰC LÃI BỎ TÚI.
+/// Riêng khối VAT phải nộp (Bước 6) cần lộ 2 số trung gian mà
+/// commercialVatPayable() không tự trả ra (outputVat/inputVat trước khi
+/// trừ) — 2 số này được ghép LẠI ĐÚNG Y HỆT logic bên trong hàm đó (xem
+/// comment tại commercialVatPayable()), không phải công thức mới.
+function renderSiteCashFlowExplainerModal(s){
+  const sup = s.supplierId ? supplierById(s.supplierId) : null;
+  const cus = s.customerId ? customerById(s.customerId) : null;
+  const resolve = (supKey, siteKey, defVal, defLabel) => {
+    if(sup && sup[supKey]!==undefined && sup[supKey]!==null && sup[supKey]!=='') return { val: sup[supKey], src: `nhà cung cấp "${escapeHtml(sup.name)}"` };
+    if(s[siteKey]!==undefined && s[siteKey]!==null && s[siteKey]!=='') return { val: s[siteKey], src: 'gõ tay riêng cho công trình này' };
+    return { val: defVal, src: defLabel };
+  };
+  const rVat = resolve('vatRatePercent','vatRatePercent', Number(state.settings.vatRatePercent)||0, 'mặc định chung Cài Đặt');
+  const rInv = resolve('invoicedBuyPercent','invoicedBuyPercent', 100, 'mặc định (coi như đủ 100% hoá đơn)');
+  const rDen = resolve('densityRatio','densityRatio', null, 'chưa khai — không quy đổi được');
+  const vatFrac = siteVatRateFraction(s);
+  const vatPct = (vatFrac*100).toFixed(0);
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+
+  const trips = s.commercialTrips||[];
+  const buyRows = trips.map(t=>{ const vol=Number(t.buyVolume)||0, price=Number(t.buyUnitPrice)||0; return { goodsType: t.goodsType||'(chưa khai)', vol, price, amt: vol*price }; });
+  const sellRows = trips.map(t=>{ const vol=Number(t.sellVolume)||0, price=Number(t.sellUnitPrice)||0; return { goodsType: t.goodsType||'(chưa khai)', vol, price, amt: vol*price }; });
+  const buyRowsHtml = buyRows.length ? buyRows.map(r=>`${escapeHtml(r.goodsType)}: ${fmtQty(r.vol)} × ${fmtVND(r.price)} = ${fmtVND(r.amt)}`).join('\n') : 'Chưa khai chuyến mua nào.';
+  const sellRowsHtml = sellRows.length ? sellRows.map(r=>`${escapeHtml(r.goodsType)}: ${fmtQty(r.vol)} × ${fmtVND(r.price)} = ${fmtVND(r.amt)}`).join('\n') : 'Chưa khai chuyến bán nào.';
+
+  const grossBuy = commercialGrossBuy(s);
+  const grossSell = commercialGrossSell(s);
+  const netBuy = commercialNetBuy(s);
+  const netSell = commercialNetSell(s);
+  const deductibleBuy = buyIsDeductible(s);
+  const cashToSupplier = commercialCashToSupplier(s);
+  const cashFromCustomer = commercialCashFromCustomer(s);
+  const cashInputVat = commercialCashInputVat(s);   // VAT THẬT nằm trong tiền đã trả mỏ
+  const cashOutputVat = commercialCashOutputVat(s); // VAT THẬT nằm trong tiền khách đã trả
+
+  // Y HỆT logic nội bộ commercialVatPayable() — xem hàm đó để đối chiếu.
+  const outputVatForPayable = netSell * (s.sellIncludesVat ? vatFrac : 0);
+  const inputVatCreditFromBuy = deductibleBuy ? (netBuy * vatFrac) : 0;
+  const supplementVatCredit = siteInvoiceSupplementVatCredit(s);
+  const vatBeforeClamp = outputVatForPayable - inputVatCreditFromBuy - supplementVatCredit;
+  const vatToState = commercialVatPayable(s);
+
+  const missingVol = siteMissingDocumentedVolume(s);
+  const supplementCost = siteInvoiceSupplementCost(s);
+  const groups = siteGoodsTypeGroups(s);
+  const lotInfo = missingVol>0.001 ? siteInvoiceLotBreakdown(s) : { allocations:[] };
+  const takeHome = cashFromCustomer - cashToSupplier - vatToState - supplementCost;
+
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>💵 Cách Tính Dòng Tiền Thương Mại — Giải Trình Chi Tiết</h3>
+    <div class="hint" style="margin-bottom:10px;">Đủ từng bước, không tắt bớt hạng mục nào. Mọi số dưới đây lấy trực tiếp từ đúng hàm đang chạy thật trong app, không tính lại bằng công thức khác.</div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 1 — Thông số áp dụng</div>
+      <div class="st-body">${sup?`Nhà cung cấp đang gắn: <b>${escapeHtml(sup.name)}</b>.`:'Chưa gắn nhà cung cấp.'} ${cus?`Khách hàng đang gắn: <b>${escapeHtml(cus.name)}</b>.`:'Chưa gắn khách hàng.'}</div>
+      <div class="st-formula">Thuế suất VAT = ${rVat.val}%  (nguồn: ${rVat.src})
+% hoá đơn mỏ xuất được = ${rInv.val}%  (nguồn: ${rInv.src})
+Hệ số quy đổi (tấn→khối) = ${rDen.val!==null?rDen.val:'chưa khai'}  (nguồn: ${rDen.src})</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 2 — Từng chuyến MUA (Khối lượng × Đơn giá)</div>
+      <div class="st-formula">${buyRowsHtml}
+—
+Tổng tiền MUA gộp (đúng số đã nhập) = ${fmtVND(grossBuy)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 3 — Từng chuyến BÁN (Khối lượng × Đơn giá)</div>
+      <div class="st-formula">${sellRowsHtml}
+—
+Tổng tiền BÁN gộp (đúng số đã nhập) = ${fmtVND(grossSell)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 4 — Bóc VAT ra số NET (để tính lãi gộp kế toán)</div>
+      <div class="st-body">Giá đã nhập "Có VAT" thì chia cho (1 + thuế suất) để ra net; giá "Chưa VAT" thì giữ nguyên, không đổi.</div>
+      <div class="st-formula">Giá MUA đang khai: ${s.buyIncludesVat?'CÓ VAT':'CHƯA VAT'}
+Net Mua = ${s.buyIncludesVat ? `${fmtVND(grossBuy)} ÷ (1 + ${vatPct}%) = ${fmtVND(netBuy)}` : `${fmtVND(grossBuy)} (đã là net, giữ nguyên)`}
+
+Giá BÁN đang khai: ${s.sellIncludesVat?'CÓ VAT':'CHƯA VAT'}
+Net Bán = ${s.sellIncludesVat ? `${fmtVND(grossSell)} ÷ (1 + ${vatPct}%) = ${fmtVND(netSell)}` : `${fmtVND(grossSell)} (đã là net, giữ nguyên)`}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 5 — Tiền mặt THẬT trả nhà cung cấp / nhận từ khách</div>
+      <div class="st-body">Khác số Net ở Bước 4 — đây là số tiền THẬT chuyển khoản, tuỳ giá đã gồm VAT hay chưa và có hoá đơn hay không.</div>
+      <div class="st-formula">"Đã nhận hóa đơn MUA (được khấu trừ VAT đầu vào)": ${deductibleBuy?'CÓ tick':'CHƯA tick'}
+Trả nhà cung cấp = ${s.buyIncludesVat
+  ? `${fmtVND(grossBuy)} (giá đã gồm VAT = đúng số trả)`
+  : deductibleBuy
+    ? `${fmtVND(netBuy)} × (1 + ${vatPct}%) = ${fmtVND(cashToSupplier)} (net + VAT vì đã có hoá đơn)`
+    : `${fmtVND(netBuy)} (net — chưa có hoá đơn nên không cộng VAT)`}
+= ${fmtVND(cashToSupplier)}   (trong đó VAT thật đã trả mỏ = ${fmtVND(cashInputVat)})
+
+"Đã xuất hóa đơn BÁN": ${s.sellHasInvoice?'CÓ tick':'CHƯA tick'}
+Khách trả = ${s.sellIncludesVat
+  ? `${fmtVND(grossSell)} (giá đã gồm VAT = đúng số khách trả)`
+  : s.sellHasInvoice
+    ? `${fmtVND(netSell)} × (1 + ${vatPct}%) = ${fmtVND(cashFromCustomer)} (net + VAT vì có xuất hoá đơn)`
+    : `${fmtVND(netSell)} (net — chưa xuất hoá đơn nên không cộng VAT)`}
+= ${fmtVND(cashFromCustomer)}   (trong đó VAT thật khách đã trả = ${fmtVND(cashOutputVat)})</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 6 — VAT phải nộp nhà nước cuối tháng</div>
+      <div class="st-body">= VAT đầu ra − VAT đầu vào ĐƯỢC KHẤU TRỪ (chỉ tính khi đã tick "Đã nhận hóa đơn MUA") − VAT khấu trừ từ các lô Kho Hoá Đơn Bù đã rút cho ca này. Đây là NGHĨA VỤ THUẾ — khác với số VAT thật nằm trong tiền mặt ở Bước 5.</div>
+      <div class="st-formula">VAT đầu ra = Net Bán × ${s.sellIncludesVat?`${vatPct}%`:'0% (giá bán chưa VAT)'} = ${fmtVND(outputVatForPayable)}
+VAT đầu vào được khấu trừ = ${deductibleBuy?`Net Mua × ${vatPct}% = ${fmtVND(inputVatCreditFromBuy)}`:'0đ (chưa có hoá đơn MUA)'}
+VAT khấu trừ từ Kho Hoá Đơn Bù = ${fmtVND(supplementVatCredit)}
+VAT phải nộp = ${fmtVND(outputVatForPayable)} − ${fmtVND(inputVatCreditFromBuy)} − ${fmtVND(supplementVatCredit)} = ${fmtVND(vatBeforeClamp)}${vatBeforeClamp<0?`
+→ Âm nghĩa là khấu trừ NHIỀU hơn phải nộp — app không cho âm (không tự bịa hoàn thuế), chốt về 0đ`:''}
+= ${fmtVND(vatToState)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 7 — Khối lượng thiếu chứng từ (theo từng loại hàng)</div>
+      <div class="st-body">${groups.length===0?'Chưa có chuyến nào khai loại hàng.':'Khối lượng có chứng từ hợp lệ = (KL mua × %hoá đơn) ÷ hệ số quy đổi. Thiếu = MAX(0, KL bán − KL có chứng từ).'}</div>
+      ${groups.map(g=>{
+        const documentedVol = (rDen.val && rDen.val>0) ? (g.buyVolume*rInv.val/100)/rDen.val : null;
+        return `<div class="st-formula"><b>${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}</b>
+KL mua = ${fmtQty(g.buyVolume)} tấn · KL bán = ${fmtQty(g.sellVolume)} khối
+KL có chứng từ = ${documentedVol!==null ? `(${fmtQty(g.buyVolume)} × ${rInv.val}%) ÷ ${rDen.val} = ${fmtQty(documentedVol)} khối` : 'không quy đổi được (thiếu % hoá đơn hoặc hệ số quy đổi)'}
+KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(documentedVol):'—'}) = ${fmtQty(g.missingVolume)} khối
+Giá trị quy đổi nội bộ = ${fmtQty(g.missingVolume)} × đơn giá mua BQ ${fmtVND(g.avgBuyUnitPrice)} = ${fmtVND(g.missingValue)}</div>`;
+      }).join('')}
+      ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — lô mua trước dùng trước)</b>
+${lotInfo.allocations.map(a=>`↳ Lô ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'} (${escapeHtml(a.goodsType||'')}): ${fmtQty(a.volume)} khối — chi phí ${fmtVND(a.cost)}, VAT khấu trừ ${fmtVND(a.vat)}`).join('\n')}
+—
+Tổng chi phí mua hoá đơn bù (tiền mặt thật, đã gồm VAT của lô) = ${fmtVND(supplementCost)}</div>` : (missingVol>0.001 ? `<div class="hint">Kho hoá đơn bù chưa rút được lô nào cho ca này — chi phí bổ sung chứng từ tạm = 0đ (không bịa số khi chưa thật sự mua lô mới).</div>` : `<div class="hint">Không thiếu chứng từ — không phát sinh chi phí bổ sung.</div>`)}
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 8 — THỰC LÃI BỎ TÚI</div>
+      <div class="st-formula">= Khách trả − Trả nhà cung cấp − VAT nộp nhà nước − Chi phí bổ sung chứng từ
+= ${fmtVND(cashFromCustomer)} − ${fmtVND(cashToSupplier)} − ${fmtVND(vatToState)} − ${fmtVND(supplementCost)}
+= ${fmtVND(takeHome)}</div>
+    </div>
+  `);
 }
 
 /// Khối "Tổng doanh thu / từng khoản chi phí / Tổng chi phí / Lợi nhuận
