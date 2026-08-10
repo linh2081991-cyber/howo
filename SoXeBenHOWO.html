@@ -172,8 +172,21 @@
   /* chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho */
   /* input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả */
   /* năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần). */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; }
-  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; }
+  /// FIX (yêu cầu Ông Chủ, kèm ảnh chụp màn hình 2026-08-10): chữ ngày
+  /// "ngày 10 thg 8, 2026" và cả khung ô bị to/cao hẳn ra so với các ô
+  /// khác. Nguyên nhân: phần chữ hiển thị ngày của Safari iOS nằm trong
+  /// shadow pseudo-element ::-webkit-date-and-time-value — pseudo-element
+  /// này KHÔNG tự nhận font-size 19px kế thừa từ input[type=date] ở trên,
+  /// mà tự vẽ theo cỡ chữ hệ thống (to hơn nhiều), và khung ô bị Safari
+  /// tự kéo cao theo đúng cỡ chữ đó (height:48px ở input không có tác
+  /// dụng với phần chữ bên trong). Ép font-size/line-height TRỰC TIẾP lên
+  /// đúng pseudo-element này (không đổi appearance, không che/đè input —
+  /// giữ nguyên tinh thần "an toàn" đã chọn trước đây) là đủ để chữ nhỏ
+  /// lại đúng cỡ 19px như các ô khác, và khung ô tự co theo, không cần
+  /// đụng gì thêm.
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; }
+  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
+  input[type=date]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
   .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
   .seg button{ flex:1; padding:13px 0; border:none; background:var(--surface); font-size:15.5px; font-weight:600; color:var(--ink-soft); }
   .seg button.active{ background:var(--accent); color:#fff; }
@@ -444,6 +457,7 @@
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
 </div>
 <datalist id="siteNamesList"></datalist>
+<datalist id="tripLocationsList"></datalist>
 <datalist id="goodsTypesList"></datalist>
 <div id="modalRoot"></div>
 <script>
@@ -2301,6 +2315,12 @@ function allSiteNames(){
   const lastSeen = {}; // tên công trình -> ngày gần nhất xuất hiện
   for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
+      // CHỈ công trình chở cước — công trình thương mại có s.siteName do
+      // syncSiteNameFromTrips() TỰ GỘP nhiều Điểm Múc-Điểm Đổ khác nhau
+      // trong cùng 1 ca thành 1 chuỗi dài (VD "Mỏ A - CT1, Mỏ B - CT2"),
+      // không phải "tên công trình" thật nên không phù hợp làm gợi ý ở
+      // đây — xem allTripLocations() bên dưới cho gợi ý riêng của thương mại.
+      if(s.siteType==='commercial') continue;
       const n=(s.siteName||'').trim();
       if(!n) continue;
       if(!lastSeen[n] || sh.date>lastSeen[n]) lastSeen[n]=sh.date;
@@ -2313,6 +2333,34 @@ function allSiteNames(){
   });
   names.sort((a,b)=>lastSeen[b].localeCompare(lastSeen[a])); // gần nhất trước
   return names;
+}
+
+/// Gợi ý Điểm Múc - Điểm Đổ khi gõ (chuyến thương mại) — tách riêng hoàn
+/// toàn khỏi allSiteNames() ở trên. Lấy TỪNG t.tripLocation riêng lẻ của
+/// từng chuyến, KHÔNG đọc s.siteName (chuỗi đó bị gộp nhiều điểm múc-đổ
+/// khác nhau vào 1 dòng — xem comment ở syncSiteNameFromTrips() và ở
+/// allSiteNames()) — nhờ vậy mỗi gợi ý luôn là ĐÚNG 1 điểm múc-đổ sạch,
+/// không dính nhiều điểm vào cùng 1 dòng. Cùng quy tắc lọc 10 ngày gần
+/// nhất như allSiteNames() để đồng nhất trải nghiệm gõ.
+function allTripLocations(){
+  const lastSeen = {}; // điểm múc-đổ -> ngày gần nhất xuất hiện
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      for(const t of (s.commercialTrips||[])){
+        const n=(t.tripLocation||'').trim();
+        if(!n) continue;
+        if(!lastSeen[n] || sh.date>lastSeen[n]) lastSeen[n]=sh.date;
+      }
+    }
+  }
+  const todayStr = todayLocalDateStr();
+  const locs = Object.keys(lastSeen).filter(n=>{
+    const days = daysBetweenDates(new Date(lastSeen[n]+'T00:00:00'), new Date(todayStr+'T00:00:00'));
+    return days < 10;
+  });
+  locs.sort((a,b)=>lastSeen[b].localeCompare(lastSeen[a])); // gần nhất trước
+  return locs;
 }
 
 // ========================= TOAST =========================
@@ -3120,7 +3168,7 @@ function renderSiteRows(){
             </div>
             <div class="field">
               <label>Điểm Múc - Điểm Đổ</label>
-              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="siteNamesList" value="${escapeHtml(t.tripLocation||'')}">
+              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="tripLocationsList" value="${escapeHtml(t.tripLocation||'')}">
             </div>
             <div class="two-col">
               <div class="field"><label>KL mua (tấn)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="buyVolume" placeholder="0" value="${blankIfZero(t.buyVolume)}"></div>
@@ -3392,7 +3440,7 @@ function updateSiteCalc(idx){
     const missingValue = siteMissingDocumentedValue(s);
 
     // Dòng "gồm VAT ..." chỉ hiện khi thực sự có VAT ở đầu đó
-    const sellSub = outVatCash>0 ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>` : '';
+    const sellSub = outVatCash>0 ? `<div class="cb-line cb-sub" style="padding-left:0;"><span class="cb-lbl">Trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>` : '';
     const buySub = inVatCash>0
       ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT đã trả mỏ ${deductible?'(được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
       : '';
@@ -3455,11 +3503,25 @@ function shiftFinancialSummaryHtml(sh){
   const revenue = shiftTotalRevenue(sh);
   const cost = shiftTotalCost(sh);
   const profit = shiftNetProfit(sh);
-  const costItems = [
+  // Tách nhóm CHI PHÍ MUA-BÁN (chỉ phát sinh ở công trình thương mại) ra
+  // khỏi nhóm CHI PHÍ VẬN HÀNH CA (dầu, lương, ăn, nhà... ca nào cũng có),
+  // chèn thêm 1 dòng subtotal "= THỰC LÃI BỎ TÚI" ở giữa — để Ông Chủ
+  // nhìn thấy rõ 2 bước: (1) mua-bán lời/lỗ bao nhiêu, (2) CP vận hành ăn
+  // vào bao nhiêu, thay vì dồn hết thành 1 cục CP như trước. KHÔNG đổi
+  // bất kỳ con số nào: cost/profit vẫn lấy đúng shiftTotalCost()/
+  // shiftNetProfit() y hệt trước — đây chỉ là thêm 1 bước hiển thị trung
+  // gian, tổng cuối cùng không đổi.
+  const materialCost = shiftMaterialCost(sh);
+  const supplementCost = shiftInvoiceSupplementCost(sh);
+  const hasCommercialCost = (materialCost>0) || (supplementCost>0);
+  const takeHomeSubtotal = revenue - materialCost - supplementCost;
+  const buyRelatedItems = [
+    { label:'Giá vốn hàng mua (thương mại)', value: materialCost },
+    { label:'Chi phí bổ sung chứng từ (khối lượng thiếu)', value: supplementCost }
+  ];
+  const operatingItems = [
     { label:'Tiền dầu tiêu hao', value: shiftFuelCost(sh) },
     { label:'Lương chuyến', value: shiftTotalTripWage(sh) },
-    { label:'Giá vốn hàng mua (thương mại)', value: shiftMaterialCost(sh) },
-    { label:'Chi phí bổ sung chứng từ (khối lượng thiếu)', value: shiftInvoiceSupplementCost(sh) },
     { label:'Lương cứng phân bổ', value: Number(sh.baseSalaryAllocation)||0 },
     { label:'Tiền ăn', value: Number(sh.foodAllowance)||0 },
     { label:'Tiền nhà phân bổ', value: Number(sh.housingAllocation)||0 },
@@ -3469,7 +3531,12 @@ function shiftFinancialSummaryHtml(sh){
   return `
     <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
-    ${costItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
+    ${hasCommercialCost ? `
+    ${buyRelatedItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
+    <div class="summary-row total" style="font-size:15px;"><span>= THỰC LÃI BỎ TÚI</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
+    <div class="formula-divider" style="margin:8px 0;"></div>
+    ` : ''}
+    ${operatingItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
     <div class="summary-row total" style="font-size:15.5px;"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
@@ -9367,6 +9434,7 @@ function renderAll(){
   }
   renderHeader();
   refreshSiteDatalist();
+  refreshTripLocationsDatalist();
   refreshGoodsTypesDatalist();
   if(state.currentTab==='shifts'){
     if(state.view==='form') renderShiftForm();
@@ -9388,6 +9456,13 @@ function renderAll(){
 function refreshSiteDatalist(){
   const dl=document.getElementById('siteNamesList');
   dl.innerHTML = allSiteNames().map(n=>`<option value="${escapeHtml(n)}">`).join('');
+}
+/// Đổ dữ liệu datalist riêng cho Điểm Múc-Điểm Đổ (thương mại) — tách
+/// hẳn khỏi #siteNamesList ở trên để 2 loại gợi ý không còn lẫn vào nhau.
+function refreshTripLocationsDatalist(){
+  const dl=document.getElementById('tripLocationsList');
+  if(!dl) return;
+  dl.innerHTML = allTripLocations().map(n=>`<option value="${escapeHtml(n)}">`).join('');
 }
 /// Danh sách LOẠI HÀNG đã dùng — gom từ từng CHUYẾN đã khai lẫn lô hoá
 /// đơn đã mua, để gõ tay không bị lệch chính tả (VD "Base A" vs "base a").
