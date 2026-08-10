@@ -172,18 +172,24 @@
   /* chỉ chỉnh font/căn lề bằng đúng thuộc tính CSS iOS Safari hỗ trợ cho */
   /* input ngày) để đỡ lệch với các ô khác, mà KHÔNG có rủi ro làm mất khả */
   /* năng bấm mở lịch (khác hẳn kiểu "đè lớp chữ đẹp" từng thất bại 2 lần). */
-  /// FIX (yêu cầu Ông Chủ, kèm ảnh chụp màn hình 2026-08-10): chữ ngày
-  /// "ngày 10 thg 8, 2026" và cả khung ô bị to/cao hẳn ra so với các ô
-  /// khác. Nguyên nhân: phần chữ hiển thị ngày của Safari iOS nằm trong
-  /// shadow pseudo-element ::-webkit-date-and-time-value — pseudo-element
-  /// này KHÔNG tự nhận font-size 19px kế thừa từ input[type=date] ở trên,
-  /// mà tự vẽ theo cỡ chữ hệ thống (to hơn nhiều), và khung ô bị Safari
-  /// tự kéo cao theo đúng cỡ chữ đó (height:48px ở input không có tác
-  /// dụng với phần chữ bên trong). Ép font-size/line-height TRỰC TIẾP lên
-  /// đúng pseudo-element này (không đổi appearance, không che/đè input —
-  /// giữ nguyên tinh thần "an toàn" đã chọn trước đây) là đủ để chữ nhỏ
-  /// lại đúng cỡ 19px như các ô khác, và khung ô tự co theo, không cần
-  /// đụng gì thêm.
+  /* FIX (yêu cầu Ông Chủ, kèm ảnh chụp màn hình 2026-08-10): chữ ngày
+     "ngày 10 thg 8, 2026" và cả khung ô bị to/cao hẳn ra so với các ô
+     khác. Nguyên nhân: phần chữ hiển thị ngày của Safari iOS nằm trong
+     shadow pseudo-element ::-webkit-date-and-time-value — pseudo-element
+     này KHÔNG tự nhận font-size 19px kế thừa từ input[type=date] ở trên,
+     mà tự vẽ theo cỡ chữ hệ thống (to hơn nhiều), và khung ô bị Safari
+     tự kéo cao theo đúng cỡ chữ đó (height:48px ở input không có tác
+     dụng với phần chữ bên trong). Ép font-size/line-height TRỰC TIẾP lên
+     đúng pseudo-element này (không đổi appearance, không che/đè input —
+     giữ nguyên tinh thần "an toàn" đã chọn trước đây) là đủ để chữ nhỏ
+     lại đúng cỡ 19px như các ô khác, và khung ô tự co theo, không cần
+     đụng gì thêm.
+     SỬA LẠI 2026-08-10 LẦN 2: bản trước dùng nhầm "///" (cú pháp comment
+     của JS) thay vì "/* */" (cú pháp comment của CSS) ngay phía trên rule
+     input[type=date] bên dưới — khiến trình duyệt hiểu nhầm cả khối chữ
+     Việt lẫn rule thật là 1 selector vô nghĩa và ÂM THẦM BỎ QUA toàn bộ
+     rule đó. Vì vậy "font-size:19px" chưa từng thực sự chạy trên máy Ông
+     Chủ — không phải do cache. Đã chuyển đúng về "/* */". */
   input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
   input[type=date]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
@@ -392,6 +398,23 @@
   table.dash tbody tr:last-child td{ border-bottom:none; }
   .dash-wrap{ overflow-x:auto; }
   .dash-highlight td{ font-weight:800; color:var(--ink); }
+  /* Bảng KẺ Ô ĐỦ 4 CẠNH (khác .dash ở trên chỉ có gạch ngang giữa các
+     dòng) — dùng cho các bảng cần soi rất kỹ từng ô (Chi Tiết Giao Dịch
+     theo từng chuyến, Lịch Sử Đã Thu/Đã Trả) theo đúng yêu cầu Ông Chủ
+     "hiển thị thành bảng, kẻ ô rõ ràng". */
+  .grid-table-wrap{ overflow-x:auto; border-radius:10px; border:1px solid var(--border); }
+  table.grid-table{ width:100%; border-collapse:collapse; font-size:12.5px; background:var(--surface); }
+  table.grid-table th, table.grid-table td{ padding:8px 7px; border:1px solid var(--border); text-align:left; }
+  table.grid-table td.num, table.grid-table th.num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  table.grid-table thead th{ background:var(--bg); font-size:10.5px; text-transform:uppercase; letter-spacing:.02em; color:var(--ink-soft); text-align:right; }
+  table.grid-table thead th:first-child{ text-align:left; }
+  table.grid-table tr.grid-group-row td{ background:var(--accent-soft); font-weight:700; color:var(--ink); font-size:12px; }
+  table.grid-table tr.grid-total-row td{ background:var(--bg); font-weight:800; text-align:right; }
+  table.grid-table tr.grid-total-row td:first-child{ text-align:right; }
+  table.grid-table td, table.grid-table th{ font-variant-numeric:tabular-nums; }
+  table.grid-table td:not(.num), table.grid-table th:not(.num){ font-variant-numeric:normal; }
+  .grid-clickable-row{ cursor:pointer; }
+  .grid-clickable-row:active{ background:var(--accent-soft); }
 
   .modal-backdrop{
     position:fixed; inset:0; z-index:200; background:rgba(0,0,0,.45);
@@ -6581,55 +6604,76 @@ function computeSupplierDebt(supplierId){
   // phải trả tính đến giờ.
   return { payable, paid, owed: payable-paid };
 }
-/// Chi tiết TỪNG "lần giao dịch" (1 dòng = 1 công trình thương mại trong
-/// 1 ca) gắn với đúng khách hàng/nhà cung cấp — Ngày, Tài Xế, Số Chuyến,
-/// Loại Hàng, Số Tiền. Chỉ để HIỂN THỊ cho Ông Chủ đối chiếu nhanh khi
-/// cần xử lý dòng tiền gấp với đối tác, không tính lại công nợ ở đây —
-/// số tiền mỗi dòng lấy ĐÚNG công thức siteBilledAmount()/
-/// commercialCashToSupplier() y hệt computeCustomerDebt()/
-/// computeSupplierDebt() đang dùng, nên cộng dồn lại luôn khớp đúng
-/// "Phải thu"/"Phải trả" ở trên — không có rủi ro lệch số.
-/// side: 'customer' hoặc 'supplier'.
-function partnerTransactionRows(partnerId, side){
-  const rows = [];
+/// Chi tiết TỪNG CHUYẾN (không gộp theo công trình nữa) gắn với đúng
+/// khách hàng/nhà cung cấp — nhóm theo NGÀY để Ông Chủ thấy rõ CẢ "hôm đó
+/// chạy mấy chuyến" LẪN "mỗi chuyến loại hàng gì, bao nhiêu tiền" trong
+/// cùng 1 bảng (yêu cầu Ông Chủ, kèm ảnh chụp màn hình 2026-08-10).
+/// side: 'customer' hoặc 'supplier'. Tiền mỗi chuyến áp ĐÚNG hệ số
+/// (sellIncludesVat/sellHasInvoice hoặc buyIncludesVat/buyIsDeductible)
+/// mà commercialCashFromCustomer()/commercialCashToSupplier() đang dùng ở
+/// cấp CÔNG TRÌNH — vì phép nhân phân phối qua phép cộng, cộng dồn từng
+/// chuyến lại LUÔN khớp tuyệt đối với đúng số công nợ đang hiển thị ở
+/// trên, không có rủi ro lệch số dù tách nhỏ tới cấp chuyến.
+function partnerTripRows(partnerId, side){
+  const groups = [];
   for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
       const match = side==='customer' ? s.customerId===partnerId : s.supplierId===partnerId;
       if(!match) continue;
-      const trips = s.commercialTrips||[];
-      const goodsTypes = [...new Set(trips.map(t=>(t.goodsType||'').trim()).filter(Boolean))];
-      rows.push({
-        date: sh.date,
-        driverName: (driverById(sh.driverId)||{}).name || '—',
-        tripCount: siteTripCount(s),
-        goodsTypeLabel: goodsTypes.length ? goodsTypes.join(', ') : '(chưa khai loại hàng)',
-        amount: side==='customer' ? siteBilledAmount(s) : commercialCashToSupplier(s)
+      const vatFrac = siteVatRateFraction(s);
+      const deductibleBuy = side==='supplier' ? buyIsDeductible(s) : false;
+      const rawTrips = (s.commercialTrips||[]).filter(t=>
+        side==='customer' ? (Number(t.sellVolume)>0 && Number(t.sellUnitPrice)>0) : (Number(t.buyVolume)>0 && Number(t.buyUnitPrice)>0)
+      );
+      if(rawTrips.length===0) continue;
+      const trips = rawTrips.map(t=>{
+        if(side==='customer'){
+          const vol = Number(t.sellVolume)||0, price = Number(t.sellUnitPrice)||0, gross = vol*price;
+          const cash = s.sellIncludesVat ? gross : (s.sellHasInvoice ? gross*(1+vatFrac) : gross);
+          return { goodsType: t.goodsType||'(chưa khai)', vol, price, unit:'khối', cash };
+        }
+        const vol = Number(t.buyVolume)||0, price = Number(t.buyUnitPrice)||0, gross = vol*price;
+        const cash = s.buyIncludesVat ? gross : (deductibleBuy ? gross*(1+vatFrac) : gross);
+        return { goodsType: t.goodsType||'(chưa khai)', vol, price, unit:'tấn', cash };
+      });
+      const driver = driverById(sh.driverId);
+      groups.push({
+        date: sh.date, shiftType: sh.shiftType,
+        driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'),
+        siteName: s.siteName||'',
+        trips, totalCash: trips.reduce((sum,t)=>sum+t.cash,0)
       });
     }
   }
-  rows.sort((a,b)=>b.date.localeCompare(a.date)); // mới nhất trước
-  return rows;
+  groups.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType)); // mới nhất trước
+  return groups;
 }
-/// Render sẵn bảng .dash dùng chung cho cả màn Khách Hàng lẫn Nhà Cung
-/// Cấp — tránh lặp code giữa openCustomerDetail()/openSupplierDetail().
+/// Render bảng .grid-table (kẻ ô đủ 4 cạnh, theo yêu cầu Ông Chủ) — mỗi
+/// NGÀY 1 dòng tiêu đề nhóm (ngày · ca · tài xế · công trình · số
+/// chuyến), theo sau là TỪNG CHUYẾN riêng (loại hàng, khối lượng, đơn
+/// giá, thành tiền), và 1 dòng "Tổng ngày" để đối chiếu nhanh.
 function partnerTransactionTableHtml(partnerId, side){
-  const rows = partnerTransactionRows(partnerId, side);
-  if(rows.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
+  const groups = partnerTripRows(partnerId, side);
+  if(groups.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const rowsHtml = groups.map(g=>{
+    const header = `<tr class="grid-group-row"><td colspan="4">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)}${g.siteName?` · ${escapeHtml(g.siteName)}`:''} — ${g.trips.length} chuyến</td></tr>`;
+    const tripLines = g.trips.map(t=>`
+      <tr>
+        <td>${escapeHtml(t.goodsType)}</td>
+        <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
+        <td class="num">${fmtVND(t.price)}</td>
+        <td class="num" style="font-weight:700;">${fmtVND(t.cash)}</td>
+      </tr>`).join('');
+    const totalLine = `<tr class="grid-total-row"><td colspan="3">Tổng ngày</td><td class="num">${fmtVND(g.totalCash)}</td></tr>`;
+    return header + tripLines + totalLine;
+  }).join('');
   return `
-    <div class="card dash-wrap" style="padding:0;">
-      <table class="dash">
-        <thead><tr><th>Ngày</th><th>Tài Xế</th><th>Số Chuyến</th><th>Loại Hàng</th><th>Số Tiền</th></tr></thead>
-        <tbody>
-          ${rows.map(r=>`
-          <tr>
-            <td>${formatDateVN(r.date)}</td>
-            <td>${escapeHtml(r.driverName)}</td>
-            <td>${r.tripCount}</td>
-            <td>${escapeHtml(r.goodsTypeLabel)}</td>
-            <td style="font-weight:700; white-space:nowrap;">${fmtVND(r.amount)}</td>
-          </tr>`).join('')}
-        </tbody>
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Loại Hàng</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Thành Tiền</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
       </table>
     </div>`;
 }
@@ -7504,11 +7548,20 @@ function openCustomerDetail(customerId){
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Thu</h3>
-      ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':payments.map(p=>`
-        <div class="card" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" data-id="${p.id}" onclick="openCustomerPaymentEditor('${p.id}','${customerId}')">
-          <div class="summary-row"><span>${formatDateVN(p.date)}</span><span class="val" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</span></div>
-          ${p.notes?`<div class="hint">${escapeHtml(p.notes)}</div>`:''}
-        </div>`).join('')}
+      ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':`
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${payments.map(p=>`
+            <tr class="grid-clickable-row" data-id="${p.id}" onclick="openCustomerPaymentEditor('${p.id}','${customerId}')">
+              <td>${formatDateVN(p.date)}</td>
+              <td>${p.notes?escapeHtml(p.notes):'—'}</td>
+              <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
     </section>
   `;
   document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
@@ -7637,11 +7690,20 @@ function openSupplierDetail(supplierId){
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Trả</h3>
-      ${payments.length===0?'<div class="hint">Chưa có khoản trả nào.</div>':payments.map(p=>`
-        <div class="card" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" data-id="${p.id}" onclick="openSupplierPaymentEditor('${p.id}','${supplierId}')">
-          <div class="summary-row"><span>${formatDateVN(p.date)}</span><span class="val" style="color:var(--loss); font-weight:700;">−${fmtVND(p.amount)}</span></div>
-          ${p.notes?`<div class="hint">${escapeHtml(p.notes)}</div>`:''}
-        </div>`).join('')}
+      ${payments.length===0?'<div class="hint">Chưa có khoản trả nào.</div>':`
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${payments.map(p=>`
+            <tr class="grid-clickable-row" data-id="${p.id}" onclick="openSupplierPaymentEditor('${p.id}','${supplierId}')">
+              <td>${formatDateVN(p.date)}</td>
+              <td>${p.notes?escapeHtml(p.notes):'—'}</td>
+              <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(p.amount)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
     </section>
   `;
   document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
