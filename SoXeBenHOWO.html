@@ -1547,26 +1547,80 @@ function renderInvoiceLotManagerModal(editingId, opts){
       </div>
       <div class="field">
         <label>Tổng giá trị hoá đơn (đã gồm VAT, đúng số chuyển khoản)</label>
-        <input type="text" inputmode="decimal" id="lot_value" placeholder="đ" value="${val(editing,'totalInvoiceValue')}">
+        <input type="text" inputmode="decimal" id="lot_value" placeholder="đ">
       </div>
     </div>
+    <div class="field">
+      <label>VAT suất trên hoá đơn (%)</label>
+      <input type="text" inputmode="decimal" id="lot_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
+    </div>
+    <div class="formula-divider" style="margin:12px 0;"></div>
+    <div style="font-weight:700; margin-bottom:6px;">Tiền Mặt Nhận Lại (bên bán trả lại mặt)</div>
     <div class="two-col">
       <div class="field">
-        <label>VAT suất trên hoá đơn (%)</label>
-        <input type="text" inputmode="decimal" id="lot_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
+        <label>% nhận lại (trên tổng giá trị hoá đơn)</label>
+        <input type="text" inputmode="decimal" id="lot_cashReturnedPct" placeholder="VD 77">
       </div>
       <div class="field">
-        <label>Tiền mặt nhận lại thực tế</label>
-        <input type="text" inputmode="decimal" id="lot_cashReturned" placeholder="đ" value="${val(editing,'cashReturned')}">
+        <label>Tiền mặt nhận lại thực tế (tự tính — sửa tay được)</label>
+        <input type="text" inputmode="decimal" id="lot_cashReturned" placeholder="đ">
       </div>
+    </div>
+    <div class="summary-row total" style="margin-bottom:10px;">
+      <span>= Số Tiền Thật Phải Trả Đối Tác</span>
+      <span class="val" id="lot_realCostVal">0đ</span>
     </div>
     <div class="field">
       <label>Ghi chú</label>
       <input type="text" id="lot_note" value="${escapeHtml(val(editing,'note'))}">
     </div>
-    <div class="hint" style="margin-bottom:10px;">Chi phí THẬT của lô = Tổng giá trị hoá đơn − Tiền mặt nhận lại, chia đều theo khối lượng khi rút dùng.</div>
+    <div class="hint" style="margin-bottom:10px;">Gõ % (hoặc sửa tay ô Tiền mặt nhận lại) — 2 ô này tự đồng bộ 2 chiều. "Số Tiền Thật Phải Trả Đối Tác" = Tổng giá trị hoá đơn − Tiền mặt nhận lại — đây mới là chi phí THẬT của lô, chia đều theo khối lượng khi rút dùng.</div>
     <button class="btn btn-accent" id="saveLotBtn">${editing?'💾 Lưu Thay Đổi':'+ Thêm Lô'}</button>
   `);
+  // ---- Đồng bộ 2 chiều % nhận lại ⇄ Tiền mặt nhận lại thực tế, cả 2 ô
+  // tiền đều hiển thị dấu chấm ngăn cách hàng nghìn (yêu cầu Ông Chủ
+  // 2026-08-10). Dùng biến cục bộ curTotalValue/curCashReturned làm nguồn
+  // sự thật thay vì parse lại chuỗi đã có dấu chấm lúc Lưu — tránh lỗi
+  // phân tách hàng nghìn khi đọc ngược lại số.
+  const totalValueInputEl = document.getElementById('lot_value');
+  const cashReturnedInputEl = document.getElementById('lot_cashReturned');
+  const pctInputEl = document.getElementById('lot_cashReturnedPct');
+  const realCostValEl = document.getElementById('lot_realCostVal');
+  let curTotalValue = Number(val(editing,'totalInvoiceValue'))||0;
+  let curCashReturned = Number(val(editing,'cashReturned'))||0;
+  const refreshRealCost = () => {
+    const real = curTotalValue - curCashReturned;
+    realCostValEl.textContent = (real>=0?'':'−') + fmtVND(Math.abs(real));
+    realCostValEl.style.color = real>=0 ? 'var(--profit)' : 'var(--loss)';
+  };
+  const syncPctFromCash = () => {
+    pctInputEl.value = (curTotalValue>0 && curCashReturned>0) ? (Math.round((curCashReturned/curTotalValue*100)*100)/100) : '';
+  };
+  attachMoneyInput(totalValueInputEl, curTotalValue, v=>{
+    curTotalValue = v;
+    // Đổi Tổng giá trị hoá đơn mà % nhận lại đã có sẵn → giữ nguyên đúng
+    // % đó, tự tính lại Tiền mặt nhận lại theo tỉ lệ mới (không giữ số
+    // tiền cũ cố định, vì % mới là con số Ông Chủ thật sự chốt với đối tác).
+    const pct = parseFloat((pctInputEl.value||'').replace(',','.'))||0;
+    if(pct>0){
+      curCashReturned = Math.round(curTotalValue*pct/100);
+      cashReturnedInputEl.value = curCashReturned ? curCashReturned.toLocaleString('vi-VN') : '';
+    }
+    refreshRealCost();
+  });
+  attachMoneyInput(cashReturnedInputEl, curCashReturned, v=>{
+    curCashReturned = v;
+    syncPctFromCash();
+    refreshRealCost();
+  });
+  syncPctFromCash();
+  pctInputEl.addEventListener('input', ()=>{
+    const pct = parseFloat(pctInputEl.value.replace(',','.'))||0;
+    curCashReturned = curTotalValue>0 ? Math.round(curTotalValue*pct/100) : 0;
+    cashReturnedInputEl.value = curCashReturned ? curCashReturned.toLocaleString('vi-VN') : '';
+    refreshRealCost();
+  });
+  refreshRealCost();
   document.querySelectorAll('.lotReportBtn').forEach(btn=>btn.addEventListener('click', ()=>{
     const lot = invoiceLotById(btn.dataset.id);
     if(lot) renderInvoiceLotManagerModal(lot.id, {showReport:true});
@@ -1584,7 +1638,7 @@ function renderInvoiceLotManagerModal(editingId, opts){
     const purchaseDate = document.getElementById('lot_purchaseDate').value;
     const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
     const totalVolume = parseVN(document.getElementById('lot_volume').value);
-    const totalInvoiceValue = parseVN(document.getElementById('lot_value').value);
+    const totalInvoiceValue = curTotalValue || undefined;
     if(!goodsType){ showToast('Nhập loại hàng (VD Base A).'); return; }
     if(!purchaseDate){ showToast('Nhập ngày mua.'); return; }
     if(!totalVolume || totalVolume<=0){ showToast('Nhập tổng khối lượng hoá đơn.'); return; }
@@ -1594,7 +1648,7 @@ function renderInvoiceLotManagerModal(editingId, opts){
       sourceName: document.getElementById('lot_source').value.trim(),
       purchaseDate, totalVolume, totalInvoiceValue,
       vatRatePercent: parseVN(document.getElementById('lot_vat').value),
-      cashReturned: parseVN(document.getElementById('lot_cashReturned').value) || 0,
+      cashReturned: curCashReturned || 0,
       note: document.getElementById('lot_note').value.trim()
     };
     let savedId;
