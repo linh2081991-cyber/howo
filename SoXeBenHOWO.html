@@ -4420,16 +4420,54 @@ function openDriverAdvanceEditor(id, driverId){
     }
   });
 }
+/// Các ca của 1 tài xế trong THÁNG HIỆN TẠI có "Chi phí phát sinh" > 0 mà
+/// CHƯA được đưa vào Báo Cáo Đã Chi nào (yêu cầu Ông Chủ 2026-08-10: lấy
+/// dữ liệu từ đúng CP phát sinh đã ghi trong ca thực, tránh gõ tay trùng
+/// lặp 2 nơi). Đánh dấu "đã lấy" qua sourceShiftId lưu trên chính bản ghi
+/// driverExpenseReports — 1 ca chỉ import được 1 lần, tránh trùng.
+function unreportedIncidentalShiftsForDriver(driverId){
+  const ym = todayLocalDateStr().slice(0,7); // tháng hiện tại YYYY-MM
+  const alreadyImported = new Set(state.driverExpenseReports.filter(r=>r.sourceShiftId).map(r=>r.sourceShiftId));
+  return state.shifts
+    .filter(sh=>sh.driverId===driverId && sh.date.slice(0,7)===ym && (Number(sh.incidentalCost)||0)>0 && !alreadyImported.has(sh.id))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+}
+/// Bảng kẻ ô để CHỌN NHANH — bấm 1 dòng sẽ tự điền form Báo Cáo Đã Chi
+/// bên dưới (vẫn sửa được trước khi Lưu). Chỉ hiện khi TẠO MỚI (không
+/// hiện lúc sửa lại 1 báo cáo đã lưu).
+function renderIncidentalPickerHtml(driverId){
+  const list = unreportedIncidentalShiftsForDriver(driverId);
+  if(list.length===0) return '';
+  return `
+    <div class="card" style="margin-bottom:10px;">
+      <div style="font-weight:700; margin-bottom:6px;">📋 Chọn Từ Chi Phí Phát Sinh Trong Ca (tháng này)</div>
+      <div class="hint" style="margin-bottom:8px;">Bấm 1 dòng để tự điền — vẫn sửa được trước khi bấm Lưu.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Ghi Chú Phát Sinh</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${list.map(sh=>`
+            <tr class="grid-clickable-row pick-incidental-row" data-shift-id="${sh.id}" data-amount="${Number(sh.incidentalCost)||0}" data-note="${escapeHtml(sh.incidentalNotes||'')}" data-date="${sh.date}">
+              <td>${formatDateVN(sh.date)}</td>
+              <td>${sh.incidentalNotes?escapeHtml(sh.incidentalNotes):'—'}</td>
+              <td class="num" style="font-weight:700;">${fmtVND(Number(sh.incidentalCost)||0)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
 function openDriverExpenseReportEditor(id, driverId){
   const existing = id ? state.driverExpenseReports.find(r=>r.id===id) : null;
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
-  const draft = existing ? {...existing} : { id: uid('dexp'), driverId: did, date: todayLocalDateStr(), amount:0, item:'', note:'' };
+  const draft = existing ? {...existing} : { id: uid('dexp'), driverId: did, date: todayLocalDateStr(), amount:0, item:'', note:'', sourceShiftId: null };
   const goBack = () => { openDriverAdvanceDetail(draft.driverId); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
       <h3>${existing?'Sửa':'Ghi'} Báo Cáo Đã Chi — ${escapeHtml(d?d.name:'')}</h3>
+      ${!existing ? renderIncidentalPickerHtml(did) : ''}
       <div class="card">
         <div class="field">
           <label>Ngày chi</label>
@@ -4456,6 +4494,19 @@ function openDriverExpenseReportEditor(id, driverId){
     </section>
   `;
   attachMoneyInput(document.getElementById('de_amount'), draft.amount, v=>draft.amount=v);
+  document.querySelectorAll('.pick-incidental-row').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const amount = Number(row.dataset.amount)||0;
+      document.getElementById('de_date').value = row.dataset.date;
+      document.getElementById('de_item').value = row.dataset.note || 'Chi phí phát sinh trong ca';
+      draft.item = row.dataset.note || 'Chi phí phát sinh trong ca';
+      draft.date = row.dataset.date;
+      draft.amount = amount;
+      draft.sourceShiftId = row.dataset.shiftId;
+      document.getElementById('de_amount').value = amount ? amount.toLocaleString('vi-VN') : '';
+      showToast('Đã điền từ Chi phí phát sinh ngày '+formatDateVN(row.dataset.date)+' — kiểm tra lại rồi bấm Lưu.');
+    });
+  });
   document.getElementById('saveExpBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('de_date').value || draft.date;
     draft.item = document.getElementById('de_item').value.trim();
