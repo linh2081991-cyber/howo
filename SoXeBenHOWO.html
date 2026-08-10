@@ -2341,7 +2341,7 @@ function allSiteNames(){
       // syncSiteNameFromTrips() TỰ GỘP nhiều Điểm Múc-Điểm Đổ khác nhau
       // trong cùng 1 ca thành 1 chuỗi dài (VD "Mỏ A - CT1, Mỏ B - CT2"),
       // không phải "tên công trình" thật nên không phù hợp làm gợi ý ở
-      // đây — xem allTripLocationsForGoodsType() bên dưới cho gợi ý riêng của thương mại.
+      // đây — xem allTripLocationsForSupplier() bên dưới cho gợi ý riêng của thương mại.
       if(s.siteType==='commercial') continue;
       const n=(s.siteName||'').trim();
       if(!n) continue;
@@ -2358,24 +2358,25 @@ function allSiteNames(){
 }
 
 /// Gợi ý Điểm Múc - Điểm Đổ khi gõ (chuyến thương mại) — LỌC THEO ĐÚNG
-/// LOẠI HÀNG đang chọn ở chính chuyến đó (yêu cầu Ông Chủ 2026-08-10):
-/// chỉ hiện những điểm múc-đổ đã từng dùng CÙNG loại hàng này, tránh gợi
-/// ý nhầm địa điểm của loại hàng khác. Nếu goodsType để trống (chưa khai
-/// loại hàng), trả về TẤT CẢ điểm múc-đổ đã dùng (không lọc) để chuyến
-/// mới vẫn có gợi ý ban đầu trước khi chọn loại hàng. Lấy TỪNG
-/// t.tripLocation riêng lẻ của từng chuyến, KHÔNG đọc s.siteName (chuỗi
-/// đó bị gộp nhiều điểm múc-đổ khác nhau vào 1 dòng — xem comment ở
-/// syncSiteNameFromTrips()/allSiteNames()) — nhờ vậy mỗi gợi ý luôn là
-/// ĐÚNG 1 điểm múc-đổ sạch. Cùng quy tắc lọc 10 ngày gần nhất như
-/// allSiteNames() để đồng nhất trải nghiệm gõ.
-function allTripLocationsForGoodsType(goodsType){
-  const gt = normGoodsType(goodsType);
-  const lastSeen = {}; // điểm múc-đổ -> ngày gần nhất xuất hiện (đúng loại hàng)
+/// NHÀ CUNG CẤP / ĐIỂM MÚC đang gắn ở công trình đó (yêu cầu Ông Chủ
+/// 2026-08-10 — SỬA LẠI từ bản lọc theo Loại Hàng lần trước: Ông Chủ xác
+/// nhận logic đó sai, đúng ra phải lọc theo Nhà Cung Cấp vì mỗi mỏ/nhà
+/// cung cấp thường gắn với 1 tập điểm múc-đổ cố định, không phụ thuộc
+/// loại hàng đang chở). Chỉ hiện những điểm múc-đổ đã từng dùng CÙNG nhà
+/// cung cấp này. Nếu công trình CHƯA gắn nhà cung cấp, trả về TẤT CẢ điểm
+/// múc-đổ đã dùng (không lọc) để vẫn có gợi ý ban đầu trước khi chọn nhà
+/// cung cấp. Lấy TỪNG t.tripLocation riêng lẻ của từng chuyến, KHÔNG đọc
+/// s.siteName (chuỗi đó bị gộp nhiều điểm múc-đổ khác nhau vào 1 dòng —
+/// xem comment ở syncSiteNameFromTrips()/allSiteNames()) — nhờ vậy mỗi
+/// gợi ý luôn là ĐÚNG 1 điểm múc-đổ sạch. Cùng quy tắc lọc 10 ngày gần
+/// nhất như allSiteNames() để đồng nhất trải nghiệm gõ.
+function allTripLocationsForSupplier(supplierId){
+  const lastSeen = {}; // điểm múc-đổ -> ngày gần nhất xuất hiện (đúng nhà cung cấp)
   for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
+      if(supplierId && s.supplierId!==supplierId) continue; // khác nhà cung cấp → bỏ qua
       for(const t of (s.commercialTrips||[])){
-        if(gt && normGoodsType(t.goodsType)!==gt) continue; // khác loại hàng → bỏ qua
         const n=(t.tripLocation||'').trim();
         if(!n) continue;
         if(!lastSeen[n] || sh.date>lastSeen[n]) lastSeen[n]=sh.date;
@@ -2390,15 +2391,19 @@ function allTripLocationsForGoodsType(goodsType){
   locs.sort((a,b)=>lastSeen[b].localeCompare(lastSeen[a])); // gần nhất trước
   return locs;
 }
-/// Đổ lại datalist Điểm Múc-Điểm Đổ RIÊNG của đúng 1 chuyến (idx=công
-/// trình, tidx=chuyến trong công trình đó) ngay khi Ông Chủ vừa gõ/đổi
-/// Loại hàng của chính chuyến đó — mỗi chuyến có 1 datalist riêng
-/// (id #tlDL_{idx}_{tidx}, xem renderSiteRows()) nên lọc đúng chuyến
-/// đang gõ, hoàn toàn không ảnh hưởng datalist của các chuyến khác.
-function refreshTripLocationDatalistFor(idx, tidx, goodsType){
-  const dl = document.getElementById(`tlDL_${idx}_${tidx}`);
-  if(!dl) return;
-  dl.innerHTML = allTripLocationsForGoodsType(goodsType).map(n=>`<option value="${escapeHtml(n)}">`).join('');
+/// Đổ lại datalist Điểm Múc-Điểm Đổ cho TẤT CẢ các chuyến trong ĐÚNG 1
+/// công trình (idx) ngay khi Ông Chủ vừa đổi Nhà Cung Cấp của công trình
+/// đó — vì Nhà Cung Cấp là trường CẤP CÔNG TRÌNH (áp dụng chung cho mọi
+/// chuyến bên trong), không phải cấp từng chuyến như Loại Hàng, nên đổi 1
+/// lần phải làm mới datalist của mọi chuyến trong công trình đó cùng lúc.
+function refreshTripLocationDatalistsForSite(idx, supplierId){
+  const s = state.draftShift && state.draftShift.siteLogs ? state.draftShift.siteLogs[idx] : null;
+  if(!s) return;
+  const options = allTripLocationsForSupplier(supplierId).map(n=>`<option value="${escapeHtml(n)}">`).join('');
+  (s.commercialTrips||[]).forEach((t, tidx)=>{
+    const dl = document.getElementById(`tlDL_${idx}_${tidx}`);
+    if(dl) dl.innerHTML = options;
+  });
 }
 
 // ========================= TOAST =========================
@@ -3207,7 +3212,7 @@ function renderSiteRows(){
             <div class="field">
               <label>Điểm Múc - Điểm Đổ</label>
               <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="tlDL_${i}_${ti}" value="${escapeHtml(t.tripLocation||'')}">
-              <datalist id="tlDL_${i}_${ti}">${allTripLocationsForGoodsType(t.goodsType).map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+              <datalist id="tlDL_${i}_${ti}">${allTripLocationsForSupplier(s.supplierId).map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
             </div>
             <div class="two-col">
               <div class="field"><label>KL mua (tấn)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="buyVolume" placeholder="0" value="${blankIfZero(t.buyVolume)}"></div>
@@ -3344,6 +3349,9 @@ function bindSiteRowEvents(){
       if(field==='siteName' || field==='supplierId' || field==='customerId') s[field] = inp.value;
       else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
       else s[field] = Number(inp.value);
+      // Vừa đổi Nhà Cung Cấp → lọc lại ngay gợi ý Điểm Múc-Điểm Đổ cho MỌI
+      // chuyến trong công trình này theo đúng nhà cung cấp mới.
+      if(field==='supplierId') refreshTripLocationDatalistsForSite(idx, inp.value);
       updateSiteCalc(idx); updateSummary();
     };
     // Gắn CẢ 'input' lẫn 'change' — thẻ <select> (ô chọn Nhà Cung Cấp) trên
@@ -3377,9 +3385,6 @@ function bindSiteRowEvents(){
       const s = sh.siteLogs[idx];
       s.commercialTrips[tidx][field] = inp.value;
       syncSiteNameFromTrips(s);
-      // Vừa gõ/đổi Loại hàng → lọc lại ngay gợi ý Điểm Múc-Điểm Đổ của
-      // ĐÚNG chuyến này theo loại hàng mới, không đụng datalist chuyến khác.
-      if(field==='goodsType') refreshTripLocationDatalistFor(idx, tidx, inp.value);
       updateSiteCalc(idx); updateSummary(); // goodsType đổi → nhóm thiếu chứng từ đổi, phải tính lại ngay
     });
   });
