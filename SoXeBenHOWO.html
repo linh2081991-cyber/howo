@@ -6606,14 +6606,18 @@ function computeSupplierDebt(supplierId){
 }
 /// Chi tiết TỪNG CHUYẾN (không gộp theo công trình nữa) gắn với đúng
 /// khách hàng/nhà cung cấp — nhóm theo NGÀY để Ông Chủ thấy rõ CẢ "hôm đó
-/// chạy mấy chuyến" LẪN "mỗi chuyến loại hàng gì, bao nhiêu tiền" trong
-/// cùng 1 bảng (yêu cầu Ông Chủ, kèm ảnh chụp màn hình 2026-08-10).
-/// side: 'customer' hoặc 'supplier'. Tiền mỗi chuyến áp ĐÚNG hệ số
-/// (sellIncludesVat/sellHasInvoice hoặc buyIncludesVat/buyIsDeductible)
-/// mà commercialCashFromCustomer()/commercialCashToSupplier() đang dùng ở
-/// cấp CÔNG TRÌNH — vì phép nhân phân phối qua phép cộng, cộng dồn từng
-/// chuyến lại LUÔN khớp tuyệt đối với đúng số công nợ đang hiển thị ở
-/// trên, không có rủi ro lệch số dù tách nhỏ tới cấp chuyến.
+/// chạy mấy chuyến" LẪN "mỗi chuyến loại hàng gì, đổ ở đâu, bao nhiêu
+/// tiền" trong cùng 1 bảng (yêu cầu Ông Chủ, kèm ảnh chụp màn hình
+/// 2026-08-10). Điểm Múc-Điểm Đổ lấy ĐÚNG t.tripLocation của TỪNG chuyến
+/// — KHÔNG dùng s.siteName (chuỗi đó bị syncSiteNameFromTrips() gộp mọi
+/// điểm múc-đổ khác nhau trong ca thành 1 dòng dài dính cục — đúng lỗi
+/// Ông Chủ vừa chỉ ra trong ảnh chụp). side: 'customer' hoặc 'supplier'.
+/// Tiền mỗi chuyến áp ĐÚNG hệ số (sellIncludesVat/sellHasInvoice hoặc
+/// buyIncludesVat/buyIsDeductible) mà commercialCashFromCustomer()/
+/// commercialCashToSupplier() đang dùng ở cấp CÔNG TRÌNH — vì phép nhân
+/// phân phối qua phép cộng, cộng dồn từng chuyến lại LUÔN khớp tuyệt đối
+/// với đúng số công nợ đang hiển thị ở trên, không có rủi ro lệch số dù
+/// tách nhỏ tới cấp chuyến.
 function partnerTripRows(partnerId, side){
   const groups = [];
   for(const sh of state.shifts){
@@ -6628,20 +6632,20 @@ function partnerTripRows(partnerId, side){
       );
       if(rawTrips.length===0) continue;
       const trips = rawTrips.map(t=>{
+        const tripLocation = (t.tripLocation||'').trim() || '(chưa khai điểm múc-đổ)';
         if(side==='customer'){
           const vol = Number(t.sellVolume)||0, price = Number(t.sellUnitPrice)||0, gross = vol*price;
           const cash = s.sellIncludesVat ? gross : (s.sellHasInvoice ? gross*(1+vatFrac) : gross);
-          return { goodsType: t.goodsType||'(chưa khai)', vol, price, unit:'khối', cash };
+          return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'khối', cash };
         }
         const vol = Number(t.buyVolume)||0, price = Number(t.buyUnitPrice)||0, gross = vol*price;
         const cash = s.buyIncludesVat ? gross : (deductibleBuy ? gross*(1+vatFrac) : gross);
-        return { goodsType: t.goodsType||'(chưa khai)', vol, price, unit:'tấn', cash };
+        return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'tấn', cash };
       });
       const driver = driverById(sh.driverId);
       groups.push({
         date: sh.date, shiftType: sh.shiftType,
         driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'),
-        siteName: s.siteName||'',
         trips, totalCash: trips.reduce((sum,t)=>sum+t.cash,0)
       });
     }
@@ -6649,30 +6653,32 @@ function partnerTripRows(partnerId, side){
   groups.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType)); // mới nhất trước
   return groups;
 }
-/// Render bảng .grid-table (kẻ ô đủ 4 cạnh, theo yêu cầu Ông Chủ) — mỗi
-/// NGÀY 1 dòng tiêu đề nhóm (ngày · ca · tài xế · công trình · số
-/// chuyến), theo sau là TỪNG CHUYẾN riêng (loại hàng, khối lượng, đơn
-/// giá, thành tiền), và 1 dòng "Tổng ngày" để đối chiếu nhanh.
+/// Render bảng .grid-table (kẻ ô đủ 4 cạnh) — mỗi NGÀY 1 dòng tiêu đề
+/// nhóm màu nổi (ngày · ca · tài xế · số chuyến — KHÔNG kèm tên công
+/// trình gộp nữa, vì đó chính là chuỗi dính cục gây rối mắt), theo sau là
+/// TỪNG CHUYẾN riêng — Loại Hàng, Điểm Múc-Điểm Đổ, Khối Lượng, Đơn Giá,
+/// Thành Tiền — và 1 dòng "Tổng ngày" để đối chiếu nhanh.
 function partnerTransactionTableHtml(partnerId, side){
   const groups = partnerTripRows(partnerId, side);
   if(groups.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const rowsHtml = groups.map(g=>{
-    const header = `<tr class="grid-group-row"><td colspan="4">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)}${g.siteName?` · ${escapeHtml(g.siteName)}`:''} — ${g.trips.length} chuyến</td></tr>`;
+    const header = `<tr class="grid-group-row"><td colspan="5">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến</td></tr>`;
     const tripLines = g.trips.map(t=>`
       <tr>
         <td>${escapeHtml(t.goodsType)}</td>
+        <td>${escapeHtml(t.tripLocation)}</td>
         <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
         <td class="num">${fmtVND(t.price)}</td>
         <td class="num" style="font-weight:700;">${fmtVND(t.cash)}</td>
       </tr>`).join('');
-    const totalLine = `<tr class="grid-total-row"><td colspan="3">Tổng ngày</td><td class="num">${fmtVND(g.totalCash)}</td></tr>`;
+    const totalLine = `<tr class="grid-total-row"><td colspan="4">Tổng ngày</td><td class="num">${fmtVND(g.totalCash)}</td></tr>`;
     return header + tripLines + totalLine;
   }).join('');
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Thành Tiền</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Thành Tiền</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>`;
