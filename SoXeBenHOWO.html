@@ -4306,13 +4306,40 @@ function renderShiftReadOnlyDetail(shiftId){
 // nhiều ca liên tiếp, số dư dồn liên tục theo thời gian, không chốt theo
 // kỳ — xem comment tại state.driverAdvances/driverExpenseReports.
 
-/// Số dư tạm ứng chi phí đang giữ của 1 tài xế = Tổng đã ứng − Tổng đã
-/// chi được xác nhận. Dương = tài xế còn giữ tiền công ty (bình thường).
-/// Âm = tài xế đã chi vượt số ứng, công ty đang nợ lại phần chênh.
+/// Ngày ứng ĐẦU TIÊN của 1 tài xế — mốc bắt đầu tự động trừ "Chi Phí
+/// Phát Sinh Trong Ca" vào số dư. KHÔNG tính lùi về các ca TRƯỚC lần ứng
+/// đầu tiên — Chi phí phát sinh những ca đó là công ty trả thẳng bình
+/// thường như trước giờ, không liên quan tới khoản tạm ứng này (yêu cầu
+/// Ông Chủ 2026-08-10 — xem phản biện đã nêu: nếu tính lùi vô hạn, số dư
+/// sẽ âm sâu ngay từ đầu vì phần lớn lịch sử CP phát sinh không hề gắn
+/// với việc "tài xế đang giữ tiền công ty").
+function driverFirstAdvanceDate(driverId){
+  const dates = state.driverAdvances.filter(a=>a.driverId===driverId).map(a=>a.date).sort();
+  return dates.length ? dates[0] : null;
+}
+/// Các ca của 1 tài xế có Chi Phí Phát Sinh > 0, TỪ ngày ứng đầu tiên trở
+/// đi — đây là phần TỰ ĐỘNG trừ vào số dư, không cần Ông Chủ bấm "nhập"
+/// thủ công như bản trước (yêu cầu Ông Chủ 2026-08-10).
+function driverIncidentalShiftsSinceFirstAdvance(driverId){
+  const since = driverFirstAdvanceDate(driverId);
+  if(!since) return [];
+  return state.shifts
+    .filter(sh=>sh.driverId===driverId && sh.date>=since && (Number(sh.incidentalCost)||0)>0)
+    .sort((a,b)=>b.date.localeCompare(a.date));
+}
+function driverIncidentalShiftsTotal(driverId){
+  return driverIncidentalShiftsSinceFirstAdvance(driverId).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
+}
+/// Số dư tạm ứng chi phí đang giữ = Tổng đã ứng − Chi Phí Phát Sinh Trong
+/// Ca (TỰ ĐỘNG, từ ngày ứng đầu tiên) − Báo Cáo Đã Chi THỦ CÔNG (chỉ dành
+/// cho khoản KHÔNG nằm trong Chi phí phát sinh của ca nào — tài xế báo
+/// miệng, Ông Chủ gõ tay ghi nhận). Dương = tài xế còn giữ tiền công ty.
+/// Âm = đã chi vượt số ứng, công ty đang nợ lại phần chênh.
 function driverAdvanceBalance(driverId){
   const advanced = state.driverAdvances.filter(a=>a.driverId===driverId).reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const spent = state.driverExpenseReports.filter(r=>r.driverId===driverId).reduce((s,r)=>s+(Number(r.amount)||0),0);
-  return advanced - spent;
+  const incidental = driverIncidentalShiftsTotal(driverId);
+  const manual = state.driverExpenseReports.filter(r=>r.driverId===driverId).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  return advanced - incidental - manual;
 }
 /// Bảng lịch sử gộp (Ứng + Báo Cáo Đã Chi) của 1 tài xế, mới nhất trước —
 /// bảng kẻ ô đủ 4 cạnh (.grid-table) đúng theo yêu cầu Ông Chủ trước đó.
@@ -4374,18 +4401,25 @@ function openDriverAdvanceDetail(driverId){
         <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)}</h3>
         <div class="summary-row total"><span>Số dư đang giữ</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
         <div class="hint" style="margin-top:4px;">${balance>=0 ? 'Tài xế còn giữ tiền công ty — bình thường, dư sẽ dồn sang lần ứng sau.' : 'Tài xế đã chi vượt số ứng — công ty đang nợ lại phần này.'}</div>
+        <div class="hint" style="margin-top:6px;">Số dư = Tổng đã ứng − Chi Phí Phát Sinh Trong Ca (tự động) − Báo Cáo Đã Chi thủ công.</div>
       </div>
       <div class="two-col" style="margin-top:10px;">
         <button class="btn btn-accent" id="addAdvanceBtn">+ Ghi Ứng Thêm</button>
-        <button class="btn btn-ghost" id="addExpenseReportBtn">+ Báo Cáo Đã Chi</button>
+        <button class="btn btn-ghost" id="addExpenseReportBtn">+ Báo Cáo Chi Khác (Ngoài Ca)</button>
       </div>
+    </section>
+    <section class="group">
+      <h3>🧾 Chi Phí Phát Sinh Trong Ca (tự động trừ)</h3>
+      <div class="hint" style="margin-bottom:8px;">Lấy thẳng từ mục "Chi Phí Phát Sinh" đã ghi khi nhập ca — TỰ ĐỘNG trừ vào số dư ở trên, không cần bấm nhập gì thêm. Tính từ ${driverFirstAdvanceDate(driverId)?formatDateVN(driverFirstAdvanceDate(driverId)):'—'} (ngày ứng đầu tiên) trở đi.</div>
+      ${renderIncidentalAutoDeductedHtml(driverId)}
     </section>
     <section class="group">
       <h3>Lịch Sử Ứng Tiền</h3>
       ${renderDriverAdvanceOnlyHistoryHtml(driverId)}
     </section>
     <section class="group">
-      <h3>Lịch Sử Báo Cáo Đã Chi</h3>
+      <h3>Báo Cáo Chi Khác (Ngoài Ca, Ghi Tay)</h3>
+      <div class="hint" style="margin-bottom:8px;">Chỉ dùng cho khoản tài xế báo miệng, KHÔNG nằm trong Chi Phí Phát Sinh của ca nào ở trên — tránh trừ trùng 2 lần.</div>
       ${renderDriverExpenseReportHistoryHtml(driverId)}
     </section>
   `;
@@ -4445,54 +4479,40 @@ function openDriverAdvanceEditor(id, driverId){
     }
   });
 }
-/// Các ca của 1 tài xế trong THÁNG HIỆN TẠI có "Chi phí phát sinh" > 0 mà
-/// CHƯA được đưa vào Báo Cáo Đã Chi nào (yêu cầu Ông Chủ 2026-08-10: lấy
-/// dữ liệu từ đúng CP phát sinh đã ghi trong ca thực, tránh gõ tay trùng
-/// lặp 2 nơi). Đánh dấu "đã lấy" qua sourceShiftId lưu trên chính bản ghi
-/// driverExpenseReports — 1 ca chỉ import được 1 lần, tránh trùng.
-function unreportedIncidentalShiftsForDriver(driverId){
-  const ym = todayLocalDateStr().slice(0,7); // tháng hiện tại YYYY-MM
-  const alreadyImported = new Set(state.driverExpenseReports.filter(r=>r.sourceShiftId).map(r=>r.sourceShiftId));
-  return state.shifts
-    .filter(sh=>sh.driverId===driverId && sh.date.slice(0,7)===ym && (Number(sh.incidentalCost)||0)>0 && !alreadyImported.has(sh.id))
-    .sort((a,b)=>b.date.localeCompare(a.date));
-}
-/// Bảng kẻ ô để CHỌN NHANH — bấm 1 dòng sẽ tự điền form Báo Cáo Đã Chi
-/// bên dưới (vẫn sửa được trước khi Lưu). Chỉ hiện khi TẠO MỚI (không
-/// hiện lúc sửa lại 1 báo cáo đã lưu).
-function renderIncidentalPickerHtml(driverId){
-  const list = unreportedIncidentalShiftsForDriver(driverId);
-  if(list.length===0) return '';
+/// Bảng kẻ ô CHỈ ĐỂ XEM (không bấm nhập gì) — hiện các ca có Chi Phí Phát
+/// Sinh > 0 kể từ ngày ứng đầu tiên, đúng phần đang được TỰ ĐỘNG trừ vào
+/// số dư ở driverAdvanceBalance(). Thay thế bản "picker bấm để nhập" cũ —
+/// yêu cầu Ông Chủ 2026-08-10: CP phát sinh trong ca phải tự động, không
+/// cần thao tác thủ công nào nữa.
+function renderIncidentalAutoDeductedHtml(driverId){
+  const list = driverIncidentalShiftsSinceFirstAdvance(driverId);
+  if(list.length===0) return '<div class="hint">Chưa có Chi phí phát sinh nào trong ca kể từ lần ứng đầu tiên (hoặc chưa có lần ứng nào).</div>';
   return `
-    <div class="card" style="margin-bottom:10px;">
-      <div style="font-weight:700; margin-bottom:6px;">📋 Chọn Từ Chi Phí Phát Sinh Trong Ca (tháng này)</div>
-      <div class="hint" style="margin-bottom:8px;">Bấm 1 dòng để tự điền — vẫn sửa được trước khi bấm Lưu.</div>
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Ngày</th><th>Ghi Chú Phát Sinh</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            ${list.map(sh=>`
-            <tr class="grid-clickable-row pick-incidental-row" data-shift-id="${sh.id}" data-amount="${Number(sh.incidentalCost)||0}" data-note="${escapeHtml(sh.incidentalNotes||'')}" data-date="${sh.date}">
-              <td>${formatDateVN(sh.date)}</td>
-              <td>${sh.incidentalNotes?escapeHtml(sh.incidentalNotes):'—'}</td>
-              <td class="num" style="font-weight:700;">${fmtVND(Number(sh.incidentalCost)||0)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Ngày</th><th>Ghi Chú Phát Sinh</th><th class="num">Số Tiền</th></tr></thead>
+        <tbody>
+          ${list.map(sh=>`
+          <tr>
+            <td>${formatDateVN(sh.date)}</td>
+            <td>${sh.incidentalNotes?escapeHtml(sh.incidentalNotes):'—'}</td>
+            <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(Number(sh.incidentalCost)||0)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
     </div>`;
 }
 function openDriverExpenseReportEditor(id, driverId){
   const existing = id ? state.driverExpenseReports.find(r=>r.id===id) : null;
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
-  const draft = existing ? {...existing} : { id: uid('dexp'), driverId: did, date: todayLocalDateStr(), amount:0, item:'', note:'', sourceShiftId: null };
+  const draft = existing ? {...existing} : { id: uid('dexp'), driverId: did, date: todayLocalDateStr(), amount:0, item:'', note:'' };
   const goBack = () => { openDriverAdvanceDetail(draft.driverId); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi'} Báo Cáo Đã Chi — ${escapeHtml(d?d.name:'')}</h3>
-      ${!existing ? renderIncidentalPickerHtml(did) : ''}
+      <h3>${existing?'Sửa':'Ghi'} Báo Cáo Chi Khác (Ngoài Ca) — ${escapeHtml(d?d.name:'')}</h3>
+      <div class="hint" style="margin-bottom:10px;">Chỉ dùng cho khoản tài xế báo miệng, KHÔNG nằm trong Chi Phí Phát Sinh của ca nào (khoản đó đã tự động trừ vào số dư rồi, không cần ghi lại ở đây).</div>
       <div class="card">
         <div class="field">
           <label>Ngày chi</label>
@@ -4518,24 +4538,11 @@ function openDriverExpenseReportEditor(id, driverId){
       </div>
     </section>
     <section class="group">
-      <h3>Lịch Sử Báo Cáo Đã Chi — ${escapeHtml(d?d.name:'')}</h3>
+      <h3>Lịch Sử Báo Cáo Chi Khác — ${escapeHtml(d?d.name:'')}</h3>
       ${renderDriverExpenseReportHistoryHtml(did)}
     </section>
   `;
   attachMoneyInput(document.getElementById('de_amount'), draft.amount, v=>draft.amount=v);
-  document.querySelectorAll('.pick-incidental-row').forEach(row=>{
-    row.addEventListener('click', ()=>{
-      const amount = Number(row.dataset.amount)||0;
-      document.getElementById('de_date').value = row.dataset.date;
-      document.getElementById('de_item').value = row.dataset.note || 'Chi phí phát sinh trong ca';
-      draft.item = row.dataset.note || 'Chi phí phát sinh trong ca';
-      draft.date = row.dataset.date;
-      draft.amount = amount;
-      draft.sourceShiftId = row.dataset.shiftId;
-      document.getElementById('de_amount').value = amount ? amount.toLocaleString('vi-VN') : '';
-      showToast('Đã điền từ Chi phí phát sinh ngày '+formatDateVN(row.dataset.date)+' — kiểm tra lại rồi bấm Lưu.');
-    });
-  });
   document.getElementById('saveExpBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('de_date').value || draft.date;
     draft.item = document.getElementById('de_item').value.trim();
