@@ -480,7 +480,6 @@
   <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
 </div>
 <datalist id="siteNamesList"></datalist>
-<datalist id="tripLocationsList"></datalist>
 <datalist id="goodsTypesList"></datalist>
 <div id="modalRoot"></div>
 <script>
@@ -2342,7 +2341,7 @@ function allSiteNames(){
       // syncSiteNameFromTrips() TỰ GỘP nhiều Điểm Múc-Điểm Đổ khác nhau
       // trong cùng 1 ca thành 1 chuỗi dài (VD "Mỏ A - CT1, Mỏ B - CT2"),
       // không phải "tên công trình" thật nên không phù hợp làm gợi ý ở
-      // đây — xem allTripLocations() bên dưới cho gợi ý riêng của thương mại.
+      // đây — xem allTripLocationsForGoodsType() bên dưới cho gợi ý riêng của thương mại.
       if(s.siteType==='commercial') continue;
       const n=(s.siteName||'').trim();
       if(!n) continue;
@@ -2358,19 +2357,25 @@ function allSiteNames(){
   return names;
 }
 
-/// Gợi ý Điểm Múc - Điểm Đổ khi gõ (chuyến thương mại) — tách riêng hoàn
-/// toàn khỏi allSiteNames() ở trên. Lấy TỪNG t.tripLocation riêng lẻ của
-/// từng chuyến, KHÔNG đọc s.siteName (chuỗi đó bị gộp nhiều điểm múc-đổ
-/// khác nhau vào 1 dòng — xem comment ở syncSiteNameFromTrips() và ở
-/// allSiteNames()) — nhờ vậy mỗi gợi ý luôn là ĐÚNG 1 điểm múc-đổ sạch,
-/// không dính nhiều điểm vào cùng 1 dòng. Cùng quy tắc lọc 10 ngày gần
-/// nhất như allSiteNames() để đồng nhất trải nghiệm gõ.
-function allTripLocations(){
-  const lastSeen = {}; // điểm múc-đổ -> ngày gần nhất xuất hiện
+/// Gợi ý Điểm Múc - Điểm Đổ khi gõ (chuyến thương mại) — LỌC THEO ĐÚNG
+/// LOẠI HÀNG đang chọn ở chính chuyến đó (yêu cầu Ông Chủ 2026-08-10):
+/// chỉ hiện những điểm múc-đổ đã từng dùng CÙNG loại hàng này, tránh gợi
+/// ý nhầm địa điểm của loại hàng khác. Nếu goodsType để trống (chưa khai
+/// loại hàng), trả về TẤT CẢ điểm múc-đổ đã dùng (không lọc) để chuyến
+/// mới vẫn có gợi ý ban đầu trước khi chọn loại hàng. Lấy TỪNG
+/// t.tripLocation riêng lẻ của từng chuyến, KHÔNG đọc s.siteName (chuỗi
+/// đó bị gộp nhiều điểm múc-đổ khác nhau vào 1 dòng — xem comment ở
+/// syncSiteNameFromTrips()/allSiteNames()) — nhờ vậy mỗi gợi ý luôn là
+/// ĐÚNG 1 điểm múc-đổ sạch. Cùng quy tắc lọc 10 ngày gần nhất như
+/// allSiteNames() để đồng nhất trải nghiệm gõ.
+function allTripLocationsForGoodsType(goodsType){
+  const gt = normGoodsType(goodsType);
+  const lastSeen = {}; // điểm múc-đổ -> ngày gần nhất xuất hiện (đúng loại hàng)
   for(const sh of state.shifts){
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
       for(const t of (s.commercialTrips||[])){
+        if(gt && normGoodsType(t.goodsType)!==gt) continue; // khác loại hàng → bỏ qua
         const n=(t.tripLocation||'').trim();
         if(!n) continue;
         if(!lastSeen[n] || sh.date>lastSeen[n]) lastSeen[n]=sh.date;
@@ -2384,6 +2389,16 @@ function allTripLocations(){
   });
   locs.sort((a,b)=>lastSeen[b].localeCompare(lastSeen[a])); // gần nhất trước
   return locs;
+}
+/// Đổ lại datalist Điểm Múc-Điểm Đổ RIÊNG của đúng 1 chuyến (idx=công
+/// trình, tidx=chuyến trong công trình đó) ngay khi Ông Chủ vừa gõ/đổi
+/// Loại hàng của chính chuyến đó — mỗi chuyến có 1 datalist riêng
+/// (id #tlDL_{idx}_{tidx}, xem renderSiteRows()) nên lọc đúng chuyến
+/// đang gõ, hoàn toàn không ảnh hưởng datalist của các chuyến khác.
+function refreshTripLocationDatalistFor(idx, tidx, goodsType){
+  const dl = document.getElementById(`tlDL_${idx}_${tidx}`);
+  if(!dl) return;
+  dl.innerHTML = allTripLocationsForGoodsType(goodsType).map(n=>`<option value="${escapeHtml(n)}">`).join('');
 }
 
 // ========================= TOAST =========================
@@ -3191,7 +3206,8 @@ function renderSiteRows(){
             </div>
             <div class="field">
               <label>Điểm Múc - Điểm Đổ</label>
-              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="tripLocationsList" value="${escapeHtml(t.tripLocation||'')}">
+              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="tripLocation" list="tlDL_${i}_${ti}" value="${escapeHtml(t.tripLocation||'')}">
+              <datalist id="tlDL_${i}_${ti}">${allTripLocationsForGoodsType(t.goodsType).map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
             </div>
             <div class="two-col">
               <div class="field"><label>KL mua (tấn)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="buyVolume" placeholder="0" value="${blankIfZero(t.buyVolume)}"></div>
@@ -3361,6 +3377,9 @@ function bindSiteRowEvents(){
       const s = sh.siteLogs[idx];
       s.commercialTrips[tidx][field] = inp.value;
       syncSiteNameFromTrips(s);
+      // Vừa gõ/đổi Loại hàng → lọc lại ngay gợi ý Điểm Múc-Điểm Đổ của
+      // ĐÚNG chuyến này theo loại hàng mới, không đụng datalist chuyến khác.
+      if(field==='goodsType') refreshTripLocationDatalistFor(idx, tidx, inp.value);
       updateSiteCalc(idx); updateSummary(); // goodsType đổi → nhóm thiếu chứng từ đổi, phải tính lại ngay
     });
   });
@@ -9791,7 +9810,6 @@ function renderAll(){
   }
   renderHeader();
   refreshSiteDatalist();
-  refreshTripLocationsDatalist();
   refreshGoodsTypesDatalist();
   if(state.currentTab==='shifts'){
     if(state.view==='form') renderShiftForm();
@@ -9813,13 +9831,6 @@ function renderAll(){
 function refreshSiteDatalist(){
   const dl=document.getElementById('siteNamesList');
   dl.innerHTML = allSiteNames().map(n=>`<option value="${escapeHtml(n)}">`).join('');
-}
-/// Đổ dữ liệu datalist riêng cho Điểm Múc-Điểm Đổ (thương mại) — tách
-/// hẳn khỏi #siteNamesList ở trên để 2 loại gợi ý không còn lẫn vào nhau.
-function refreshTripLocationsDatalist(){
-  const dl=document.getElementById('tripLocationsList');
-  if(!dl) return;
-  dl.innerHTML = allTripLocations().map(n=>`<option value="${escapeHtml(n)}">`).join('');
 }
 /// Danh sách LOẠI HÀNG đã dùng — gom từ từng CHUYẾN đã khai lẫn lô hoá
 /// đơn đã mua, để gõ tay không bị lệch chính tả (VD "Base A" vs "base a").
