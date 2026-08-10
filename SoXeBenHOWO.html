@@ -9084,17 +9084,78 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   return out;
 }
 
-/// Builds the "Sửa Chữa Khấu Hao" sheet — repair log within [from, to].
-function buildRepairRows(from, to){
-  const header = ['Ngày','Hạng Mục','Mã Hoá Đơn/Gara','Số Tiền','Trách Nhiệm','Tài Xế Chịu Trách Nhiệm','Số Tiền Tài Xế Bị Trừ'];
-  const rows = [header];
-  const inRange = repairsInRange(from, to).sort((a,b)=>a.date.localeCompare(b.date));
-  inRange.forEach(r=>{
-    const respDriver = driverById(r.responsibleDriverId);
-    rows.push([formatDateVN(r.date), r.item||'', r.invoiceCode||'', Math.round(r.amount)||0,
-      repairResponsibilityLabel(r.responsibility), respDriver?.name || '', Math.round(repairDriverResponsibleAmount(r))]);
+/// Builds the "Kho Hoa Don Bu" sheet — TOÀN BỘ (không theo kỳ, vì tồn kho
+/// là số dồn từ trước tới giờ, cùng triết lý với "Đối Tác & Công Nợ"):
+/// 2 bảng gộp trong 1 sheet — (1) Tổng quan còn/đã dùng theo TỪNG LOẠI
+/// HÀNG, khớp đúng bảng "Tổng quan tất cả Loại hàng" trong mục Kho Hoá
+/// Đơn Bù trên app; (2) Chi tiết TỪNG LÔ đã mua, khớp đúng danh sách lô
+/// trong modal Quản Lý Kho Hoá Đơn Bù. Dùng lại NGUYÊN buildInvoiceLotLedger()
+/// đã verify — không tính lại bằng công thức khác.
+function buildInvoiceLotOverviewRows(){
+  const out = [];
+  const goodsTypes = allGoodsTypes();
+  out.push(['KHO HOÁ ĐƠN BÙ — TOÀN BỘ, KHÔNG THEO KỲ (tồn kho là số dồn từ trước tới giờ, giống Đối Tác & Công Nợ)']);
+  out.push([]);
+  out.push(['TỔNG QUAN THEO TỪNG LOẠI HÀNG']);
+  out.push(['Loại Hàng','Đã Mua (khối)','Đã Dùng (khối)','Còn Lại (khối)','Cảnh Báo']);
+  let anyType = false;
+  goodsTypes.forEach(g=>{
+    const led = buildInvoiceLotLedger(g);
+    const lots = Object.values(led.byLot);
+    if(!lots.length) return;
+    anyType = true;
+    const total = lots.reduce((s,l)=>s+l.total,0);
+    const used = lots.reduce((s,l)=>s+l.used,0);
+    const remaining = lots.reduce((s,l)=>s+l.remaining,0);
+    const low = total>0 && remaining/total<0.15;
+    out.push([g, Math.round(total*100)/100, Math.round(used*100)/100, Math.round(remaining*100)/100, low?'⚠️ Sắp hết':'']);
   });
-  if(rows.length===1) rows.push(['(Không có khoản sửa chữa nào trong kỳ này)','','','','','','']);
+  if(!anyType) out.push(['(Chưa mua lô hoá đơn nào)','','','','']);
+  out.push([]);
+
+  out.push(['CHI TIẾT TỪNG LÔ HOÁ ĐƠN ĐÃ MUA (mới nhất trước)']);
+  out.push(['Loại Hàng','Ngày Mua','Nguồn / Bên Bán','Tổng Khối Lượng (khối)','Tổng Giá Trị Hoá Đơn','VAT Suất (%)','Tiền Mặt Nhận Lại','Chi Phí Thật/Khối','Đã Dùng (khối)','Còn Lại (khối)','Ghi Chú']);
+  const sortedLots = [...state.invoiceLots].sort((a,b)=>(b.purchaseDate||'').localeCompare(a.purchaseDate||''));
+  sortedLots.forEach(lot=>{
+    const led = buildInvoiceLotLedger(lot.goodsType);
+    const st = led.byLot[lot.id] || { total:Number(lot.totalVolume)||0, used:0, remaining:Number(lot.totalVolume)||0 };
+    const netCostTotal = (Number(lot.totalInvoiceValue)||0) - (Number(lot.cashReturned)||0);
+    const costPerVol = st.total>0 ? netCostTotal/st.total : 0;
+    out.push([lot.goodsType||'', formatDateVN(lot.purchaseDate), lot.sourceName||'', Math.round(st.total*100)/100,
+      Math.round(Number(lot.totalInvoiceValue)||0), Number(lot.vatRatePercent)||0, Math.round(Number(lot.cashReturned)||0),
+      Math.round(costPerVol), Math.round(st.used*100)/100, Math.round(st.remaining*100)/100, lot.note||'']);
+  });
+  if(sortedLots.length===0) out.push(['(Chưa mua lô hoá đơn nào)','','','','','','','','','','']);
+  return out;
+}
+/// Builds the "Rut Kho Hoa Don Bu" sheet — TỪNG LẦN rút kho cho TỪNG ca
+/// (ngày, tài xế, khách hàng, công trình, loại hàng, khối lượng, từ đúng
+/// lô ngày nào, chi phí) — khớp đúng dữ liệu hiện trong nút "🔍 Chi Tiết
+/// Cách Tính" (Bước 7) và nút "Đã che ca nào?" của từng lô, gộp lại thành
+/// 1 bảng duy nhất để đối chiếu toàn bộ trong 1 file.
+function buildInvoiceLotDrawdownRows(){
+  const header = ['Ngày','Ca','Tài Xế','Khách Hàng','Công Trình / Điểm Múc-Điểm Đổ','Loại Hàng','Khối Lượng Rút (khối)','Từ Lô Ngày','Chi Phí'];
+  const rows = [header];
+  const entries = [];
+  state.shifts.forEach(sh=>{
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      const missingGroups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0.001);
+      missingGroups.forEach(g=>{
+        const gb = siteInvoiceGroupBreakdown(s, g.goodsType);
+        gb.allocations.forEach(a=>entries.push({ sh, s, a, goodsType: a.goodsType||g.goodsType||'' }));
+      });
+    });
+  });
+  entries.sort((x,y)=>chronoKey(x.sh.date,x.sh.shiftType)-chronoKey(y.sh.date,y.sh.shiftType));
+  entries.forEach(({sh,s,a,goodsType})=>{
+    const driver = driverById(sh.driverId);
+    const cus = s.customerId ? customerById(s.customerId) : null;
+    rows.push([formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), driver?driver.name:(sh.driverNameSnapshot||''),
+      cus?cus.name:'', s.siteName||'', goodsType, Math.round(a.volume*100)/100,
+      a.purchaseDate?formatDateVN(a.purchaseDate):'', Math.round(a.cost)]);
+  });
+  if(rows.length===1) rows.push(['(Chưa có lần rút kho nào)','','','','','','','','']);
   return rows;
 }
 
@@ -9608,6 +9669,21 @@ function downloadWorkbook(from, to, resultsData, filenamePrefix){
   applyAccountingFormat(wsRepairs, [3,6], 1);
   autoFitColumns(wsRepairs, repairRows);
   XLSX.utils.book_append_sheet(wb, wsRepairs, 'Sua Chua Khau Hao');
+
+  // Kho Hoá Đơn Bù — TOÀN BỘ, không theo kỳ (giống triết lý Đối Tác & Công
+  // Nợ), để Ông Chủ luôn thấy đủ bức tranh mua/dùng/còn tồn trong CÙNG 1
+  // file tổng hợp, không cần mở riêng app để đối chiếu.
+  const lotOverviewRows = buildInvoiceLotOverviewRows();
+  const wsLotOverview = XLSX.utils.aoa_to_sheet(lotOverviewRows);
+  applyAccountingFormat(wsLotOverview, [4,6,7], 0); // đúng cột tiền: Tổng Giá Trị Hoá Đơn / Tiền Mặt Nhận Lại / Chi Phí Thật-Khối trong bảng "Chi Tiết Từng Lô" — không đụng cột khối lượng ở bảng "Tổng Quan" phía trên (không trùng chỉ số cột)
+  autoFitColumns(wsLotOverview, lotOverviewRows);
+  XLSX.utils.book_append_sheet(wb, wsLotOverview, 'Kho Hoa Don Bu');
+
+  const lotDrawdownRows = buildInvoiceLotDrawdownRows();
+  const wsLotDrawdown = XLSX.utils.aoa_to_sheet(lotDrawdownRows);
+  applyAccountingFormat(wsLotDrawdown, [8], 1); // cột Chi Phí
+  autoFitColumns(wsLotDrawdown, lotDrawdownRows);
+  XLSX.utils.book_append_sheet(wb, wsLotDrawdown, 'Rut Kho Hoa Don Bu');
 
   XLSX.writeFile(wb, `${filenamePrefix}_${from}_den_${to}.xlsx`);
   showToast('Đã xuất file Excel (.xlsx) — cột đã tự giãn, số tiền có dấu chấm ngăn cách hàng nghìn.');
