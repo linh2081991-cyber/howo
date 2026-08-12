@@ -436,6 +436,18 @@
   .resp-badge.driver_full{ background:var(--loss-soft); color:var(--loss); }
   .resp-badge.split{ background:#FFF3CD; color:#8A6D00; }
   .resp-badge.owner_full{ background:var(--accent-soft); color:var(--accent); }
+
+  /* Badge trạng thái VAT trên dòng tiêu đề mỗi nhóm giao dịch đối tác — 3
+     trạng thái rõ ràng: giá đã gồm VAT / đã xuất hoá đơn (+VAT) / chưa
+     hoá đơn (không VAT). */
+  .vat-badge{ display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:6px; vertical-align:middle; white-space:nowrap; }
+  .vat-badge.vat-yes{ background:var(--profit-soft); color:var(--profit); }
+  .vat-badge.vat-no{ background:var(--surface); color:var(--ink-soft); border:1px solid var(--border); }
+  .vat-badge.vat-included{ background:var(--accent-soft); color:var(--accent); }
+  /* Cột tiền đang THỰC SỰ được dùng để tính công nợ (Chưa VAT hoặc Có
+     VAT, tuỳ trạng thái hoá đơn) được tô đậm nổi bật — cột còn lại chỉ để
+     đối chiếu, không tô đậm. */
+  table.grid-table td.vat-cell-active{ font-weight:800; color:var(--profit); background:var(--profit-soft); }
 </style>
 </head>
 <body>
@@ -7010,26 +7022,46 @@ function partnerTripRows(partnerId, side){
       if(!match) continue;
       const vatFrac = siteVatRateFraction(s);
       const deductibleBuy = side==='supplier' ? buyIsDeductible(s) : false;
+      // Đúng 3 trạng thái đang chi phối cách VAT được cộng vào tiền — ĐỌC
+      // LẠI y nguyên các điều kiện gốc mà commercialCashFromCustomer()/
+      // commercialCashToSupplier() đang dùng (KHÔNG tính theo cách khác),
+      // chỉ để lộ rõ ra UI cho Ông Chủ thấy TẠI SAO có VAT hay không:
+      //  1) priceIncludesVat=true  → đơn giá gõ vào ĐÃ gồm VAT sẵn, luôn
+      //     tính VAT bất kể có tick hoá đơn hay không.
+      //  2) priceIncludesVat=false + ĐÃ tick hoá đơn (sellHasInvoice /
+      //     buyIsDeductible) → cộng thêm VAT lên trên giá net đã gõ.
+      //  3) priceIncludesVat=false + CHƯA tick hoá đơn → giữ nguyên giá
+      //     net, không cộng VAT.
+      const priceIncludesVat = side==='customer' ? !!s.sellIncludesVat : !!s.buyIncludesVat;
+      const invoiceEffective = side==='customer' ? !!s.sellHasInvoice : deductibleBuy;
+      const vatApplied = priceIncludesVat || invoiceEffective;
       const rawTrips = (s.commercialTrips||[]).filter(t=>
         side==='customer' ? (Number(t.sellVolume)>0 && Number(t.sellUnitPrice)>0) : (Number(t.buyVolume)>0 && Number(t.buyUnitPrice)>0)
       );
       if(rawTrips.length===0) continue;
       const trips = rawTrips.map(t=>{
         const tripLocation = (t.tripLocation||'').trim() || '(chưa khai điểm múc-đổ)';
-        if(side==='customer'){
-          const vol = Number(t.sellVolume)||0, price = Number(t.sellUnitPrice)||0, gross = vol*price;
-          const cash = s.sellIncludesVat ? gross : (s.sellHasInvoice ? gross*(1+vatFrac) : gross);
-          return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'khối', cash };
-        }
-        const vol = Number(t.buyVolume)||0, price = Number(t.buyUnitPrice)||0, gross = vol*price;
-        const cash = s.buyIncludesVat ? gross : (deductibleBuy ? gross*(1+vatFrac) : gross);
-        return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'tấn', cash };
+        const vol = side==='customer' ? (Number(t.sellVolume)||0) : (Number(t.buyVolume)||0);
+        const price = side==='customer' ? (Number(t.sellUnitPrice)||0) : (Number(t.buyUnitPrice)||0);
+        const gross = vol*price;
+        // netAmt = tiền CHƯA VAT · withVatAmt = tiền ĐÃ CỘNG VAT — quy cả
+        // 2 về CÙNG 1 gốc dù đơn giá gõ vào là giá net hay giá đã gồm
+        // VAT, để 2 cột luôn so sánh ngang hàng được với nhau.
+        const netAmt = priceIncludesVat ? gross/(1+vatFrac) : gross;
+        const withVatAmt = priceIncludesVat ? gross : gross*(1+vatFrac);
+        // cash = ĐÚNG công thức gốc (không đổi) — chỉ viết lại gọn hơn:
+        // vatApplied ? withVatAmt : netAmt luôn khớp tuyệt đối 3 nhánh cũ.
+        const cash = vatApplied ? withVatAmt : netAmt;
+        return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit: side==='customer'?'khối':'tấn', netAmt, withVatAmt, cash };
       });
       const driver = driverById(sh.driverId);
       groups.push({
         date: sh.date, shiftType: sh.shiftType,
         driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'),
-        trips, totalCash: trips.reduce((sum,t)=>sum+t.cash,0)
+        trips, totalCash: trips.reduce((sum,t)=>sum+t.cash,0),
+        totalNet: trips.reduce((sum,t)=>sum+t.netAmt,0),
+        totalWithVat: trips.reduce((sum,t)=>sum+t.withVatAmt,0),
+        priceIncludesVat, invoiceEffective, vatApplied, vatFrac
       });
     }
   }
@@ -7037,34 +7069,52 @@ function partnerTripRows(partnerId, side){
   return groups;
 }
 /// Render bảng .grid-table (kẻ ô đủ 4 cạnh) — mỗi NGÀY 1 dòng tiêu đề
-/// nhóm màu nổi (ngày · ca · tài xế · số chuyến — KHÔNG kèm tên công
-/// trình gộp nữa, vì đó chính là chuỗi dính cục gây rối mắt), theo sau là
-/// TỪNG CHUYẾN riêng — Loại Hàng, Điểm Múc-Điểm Đổ, Khối Lượng, Đơn Giá,
-/// Thành Tiền — và 1 dòng "Tổng ngày" để đối chiếu nhanh.
+/// nhóm màu nổi (ngày · ca · tài xế · số chuyến, kèm 1 badge trạng thái
+/// hoá đơn/VAT rõ ràng), theo sau là TỪNG CHUYẾN riêng — Loại Hàng, Điểm
+/// Múc-Điểm Đổ, Khối Lượng, Đơn Giá — và TÁCH RIÊNG 2 cột "Chưa VAT" /
+/// "Có VAT" (yêu cầu Ông Chủ 2026-08-13) thay vì gộp chung 1 cột "Thành
+/// Tiền" như trước. Cột nào đang THỰC SỰ được dùng để tính công nợ (theo
+/// đúng trạng thái tick hoá đơn của công trình đó) được tô đậm màu xanh
+/// nổi bật — cột kia chỉ để đối chiếu tham khảo. 1 dòng "Tổng ngày" chốt
+/// lại, số tô đậm luôn khớp tuyệt đối với "Còn Nợ" ở trên (cùng công thức
+/// gốc, chỉ trình bày tách cột).
 function partnerTransactionTableHtml(partnerId, side){
   const groups = partnerTripRows(partnerId, side);
   if(groups.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const invoiceBadge = g=>{
+    if(g.priceIncludesVat) return `<span class="vat-badge vat-included">💰 Giá đã gồm VAT</span>`;
+    if(g.invoiceEffective) return `<span class="vat-badge vat-yes">✅ Đã xuất hoá đơn (+VAT ${Math.round(g.vatFrac*100)}%)</span>`;
+    return `<span class="vat-badge vat-no">○ Chưa xuất hoá đơn (không VAT)</span>`;
+  };
   const rowsHtml = groups.map(g=>{
-    const header = `<tr class="grid-group-row"><td colspan="5">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến</td></tr>`;
+    const header = `<tr class="grid-group-row"><td colspan="6">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến ${invoiceBadge(g)}</td></tr>`;
+    const netCls = g.vatApplied ? 'num' : 'num vat-cell-active';
+    const vatCls = g.vatApplied ? 'num vat-cell-active' : 'num';
     const tripLines = g.trips.map(t=>`
       <tr>
         <td>${escapeHtml(t.goodsType)}</td>
         <td>${escapeHtml(t.tripLocation)}</td>
         <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
         <td class="num">${fmtVND(t.price)}</td>
-        <td class="num" style="font-weight:700;">${fmtVND(t.cash)}</td>
+        <td class="${netCls}">${fmtVND(t.netAmt)}</td>
+        <td class="${vatCls}">${fmtVND(t.withVatAmt)}</td>
       </tr>`).join('');
-    const totalLine = `<tr class="grid-total-row"><td colspan="4">Tổng ngày</td><td class="num">${fmtVND(g.totalCash)}</td></tr>`;
+    const totalLine = `<tr class="grid-total-row">
+        <td colspan="4">Tổng ngày (${g.vatApplied?'ĐÃ tính VAT':'CHƯA tính VAT'})</td>
+        <td class="${netCls}">${fmtVND(g.totalNet)}</td>
+        <td class="${vatCls}">${fmtVND(g.totalWithVat)}</td>
+      </tr>`;
     return header + tripLines + totalLine;
   }).join('');
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Thành Tiền</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Chưa VAT</th><th>Có VAT</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
-    </div>`;
+    </div>
+    <div class="hint" style="margin-top:8px;">Cột tô đậm xanh ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ.</div>`;
 }
 /// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
