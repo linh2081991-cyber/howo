@@ -487,7 +487,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-09 · #46';
+const APP_BUILD = '2026-08-12 · #47';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1692,10 +1692,43 @@ function renderInvoiceLotManagerModal(editingId, opts){
   });
 }
 
+/// Tổng khối lượng "còn thiếu THẬT" trong đúng khoảng ngày đang lọc —
+/// khác với invoiceDemandByDateRange().totalMissing (chỉ là nhu cầu THÔ,
+/// chưa biết có đủ lô để bù hay không). Đối chiếu với buildInvoiceLotLedger()
+/// (rút FIFO theo TOÀN BỘ lịch sử) để biết đúng phần nào trong kỳ đang xem
+/// thực sự CHƯA được lô nào bù — vì lô mua sau có thể đã bị dùng hết cho
+/// nhu cầu phát sinh SAU kỳ đang xem (ngày phát sinh cũ hơn luôn được ưu
+/// tiên rút trước, không liên quan gì đến việc lô mua trước hay sau kỳ
+/// đang lọc trên màn hình).
+function periodShortfallByDateRange(goodsType, from, to){
+  const gt = normGoodsType(goodsType);
+  if(!gt) return 0;
+  const ledger = buildInvoiceLotLedger(gt);
+  let shortfall = 0;
+  allShiftsForLedger().forEach(sh=>{
+    if(sh.date<from || sh.date>to) return;
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      if(s.siteType!=='commercial') return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)!==gt || g.missingVolume<=0) return;
+        const key = siteLogGroupKey(sh, idx, g.goodsType);
+        const rec = ledger.bySiteLog[key];
+        if(rec) shortfall += rec.shortfall;
+      });
+    });
+  });
+  return shortfall;
+}
 /// Bảng tổng quan Kho Hoá Đơn Bù theo từng mỏ, đặt trong tab Kết Quả.
 /// Tổng quan Kho Hoá Đơn Bù trong tab Kết Quả — chọn Loại hàng + khoảng
 /// ngày, hiện ngay tổng cần rút trong kỳ (tự tính từ dữ liệu ca, không
 /// phỏng đoán) + tồn kho hiện có, và nút Chi Tiết để đối soát từng ngày.
+/// Tách RIÊNG "còn thiếu THẬT trong đúng kỳ đang xem" (dùng để biết kỳ này
+/// đã đủ chứng từ chưa) khỏi "tồn kho toàn bộ lịch sử" (dùng để biết có
+/// cần mua thêm lô cho các ngày sắp tới không) — 2 con số KHÁC Ý NGHĨA
+/// nhau, trước đây đặt cạnh nhau gây hiểu lầm "không đủ" giả (Ông Chủ phát
+/// hiện 2026-08-12: Base A đã bù đủ 100% cho kỳ nhưng vẫn báo "không đủ"
+/// vì so nhầm tồn kho còn lại với tổng nhu cầu cả kỳ).
 function renderInvoiceLotOverview(){
   const wrap = document.getElementById('invoiceLotOverviewWrap');
   if(!wrap) return;
@@ -1708,10 +1741,12 @@ function renderInvoiceLotOverview(){
   if(!goodsTypes.includes(state.invoiceLotFilter.goodsType)) state.invoiceLotFilter.goodsType = goodsTypes[0];
   const { goodsType, from, to } = state.invoiceLotFilter;
   const demand = invoiceDemandByDateRange(goodsType, from, to);
+  const periodShortfall = periodShortfallByDateRange(goodsType, from, to);
+  const periodCovered = Math.max(0, demand.totalMissing - periodShortfall);
   const ledger = buildInvoiceLotLedger(goodsType);
   const lotsForType = Object.values(ledger.byLot);
   const inStock = lotsForType.reduce((sum,l)=>sum+l.remaining,0);
-  const enough = inStock >= demand.totalMissing - 0.001;
+  const periodOk = periodShortfall <= 0.001;
 
   wrap.innerHTML = `
     <div class="field">
@@ -1725,12 +1760,19 @@ function renderInvoiceLotOverview(){
       <div class="field"><label>Đến ngày</label><input type="date" id="lotFilterTo" value="${to}"></div>
     </div>
     <div class="card" style="margin-bottom:10px;">
-      <div class="summary-row"><span>Tổng cần rút từ kho trong kỳ</span><span class="val" style="color:var(--loss); font-weight:700;">${demand.totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <div class="summary-row"><span>Đang có trong kho (${escapeHtml(goodsType)})</span><span class="val" style="color:${enough?'var(--profit)':'var(--loss)'}; font-weight:700;">${inStock.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${enough?'':' ⚠️ không đủ'}</span></div>
+      <div style="font-weight:700; margin-bottom:8px;">📅 Đúng trong kỳ đang xem (${formatDateVN(from)} → ${formatDateVN(to)})</div>
+      <div class="summary-row"><span>Tổng cần bù trong kỳ</span><span class="val" style="font-weight:700;">${demand.totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="summary-row"><span>Đã được bù đủ</span><span class="val" style="color:var(--profit); font-weight:700;">${periodCovered.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="summary-row"><span>Còn thiếu THẬT (kỳ này)</span><span class="val" style="color:${periodOk?'var(--profit)':'var(--loss)'}; font-weight:700;">${periodOk?'Đã đủ ✅':(periodShortfall.toLocaleString('vi-VN',{maximumFractionDigits:2})+' khối ⚠️')}</span></div>
+    </div>
+    <div class="card" style="margin-bottom:10px; background:var(--card-alt, #f4f4f0);">
+      <div style="font-weight:700; margin-bottom:8px;">📦 Tồn kho ${escapeHtml(goodsType)} (TOÀN BỘ lịch sử, không giới hạn theo ngày lọc ở trên)</div>
+      <div class="summary-row"><span>Đang còn lại trong kho</span><span class="val" style="font-weight:700;">${inStock.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="hint" style="margin-top:4px;">Số này dùng để biết có cần mua thêm lô mới hay không cho CẢ tương lai, không chỉ riêng kỳ đang xem — vì lô mua ra rút theo thứ tự ngày phát sinh thiếu chứng từ CŨ NHẤT trước, không phân biệt kỳ Ông Chủ đang lọc.</div>
     </div>
     <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;">📋 Chi Tiết Từng Ngày</button>
     <div class="formula-divider" style="margin:10px 0;"></div>
-    <div style="font-weight:700; margin-bottom:6px;">Tổng quan tất cả Loại hàng</div>
+    <div style="font-weight:700; margin-bottom:6px;">Tổng quan tất cả Loại hàng (tính đến hôm nay, toàn bộ lịch sử)</div>
     <div class="card dash-wrap" style="padding:0;">
       <table class="dash">
         <thead><tr><th>Loại hàng</th><th>Đã mua</th><th>Đã dùng</th><th>Còn lại</th></tr></thead>
@@ -4048,7 +4090,7 @@ function renderDrivers(){
             <div class="driver-cv-item"><span class="k">Bằng lái</span><span class="v">${escapeHtml(d.licenseInfo||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tình trạng sức khoẻ</span><span class="v">${escapeHtml(d.healthStatus||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--loss)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
-            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ</span><span class="v" style="color:${driverAdvanceBalance(d.id)>=0?'inherit':'var(--loss)'}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ (tháng này)</span><span class="v" style="color:${driverAdvanceBalance(d.id)>=0?'inherit':'var(--loss)'}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
           <button class="btn btn-ghost btn-block viewDriverDetailBtn" data-id="${d.id}" style="margin-top:10px;">📊 Xem Chi Tiết Vận Hành →</button>
@@ -4302,48 +4344,59 @@ function renderShiftReadOnlyDetail(shiftId){
 
 // ========================= TẠM ỨNG CHI PHÍ TÀI XẾ (PHASE 1) =========================
 // Sổ theo dõi độc lập — CHƯA cộng vào Lợi Nhuận Ròng/Điểm Hoà Vốn/Cảnh
-// Báo Tài Chính (Phase 2, làm sau khi Phase 1 test ổn). Ứng 1 lần dùng
-// nhiều ca liên tiếp, số dư dồn liên tục theo thời gian, không chốt theo
-// kỳ — xem comment tại state.driverAdvances/driverExpenseReports.
+// Báo Tài Chính (Phase 2, làm sau khi Phase 1 test ổn). MÔ HÌNH THEO
+// THÁNG (chốt theo yêu cầu Ông Chủ 2026-08-10): mỗi tháng dương lịch là 1
+// đợt ứng RIÊNG — đầu tháng mới coi như đã quyết toán xong tháng cũ, số
+// dư KHÔNG cộng dồn xuyên tháng trong công thức (Ông Chủ tự cân đối bằng
+// tay khi quyết định ứng thêm bao nhiêu cho tháng mới, tuỳ có dư/thiếu
+// tháng trước hay không — app không tự động trừ/cộng qua tháng khác).
 
-/// Ngày ứng ĐẦU TIÊN của 1 tài xế — mốc bắt đầu tự động trừ "Chi Phí
-/// Phát Sinh Trong Ca" vào số dư. KHÔNG tính lùi về các ca TRƯỚC lần ứng
-/// đầu tiên — Chi phí phát sinh những ca đó là công ty trả thẳng bình
-/// thường như trước giờ, không liên quan tới khoản tạm ứng này (yêu cầu
-/// Ông Chủ 2026-08-10 — xem phản biện đã nêu: nếu tính lùi vô hạn, số dư
-/// sẽ âm sâu ngay từ đầu vì phần lớn lịch sử CP phát sinh không hề gắn
-/// với việc "tài xế đang giữ tiền công ty").
+/// Ngày ứng ĐẦU TIÊN của 1 tài xế (toàn thời gian) — chỉ dùng để xác định
+/// mốc bắt đầu cửa sổ tính của THÁNG ĐẦU TIÊN (driverMonthWindowStart).
 function driverFirstAdvanceDate(driverId){
   const dates = state.driverAdvances.filter(a=>a.driverId===driverId).map(a=>a.date).sort();
   return dates.length ? dates[0] : null;
 }
-/// Các ca của 1 tài xế có Chi Phí Phát Sinh > 0, TỪ ngày ứng đầu tiên trở
-/// đi — đây là phần TỰ ĐỘNG trừ vào số dư, không cần Ông Chủ bấm "nhập"
-/// thủ công như bản trước (yêu cầu Ông Chủ 2026-08-10).
-function driverIncidentalShiftsSinceFirstAdvance(driverId){
-  const since = driverFirstAdvanceDate(driverId);
-  if(!since) return [];
+/// Mốc bắt đầu cửa sổ tính CP phát sinh tự động của 1 tài xế trong 1
+/// tháng (yearMonth dạng 'YYYY-MM'): nếu đây là tháng có lần ứng ĐẦU TIÊN
+/// của tài xế, tính từ ĐÚNG ngày nhận tiền; các tháng sau, tính từ NGÀY 1
+/// đầu tháng đó.
+function driverMonthWindowStart(driverId, yearMonth){
+  const firstDate = driverFirstAdvanceDate(driverId);
+  if(firstDate && firstDate.slice(0,7)===yearMonth) return firstDate;
+  return yearMonth + '-01';
+}
+/// Các khoản ỨNG của 1 tài xế rơi vào ĐÚNG tháng yearMonth.
+function driverAdvancesInMonth(driverId, yearMonth){
+  return state.driverAdvances.filter(a=>a.driverId===driverId && a.date.slice(0,7)===yearMonth);
+}
+/// Các ca của 1 tài xế có Chi Phí Phát Sinh > 0, rơi vào ĐÚNG tháng
+/// yearMonth và từ đúng driverMonthWindowStart() trở đi — đây là phần TỰ
+/// ĐỘNG trừ vào số dư, không cần Ông Chủ bấm "nhập" thủ công.
+function driverIncidentalShiftsInMonth(driverId, yearMonth){
+  const start = driverMonthWindowStart(driverId, yearMonth);
   return state.shifts
-    .filter(sh=>sh.driverId===driverId && sh.date>=since && (Number(sh.incidentalCost)||0)>0)
+    .filter(sh=>sh.driverId===driverId && sh.date.slice(0,7)===yearMonth && sh.date>=start && (Number(sh.incidentalCost)||0)>0)
     .sort((a,b)=>b.date.localeCompare(a.date));
 }
-function driverIncidentalShiftsTotal(driverId){
-  return driverIncidentalShiftsSinceFirstAdvance(driverId).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
+/// Các Báo Cáo Chi Khác (thủ công, ngoài ca) của 1 tài xế rơi vào ĐÚNG
+/// tháng yearMonth.
+function driverManualReportsInMonth(driverId, yearMonth){
+  return state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date.slice(0,7)===yearMonth);
 }
-/// Số dư tạm ứng chi phí đang giữ = Tổng đã ứng − Chi Phí Phát Sinh Trong
-/// Ca (TỰ ĐỘNG, từ ngày ứng đầu tiên) − Báo Cáo Đã Chi THỦ CÔNG (chỉ dành
-/// cho khoản KHÔNG nằm trong Chi phí phát sinh của ca nào — tài xế báo
-/// miệng, Ông Chủ gõ tay ghi nhận). Dương = tài xế còn giữ tiền công ty.
-/// Âm = đã chi vượt số ứng, công ty đang nợ lại phần chênh.
-function driverAdvanceBalance(driverId){
-  const advanced = state.driverAdvances.filter(a=>a.driverId===driverId).reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const incidental = driverIncidentalShiftsTotal(driverId);
-  const manual = state.driverExpenseReports.filter(r=>r.driverId===driverId).reduce((s,r)=>s+(Number(r.amount)||0),0);
+/// Số dư tạm ứng chi phí đang giữ CỦA ĐÚNG THÁNG yearMonth (mặc định
+/// tháng hiện tại) = Tổng đã ứng TRONG THÁNG − Chi Phí Phát Sinh Trong Ca
+/// TRONG THÁNG (tự động) − Báo Cáo Chi Khác TRONG THÁNG (thủ công).
+/// KHÔNG cộng dồn từ tháng trước — mỗi tháng là 1 đợt độc lập.
+function driverAdvanceBalance(driverId, yearMonth){
+  yearMonth = yearMonth || todayLocalDateStr().slice(0,7);
+  const advanced = driverAdvancesInMonth(driverId, yearMonth).reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const incidental = driverIncidentalShiftsInMonth(driverId, yearMonth).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
+  const manual = driverManualReportsInMonth(driverId, yearMonth).reduce((s,r)=>s+(Number(r.amount)||0),0);
   return advanced - incidental - manual;
 }
-/// Bảng lịch sử gộp (Ứng + Báo Cáo Đã Chi) của 1 tài xế, mới nhất trước —
-/// bảng kẻ ô đủ 4 cạnh (.grid-table) đúng theo yêu cầu Ông Chủ trước đó.
-/// Lịch Sử ỨNG TIỀN riêng của 1 tài xế — bảng kẻ ô đầy đủ cột.
+/// Lịch Sử ỨNG TIỀN riêng của 1 tài xế (toàn thời gian, để tiện đối chiếu
+/// nhiều tháng) — bảng kẻ ô đầy đủ cột.
 function renderDriverAdvanceOnlyHistoryHtml(driverId){
   const items = state.driverAdvances.filter(a=>a.driverId===driverId).sort((a,b)=>b.date.localeCompare(a.date));
   if(items.length===0) return '<div class="hint">Chưa có lần ứng nào.</div>';
@@ -4391,17 +4444,16 @@ function openDriverAdvanceDetail(driverId){
   const d = driverById(driverId);
   const app = document.getElementById('app');
   if(!d){ renderAll(); return; }
-  const balance = driverAdvanceBalance(driverId);
+  const yearMonth = todayLocalDateStr().slice(0,7);
+  const balance = driverAdvanceBalance(driverId, yearMonth);
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="advDetailBackBtn">← Quay Lại Tài Xế</button>
     </section>
     <section class="group">
       <div class="card">
-        <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)}</h3>
+        <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)} · Tháng ${monthLabelVN(yearMonth)}</h3>
         <div class="summary-row total"><span>Số dư đang giữ</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
-        <div class="hint" style="margin-top:4px;">${balance>=0 ? 'Tài xế còn giữ tiền công ty — bình thường, dư sẽ dồn sang lần ứng sau.' : 'Tài xế đã chi vượt số ứng — công ty đang nợ lại phần này.'}</div>
-        <div class="hint" style="margin-top:6px;">Số dư = Tổng đã ứng − Chi Phí Phát Sinh Trong Ca (tự động) − Báo Cáo Đã Chi thủ công.</div>
       </div>
       <div class="two-col" style="margin-top:10px;">
         <button class="btn btn-accent" id="addAdvanceBtn">+ Ghi Ứng Thêm</button>
@@ -4409,17 +4461,15 @@ function openDriverAdvanceDetail(driverId){
       </div>
     </section>
     <section class="group">
-      <h3>🧾 Chi Phí Phát Sinh Trong Ca (tự động trừ)</h3>
-      <div class="hint" style="margin-bottom:8px;">Lấy thẳng từ mục "Chi Phí Phát Sinh" đã ghi khi nhập ca — TỰ ĐỘNG trừ vào số dư ở trên, không cần bấm nhập gì thêm. Tính từ ${driverFirstAdvanceDate(driverId)?formatDateVN(driverFirstAdvanceDate(driverId)):'—'} (ngày ứng đầu tiên) trở đi.</div>
-      ${renderIncidentalAutoDeductedHtml(driverId)}
-    </section>
-    <section class="group">
       <h3>Lịch Sử Ứng Tiền</h3>
       ${renderDriverAdvanceOnlyHistoryHtml(driverId)}
     </section>
     <section class="group">
+      <h3>🧾 Chi Phí Phát Sinh Trong Ca — Tháng ${monthLabelVN(yearMonth)}</h3>
+      ${renderIncidentalAutoDeductedHtml(driverId, yearMonth)}
+    </section>
+    <section class="group">
       <h3>Báo Cáo Chi Khác (Ngoài Ca, Ghi Tay)</h3>
-      <div class="hint" style="margin-bottom:8px;">Chỉ dùng cho khoản tài xế báo miệng, KHÔNG nằm trong Chi Phí Phát Sinh của ca nào ở trên — tránh trừ trùng 2 lần.</div>
       ${renderDriverExpenseReportHistoryHtml(driverId)}
     </section>
   `;
@@ -4480,13 +4530,11 @@ function openDriverAdvanceEditor(id, driverId){
   });
 }
 /// Bảng kẻ ô CHỈ ĐỂ XEM (không bấm nhập gì) — hiện các ca có Chi Phí Phát
-/// Sinh > 0 kể từ ngày ứng đầu tiên, đúng phần đang được TỰ ĐỘNG trừ vào
-/// số dư ở driverAdvanceBalance(). Thay thế bản "picker bấm để nhập" cũ —
-/// yêu cầu Ông Chủ 2026-08-10: CP phát sinh trong ca phải tự động, không
-/// cần thao tác thủ công nào nữa.
-function renderIncidentalAutoDeductedHtml(driverId){
-  const list = driverIncidentalShiftsSinceFirstAdvance(driverId);
-  if(list.length===0) return '<div class="hint">Chưa có Chi phí phát sinh nào trong ca kể từ lần ứng đầu tiên (hoặc chưa có lần ứng nào).</div>';
+/// Sinh > 0 trong ĐÚNG tháng yearMonth, đúng phần đang được TỰ ĐỘNG trừ
+/// vào số dư tháng đó ở driverAdvanceBalance().
+function renderIncidentalAutoDeductedHtml(driverId, yearMonth){
+  const list = driverIncidentalShiftsInMonth(driverId, yearMonth);
+  if(list.length===0) return '<div class="hint">Chưa có Chi phí phát sinh nào trong ca tháng này.</div>';
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
@@ -4512,7 +4560,6 @@ function openDriverExpenseReportEditor(id, driverId){
   app.innerHTML = `
     <section class="group">
       <h3>${existing?'Sửa':'Ghi'} Báo Cáo Chi Khác (Ngoài Ca) — ${escapeHtml(d?d.name:'')}</h3>
-      <div class="hint" style="margin-bottom:10px;">Chỉ dùng cho khoản tài xế báo miệng, KHÔNG nằm trong Chi Phí Phát Sinh của ca nào (khoản đó đã tự động trừ vào số dư rồi, không cần ghi lại ở đây).</div>
       <div class="card">
         <div class="field">
           <label>Ngày chi</label>
@@ -7013,18 +7060,22 @@ function partnerTripRows(partnerId, side){
         const tripLocation = (t.tripLocation||'').trim() || '(chưa khai điểm múc-đổ)';
         if(side==='customer'){
           const vol = Number(t.sellVolume)||0, price = Number(t.sellUnitPrice)||0, gross = vol*price;
+          const vatAdded = !s.sellIncludesVat && !!s.sellHasInvoice;
           const cash = s.sellIncludesVat ? gross : (s.sellHasInvoice ? gross*(1+vatFrac) : gross);
-          return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'khối', cash };
+          return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'khối', gross, cash, vatAdded };
         }
         const vol = Number(t.buyVolume)||0, price = Number(t.buyUnitPrice)||0, gross = vol*price;
+        const vatAdded = !s.buyIncludesVat && deductibleBuy;
         const cash = s.buyIncludesVat ? gross : (deductibleBuy ? gross*(1+vatFrac) : gross);
-        return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'tấn', cash };
+        return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit:'tấn', gross, cash, vatAdded };
       });
       const driver = driverById(sh.driverId);
       groups.push({
         date: sh.date, shiftType: sh.shiftType,
         driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'),
-        trips, totalCash: trips.reduce((sum,t)=>sum+t.cash,0)
+        trips,
+        totalGross: trips.reduce((sum,t)=>sum+t.gross,0),
+        totalCash: trips.reduce((sum,t)=>sum+t.cash,0)
       });
     }
   }
@@ -7035,31 +7086,36 @@ function partnerTripRows(partnerId, side){
 /// nhóm màu nổi (ngày · ca · tài xế · số chuyến — KHÔNG kèm tên công
 /// trình gộp nữa, vì đó chính là chuỗi dính cục gây rối mắt), theo sau là
 /// TỪNG CHUYẾN riêng — Loại Hàng, Điểm Múc-Điểm Đổ, Khối Lượng, Đơn Giá,
-/// Thành Tiền — và 1 dòng "Tổng ngày" để đối chiếu nhanh.
+/// Tiền Hàng (= Khối Lượng × Đơn Giá, chưa VAT), Phải Trả/Khách Trả (cộng
+/// thêm VAT khi ca đó đã có hoá đơn — đánh dấu (+VAT) để không còn nhầm
+/// với phép nhân KL×Đơn Giá thuần) — và 1 dòng "Tổng ngày" để đối chiếu.
 function partnerTransactionTableHtml(partnerId, side){
   const groups = partnerTripRows(partnerId, side);
   if(groups.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const payLabel = side==='supplier' ? 'Phải Trả Mỏ' : 'Khách Phải Trả';
   const rowsHtml = groups.map(g=>{
-    const header = `<tr class="grid-group-row"><td colspan="5">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến</td></tr>`;
+    const header = `<tr class="grid-group-row"><td colspan="6">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến</td></tr>`;
     const tripLines = g.trips.map(t=>`
       <tr>
         <td>${escapeHtml(t.goodsType)}</td>
         <td>${escapeHtml(t.tripLocation)}</td>
         <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
         <td class="num">${fmtVND(t.price)}</td>
-        <td class="num" style="font-weight:700;">${fmtVND(t.cash)}</td>
+        <td class="num">${fmtVND(t.gross)}</td>
+        <td class="num" style="font-weight:700;">${fmtVND(t.cash)}${t.vatAdded?' <span style="font-weight:400; font-size:11px; color:var(--loss);">(+VAT)</span>':''}</td>
       </tr>`).join('');
-    const totalLine = `<tr class="grid-total-row"><td colspan="4">Tổng ngày</td><td class="num">${fmtVND(g.totalCash)}</td></tr>`;
+    const totalLine = `<tr class="grid-total-row"><td colspan="4">Tổng ngày</td><td class="num">${fmtVND(g.totalGross)}</td><td class="num">${fmtVND(g.totalCash)}</td></tr>`;
     return header + tripLines + totalLine;
   }).join('');
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Thành Tiền</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Tiền Hàng</th><th>${escapeHtml(payLabel)}</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
-    </div>`;
+    </div>
+    <div class="hint" style="margin-top:8px;">"Tiền Hàng" = Khối Lượng × Đơn Giá (chưa VAT, đúng phép nhân 2 cột bên trái). "${escapeHtml(payLabel)}" cộng thêm 10% VAT khi ca đó đã có hoá đơn — có nhãn <span style="color:var(--loss);">(+VAT)</span> để Ông Chủ dễ nhận biết vì sao 2 số khác nhau.</div>`;
 }
 /// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
