@@ -7116,6 +7116,76 @@ function partnerTransactionTableHtml(partnerId, side){
     </div>
     <div class="hint" style="margin-top:8px;">Cột tô đậm xanh ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ.</div>`;
 }
+/// Gộp TOÀN BỘ chuyến (mọi thời điểm — CÙNG phạm vi "toàn bộ" với "Phải
+/// Trả (tổng)" ở đầu màn Chi Tiết Nhà Cung Cấp, KHÔNG lọc theo kỳ) của 1
+/// nhà cung cấp, theo TỪNG LOẠI HÀNG (Base A, Base B, đá, cát...) — để Ông
+/// Chủ biết rõ đã lấy bao nhiêu chuyến/tấn mỗi loại, tiền hàng (chưa VAT)
+/// bao nhiêu, và VAT đã cộng thêm bao nhiêu (yêu cầu Ông Chủ 2026-08-13).
+/// TÁI SỬ DỤNG đúng partnerTripRows() — mỗi t.cash cộng dồn LUÔN khớp
+/// tuyệt đối với commercialCashToSupplier() ở cấp công trình (đã kiểm
+/// chứng ở partnerTripRows), nên totalCash dưới đây LUÔN bằng đúng
+/// debt.payable, không có đường tính nào khác gây lệch số.
+function supplierGoodsBreakdown(supplierId){
+  const groups = partnerTripRows(supplierId, 'supplier');
+  const byGoods = {};
+  let totalVol=0, totalTrips=0, totalNet=0, totalVat=0, totalCash=0;
+  for(const g of groups){
+    for(const t of g.trips){
+      const key = t.goodsType || '(chưa khai)';
+      if(!byGoods[key]) byGoods[key] = { goodsType:key, trips:0, vol:0, net:0, vat:0, cash:0 };
+      const b = byGoods[key];
+      // vat = phần chênh giữa "Có VAT" và "Chưa VAT" — CHỈ khi VAT thực
+      // sự được áp (g.vatApplied), khớp đúng cách cash được chọn ở
+      // partnerTripRows (cash = vatApplied ? withVatAmt : netAmt), nên
+      // cash === net + vat LUÔN đúng tuyệt đối ở mọi dòng, không làm tròn.
+      const vat = g.vatApplied ? (t.withVatAmt - t.netAmt) : 0;
+      b.trips += 1; b.vol += t.vol; b.net += t.netAmt; b.vat += vat; b.cash += t.cash;
+      totalVol += t.vol; totalTrips += 1; totalNet += t.netAmt; totalVat += vat; totalCash += t.cash;
+    }
+  }
+  const rows = Object.values(byGoods).sort((a,b)=>b.cash-a.cash);
+  return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash };
+}
+/// Render thẻ tổng hợp + bảng theo loại hàng, kèm phép tính tường minh
+/// (tiền hàng + VAT = tổng cộng) để Ông Chủ tự đối chiếu bằng tay được,
+/// cùng triết lý minh bạch số học đang dùng ở khối Điểm Hoà Vốn.
+function supplierGoodsBreakdownHtml(supplierId){
+  const b = supplierGoodsBreakdown(supplierId);
+  if(b.totalTrips===0) return '';
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const rowsHtml = b.rows.map(r=>`
+    <tr>
+      <td>${escapeHtml(r.goodsType)}</td>
+      <td class="num">${r.trips} chuyến</td>
+      <td class="num">${fmtQty(r.vol)} tấn</td>
+      <td class="num">${fmtVND(r.net)}</td>
+      <td class="num">${fmtVND(r.vat)}</td>
+      <td class="num" style="font-weight:800;">${fmtVND(r.cash)}</td>
+    </tr>`).join('');
+  return `
+    <div class="card">
+      <div class="summary-row"><span>Tổng tiền hàng (chưa VAT)</span><span class="val">${fmtVND(b.totalNet)}</span></div>
+      <div class="summary-row"><span>+ Tổng VAT đã tính</span><span class="val">${fmtVND(b.totalVat)}</span></div>
+      <div class="summary-row total"><span>= Tổng Cộng (khớp "Phải Trả" ở trên)</span><span class="val">${fmtVND(b.totalCash)}</span></div>
+      <div class="hint" style="margin-top:6px;">${fmtVND(b.totalNet)}đ (tiền hàng) + ${fmtVND(b.totalVat)}đ (VAT) = ${fmtVND(b.totalCash)}đ — tổng ${b.totalTrips} chuyến, ${fmtQty(b.totalVol)} tấn, cộng dồn từ mọi kỳ.</div>
+    </div>
+    <div class="grid-table-wrap" style="margin-top:10px;">
+      <table class="grid-table">
+        <thead><tr><th>Loại Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th><th>Chưa VAT</th><th>VAT</th><th>Có VAT (Thực Trả)</th></tr></thead>
+        <tbody>
+          ${rowsHtml}
+          <tr class="grid-total-row">
+            <td>TỔNG CỘNG</td>
+            <td class="num">${b.totalTrips} chuyến</td>
+            <td class="num">${fmtQty(b.totalVol)} tấn</td>
+            <td class="num">${fmtVND(b.totalNet)}</td>
+            <td class="num">${fmtVND(b.totalVat)}</td>
+            <td class="num">${fmtVND(b.totalCash)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+}
 /// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
 /// xuất cho KT thuế, đảm bảo 2 nơi luôn khớp nhau tuyệt đối.
@@ -8122,6 +8192,10 @@ function openSupplierDetail(supplierId){
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
+    </section>
+    <section class="group">
+      <h3>📦 Tổng Tiền Hàng Đã Lấy — Theo Loại Hàng (Toàn Bộ)</h3>
+      ${supplierGoodsBreakdownHtml(supplierId)}
     </section>
     <section class="group">
       <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
