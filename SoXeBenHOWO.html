@@ -1786,16 +1786,25 @@ function renderInvoiceLotOverview(){
           ${goodsTypes.map(g=>{
             const led = buildInvoiceLotLedger(g);
             const lots = Object.values(led.byLot);
-            if(!lots.length) return '';
-            const total = lots.reduce((sum,l)=>sum+l.total,0);
-            const used = lots.reduce((sum,l)=>sum+l.used,0);
-            const remaining = lots.reduce((sum,l)=>sum+l.remaining,0);
-            const low = total>0 && remaining/total<0.15;
+            // Hiện dòng này nếu CÓ lô đã mua HOẶC có ca nào từng cần loại
+            // hàng này (kể cả chưa mua lô nào, để lộ rõ thiếu ngay từ đầu
+            // thay vì ẩn mất khi Đã Mua = 0).
+            if(!lots.length && Object.keys(led.bySiteLog).length===0) return '';
+            const total = lots.reduce((sum,l)=>sum+l.total,0); // Đã mua
+            // "Đã dùng" = TỔNG NHU CẦU THẬT mọi thời điểm (cộng dồn đúng
+            // allocations + shortfall đã có sẵn trong ledger.bySiteLog —
+            // không tính lại theo cách khác), KHÁC với l.used (bị chặn
+            // không vượt quá số lô hiện có) — dùng cách này để "Còn lại"
+            // = Đã mua − Đã dùng phản ánh đúng thực tế, có thể ÂM khi
+            // thiếu thật (yêu cầu Ông Chủ 2026-08-13: tồn kho real-time,
+            // âm là đỏ, không cần badge "sắp hết" nữa).
+            const totalDemand = Object.values(led.bySiteLog).reduce((sum,rec)=>sum+rec.allocations.reduce((s,a)=>s+a.volume,0)+rec.shortfall,0);
+            const remaining = total - totalDemand;
             return `<tr>
               <td>${escapeHtml(g)}</td>
               <td>${total.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</td>
-              <td>${used.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</td>
-              <td style="font-weight:700; color:${low?'var(--loss)':'var(--profit)'};">${remaining.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${low?' ⚠️ sắp hết':''}</td>
+              <td style="font-weight:700;">${totalDemand.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</td>
+              <td style="font-weight:700; color:${remaining>=0?'var(--profit)':'var(--loss)'};">${remaining<0?'−':''}${Math.abs(remaining).toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</td>
             </tr>`;
           }).join('')}
         </tbody>
