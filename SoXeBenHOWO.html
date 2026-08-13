@@ -3790,6 +3790,93 @@ Tổng chi phí mua hoá đơn bù (tiền mặt thật, đã gồm VAT của l�
     </div>
   `);
 }
+/// Gộp VAT của CẢ KỲ theo TỪNG ĐỐI TÁC — khách hàng nào đã trả VAT đầu ra
+/// bao nhiêu, nhà cung cấp nào đã được trả VAT đầu vào (khấu trừ) bao
+/// nhiêu — mở từ nút [Chi Tiết] cạnh "VAT phải nộp" ở Kết Quả Kinh Doanh
+/// (yêu cầu Ông Chủ 2026-08-13). Nhận thẳng đúng mảng inRangeShifts đang
+/// dùng để tính vatPayableInRange trong renderResults() — KHÔNG tự lọc
+/// lại theo ngày, để chắc chắn cùng 1 tập ca với số đang hiển thị. Mỗi
+/// công trình dùng lại ĐÚNG siteVatRateFraction/commercialNetSell/
+/// commercialNetBuy/buyIsDeductible/siteInvoiceSupplementVatCredit/
+/// commercialVatPayable — không có công thức tính VAT nào khác ở đây.
+function periodVatBreakdown(inRangeShifts){
+  const byCustomer = {}, bySupplier = {};
+  let totalOutputRaw=0, totalInputRaw=0, totalSupplementCredit=0, totalPayableClamped=0;
+  for(const sh of inRangeShifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      const vatFrac = siteVatRateFraction(s);
+      const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vatFrac : 0);
+      const inputVat = buyIsDeductible(s) ? (commercialNetBuy(s) * vatFrac) : 0;
+      const supplementCredit = siteInvoiceSupplementVatCredit(s);
+      const payable = commercialVatPayable(s); // hàm gốc — đã tự kẹp về 0 nếu âm
+      totalOutputRaw += outputVat; totalInputRaw += inputVat;
+      totalSupplementCredit += supplementCredit; totalPayableClamped += payable;
+      if(s.customerId && outputVat>0.5){
+        const cus = customerById(s.customerId);
+        if(!byCustomer[s.customerId]) byCustomer[s.customerId] = { name: cus?cus.name:'(khách hàng đã xoá)', vat:0, sites:0 };
+        byCustomer[s.customerId].vat += outputVat; byCustomer[s.customerId].sites += 1;
+      }
+      if(s.supplierId && inputVat>0.5){
+        const sup = supplierById(s.supplierId);
+        if(!bySupplier[s.supplierId]) bySupplier[s.supplierId] = { name: sup?sup.name:'(nhà cung cấp đã xoá)', vat:0, sites:0 };
+        bySupplier[s.supplierId].vat += inputVat; bySupplier[s.supplierId].sites += 1;
+      }
+    }
+  }
+  const totalPayableRaw = totalOutputRaw - totalInputRaw - totalSupplementCredit;
+  // totalLostCredit = phần "âm" của từng công trình lẻ bị kẹp về 0 (luật
+  // không cho công trình này bù chéo phần dư khấu trừ sang công trình
+  // khác) — luôn ≥0, và cộng đúng vào để ra lại totalPayableClamped, xem
+  // hệt logic Math.max(0,...) trong commercialVatPayable() ở trên.
+  const totalLostCredit = totalPayableClamped - totalPayableRaw;
+  return {
+    customerRows: Object.values(byCustomer).sort((a,b)=>b.vat-a.vat),
+    supplierRows: Object.values(bySupplier).sort((a,b)=>b.vat-a.vat),
+    totalOutputRaw, totalInputRaw, totalSupplementCredit, totalPayableRaw, totalLostCredit, totalPayableClamped
+  };
+}
+function renderPeriodVatDetailModal(inRangeShifts, vatPayableInRange){
+  const b = periodVatBreakdown(inRangeShifts);
+  const rowHtml = r=>`<div class="summary-row"><span>${escapeHtml(r.name)} <span style="color:var(--ink-soft); font-size:11px;">(${r.sites} công trình)</span></span><span class="val">${fmtVND(r.vat)}</span></div>`;
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🧾 VAT Phải Nộp — Giải Trình Chi Tiết</h3>
+    <div class="hint" style="margin-bottom:10px;">Cộng dồn đúng từng công trình thương mại trong kỳ đang xem — số liệu lấy trực tiếp từ đúng hàm đang chạy thật (commercialVatPayable), không tính lại theo cách khác.</div>
+
+    <div class="modal-step">
+      <div class="st-title">1. VAT đã thu từ khách hàng (đầu ra) — theo từng khách</div>
+      <div class="st-body">Chỉ tính khi công trình đó bán có VAT (giá đã gồm VAT, hoặc giá net + đã xuất hoá đơn bán).</div>
+      ${b.customerRows.length===0?'<div class="hint">Chưa có khách hàng nào phát sinh VAT đầu ra trong kỳ.</div>':b.customerRows.map(rowHtml).join('')}
+      <div class="summary-row total"><span>Tổng VAT đầu ra</span><span class="val">${fmtVND(b.totalOutputRaw)}</span></div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">2. VAT đã trả cho nhà cung cấp (đầu vào, được khấu trừ) — theo từng NCC</div>
+      <div class="st-body">Chỉ tính khi công trình đó mua có VAT VÀ đã tick "Đã nhận hoá đơn MUA" — mua chưa có hoá đơn thì KHÔNG được khấu trừ.</div>
+      ${b.supplierRows.length===0?'<div class="hint">Chưa có nhà cung cấp nào phát sinh VAT đầu vào được khấu trừ trong kỳ.</div>':b.supplierRows.map(rowHtml).join('')}
+      <div class="summary-row total"><span>Tổng VAT đầu vào được khấu trừ</span><span class="val">${fmtVND(b.totalInputRaw)}</span></div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">3. VAT khấu trừ từ Kho Hoá Đơn Bù</div>
+      <div class="st-formula">Tổng VAT khấu trừ từ các lô hoá đơn bù đã rút trong kỳ = ${fmtVND(b.totalSupplementCredit)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">4. Cộng dồn ra VAT phải nộp thực tế</div>
+      <div class="st-body">Mỗi công trình tính riêng rồi mới cộng lại (không gộp trước) — nếu 1 công trình tự nó bị âm (khấu trừ nhiều hơn phải nộp) thì phần âm đó bị kẹp về 0 cho đúng công trình đó (luật không cho bù chéo sang công trình khác, cũng không tự hoàn thuế).</div>
+      <div class="st-formula">VAT đầu ra − VAT đầu vào − Hoá đơn bù = ${fmtVND(b.totalOutputRaw)} − ${fmtVND(b.totalInputRaw)} − ${fmtVND(b.totalSupplementCredit)} = ${fmtVND(b.totalPayableRaw)}${b.totalLostCredit>0.5?`
++ Khấu trừ dư bị mất (công trình lẻ âm VAT, không được bù chéo) = ${fmtVND(b.totalLostCredit)}`:''}
+= VAT PHẢI NỘP THỰC TẾ = ${fmtVND(vatPayableInRange)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">5. Còn phải nộp cho ai</div>
+      <div class="st-body">Toàn bộ <b>${fmtVND(vatPayableInRange)}</b> là nghĩa vụ còn phải nộp cho <b>NHÀ NƯỚC (Cơ Quan Thuế)</b> — không phải nộp cho khách hàng hay nhà cung cấp nào cả. Phần VAT đã trả cho nhà cung cấp ở mục 2 đã được khấu trừ ngay trong phép tính trên rồi, không phải trả/nộp thêm lần nữa.</div>
+    </div>
+  `);
+}
 
 /// Khối "Tổng doanh thu / từng khoản chi phí / Tổng chi phí / Lợi nhuận
 /// ròng" — dùng chung cho cả form sửa ca (updateSummary) lẫn trang xem lại
@@ -7146,12 +7233,12 @@ function supplierGoodsBreakdown(supplierId){
   const rows = Object.values(byGoods).sort((a,b)=>b.cash-a.cash);
   return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash };
 }
-/// Render thẻ tổng hợp + bảng theo loại hàng, kèm phép tính tường minh
-/// (tiền hàng + VAT = tổng cộng) để Ông Chủ tự đối chiếu bằng tay được,
-/// cùng triết lý minh bạch số học đang dùng ở khối Điểm Hoà Vốn.
-function supplierGoodsBreakdownHtml(supplierId){
-  const b = supplierGoodsBreakdown(supplierId);
-  if(b.totalTrips===0) return '';
+/// Render bảng chi tiết theo loại hàng — nhận thẳng object đã tính từ
+/// supplierGoodsBreakdown() (KHÔNG tính lại), để dùng chung 1 lần tính
+/// duy nhất với thẻ tổng hợp phía trên trong openSupplierDetail — tránh
+/// 2 nơi tính riêng rẽ có thể lệch nhau.
+function supplierGoodsBreakdownHtml(b){
+  if(!b || b.totalTrips===0) return '<div class="hint">Chưa có chuyến hàng thương mại nào gắn nhà cung cấp này.</div>';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const rowsHtml = b.rows.map(r=>`
     <tr>
@@ -7163,13 +7250,7 @@ function supplierGoodsBreakdownHtml(supplierId){
       <td class="num" style="font-weight:800;">${fmtVND(r.cash)}</td>
     </tr>`).join('');
   return `
-    <div class="card">
-      <div class="summary-row"><span>Tổng tiền hàng (chưa VAT)</span><span class="val">${fmtVND(b.totalNet)}</span></div>
-      <div class="summary-row"><span>+ Tổng VAT đã tính</span><span class="val">${fmtVND(b.totalVat)}</span></div>
-      <div class="summary-row total"><span>= Tổng Cộng (khớp "Phải Trả" ở trên)</span><span class="val">${fmtVND(b.totalCash)}</span></div>
-      <div class="hint" style="margin-top:6px;">${fmtVND(b.totalNet)}đ (tiền hàng) + ${fmtVND(b.totalVat)}đ (VAT) = ${fmtVND(b.totalCash)}đ — tổng ${b.totalTrips} chuyến, ${fmtQty(b.totalVol)} tấn, cộng dồn từ mọi kỳ.</div>
-    </div>
-    <div class="grid-table-wrap" style="margin-top:10px;">
+    <div class="grid-table-wrap">
       <table class="grid-table">
         <thead><tr><th>Loại Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th><th>Chưa VAT</th><th>VAT</th><th>Có VAT (Thực Trả)</th></tr></thead>
         <tbody>
@@ -7721,6 +7802,7 @@ function renderResults(){
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
+        <button class="btn btn-ghost btn-sm" id="vatDetailBtn" style="margin:2px 0 6px;">🔍 Chi Tiết Cách Tính VAT</button>
         <div class="field" style="margin-top:8px; margin-bottom:0;">
           <label>Thuế TNDN dự kiến (KT thuế tư vấn — Ông Chủ tự nhập theo đúng kỳ này)</label>
           <input type="text" inputmode="decimal" id="res_manualCit" placeholder="Chưa nhập">
@@ -7970,6 +8052,9 @@ function renderResults(){
   document.getElementById('exportKTThueBtn').addEventListener('click', ()=>{
     exportKTThueBundle(from, to);
   });
+  document.getElementById('vatDetailBtn').addEventListener('click', ()=>{
+    renderPeriodVatDetailModal(inRange, vatPayableInRange);
+  });
   document.querySelectorAll('.fin-warning-detail-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const w = financialWarnings.find(x=>x.id===btn.dataset.warningId);
@@ -8174,6 +8259,12 @@ function openSupplierDetail(supplierId){
   const app = document.getElementById('app');
   if(!sup){ renderAll(); return; }
   const debt = computeSupplierDebt(supplierId);
+  // Tính 1 LẦN DUY NHẤT, dùng chung cho cả thẻ tổng hợp lẫn bảng theo loại
+  // hàng bên dưới — tránh 2 nơi tính riêng rẽ có thể lệch nhau. goods.totalCash
+  // LUÔN khớp tuyệt đối debt.payable (đã kiểm chứng ở supplierGoodsBreakdown),
+  // nhưng dòng "= Phải trả (tổng)" bên dưới vẫn LẤY ĐÚNG debt.payable (giá trị
+  // gốc từ computeSupplierDebt) để không bao giờ tách rời khỏi công thức lõi.
+  const goods = supplierGoodsBreakdown(supplierId);
   const payments = state.supplierPayments.filter(p=>p.supplierId===supplierId).sort((a,b)=>b.date.localeCompare(a.date));
   app.innerHTML = `
     <section class="group">
@@ -8186,16 +8277,20 @@ function openSupplierDetail(supplierId){
     </section>
     <section class="group">
       <div class="card">
-        <div class="summary-row"><span>Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
-        <div class="summary-row"><span>Đã trả (tổng)</span><span class="val">${fmtVND(debt.paid)}</span></div>
+        ${goods.totalTrips>0 ? `
+        <div class="summary-row"><span>Tổng tiền hàng đã lấy (chưa VAT)</span><span class="val">${fmtVND(goods.totalNet)}</span></div>
+        <div class="summary-row"><span>+ VAT</span><span class="val">${fmtVND(goods.totalVat)}</span></div>
+        ` : ''}
+        <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
+        <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
         <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (anh tạm ứng dư)':''}</span></div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
     <section class="group">
-      <h3>📦 Tổng Tiền Hàng Đã Lấy — Theo Loại Hàng (Toàn Bộ)</h3>
-      ${supplierGoodsBreakdownHtml(supplierId)}
+      <h3>📦 Chi Tiết Tiền Hàng — Theo Loại Hàng (Base A / Base B...)</h3>
+      ${supplierGoodsBreakdownHtml(goods)}
     </section>
     <section class="group">
       <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
