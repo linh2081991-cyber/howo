@@ -1587,14 +1587,19 @@ function renderInvoiceLotManagerModal(editingId, opts){
         <input type="text" inputmode="decimal" id="lot_volume" placeholder="VD 50" value="${val(editing,'totalVolume')}">
       </div>
       <div class="field">
-        <label>Tổng giá trị hoá đơn (đã gồm VAT, đúng số chuyển khoản)</label>
-        <input type="text" inputmode="decimal" id="lot_value" placeholder="đ">
+        <label>Đơn giá net/khối (chưa VAT — tự tính ra tổng)</label>
+        <input type="text" inputmode="decimal" id="lot_netPrice" placeholder="đ/khối">
       </div>
+    </div>
+    <div class="field">
+      <label>Tổng giá trị hoá đơn (đã gồm VAT, đúng số chuyển khoản)</label>
+      <input type="text" inputmode="decimal" id="lot_value" placeholder="đ">
     </div>
     <div class="field">
       <label>VAT suất trên hoá đơn (%)</label>
       <input type="text" inputmode="decimal" id="lot_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
     </div>
+    <div class="hint" style="margin-bottom:10px;">Gõ "Đơn giá net/khối" (giá chưa VAT) — app tự nhân ra "Tổng giá trị hoá đơn" = Khối lượng × Đơn giá net × (1 + VAT%). Chỉ để tính nhanh: nếu số thật trên hoá đơn/chuyển khoản lệch đi (làm tròn, chiết khấu...), Ông Chủ vẫn sửa tay thẳng ô "Tổng giá trị hoá đơn" — ô đó luôn là số cuối cùng được lưu lại.</div>
     <div class="formula-divider" style="margin:12px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">Tiền Mặt Nhận Lại (bên bán trả lại mặt)</div>
     <div class="two-col">
@@ -1627,6 +1632,9 @@ function renderInvoiceLotManagerModal(editingId, opts){
   const cashReturnedInputEl = document.getElementById('lot_cashReturned');
   const pctInputEl = document.getElementById('lot_cashReturnedPct');
   const realCostValEl = document.getElementById('lot_realCostVal');
+  const netPriceInputEl = document.getElementById('lot_netPrice');
+  const volumeInputEl = document.getElementById('lot_volume');
+  const vatInputEl = document.getElementById('lot_vat');
   let curTotalValue = Number(val(editing,'totalInvoiceValue'))||0;
   let curCashReturned = Number(val(editing,'cashReturned'))||0;
   const refreshRealCost = () => {
@@ -1637,18 +1645,21 @@ function renderInvoiceLotManagerModal(editingId, opts){
   const syncPctFromCash = () => {
     pctInputEl.value = (curTotalValue>0 && curCashReturned>0) ? (Math.round((curCashReturned/curTotalValue*100)*100)/100) : '';
   };
-  attachMoneyInput(totalValueInputEl, curTotalValue, v=>{
+  // Tách thành hàm riêng để gọi lại được từ cả 2 nơi: (1) Ông Chủ gõ tay
+  // thẳng vào ô Tổng giá trị hoá đơn, (2) Ông Chủ gõ Đơn giá net/khối bên
+  // dưới rồi app tự tính ngược ra tổng — cả 2 đường đều phải đồng bộ %
+  // nhận lại ⇄ tiền mặt nhận lại và cập nhật lại "Số Tiền Thật Phải Trả"
+  // giống hệt nhau, không có công thức thứ 2 nào khác.
+  const applyTotalValueChange = (v) => {
     curTotalValue = v;
-    // Đổi Tổng giá trị hoá đơn mà % nhận lại đã có sẵn → giữ nguyên đúng
-    // % đó, tự tính lại Tiền mặt nhận lại theo tỉ lệ mới (không giữ số
-    // tiền cũ cố định, vì % mới là con số Ông Chủ thật sự chốt với đối tác).
     const pct = parseFloat((pctInputEl.value||'').replace(',','.'))||0;
     if(pct>0){
       curCashReturned = Math.round(curTotalValue*pct/100);
       cashReturnedInputEl.value = curCashReturned ? curCashReturned.toLocaleString('vi-VN') : '';
     }
     refreshRealCost();
-  });
+  };
+  attachMoneyInput(totalValueInputEl, curTotalValue, applyTotalValueChange);
   attachMoneyInput(cashReturnedInputEl, curCashReturned, v=>{
     curCashReturned = v;
     syncPctFromCash();
@@ -1662,6 +1673,31 @@ function renderInvoiceLotManagerModal(editingId, opts){
     refreshRealCost();
   });
   refreshRealCost();
+  // ---- Đơn giá net/khối → tự tính Tổng giá trị hoá đơn (yêu cầu Ông Chủ
+  // 2026-08-13). Đây là công cụ TÍNH NHANH 1 CHIỀU: gõ đơn giá net (và có
+  // sẵn khối lượng + VAT suất) thì app nhân ra tổng, đổ thẳng vào cùng
+  // đường applyTotalValueChange() y hệt như gõ tay vào ô Tổng giá trị hoá
+  // đơn — không có công thức thứ 2. Ông Chủ vẫn có thể sửa tay đè lên ô
+  // Tổng giá trị hoá đơn bất cứ lúc nào (ví dụ số chuyển khoản lệch do làm
+  // tròn/chiết khấu) — ô đó luôn là số cuối cùng được lưu, đơn giá net
+  // KHÔNG được lưu lại, chỉ là ô nháp hỗ trợ tính.
+  let curNetPrice = (() => {
+    if(!editing) return 0;
+    const vol = Number(editing.totalVolume)||0, vat = Number(editing.vatRatePercent)||0;
+    return vol>0 ? Math.round(((Number(editing.totalInvoiceValue)||0)/(1+vat/100))/vol) : 0;
+  })();
+  const recalcTotalFromNetPrice = () => {
+    if(curNetPrice<=0) return; // chưa gõ đơn giá net — không tự ý ghi đè Tổng giá trị hoá đơn đang có
+    const volume = parseFloat((volumeInputEl.value||'').replace(',','.'))||0;
+    const vatPct = parseFloat((vatInputEl.value||'').replace(',','.'))||0;
+    if(volume<=0) return;
+    const newTotal = Math.round(volume*curNetPrice*(1+vatPct/100));
+    totalValueInputEl.value = newTotal ? newTotal.toLocaleString('vi-VN') : '';
+    applyTotalValueChange(newTotal);
+  };
+  attachMoneyInput(netPriceInputEl, curNetPrice, v=>{ curNetPrice=v; recalcTotalFromNetPrice(); });
+  volumeInputEl.addEventListener('input', recalcTotalFromNetPrice);
+  vatInputEl.addEventListener('input', recalcTotalFromNetPrice);
   document.querySelectorAll('.lotReportBtn').forEach(btn=>btn.addEventListener('click', ()=>{
     const lot = invoiceLotById(btn.dataset.id);
     if(lot) renderInvoiceLotManagerModal(lot.id, {showReport:true});
@@ -3626,7 +3662,7 @@ function updateSiteCalc(idx){
         </div>
         ${missingBlock}
         <div class="cb-profit">
-          <span class="cb-lbl">THỰC LÃI BỎ TÚI</span>
+          <span class="cb-lbl">LÃI THỰC NHẬN (TIỀN MẶT)</span>
           <span class="cb-val">${takeHome>=0?'+':''}${fmtVND(takeHome)}</span>
         </div>
         <button type="button" class="btn btn-ghost btn-sm cashflow-detail-btn" data-idx="${idx}" style="width:100%; margin-top:8px;">🔍 Chi Tiết Cách Tính</button>
@@ -3648,7 +3684,7 @@ function updateSiteCalc(idx){
 /// commercialNetBuy/Sell, commercialCashToSupplier/FromCustomer,
 /// commercialVatPayable, siteGoodsTypeGroups, siteInvoiceLotBreakdown...)
 /// — KHÔNG tính lại bằng công thức riêng, để tuyệt đối không có rủi ro
-/// hiển thị 1 số khác với số thật đang dùng để tính THỰC LÃI BỎ TÚI.
+/// hiển thị 1 số khác với số thật đang dùng để tính LÃI THỰC NHẬN (TIỀN MẶT).
 /// Riêng khối VAT phải nộp (Bước 6) cần lộ 2 số trung gian mà
 /// commercialVatPayable() không tự trả ra (outputVat/inputVat trước khi
 /// trừ) — 2 số này được ghép LẠI ĐÚNG Y HỆT logic bên trong hàm đó (xem
@@ -3777,13 +3813,33 @@ KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(do
 Giá trị quy đổi nội bộ = ${fmtQty(g.missingVolume)} × đơn giá mua BQ ${fmtVND(g.avgBuyUnitPrice)} = ${fmtVND(g.missingValue)}</div>`;
       }).join('')}
       ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — lô mua trước dùng trước)</b>
-${lotInfo.allocations.map(a=>`↳ Lô ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'} (${escapeHtml(a.goodsType||'')}): ${fmtQty(a.volume)} khối — chi phí ${fmtVND(a.cost)}, VAT khấu trừ ${fmtVND(a.vat)}`).join('\n')}
+${lotInfo.allocations.map(a=>{
+  const lot = invoiceLotById(a.lotId) || {};
+  const lotVol = Number(lot.totalVolume)||0;
+  const lotValue = Number(lot.totalInvoiceValue)||0;
+  const lotReturned = Number(lot.cashReturned)||0;
+  const lotVat = Number(lot.vatRatePercent)||0;
+  // Y HỆT logic nội bộ buildInvoiceLotLedger() — chỉ dựng lại 3 số/khối
+  // trung gian (hàm đó không tự trả ra) để lộ rõ TẠI SAO rút bao nhiêu
+  // khối lại ra đúng bấy nhiêu tiền/VAT (yêu cầu Ông Chủ 2026-08-13).
+  const grossPerVol = lotVol>0 ? lotValue/lotVol : 0;
+  const netCostPerVol = lotVol>0 ? (lotValue-lotReturned)/lotVol : 0;
+  const vatPerVol = grossPerVol*lotVat/(100+lotVat);
+  return `↳ Lô ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'} (${escapeHtml(a.goodsType||'')}) — rút ${fmtQty(a.volume)} khối
+   Giá hoá đơn gốc/khối = ${fmtVND(lotValue)} ÷ ${fmtQty(lotVol)} khối cả lô = ${fmtVND(grossPerVol)}/khối
+   Chi phí THẬT/khối = (${fmtVND(lotValue)} − ${fmtVND(lotReturned)} tiền mặt nhận lại) ÷ ${fmtQty(lotVol)} khối = ${fmtVND(netCostPerVol)}/khối
+   → Chi phí lô này = ${fmtQty(a.volume)} khối × ${fmtVND(netCostPerVol)}/khối = ${fmtVND(a.cost)}
+   VAT khấu trừ/khối = ${fmtVND(grossPerVol)} × ${lotVat}% ÷ (100%+${lotVat}%) = ${fmtVND(vatPerVol)}/khối
+   → VAT khấu trừ lô này = ${fmtQty(a.volume)} khối × ${fmtVND(vatPerVol)}/khối = ${fmtVND(a.vat)}`;
+}).join('\n\n')}
 —
-Tổng chi phí mua hoá đơn bù (tiền mặt thật, đã gồm VAT của lô) = ${fmtVND(supplementCost)}</div>` : (missingVol>0.001 ? `<div class="hint">Kho hoá đơn bù chưa rút được lô nào cho ca này — chi phí bổ sung chứng từ tạm = 0đ (không bịa số khi chưa thật sự mua lô mới).</div>` : `<div class="hint">Không thiếu chứng từ — không phát sinh chi phí bổ sung.</div>`)}
+Tổng chi phí mua hoá đơn bù (tiền mặt thật) = ${fmtVND(supplementCost)}
+Tổng VAT khấu trừ từ hoá đơn bù = ${fmtVND(supplementVatCredit)}</div>
+<div class="hint">VAT khấu trừ tính theo ĐÚNG giá ghi trên hoá đơn gốc (chưa trừ tiền mặt nhận lại) — vì trên giấy tờ, hoá đơn vẫn ghi đúng giá gốc, tiền mặt nhận lại là thoả thuận ngầm ngoài hoá đơn, không làm thay đổi số VAT được pháp luật công nhận khấu trừ.</div>` : (missingVol>0.001 ? `<div class="hint">Kho hoá đơn bù chưa rút được lô nào cho ca này — chi phí bổ sung chứng từ tạm = 0đ (không bịa số khi chưa thật sự mua lô mới).</div>` : `<div class="hint">Không thiếu chứng từ — không phát sinh chi phí bổ sung.</div>`)}
     </div>
 
     <div class="modal-step">
-      <div class="st-title">Bước 8 — THỰC LÃI BỎ TÚI</div>
+      <div class="st-title">Bước 8 — LÃI THỰC NHẬN (TIỀN MẶT)</div>
       <div class="st-formula">= Khách trả − Trả nhà cung cấp − VAT nộp nhà nước − Chi phí bổ sung chứng từ
 = ${fmtVND(cashFromCustomer)} − ${fmtVND(cashToSupplier)} − ${fmtVND(vatToState)} − ${fmtVND(supplementCost)}
 = ${fmtVND(takeHome)}</div>
@@ -3888,7 +3944,7 @@ function shiftFinancialSummaryHtml(sh){
   const profit = shiftNetProfit(sh);
   // Tách nhóm CHI PHÍ MUA-BÁN (chỉ phát sinh ở công trình thương mại) ra
   // khỏi nhóm CHI PHÍ VẬN HÀNH CA (dầu, lương, ăn, nhà... ca nào cũng có),
-  // chèn thêm 1 dòng subtotal "= THỰC LÃI BỎ TÚI" ở giữa — để Ông Chủ
+  // chèn thêm 1 dòng subtotal "= LÃI GỘP MUA-BÁN (SỔ SÁCH)" ở giữa — để Ông Chủ
   // nhìn thấy rõ 2 bước: (1) mua-bán lời/lỗ bao nhiêu, (2) CP vận hành ăn
   // vào bao nhiêu, thay vì dồn hết thành 1 cục CP như trước. KHÔNG đổi
   // bất kỳ con số nào: cost/profit vẫn lấy đúng shiftTotalCost()/
@@ -3916,7 +3972,8 @@ function shiftFinancialSummaryHtml(sh){
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${hasCommercialCost ? `
     ${buyRelatedItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
-    <div class="summary-row total" style="font-size:15px;"><span>= THỰC LÃI BỎ TÚI</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
+    <div class="summary-row total" style="font-size:15px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
+    <div class="hint" style="margin:2px 0 0;">Tính theo doanh thu/giá vốn đã bóc VAT (sổ sách kế toán) — KHÁC với "Lãi Thực Nhận (Tiền Mặt)" ở từng công trình, vì số đó tính bằng tiền mặt thật đã trừ VAT thực nộp. 2 số có thể lệch nhau nếu công trình có hoá đơn bù hoặc VAT mua chưa khấu trừ được.</div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     ` : ''}
     ${operatingItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
@@ -7788,7 +7845,8 @@ function renderResults(){
         <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(gTotal.revenue)}</span></div>
         <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù (Kho Hoá Đơn Bù)</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
-        <div class="summary-row total" style="font-size:16px;"><span>= THỰC LÃI BỎ TÚI</span><span class="val">${fmtVND(gTotal.takeHomeTotal)}</span></div>
+        <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val">${fmtVND(gTotal.takeHomeTotal)}</span></div>
+        <div class="hint" style="margin:2px 0 8px;">Tính theo doanh thu/giá vốn đã bóc VAT (sổ sách) — KHÁC với "Lãi Thực Nhận (Tiền Mặt)" xem ở từng công trình (Ca Làm Việc), vì đó tính bằng tiền mặt thật đã trừ VAT thực nộp.</div>
         <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(gTotal.operatingCashCost)}</span></div>
         <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px;"><span>= Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
         <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
