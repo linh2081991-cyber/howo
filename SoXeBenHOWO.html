@@ -3972,7 +3972,7 @@ function shiftFinancialSummaryHtml(sh){
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${hasCommercialCost ? `
     ${buyRelatedItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
-    <div class="summary-row total" style="font-size:15px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
+    <div class="summary-row total" style="font-size:15px;"><span style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
     <div class="hint" style="margin:2px 0 0;">Tính theo doanh thu/giá vốn đã bóc VAT (sổ sách kế toán) — KHÁC với "Lãi Thực Nhận (Tiền Mặt)" ở từng công trình, vì số đó tính bằng tiền mặt thật đã trừ VAT thực nộp. 2 số có thể lệch nhau nếu công trình có hoá đơn bù hoặc VAT mua chưa khấu trừ được.</div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     ` : ''}
@@ -7845,7 +7845,7 @@ function renderResults(){
         <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(gTotal.revenue)}</span></div>
         <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù (Kho Hoá Đơn Bù)</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
-        <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val">${fmtVND(gTotal.takeHomeTotal)}</span></div>
+        <div class="summary-row total" style="font-size:16px;"><span style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
         <div class="hint" style="margin:2px 0 8px;">Tính theo doanh thu/giá vốn đã bóc VAT (sổ sách) — KHÁC với "Lãi Thực Nhận (Tiền Mặt)" xem ở từng công trình (Ca Làm Việc), vì đó tính bằng tiền mặt thật đã trừ VAT thực nộp.</div>
         <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(gTotal.operatingCashCost)}</span></div>
         <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px;"><span>= Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
