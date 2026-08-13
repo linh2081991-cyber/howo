@@ -10066,11 +10066,11 @@ function ktBuildTongQuan(wb, S, companyName, mst){
   line('Doanh thu', S.gTotal.revenue);
   line('Giá vốn + chi phí vận hành', S.gTotal.opCost);
   line('LỢI NHUẬN THỰC TẾ', S.finalNetProfit, {bold:true, color:S.finalNetProfit>=0?'FF1F7A4D':'FFB23A2E'});
-  r++; setH(10);
+  setH(10);
   ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'NGHĨA VỤ THUẾ',{bold:true,fill:KT_HEAD_FILL}); setH(26);
   line('VAT phải nộp trong kỳ (bắt buộc)', S.vatPayableInRange, {color:'FFB23A2E'});
   line('Thuế TNDN dự kiến (KT thuế tư vấn)', S.manualCitValue, {color:'FFB23A2E'});
-  r++; setH(10);
+  setH(10);
   ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (trực tiếp)',{bold:true,fill:KT_HEAD_FILL,wrap:true}); setH(30);
   line('Tiền khách bank vào (thật)', S.cashIn, {color:'FF1F7A4D'});
   line('Tiền bank cho mỏ (thật)', -S.cashOutToSuppliers);
@@ -10185,7 +10185,7 @@ function ktBuildCongNo(wb){
   ws.columns = [{width:12},{width:30},{width:20},{width:20},{width:22}];
   let r=1;
   ws.mergeCells(`A${r}:E${r}`); ktCell(ws,`A${r}`,'Công nợ tính đến ngày xuất file — không theo kỳ',{bold:true,italic:true,border:false}); ws.getRow(r).height=22; r++;
-  r++;
+  ws.getRow(r).height=10; r++;
   ktHeaderRow(ws,r,['Loại','Tên','Phải Thu/Trả','Đã Nhận/Trả','Còn Nợ']); r++;
   state.customers.forEach(c=>{
     const d = computeCustomerDebt(c.id);
@@ -10209,6 +10209,97 @@ function ktBuildCongNo(wb){
     ws.mergeCells(`A${r}:E${r}`); ktCell(ws,`A${r}`,'Chưa có khách hàng/nhà cung cấp nào.',{align:'center'}); ws.getRow(r).height=24;
   }
 }
+/// Sheet MỚI (yêu cầu Ông Chủ 2026-08-13): CHI TIẾT MUA HÀNG THEO TỪNG
+/// NHÀ CUNG CẤP trong đúng kỳ xuất báo cáo — khối lượng mua thực tế, tiền
+/// hàng/VAT/thành tiền, những NGÀY nào đã xuất hoá đơn, và khối lượng
+/// thiếu chứng từ đã QUY ĐỔI. Toàn bộ số tiền/VAT lấy lại nguyên trạng từ
+/// partnerTripRows() (đã kiểm chứng ở Kết Quả Kinh Doanh), chỉ lọc thêm
+/// theo [from,to] vì hàm gốc mặc định TOÀN BỘ thời gian; khối lượng thiếu
+/// chứng từ lấy lại nguyên trạng từ siteMissingDocumentedVolume() (đã
+/// kiểm chứng ở Bước 7) — KHÔNG có công thức tính tiền/VAT/khối lượng nào
+/// mới ở sheet này, chỉ gộp lại theo nhà cung cấp cho dễ đối chiếu.
+function ktBuildSupplierDetail(wb, from, to){
+  const ws = wb.addWorksheet('NCC - Chi Tiet Mua Hang');
+  ws.columns = [{width:24},{width:14},{width:17},{width:15},{width:17},{width:18},{width:46},{width:20}];
+  ktHeaderRow(ws,1,['Nhà Cung Cấp','Tổng KL Mua','Tiền Hàng (chưa VAT)','VAT','Thành Tiền (Có VAT)','Số Ngày Có HĐ / Tổng Ngày GD','Những Ngày Đã Xuất Hoá Đơn','KL Thiếu C.Từ (quy đổi)']);
+  let r=2;
+  let gVol=0,gNet=0,gVat=0,gCash=0,gMissing=0;
+  state.suppliers.forEach(sup=>{
+    const groups = partnerTripRows(sup.id,'supplier').filter(g=>g.date>=from && g.date<=to);
+    if(groups.length===0) return;
+    const vol = groups.reduce((s,g)=>s+g.trips.reduce((ss,t)=>ss+t.vol,0),0);
+    const net = groups.reduce((s,g)=>s+g.totalNet,0);
+    const cash = groups.reduce((s,g)=>s+g.totalCash,0);
+    const vat = cash-net;
+    const invoicedDates = groups.filter(g=>g.invoiceEffective||g.priceIncludesVat).map(g=>g.date).sort();
+    let missingVol = 0;
+    for(const sh of state.shifts){
+      if(sh.date<from || sh.date>to) continue;
+      for(const s of (sh.siteLogs||[])) if(s.siteType==='commercial' && s.supplierId===sup.id) missingVol += siteMissingDocumentedVolume(s);
+    }
+    gVol+=vol; gNet+=net; gVat+=vat; gCash+=cash; gMissing+=missingVol;
+    ktCell(ws,`A${r}`,sup.name);
+    ktCell(ws,`B${r}`,vol.toLocaleString('vi-VN',{maximumFractionDigits:2})+' tấn',{align:'right'});
+    ktCell(ws,`C${r}`,Math.round(net),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`D${r}`,Math.round(vat),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`E${r}`,Math.round(cash),{align:'right',numFmt:KT_NUMFMT,bold:true});
+    ktCell(ws,`F${r}`,`${invoicedDates.length}/${groups.length} ngày`,{align:'center'});
+    ktCell(ws,`G${r}`,invoicedDates.length?invoicedDates.map(d=>formatDateVN(d)).join(', '):'(chưa xuất hoá đơn ngày nào)',{wrap:true});
+    ktCell(ws,`H${r}`,missingVol.toLocaleString('vi-VN',{maximumFractionDigits:2})+' khối',{align:'right',color:missingVol>0.01?'FFB23A2E':'FF1F7A4D',bold:missingVol>0.01});
+    ws.getRow(r).height = invoicedDates.length>2 ? 22*Math.ceil(invoicedDates.length/3) : 22;
+    r++;
+  });
+  if(r===2){ ws.mergeCells(`A2:H2`); ktCell(ws,`A2`,'Không có nhà cung cấp nào phát sinh giao dịch trong kỳ.',{align:'center'}); ws.getRow(2).height=24; return; }
+  ktCell(ws,`A${r}`,'TỔNG CỘNG',{bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`B${r}`,gVol.toLocaleString('vi-VN',{maximumFractionDigits:2})+' tấn',{align:'right',bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`C${r}`,Math.round(gNet),{align:'right',numFmt:KT_NUMFMT,bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`D${r}`,Math.round(gVat),{align:'right',numFmt:KT_NUMFMT,bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`E${r}`,Math.round(gCash),{align:'right',numFmt:KT_NUMFMT,bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`F${r}`,'',{fill:KT_HEAD_FILL});
+  ktCell(ws,`G${r}`,'',{fill:KT_HEAD_FILL});
+  ktCell(ws,`H${r}`,gMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})+' khối',{align:'right',bold:true,fill:KT_HEAD_FILL,color:gMissing>0.01?'FFB23A2E':'FF1F7A4D'});
+  ws.getRow(r).height=26;
+}
+/// Sheet MỚI (yêu cầu Ông Chủ 2026-08-13) — cấu trúc y hệt sheet Nhà Cung
+/// Cấp ở trên nhưng cho phía KHÁCH HÀNG (đối tác của Linh Chí Thành). Cột
+/// "khối lượng thiếu chứng từ" KHÔNG áp dụng ở đây, vì đó là khái niệm
+/// riêng của việc MUA hàng (mỏ chưa xuất đủ hoá đơn cho khối lượng đã
+/// mua) — không có khái niệm tương đương ở phía bán.
+function ktBuildCustomerDetail(wb, from, to){
+  const ws = wb.addWorksheet('Khach Hang - Chi Tiet Ban Hang');
+  ws.columns = [{width:24},{width:14},{width:17},{width:15},{width:17},{width:18},{width:46}];
+  ktHeaderRow(ws,1,['Khách Hàng','Tổng KL Bán','Tiền Hàng (chưa VAT)','VAT','Thành Tiền (Có VAT)','Số Ngày Có HĐ / Tổng Ngày GD','Những Ngày Đã Xuất Hoá Đơn']);
+  let r=2;
+  let gVol=0,gNet=0,gVat=0,gCash=0;
+  state.customers.forEach(cus=>{
+    const groups = partnerTripRows(cus.id,'customer').filter(g=>g.date>=from && g.date<=to);
+    if(groups.length===0) return;
+    const vol = groups.reduce((s,g)=>s+g.trips.reduce((ss,t)=>ss+t.vol,0),0);
+    const net = groups.reduce((s,g)=>s+g.totalNet,0);
+    const cash = groups.reduce((s,g)=>s+g.totalCash,0);
+    const vat = cash-net;
+    const invoicedDates = groups.filter(g=>g.invoiceEffective||g.priceIncludesVat).map(g=>g.date).sort();
+    gVol+=vol; gNet+=net; gVat+=vat; gCash+=cash;
+    ktCell(ws,`A${r}`,cus.name);
+    ktCell(ws,`B${r}`,vol.toLocaleString('vi-VN',{maximumFractionDigits:2})+' khối',{align:'right'});
+    ktCell(ws,`C${r}`,Math.round(net),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`D${r}`,Math.round(vat),{align:'right',numFmt:KT_NUMFMT});
+    ktCell(ws,`E${r}`,Math.round(cash),{align:'right',numFmt:KT_NUMFMT,bold:true});
+    ktCell(ws,`F${r}`,`${invoicedDates.length}/${groups.length} ngày`,{align:'center'});
+    ktCell(ws,`G${r}`,invoicedDates.length?invoicedDates.map(d=>formatDateVN(d)).join(', '):'(chưa xuất hoá đơn ngày nào)',{wrap:true});
+    ws.getRow(r).height = invoicedDates.length>2 ? 22*Math.ceil(invoicedDates.length/3) : 22;
+    r++;
+  });
+  if(r===2){ ws.mergeCells(`A2:G2`); ktCell(ws,`A2`,'Không có khách hàng nào phát sinh giao dịch trong kỳ.',{align:'center'}); ws.getRow(2).height=24; return; }
+  ktCell(ws,`A${r}`,'TỔNG CỘNG',{bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`B${r}`,gVol.toLocaleString('vi-VN',{maximumFractionDigits:2})+' khối',{align:'right',bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`C${r}`,Math.round(gNet),{align:'right',numFmt:KT_NUMFMT,bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`D${r}`,Math.round(gVat),{align:'right',numFmt:KT_NUMFMT,bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`E${r}`,Math.round(gCash),{align:'right',numFmt:KT_NUMFMT,bold:true,fill:KT_HEAD_FILL});
+  ktCell(ws,`F${r}`,'',{fill:KT_HEAD_FILL});
+  ktCell(ws,`G${r}`,'',{fill:KT_HEAD_FILL});
+  ws.getRow(r).height=26;
+}
 async function exportKTThueBundle(from, to){
   if(typeof ExcelJS === 'undefined'){ showToast('Đang tải thư viện xuất file, thử lại sau vài giây (cần mạng).'); return; }
   showToast('Đang gom dữ liệu cho KT thuế, vui lòng đợi...');
@@ -10229,6 +10320,8 @@ async function exportKTThueBundle(from, to){
   ktBuildChungTu(wb, taxData, from, to);
   ktBuildBangKe(wb, taxData, from, to);
   ktBuildNhatKy(wb, S.inRange);
+  ktBuildSupplierDetail(wb, from, to);
+  ktBuildCustomerDetail(wb, from, to);
   ktBuildSoTien(wb, 'So Tien Khach Bank Vao', 'Khách Hàng',
     state.sitePayments.filter(p=>p.date>=from && p.date<=to),
     p=>(p.customerId&&customerById(p.customerId)?.name) || p.partnerName || p.siteName || '');
@@ -10244,7 +10337,7 @@ async function exportKTThueBundle(from, to){
   a.href = url; a.download = `KTThue_LinhChiThanh_${from}_den_${to}.xlsx`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
-  showToast('Đã xuất file trọn gói cho KT thuế — 8 sheet đầy đủ.');
+  showToast('Đã xuất file trọn gói cho KT thuế — 10 sheet đầy đủ.');
 }
 
 async function exportDriverPayslipXLSX(driverId){
