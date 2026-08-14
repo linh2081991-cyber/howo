@@ -437,10 +437,14 @@
   .resp-badge.split{ background:#FFF3CD; color:#8A6D00; }
   .resp-badge.owner_full{ background:var(--accent-soft); color:var(--accent); }
 
-  /* Thanh chọn Xe / LCT — nằm ngay dưới header, bấm vào để mở danh sách
-     xe (yêu cầu Ông Chủ 2026-08-14, Giai đoạn 1 quản lý nhiều xe). */
-  .vehicle-scope-bar{ display:flex; align-items:center; justify-content:space-between; padding:9px 16px; background:var(--surface); border-bottom:1px solid var(--border); font-size:13px; font-weight:800; cursor:pointer; user-select:none; }
-  .vehicle-scope-bar .vsb-chev{ color:var(--ink-soft); font-size:11px; font-weight:400; }
+  /* Thanh chọn Xe / LINH CHÍ THÀNH — nằm ngay dưới header, bấm vào để mở
+     danh sách xe (yêu cầu Ông Chủ 2026-08-14/15, làm nổi bật + đẹp hơn
+     theo yêu cầu). Nền cam nhạt nổi bật, chữ đậm, có icon + nút "Đổi xe"
+     rõ ràng thay vì 1 dòng chữ mờ nhạt như trước. */
+  .vehicle-scope-bar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 16px; background:var(--accent-soft); border-bottom:1.5px solid var(--accent); cursor:pointer; user-select:none; }
+  .vehicle-scope-bar .vsb-label{ display:flex; align-items:center; gap:8px; font-size:15px; font-weight:800; color:var(--accent); }
+  .vehicle-scope-bar .vsb-icon{ font-size:19px; }
+  .vehicle-scope-bar .vsb-chev{ display:flex; align-items:center; gap:4px; color:var(--accent); font-size:12.5px; font-weight:700; background:var(--surface); padding:5px 10px; border-radius:20px; border:1px solid var(--accent); }
 
   /* Badge trạng thái VAT trên dòng tiêu đề mỗi nhóm giao dịch đối tác — 3
      trạng thái rõ ràng: giá đã gồm VAT / đã xuất hoá đơn (+VAT) / chưa
@@ -621,6 +625,24 @@ function defaultCostPolicies(){
   };
 }
 
+/// 4 field DÙNG CHUNG toàn công ty (giá dầu, VAT, thuế TNDN suất, API
+/// key) — mọi field settings KHÁC đều riêng theo từng xe (khấu hao, vay
+/// ngân hàng, bảo hiểm, đăng kiểm, lương cứng...), theo đúng yêu cầu Ông
+/// Chủ 2026-08-14: "thêm xe nào thêm tiền xe đó... tiền ngân hàng, khấu
+/// hao... chưa nhập thì không thể lấy số bên xe 29E69112".
+const SHARED_SETTINGS_FIELDS = ['geminiApiKey','currentFuelUnitPrice','vatRatePercent','citRatePercent'];
+function defaultSettingsShape(){
+  return { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
+              monthlyFixedRoadFee: 25000000, geminiApiKey: '',
+              currentFuelUnitPrice: 0, vatRatePercent: 10, citRatePercent: 20,
+              extraDayBaseSalary: 1000000,
+              monthlyVehicleDepreciation: 0,
+              monthlyLoanPayment: 0,
+              bankLoan: { principal: 0, termMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [] },
+              monthlyInsurance: 0,
+              monthlyRegistrationFee: 0 };
+}
+
 let state = {
   // Quản lý nhiều xe (Giai đoạn 1, 2026-08-14) — currentVehicleId=null
   // nghĩa là đang ở chế độ "LINH CHÍ THÀNH (Toàn Công Ty)" (mặc định khi mở app).
@@ -631,26 +653,15 @@ let state = {
   // hậu tố đúng id xe — xem sharedDataRefForVehicle().
   vehicles: [],
   currentVehicleId: null,
+  // Bộ nhớ đệm CA CỦA TẤT CẢ XE gộp lại — { [vehicleId]: [ca...] } — dùng
+  // RIÊNG cho các phần THẬT SỰ dùng chung toàn công ty (Kho Hoá Đơn Bù,
+  // Công Nợ Khách Hàng/Nhà Cung Cấp). KHÁC với state.shifts (chỉ ca của
+  // xe đang xem/sửa). Xem allShiftsCompanyWide()/refreshAllVehiclesShiftsCache().
+  allVehiclesShifts: {},
   drivers: [],
   shifts: [],
   repairs: [], // {id, date, item, invoiceCode, amount, notes}
-  settings: { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
-              monthlyFixedRoadFee: 25000000, geminiApiKey: '',
-              currentFuelUnitPrice: 0, vatRatePercent: 10, citRatePercent: 20,
-              // Ca "vượt" ngày công chuẩn/tháng (VD ca thứ 29/30/31 khi
-              // chuẩn là 28) — lương cứng ngày đó tính CỐ ĐỊNH theo mức
-              // này, không chia đều theo dailyBaseSalary() nữa. Xem
-              // baseSalaryForShift().
-              extraDayBaseSalary: 1000000,
-              // Các chi phí cố định hàng tháng khác — trước đây CHƯA được
-              // cộng vào bất kỳ công thức tài chính nào (Lợi Nhuận Thực Tế,
-              // Điểm Hoà Vốn, Cảnh Báo Tài Chính). Từ nay được cộng thêm
-              // đồng bộ ở mọi nơi tính "chi phí cố định", xem otherFixedMonthly.
-              monthlyVehicleDepreciation: 0, // Khấu hao xe dự kiến (đ/tháng)
-              monthlyLoanPayment: 0,        // Gốc + lãi vay ngân hàng (đ/tháng) — SỐ ĐÃ TÍNH SẴN, được ghi tự động bởi recomputeBankLoanMonthlyPayment() mỗi lần render, mọi công thức chi phí cố định trong app đọc thẳng biến này, không đọc bankLoan bên dưới.
-              bankLoan: { principal: 0, termMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [] }, // Dữ liệu GỐC của Công Cụ Tính Gốc + Lãi Tự Động (Cài Đặt) — dùng để TÍNH RA monthlyLoanPayment ở trên, không dùng trực tiếp trong công thức tài chính nào khác. rateSchedule: [{id, effectiveFrom:'YYYY-MM-DD', ratePercent}] — hỗ trợ lãi suất đổi theo từng giai đoạn. lastPaidMonth: 'YYYY-MM' của kỳ đã bấm "Đã Trả Tiền Ngân Hàng" gần nhất, dùng để tắt cảnh báo đúng kỳ đó.
-              monthlyInsurance: 0,          // Bảo hiểm xe (đ/tháng)
-              monthlyRegistrationFee: 0 },  // Đăng kiểm/Đăng ký/Phù hiệu vận tải (đ/tháng)
+  settings: defaultSettingsShape(),
   currentTab: 'shifts',
   view: 'list', // 'list' | 'form'
   draftShift: null,
@@ -1141,7 +1152,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1159,7 +1170,8 @@ async function loadAll(){
       sharedDataRef('invoiceLots').get(),
       sharedDataRef('driverAdvances').get(),
       sharedDataRef('driverExpenseReports').get(),
-      sharedDataRef('vehicles').get()
+      sharedDataRef('vehicles').get(),
+      sharedDataRef('companySettings').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1194,9 +1206,14 @@ async function loadAll(){
     const driverExpenseReportData = driverExpenseReportSnap.exists ? driverExpenseReportSnap.data() : null;
     state.driverExpenseReports = driverExpenseReportData && Array.isArray(driverExpenseReportData.list) ? driverExpenseReportData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
+    if(companySettingsSnap.exists){
+      const cs = companySettingsSnap.data();
+      SHARED_SETTINGS_FIELDS.forEach(f=>{ if(cs[f]!==undefined) state.settings[f]=cs[f]; });
+    }
     const vehicleData = vehicleSnap.exists ? vehicleSnap.data() : null;
     state.vehicles = vehicleData && Array.isArray(vehicleData.list) ? vehicleData.list : [];
     ensureVehiclesMigrated();
+    await refreshAllVehiclesShiftsCache();
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
   }
@@ -1224,7 +1241,7 @@ async function saveVehicles(){
 /// theo. Không đụng gì tới dữ liệu Xe #1 đang chạy.
 function renderVehiclePickerModal(){
   const rows = [
-    { id:null, label:'🏢 LINH CHÍ THÀNH (Toàn Công Ty)', sub:'Tổng hợp tất cả xe' },
+    { id:null, label:'🏢 LINH CHÍ THÀNH', sub:'Tổng hợp tất cả xe' },
     ...state.vehicles.map(v=>({ id:v.id, label:`🚛 ${v.name||v.plate}`, sub: v.isPrimary?'Xe chính':'' }))
   ];
   openModal(`
@@ -1269,20 +1286,59 @@ function renderAddVehicleModal(){
     switchVehicle(v.id);
   });
 }
-/// Tải riêng Ca Làm Việc + Tài Xế của ĐÚNG 1 xe vào bộ nhớ (thay thế
-/// hoàn toàn state.drivers/state.shifts đang có) — dùng mỗi khi chuyển
-/// sang xem/sửa 1 xe cụ thể. vehicleDataRef() tự đảm bảo Xe #1 luôn đọc
-/// đúng path gốc, nên bước này không có rủi ro nào với dữ liệu Xe #1.
+/// Tải riêng TOÀN BỘ dữ liệu RIÊNG CỦA 1 XE vào bộ nhớ (Ca Làm Việc, Tài
+/// Xế, Cài Đặt, Sửa Chữa, Luật Đường Theo Tháng, Giấy Tờ Xe, Lịch Bảo
+/// Dưỡng, Thưởng Tháng) — thay thế hoàn toàn dữ liệu đang có, dùng mỗi
+/// khi chuyển sang xem/sửa 1 xe cụ thể. vehicleDataRef() tự đảm bảo Xe #1
+/// luôn đọc đúng path gốc, nên bước này không có rủi ro nào với dữ liệu
+/// Xe #1 (yêu cầu Ông Chủ 2026-08-14: mỗi xe khấu hao/vay/bảo hiểm/đăng
+/// kiểm/giấy tờ/lịch bảo dưỡng riêng, xe mới không được lấy nhầm số của
+/// xe 29E-691.12). Nhà cung cấp/Khách hàng/Kho Hoá Đơn Bù/Công nợ dùng
+/// chung toàn công ty nên KHÔNG nằm trong hàm này, giữ nguyên không đổi.
 async function loadVehicleWorkingSet(vehicleId){
   try {
-    const [dSnap, sSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, roadFeeSnap, docSnap, maintSnap, bonusSnap, stSnap, companySettingsSnap] = await Promise.all([
       vehicleDataRef(vehicleId, 'drivers').get(),
-      vehicleDataRef(vehicleId, 'shifts').get()
+      vehicleDataRef(vehicleId, 'shifts').get(),
+      vehicleDataRef(vehicleId, 'repairs').get(),
+      vehicleDataRef(vehicleId, 'roadFeeByMonth').get(),
+      vehicleDataRef(vehicleId, 'documents').get(),
+      vehicleDataRef(vehicleId, 'maintenanceSchedules').get(),
+      vehicleDataRef(vehicleId, 'monthlyBonuses').get(),
+      vehicleDataRef(vehicleId, 'settings').get(),
+      sharedDataRef('companySettings').get()
     ]);
-    const dData = dSnap.exists ? dSnap.data() : null;
-    const sData = sSnap.exists ? sSnap.data() : null;
-    state.drivers = dData && Array.isArray(dData.list) ? dData.list : [];
-    state.shifts = sData && Array.isArray(sData.list) ? sData.list : [];
+    state.drivers = dSnap.exists && Array.isArray(dSnap.data().list) ? dSnap.data().list : [];
+    state.shifts = sSnap.exists && Array.isArray(sSnap.data().list) ? sSnap.data().list : [];
+    state.repairs = rSnap.exists && Array.isArray(rSnap.data().list) ? rSnap.data().list : [];
+    state.roadFeeByMonth = roadFeeSnap.exists && Array.isArray(roadFeeSnap.data().list) ? roadFeeSnap.data().list : [];
+    state.documents = docSnap.exists && Array.isArray(docSnap.data().list) ? docSnap.data().list : [];
+    state.maintenanceSchedules = maintSnap.exists && Array.isArray(maintSnap.data().list) ? maintSnap.data().list : [];
+    state.monthlyBonuses = bonusSnap.exists && Array.isArray(bonusSnap.data().list) ? bonusSnap.data().list : [];
+    // Cài Đặt: bắt đầu từ mặc định sạch (KHÔNG kế thừa số của xe vừa xem
+    // trước đó) → đè bằng đúng dữ liệu CỦA XE NÀY nếu đã từng lưu → đè
+    // LẦN CUỐI bằng 4 field dùng chung mới nhất (giá dầu/VAT/CIT/API key).
+    state.settings = defaultSettingsShape();
+    if(stSnap.exists) state.settings = Object.assign(state.settings, stSnap.data());
+    if(companySettingsSnap.exists){
+      const cs = companySettingsSnap.data();
+      SHARED_SETTINGS_FIELDS.forEach(f=>{ if(cs[f]!==undefined) state.settings[f]=cs[f]; });
+    } else {
+      // Document "companySettings" CHƯA TỪNG được tạo (lần đầu bật tính
+      // năng nhiều xe, Ông Chủ chưa bấm Lưu Cài Đặt lần nào sau bản cập
+      // nhật này) → tạm lấy 4 field dùng chung từ ĐÚNG document GỐC của
+      // Xe #1 (nơi các field này vốn nằm sẵn từ trước tới giờ), để xe mới
+      // không hiện 0đ giá dầu/VAT ngay lần đầu chọn.
+      const primary = state.vehicles.find(v=>v.isPrimary);
+      if(primary && primary.id!==vehicleId){
+        const primarySettingsSnap = await sharedDataRef('settings').get();
+        if(primarySettingsSnap.exists){
+          const ps = primarySettingsSnap.data();
+          SHARED_SETTINGS_FIELDS.forEach(f=>{ if(ps[f]!==undefined) state.settings[f]=ps[f]; });
+        }
+      }
+    }
+    if(vehicleId) state.allVehiclesShifts[vehicleId] = state.shifts;
   } catch(e) {
     showToast('Lỗi tải dữ liệu xe — kiểm tra mạng.');
   }
@@ -1300,7 +1356,7 @@ async function switchVehicle(vid){
   if(editingId) await loadVehicleWorkingSet(editingId);
   state.view='list'; state.draftShift=null;
   renderAll();
-  const label = vid===null ? 'LINH CHÍ THÀNH (Toàn Công Ty)' : ((state.vehicles.find(v=>v.id===vid)||{}).name||'');
+  const label = vid===null ? 'LINH CHÍ THÀNH' : ((state.vehicles.find(v=>v.id===vid)||{}).name||'');
   showToast(`Đang xem: ${label}`);
 }
 /// Cập nhật thanh chọn Xe ngay dưới header — gọi từ renderAll() mỗi lần
@@ -1309,7 +1365,7 @@ function updateVehicleScopeBar(){
   const bar = document.getElementById('vehicleScopeBar');
   if(!bar) return;
   const vid = state.currentVehicleId;
-  const label = vid===null ? '🏢 LINH CHÍ THÀNH (Toàn Công Ty)' : `🚛 ${escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'')}`;
+  const label = vid===null ? '🏢 LINH CHÍ THÀNH' : `🚛 ${escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'')}`;
   bar.innerHTML = `<span>${label}</span><span class="vsb-chev">Đổi xe ▾</span>`;
   bar.onclick = renderVehiclePickerModal;
 }
@@ -1368,15 +1424,59 @@ async function saveSupplierPayments(){
   catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); }
 }
 async function saveShifts(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'shifts').set({ list: state.shifts }); }
+  try {
+    const vid = activeVehicleIdForEditing();
+    await vehicleDataRef(vid, 'shifts').set({ list: state.shifts });
+    if(vid) state.allVehiclesShifts[vid] = state.shifts;
+  }
   catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
 }
+/// Tải lại CA CỦA TỪNG XE (mọi xe, không chỉ xe đang xem) vào bộ nhớ đệm
+/// state.allVehiclesShifts — gọi 1 lần khi mở app; saveShifts()/
+/// loadVehicleWorkingSet() tự đồng bộ lại đúng 1 xe mỗi khi có thay đổi,
+/// nên không cần gọi lại hàm này thường xuyên.
+async function refreshAllVehiclesShiftsCache(){
+  const entries = await Promise.all(state.vehicles.map(async v=>{
+    const snap = await vehicleDataRef(v.id, 'shifts').get();
+    const list = snap.exists && Array.isArray(snap.data().list) ? snap.data().list : [];
+    return [v.id, list];
+  }));
+  entries.forEach(([vid,list])=>{ state.allVehiclesShifts[vid]=list; });
+}
+/// Gộp CA CỦA TẤT CẢ XE thành 1 mảng — dùng cho những phần THẬT SỰ dùng
+/// chung toàn công ty (Công Nợ Khách Hàng/Nhà Cung Cấp, nhu cầu rút Kho
+/// Hoá Đơn Bù), KHÁC với state.shifts (chỉ xe đang xem/sửa).
+function allShiftsCompanyWide(){
+  const combined = [];
+  Object.entries(state.allVehiclesShifts).forEach(([vid,list])=>{
+    // Nhân bản NHẸ (không đụng object gốc) — gắn thêm _vehicleId để nơi
+    // nào cần hiện rõ "xe nào" (Kho Hoá Đơn Bù) có sẵn thông tin, không
+    // phải tra ngược qua state.vehicles nhiều lần.
+    list.forEach(sh=>combined.push(Object.assign({}, sh, { _vehicleId: vid })));
+  });
+  return combined;
+}
+function vehicleNameById(vid){
+  const v = state.vehicles.find(x=>x.id===vid);
+  return v ? (v.name||v.plate) : '(xe không rõ)';
+}
+/// Y HỆT allShiftsForLedger() (dòng ~2311) nhưng GỘP TẤT CẢ XE thay vì
+/// chỉ xe đang xem — để Kho Hoá Đơn Bù luôn thấy đủ nhu cầu của mọi xe,
+/// kể cả ca đang sửa dở (state.draftShift) của xe đang mở.
+function allShiftsForLedgerCompanyWide(){
+  const list = allShiftsCompanyWide();
+  if(state.draftShift){
+    const i = list.findIndex(sh=>sh.id===state.draftShift.id);
+    if(i>=0) list[i] = state.draftShift; else list.push(state.draftShift);
+  }
+  return list;
+}
 async function saveRepairs(){
-  try { await sharedDataRef('repairs').set({ list: state.repairs }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'repairs').set({ list: state.repairs }); }
   catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa — kiểm tra mạng.'); }
 }
 async function saveRoadFeeByMonth(){
-  try { await sharedDataRef('roadFeeByMonth').set({ list: state.roadFeeByMonth }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'roadFeeByMonth').set({ list: state.roadFeeByMonth }); }
   catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường — kiểm tra mạng.'); }
 }
 // "2026-07" -> "7/2026" để hiện nhãn gọn cho từng dòng trong danh sách.
@@ -1416,11 +1516,11 @@ async function saveSitePayments(){
   catch(e){ showToast('Lỗi lưu dữ liệu công nợ — kiểm tra mạng.'); }
 }
 async function saveDocuments(){
-  try { await sharedDataRef('documents').set({ list: state.documents }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'documents').set({ list: state.documents }); }
   catch(e){ showToast('Lỗi lưu dữ liệu giấy tờ — kiểm tra mạng.'); }
 }
 async function saveMaintenanceSchedules(){
-  try { await sharedDataRef('maintenanceSchedules').set({ list: state.maintenanceSchedules }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'maintenanceSchedules').set({ list: state.maintenanceSchedules }); }
   catch(e){ showToast('Lỗi lưu lịch bảo dưỡng — kiểm tra mạng.'); }
 }
 async function saveSiteContracts(){
@@ -1432,11 +1532,25 @@ async function saveSiteAppraisals(){
   catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình — kiểm tra mạng.'); }
 }
 async function saveMonthlyBonuses(){
-  try { await sharedDataRef('monthlyBonuses').set({ list: state.monthlyBonuses }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'monthlyBonuses').set({ list: state.monthlyBonuses }); }
   catch(e){ showToast('Lỗi lưu tiền tip/thưởng cuối tháng — kiểm tra mạng.'); }
 }
+/// Lưu Cài Đặt — TÁCH LÀM 2: 4 field dùng chung (giá dầu/VAT/CIT/API key)
+/// ghi vào 1 document CHUNG cho cả công ty; mọi field còn lại (khấu hao,
+/// vay ngân hàng, bảo hiểm, đăng kiểm, lương cứng...) ghi vào document
+/// RIÊNG của đúng xe đang xem. Xe #1 vẫn ghi đủ CẢ 2 loại field vào đúng
+/// document gốc 'settings' như trước (không đổi hành vi cũ), CHỈ THÊM
+/// việc đồng bộ 4 field dùng chung sang document mới 'companySettings'
+/// để các xe khác đọc lại được giá dầu/VAT mới nhất.
 async function saveSettings(){
-  try { await sharedDataRef('settings').set(state.settings); }
+  try {
+    const shared = {};
+    SHARED_SETTINGS_FIELDS.forEach(f=>{ shared[f]=state.settings[f]; });
+    await Promise.all([
+      sharedDataRef('companySettings').set(shared),
+      vehicleDataRef(activeVehicleIdForEditing(), 'settings').set(state.settings)
+    ]);
+  }
   catch(e){ showToast('Lỗi lưu cài đặt — kiểm tra mạng.'); }
 }
 
@@ -1708,7 +1822,7 @@ function invoiceLotById(id){ return state.invoiceLots.find(x=>x.id===id); }
 function invoiceLotCoverageReport(lotId, goodsType){
   const ledger = buildInvoiceLotLedger(goodsType);
   const rows = [];
-  allShiftsForLedger().forEach(sh=>{
+  allShiftsForLedgerCompanyWide().forEach(sh=>{
     (sh.siteLogs||[]).forEach((s,idx)=>{
       if(s.siteType!=='commercial') return;
       const g = siteGoodsTypeGroups(s).find(x=>normGoodsType(x.goodsType)===normGoodsType(goodsType));
@@ -2025,14 +2139,15 @@ function renderInvoiceLotDetailModal(goodsType, from, to){
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
     <h3>📋 Chi Tiết — ${escapeHtml(goodsType)}</h3>
-    <div class="hint" style="margin-bottom:10px;">${formatDateVN(from)} → ${formatDateVN(to)} — tổng còn thiếu ${totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</div>
+    <div class="hint" style="margin-bottom:10px;">${formatDateVN(from)} → ${formatDateVN(to)} — tổng còn thiếu ${totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối · gộp TẤT CẢ xe (kho dùng chung toàn công ty)</div>
     ${rows.length===0 ? '<div class="hint">Không có công trình nào đúng loại hàng này trong khoảng ngày đã chọn.</div>' : `
     <div class="card dash-wrap" style="padding:0; overflow-x:auto;">
       <table class="dash">
-        <thead><tr><th>Ngày</th><th>Tài xế</th><th>Khách hàng</th><th>Chuyến</th><th>KL bán</th><th>Mỏ xuất</th><th>Còn thiếu</th></tr></thead>
+        <thead><tr><th>Ngày</th><th>Xe</th><th>Tài xế</th><th>Khách hàng</th><th>Chuyến</th><th>KL bán</th><th>Mỏ xuất</th><th>Còn thiếu</th></tr></thead>
         <tbody>
           ${rows.map(r=>`<tr>
             <td>${formatDateVN(r.date)}</td>
+            <td style="font-weight:700;">🚛 ${escapeHtml(r.vehicleName)}</td>
             <td>${escapeHtml(r.driverName)}</td>
             <td>${escapeHtml(r.customerName)}</td>
             <td>${r.tripsCount}</td>
@@ -2338,7 +2453,7 @@ const _invoiceLedgerCache = { key:null, data:null };
 function buildInvoiceLotLedger(goodsType){
   const gt = normGoodsType(goodsType);
   if(!gt) return { bySiteLog:{}, byLot:{} };
-  const allSh = allShiftsForLedger();
+  const allSh = allShiftsForLedgerCompanyWide();
   const cacheKey = gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
     +'|'+allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).length).join(',');
   if(_invoiceLedgerCache.key===cacheKey) return _invoiceLedgerCache.data;
@@ -2444,7 +2559,7 @@ function invoiceDemandByDateRange(goodsType, from, to){
   const gt = normGoodsType(goodsType);
   const rows = [];
   if(!gt) return { rows, totalMissing:0 };
-  allShiftsForLedger().forEach(sh=>{
+  allShiftsForLedgerCompanyWide().forEach(sh=>{
     if(sh.date<from || sh.date>to) return;
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
@@ -2457,6 +2572,7 @@ function invoiceDemandByDateRange(goodsType, from, to){
       rows.push({
         date: sh.date, shiftType: sh.shiftType,
         driverName: driver ? driver.name : '(chưa gắn tài xế)',
+        vehicleName: vehicleNameById(sh._vehicleId),
         siteName: s.siteName || '',
         customerName: customer ? customer.name : '(chưa gắn khách hàng)',
         tripsCount, sellVolume: g.sellVolume,
@@ -2944,7 +3060,7 @@ function renderChooseVehiclePrompt(){
       <div class="card" style="text-align:center; padding:28px 16px;">
         <div style="font-size:32px; margin-bottom:10px;">🚛</div>
         <div style="font-weight:800; margin-bottom:6px;">Chọn 1 xe cụ thể để xem/sửa</div>
-        <div class="hint" style="margin-bottom:16px;">Đang ở chế độ LINH CHÍ THÀNH (Toàn Công Ty) — mục này chỉ thao tác được trên đúng 1 xe.</div>
+        <div class="hint" style="margin-bottom:16px;">Đang ở chế độ LINH CHÍ THÀNH — mục này chỉ thao tác được trên đúng 1 xe.</div>
         <button class="btn btn-accent btn-block" id="chooseVehiclePromptBtn">Chọn Xe →</button>
       </div>
     </section>`;
@@ -7378,7 +7494,7 @@ const ALL_TIME_TO = '2999-12-31';
 /// lệ cố định.
 function computeCustomerDebt(customerId){
   let billed = 0;
-  for(const sh of state.shifts){
+  for(const sh of allShiftsCompanyWide()){
     for(const s of (sh.siteLogs||[])){
       if(s.customerId===customerId) billed += siteBilledAmount(s);
     }
@@ -7394,7 +7510,7 @@ function computeCustomerDebt(customerId){
 /// trừ Đã Trả (tổng tiền đã thực bank cho mỏ, ghi ở supplierPayments).
 function computeSupplierDebt(supplierId){
   let payable = 0;
-  for(const sh of state.shifts){
+  for(const sh of allShiftsCompanyWide()){
     for(const s of (sh.siteLogs||[])){
       if(s.siteType==='commercial' && s.supplierId===supplierId) payable += commercialCashToSupplier(s);
     }
@@ -7420,7 +7536,7 @@ function computeSupplierDebt(supplierId){
 /// tách nhỏ tới cấp chuyến.
 function partnerTripRows(partnerId, side){
   const groups = [];
-  for(const sh of state.shifts){
+  for(const sh of allShiftsCompanyWide()){
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
       const match = side==='customer' ? s.customerId===partnerId : s.supplierId===partnerId;
