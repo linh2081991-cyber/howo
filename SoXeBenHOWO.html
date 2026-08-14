@@ -1029,6 +1029,52 @@ function getExcludedRecentShiftIds(){
   sorted.slice(0,2).forEach(sh=>{ if(computeShiftIssues(sh).length>0) excluded.add(sh.id); });
   return excluded;
 }
+// ========================= 2026-08-14: TÁCH "THIẾU ODO/DẦU" RA KHỎI "THIẾU DỮ LIỆU THẬT" =========================
+// Yêu cầu Ông Chủ: 1 chuyến múc-đổ đã khai ĐỦ 4 số (khối lượng/đơn giá
+// mua-bán) là giao dịch CÓ THẬT, không nên phải chờ tài xế kết ca (nhập
+// xong ODO/dầu cuối) mới được cộng vào doanh thu/số chuyến. Chỉ ĐÚNG phần
+// dầu (shiftFuelCost) là thứ THẬT SỰ cần chờ, vì fuelEnd=0 sẽ làm
+// shiftFuelConsumed() tính SAI (vống lên) — còn doanh thu/giá vốn/lương
+// chuyến hoàn toàn không phụ thuộc ODO/dầu. Toàn bộ đoạn dưới đây KHÔNG
+// sửa 1 chữ nào trong computeShiftIssues()/getExcludedRecentShiftIds()/
+// shiftTotalCost()/shiftFuelCost()/shiftFuelConsumed()/computeResultsGroup()
+// ở trên — chỉ thêm hàm MỚI, dùng để đổi DỮ LIỆU ĐƯA VÀO các hàm đó tại
+// đúng 4 điểm gọi (không đổi bản thân công thức).
+
+// Đúng 5 câu chữ mà computeShiftIssues() có thể sinh ra CHỈ vì thiếu
+// ODO/dầu (copy y hệt dòng 963/965/969/972/975 ở trên) — dùng để lọc ra
+// khỏi danh sách issues, KHÔNG phải 1 cách tính khác.
+const FUEL_ODO_ISSUE_MESSAGES = new Set([
+  'Chưa nhập ODO cuối ca',
+  'ODO cuối nhỏ hơn ODO đầu — kiểm tra lại số công tơ mét',
+  'Chưa nhập lượng dầu cuối ca',
+  'Dầu cuối ca lớn hơn dầu đầu ca cộng dầu đổ thêm — số liệu dầu bị sai',
+  'Có đổ dầu nhưng chưa nhập đơn giá dầu'
+]);
+function shiftHasNonFuelOdoIssues(sh){ return computeShiftIssues(sh).some(msg=>!FUEL_ODO_ISSUE_MESSAGES.has(msg)); }
+function shiftHasFuelOdoIssues(sh){ return computeShiftIssues(sh).some(msg=>FUEL_ODO_ISSUE_MESSAGES.has(msg)); }
+/// Ca bị loại HẲN khỏi doanh thu/chi phí của kỳ — CHỈ khi có vấn đề KHÁC
+/// ODO/dầu (thiếu tài xế, thiếu tên công trình, chuyến mua-bán khai thiếu
+/// số...). Thay cho getExcludedRecentShiftIds() ở 4 chỗ tính doanh thu/
+/// lợi nhuận bên dưới — getExcludedRecentShiftIds() GỐC vẫn giữ nguyên,
+/// tiếp tục dùng cho operationalShifts() (bình quân dầu/lương/ăn cần
+/// ODO/dầu đáng tin cậy, không đổi).
+function getRevenueExcludedShiftIds(){
+  const sorted = [...state.shifts].sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  const excluded = new Set();
+  sorted.slice(0,2).forEach(sh=>{ if(shiftHasNonFuelOdoIssues(sh)) excluded.add(sh.id); });
+  return excluded;
+}
+/// Ca chỉ thiếu ODO/dầu (2 ca gần nhất) → trả về 1 BẢN SAO NHẸ với
+/// fuelEnd = fuelStart+fuelAdded, khiến shiftFuelConsumed()/shiftFuelCost()
+/// tự động ra đúng 0đ (đúng công thức Math.max(0, fuelStart+fuelAdded−fuelEnd)
+/// sẵn có, không đổi công thức) — mọi trường khác (doanh thu, giá vốn,
+/// lương chuyến, chuyến mua-bán...) giữ NGUYÊN VẸN vì không phụ thuộc
+/// fuelEnd. Ca không có vấn đề gì trả về chính nó, không tạo bản sao thừa.
+function sanitizeShiftForRevenue(sh){
+  if(!shiftHasFuelOdoIssues(sh)) return sh;
+  return { ...sh, fuelEnd: (Number(sh.fuelStart)||0) + (Number(sh.fuelAdded)||0) };
+}
 /// Full shift list minus the currently-excluded newest-but-incomplete ca
 /// above. Every fleet-wide historical average (tiêu hao dầu, lương
 /// chuyến, tiền ăn...) should read from THIS, never straight from
@@ -5347,8 +5393,8 @@ function computeHiringAdvisorMetrics(draft){
   // sinh, tiền phạt...) vì đây là biến số không lường trước được — đưa vào
   // sẽ làm méo dự đoán tuyển người. Sửa chữa xe cũng không đưa vào vì luôn
   // không đều giữa các tháng. -----
-  const excludedShiftIds = getExcludedRecentShiftIds();
-  const rangeShifts = state.shifts.filter(sh=>sh.date>=draft.from && sh.date<=draft.to && !excludedShiftIds.has(sh.id));
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const rangeShifts = state.shifts.filter(sh=>sh.date>=draft.from && sh.date<=draft.to && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const totalTrips = rangeShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = rangeShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
   const variableCost = rangeShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+shiftMaterialCost(sh),0);
@@ -6843,6 +6889,38 @@ function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal, otherFixe
 }
 
 // ================= DỰ ĐOÁN HOÀ VỐN CẢ THÁNG (mới, tách riêng) =================
+/// Tìm các dòng CHUYẾN THƯƠNG MẠI đã khai DỞ DANG trong kỳ — có nhập 1
+/// phần (vd chỉ khai bên MUA, quên bên BÁN) nhưng CHƯA đủ cả 4 số (Khối
+/// Lượng Mua/Đơn Giá Mua/Khối Lượng Bán/Đơn Giá Bán). Đây CHÍNH XÁC là
+/// các dòng bị siteTripCount() loại khỏi "Số chuyến" ở Điểm Hoà Vốn —
+/// dùng lại NGUYÊN ĐIỀU KIỆN y hệt siteTripCount(), không có công thức
+/// đếm nào khác (yêu cầu Ông Chủ 2026-08-14: đếm tay ra 24, app ra 22,
+/// tìm đúng 2 chuyến bị thiếu ở đâu).
+function findIncompleteCommercialTrips(inRangeShifts){
+  const rows = [];
+  for(const sh of inRangeShifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      for(const t of (s.commercialTrips||[])){
+        const hasBuyVol = Number(t.buyVolume)>0, hasBuyPrice = Number(t.buyUnitPrice)>0;
+        const hasSellVol = Number(t.sellVolume)>0, hasSellPrice = Number(t.sellUnitPrice)>0;
+        const complete = hasBuyVol && hasBuyPrice && hasSellVol && hasSellPrice;
+        const anyFilled = hasBuyVol || hasBuyPrice || hasSellVol || hasSellPrice || !!(t.goodsType||'').trim();
+        if(complete || !anyFilled) continue; // đủ 4 số (đã tính vào Số chuyến rồi) hoặc hoàn toàn trống (dòng thừa chưa dùng tới) — bỏ qua, không phải nguồn gây lệch
+        const missing = [];
+        if(!hasBuyVol) missing.push('Khối lượng MUA');
+        if(!hasBuyPrice) missing.push('Đơn giá MUA');
+        if(!hasSellVol) missing.push('Khối lượng BÁN');
+        if(!hasSellPrice) missing.push('Đơn giá BÁN');
+        const driver = driverById(sh.driverId);
+        rows.push({ date:sh.date, shiftType:sh.shiftType, driverName:driver?driver.name:(sh.driverNameSnapshot||'—'), goodsType:t.goodsType||'(chưa khai loại hàng)', missing, shiftId:sh.id });
+      }
+    }
+  }
+  rows.sort((a,b)=>a.date.localeCompare(b.date));
+  return rows;
+}
+
 // KHÔNG đụng gì tới computeBreakEvenDetailed() ở trên — hàm đó vẫn tính
 // đúng điểm hoà vốn CỦA KỲ ĐANG XEM như cũ, giữ nguyên 100%. Hàm dưới
 // đây tính thêm 1 MỤC TIÊU riêng, ỔN ĐỊNH cho CẢ THÁNG hiện tại:
@@ -6871,8 +6949,8 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const toDate = today;
   const fromDateObj = new Date(); fromDateObj.setDate(fromDateObj.getDate()-(marginWindowDays-1));
   const fromDate = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth()+1).padStart(2,'0')}-${String(fromDateObj.getDate()).padStart(2,'0')}`;
-  const excludedShiftIds = getExcludedRecentShiftIds();
-  const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id));
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
   const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
@@ -7337,8 +7415,8 @@ function supplierGoodsBreakdownHtml(b){
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
 /// xuất cho KT thuế, đảm bảo 2 nơi luôn khớp nhau tuyệt đối.
 function computePeriodSummary(from, to){
-  const excludedShiftIds = getExcludedRecentShiftIds();
-  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const gTotal = computeResultsGroup(inRange);
   const repairsHere = repairsInRange(from, to);
   const repairTotal = repairsHere.reduce((s,r)=>s+(Number(r.amount)||0),0);
@@ -7719,11 +7797,15 @@ function renderResults(){
   if(!state.resultsRange) state.resultsRange = currentMonthRange();
   const { from, to } = state.resultsRange;
 
-  // Loại các ca gần nhất còn thiếu ODO/dầu cuối ca/tài xế ra khỏi bài
-  // toán vận hành chung của kỳ — xem getExcludedRecentShiftIds() ở trên.
-  const excludedShiftIds = getExcludedRecentShiftIds();
-  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
+  // 2026-08-14: chỉ còn loại HẲN ca có vấn đề dữ liệu THẬT (thiếu tài xế/
+  // tên công trình/chuyến mua-bán khai thiếu số) khỏi doanh thu — ca chỉ
+  // thiếu ODO/dầu cuối ca (chưa kết ca) vẫn được cộng đủ doanh thu/số
+  // chuyến, chỉ riêng tiền dầu của đúng ca đó tạm = 0 (sanitizeShiftForRevenue).
+  // Xem getRevenueExcludedShiftIds()/sanitizeShiftForRevenue() ở đầu file.
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const pendingShiftsInRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && excludedShiftIds.has(sh.id));
+  const fuelOdoPendingShifts = state.shifts.filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id) && shiftHasFuelOdoIssues(sh));
   const dayShifts = inRange.filter(sh=>sh.shiftType==='day');
   const nightShifts = inRange.filter(sh=>sh.shiftType==='night');
 
@@ -7813,7 +7895,18 @@ function renderResults(){
             <span>${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}: ${escapeHtml(computeShiftIssues(sh).join(', '))}</span>
           </div>`).join('')}
         <button class="btn btn-ghost btn-sm" id="goCompletePendingShiftsBtn" style="margin-top:10px;">Hoàn thiện ngay →</button>
-        <div class="hint" style="margin-top:8px;">Ca vừa chạy xong thường chưa kịp nhập đủ ODO/dầu cuối ca nên app tạm loại khỏi mọi phép tính (doanh thu, chi phí, hoà vốn...) để không làm sai lệch số liệu chung. Điền xong các trường còn thiếu ở tab Ca Làm Việc, ca sẽ tự động được cộng lại như bình thường.</div>
+        <div class="hint" style="margin-top:8px;">Ca thiếu tài xế/tên công trình/chuyến mua-bán chưa khai đủ số nên app tạm loại khỏi mọi phép tính (doanh thu, chi phí, hoà vốn...) để không làm sai lệch số liệu chung. Điền xong các trường còn thiếu ở tab Ca Làm Việc, ca sẽ tự động được cộng lại như bình thường.</div>
+      </div>
+    </section>` : ''}
+    ${fuelOdoPendingShifts.length>0 ? `
+    <section class="group">
+      <div class="card" style="border:1.5px solid var(--profit);">
+        <div style="font-weight:800; margin-bottom:8px; color:var(--profit);">✅ ${fuelOdoPendingShifts.length} Ca Đã Cộng Doanh Thu — Còn Thiếu ODO/Dầu Cuối Ca</div>
+        ${fuelOdoPendingShifts.map(sh=>`
+          <div class="kv" style="padding:4px 0; align-items:flex-start;">
+            <span>${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}: ${escapeHtml(computeShiftIssues(sh).filter(m=>FUEL_ODO_ISSUE_MESSAGES.has(m)).join(', '))}</span>
+          </div>`).join('')}
+        <div class="hint" style="margin-top:8px;">Doanh thu/số chuyến/giá vốn của các ca này ĐÃ được cộng đủ vào Kết Quả Kinh Doanh ở dưới (vì chuyến múc-đổ đã khai đủ số, là giao dịch có thật). Riêng tiền dầu của đúng ca này đang tạm để 0đ cho tới khi Ông Chủ kết ca (nhập ODO/dầu cuối) — kết ca xong, tiền dầu sẽ tự cộng vào, không cần làm gì thêm.</div>
       </div>
     </section>` : ''}
     ${financialWarnings.length>0 ? `
@@ -7904,6 +7997,15 @@ function renderResults(){
           </tbody>
         </table>
       </div>
+      ${(() => {
+        const incomplete = findIncompleteCommercialTrips(inRange);
+        if(incomplete.length===0) return '';
+        return `<div class="card" style="margin-bottom:10px; border:1px solid var(--loss);">
+          <div style="font-weight:800; color:var(--loss); margin-bottom:6px;">⚠️ ${incomplete.length} chuyến khai DỞ DANG trong kỳ — CHƯA được tính vào "Số chuyến" ở trên</div>
+          <div class="hint" style="margin-bottom:8px;">Các dòng dưới đây đã bắt đầu khai nhưng còn thiếu 1 trong 4 số (khối lượng/đơn giá mua/bán) nên chưa được đếm là 1 chuyến hoàn chỉnh — vào đúng ca đó bổ sung nốt để cộng vào "Số chuyến".</div>
+          ${incomplete.map(r=>`<div class="summary-row" style="align-items:flex-start;"><span>${formatDateVN(r.date)} · ${shiftTypeLabel(r.shiftType)} · ${escapeHtml(r.driverName)} · ${escapeHtml(r.goodsType)}</span><span class="val" style="color:var(--loss); text-align:right;">Thiếu: ${r.missing.join(', ')}</span></div>`).join('')}
+        </div>`;
+      })()}
 
       <div class="card">
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu) = <strong>${fmtVND(breakEven.fixedCost)}</strong></div>
