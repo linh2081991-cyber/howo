@@ -437,6 +437,11 @@
   .resp-badge.split{ background:#FFF3CD; color:#8A6D00; }
   .resp-badge.owner_full{ background:var(--accent-soft); color:var(--accent); }
 
+  /* Thanh chọn Xe / LCT — nằm ngay dưới header, bấm vào để mở danh sách
+     xe (yêu cầu Ông Chủ 2026-08-14, Giai đoạn 1 quản lý nhiều xe). */
+  .vehicle-scope-bar{ display:flex; align-items:center; justify-content:space-between; padding:9px 16px; background:var(--surface); border-bottom:1px solid var(--border); font-size:13px; font-weight:800; cursor:pointer; user-select:none; }
+  .vehicle-scope-bar .vsb-chev{ color:var(--ink-soft); font-size:11px; font-weight:400; }
+
   /* Badge trạng thái VAT trên dòng tiêu đề mỗi nhóm giao dịch đối tác — 3
      trạng thái rõ ràng: giá đã gồm VAT / đã xuất hoá đơn (+VAT) / chưa
      hoá đơn (không VAT). */
@@ -480,6 +485,7 @@
     </div>
     <div id="headerAction"></div>
   </header>
+  <div id="vehicleScopeBar" class="vehicle-scope-bar"></div>
   <main id="app"></main>
   <div class="toast" id="toast"></div>
   <nav class="tabbar">
@@ -616,6 +622,15 @@ function defaultCostPolicies(){
 }
 
 let state = {
+  // Quản lý nhiều xe (Giai đoạn 1, 2026-08-14) — currentVehicleId=null
+  // nghĩa là đang ở chế độ "LCT (Toàn Công Ty)" (mặc định khi mở app).
+  // Xe #1 (isPrimary:true) LUÔN đọc/ghi đúng các document Firestore GỐC
+  // (drivers/shifts/settings, không hậu tố) — KHÔNG di trú dữ liệu cũ
+  // sang đường dẫn khác, để tuyệt đối không có rủi ro mất/lệch số liệu
+  // đang chạy thật. Xe thêm sau (isPrimary:false) dùng document RIÊNG,
+  // hậu tố đúng id xe — xem sharedDataRefForVehicle().
+  vehicles: [],
+  currentVehicleId: null,
   drivers: [],
   shifts: [],
   repairs: [], // {id, date, item, invoiceCode, amount, notes}
@@ -1126,7 +1141,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1143,7 +1158,8 @@ async function loadAll(){
       sharedDataRef('supplierPayments').get(),
       sharedDataRef('invoiceLots').get(),
       sharedDataRef('driverAdvances').get(),
-      sharedDataRef('driverExpenseReports').get()
+      sharedDataRef('driverExpenseReports').get(),
+      sharedDataRef('vehicles').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1178,10 +1194,97 @@ async function loadAll(){
     const driverExpenseReportData = driverExpenseReportSnap.exists ? driverExpenseReportSnap.data() : null;
     state.driverExpenseReports = driverExpenseReportData && Array.isArray(driverExpenseReportData.list) ? driverExpenseReportData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
+    const vehicleData = vehicleSnap.exists ? vehicleSnap.data() : null;
+    state.vehicles = vehicleData && Array.isArray(vehicleData.list) ? vehicleData.list : [];
+    ensureVehiclesMigrated();
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
   }
   state.loaded = true;
+}
+/// Di trú 1 LẦN DUY NHẤT (chỉ chạy khi state.vehicles rỗng, tức lần đầu
+/// bật tính năng nhiều xe): tạo Xe #1 đại diện đúng xe 29E-691.12 đang
+/// chạy — KHÔNG đụng, KHÔNG copy, KHÔNG chuyển bất kỳ document Firestore
+/// nào (drivers/shifts/settings vẫn y nguyên đường dẫn cũ). Xe #1 chỉ là
+/// 1 "nhãn" trỏ vào đúng dữ liệu đang có sẵn — tuyệt đối 0 rủi ro mất số.
+function ensureVehiclesMigrated(){
+  if(state.vehicles.length>0) return;
+  const primary = { id: uid('vehicle'), plate:'29E-691.12', name:'29E-691.12', isPrimary:true, createdAt: todayLocalDateStr() };
+  state.vehicles = [primary];
+  saveVehicles();
+}
+async function saveVehicles(){
+  try { await sharedDataRef('vehicles').set({ list: state.vehicles }); }
+  catch(e){ showToast('Lỗi lưu dữ liệu xe — kiểm tra mạng.'); }
+}
+/// Modal chọn phạm vi đang xem: LCT (Toàn Công Ty) hoặc 1 xe cụ thể.
+/// GHI CHÚ (Giai đoạn 1): bấm chọn xe hiện mới chỉ đổi NHÃN đang xem
+/// (state.currentVehicleId) — việc tự động tải đúng dữ liệu (ca/tài xế)
+/// riêng của xe đó, và màn LCT tổng hợp tất cả xe, sẽ làm ở bước tiếp
+/// theo. Không đụng gì tới dữ liệu Xe #1 đang chạy.
+function renderVehiclePickerModal(){
+  const rows = [
+    { id:null, label:'🏢 LCT (Toàn Công Ty)', sub:'Tổng hợp tất cả xe' },
+    ...state.vehicles.map(v=>({ id:v.id, label:`🚛 ${v.name||v.plate}`, sub: v.isPrimary?'Xe chính':'' }))
+  ];
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>Chọn Xe</h3>
+    ${rows.map(r=>`
+      <div class="summary-row vehicle-pick-row" data-vid="${r.id===null?'':r.id}" style="cursor:pointer; padding:12px 4px;">
+        <span>${escapeHtml(r.label)}${r.sub?` <span style="color:var(--ink-soft); font-size:11px;">(${escapeHtml(r.sub)})</span>`:''}</span>
+        <span class="val">${(state.currentVehicleId===r.id) ? '✓' : ''}</span>
+      </div>`).join('')}
+    <button class="btn btn-accent btn-block" id="addVehicleBtn" style="margin-top:14px;">+ Thêm Xe</button>
+  `);
+  document.querySelectorAll('.vehicle-pick-row').forEach(row=>{
+    row.addEventListener('click', ()=>{ switchVehicle(row.dataset.vid || null); });
+  });
+  const addBtn = document.getElementById('addVehicleBtn');
+  if(addBtn) addBtn.addEventListener('click', renderAddVehicleModal);
+}
+function renderAddVehicleModal(){
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="backToVehicleListBtn">← Quay lại</button></div>
+    <h3>+ Thêm Xe Mới</h3>
+    <div class="field">
+      <label>Biển số xe</label>
+      <input type="text" id="newVehiclePlate" placeholder="VD 29H-123.45">
+    </div>
+    <div class="field">
+      <label>Tên gọi (tuỳ chọn — để trống dùng luôn biển số)</label>
+      <input type="text" id="newVehicleName" placeholder="VD Xe Ben 2">
+    </div>
+    <button class="btn btn-accent btn-block" id="saveNewVehicleBtn" style="margin-top:10px;">Lưu Xe Mới</button>
+  `);
+  document.getElementById('backToVehicleListBtn').addEventListener('click', renderVehiclePickerModal);
+  document.getElementById('saveNewVehicleBtn').addEventListener('click', ()=>{
+    const plate = (document.getElementById('newVehiclePlate').value||'').trim();
+    if(!plate){ showToast('Nhập biển số xe trước đã.'); return; }
+    const name = (document.getElementById('newVehicleName').value||'').trim() || plate;
+    const v = { id: uid('vehicle'), plate, name, isPrimary:false, createdAt: todayLocalDateStr() };
+    state.vehicles.push(v);
+    saveVehicles();
+    showToast(`Đã thêm ${name}.`);
+    renderVehiclePickerModal();
+  });
+}
+function switchVehicle(vid){
+  state.currentVehicleId = vid || null;
+  closeModal();
+  updateVehicleScopeBar();
+  const label = vid===null ? 'LCT (Toàn Công Ty)' : ((state.vehicles.find(v=>v.id===vid)||{}).name||'');
+  showToast(`Đang xem: ${label}`);
+}
+/// Cập nhật thanh chọn Xe ngay dưới header — gọi từ renderAll() mỗi lần
+/// render, để luôn khớp đúng state.currentVehicleId hiện tại.
+function updateVehicleScopeBar(){
+  const bar = document.getElementById('vehicleScopeBar');
+  if(!bar) return;
+  const vid = state.currentVehicleId;
+  const label = vid===null ? '🏢 LCT (Toàn Công Ty)' : `🚛 ${escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'')}`;
+  bar.innerHTML = `<span>${label}</span><span class="vsb-chev">Đổi xe ▾</span>`;
+  bar.onclick = renderVehiclePickerModal;
 }
 
 async function saveDrivers(){
@@ -10738,6 +10841,7 @@ function renderAll(){
     state.shiftArchiveMonth = null;
   }
   renderHeader();
+  updateVehicleScopeBar();
   refreshSiteDatalist();
   refreshGoodsTypesDatalist();
   if(state.currentTab==='shifts'){
