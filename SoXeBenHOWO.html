@@ -10063,9 +10063,16 @@ function ktBuildTongQuan(wb, S, companyName, mst){
   ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,`Kỳ báo cáo: ${formatDateVN(S.from)} — ${formatDateVN(S.to)}`,{align:'center',bold:true,border:false,wrap:true}); setH(26);
   setH(10);
   const line=(label,val,opts={})=>{
-    ktCell(ws,`A${r}`,label,{bold:opts.bold});
+    // Nhãn dài (vd "Sửa chữa + luật đường + khấu hao/vay/bảo hiểm/đăng
+    // kiểm") từng bị CẮT MẤT chữ cuối vì cột B có sẵn nội dung nên không
+    // tràn chữ được, mà ô nhãn lại chưa bật wrapText (yêu cầu Ông Chủ
+    // 2026-08-14: đã tự dựng file thật bằng ExcelJS + LibreOffice để soi
+    // ra đúng điểm này). Giờ MỌI nhãn qua line() đều bật wrap + tự co
+    // giãn chiều cao theo độ dài chữ, không cần biết trước label nào dài.
+    const tall = label.length > 36;
+    ktCell(ws,`A${r}`,label,{bold:opts.bold,wrap:true});
     ktCell(ws,`B${r}`,Math.round(val),{align:'right',numFmt:KT_NUMFMT,bold:opts.bold,color:opts.color});
-    setH(24);
+    setH(tall ? 38 : 24);
   };
   ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'KẾT QUẢ KINH DOANH',{bold:true,fill:KT_HEAD_FILL}); setH(26);
   line('Doanh thu', S.gTotal.revenue);
