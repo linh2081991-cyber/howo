@@ -623,7 +623,7 @@ function defaultCostPolicies(){
 
 let state = {
   // Quản lý nhiều xe (Giai đoạn 1, 2026-08-14) — currentVehicleId=null
-  // nghĩa là đang ở chế độ "LCT (Toàn Công Ty)" (mặc định khi mở app).
+  // nghĩa là đang ở chế độ "LINH CHÍ THÀNH (Toàn Công Ty)" (mặc định khi mở app).
   // Xe #1 (isPrimary:true) LUÔN đọc/ghi đúng các document Firestore GỐC
   // (drivers/shifts/settings, không hậu tố) — KHÔNG di trú dữ liệu cũ
   // sang đường dẫn khác, để tuyệt đối không có rủi ro mất/lệch số liệu
@@ -1217,14 +1217,14 @@ async function saveVehicles(){
   try { await sharedDataRef('vehicles').set({ list: state.vehicles }); }
   catch(e){ showToast('Lỗi lưu dữ liệu xe — kiểm tra mạng.'); }
 }
-/// Modal chọn phạm vi đang xem: LCT (Toàn Công Ty) hoặc 1 xe cụ thể.
+/// Modal chọn phạm vi đang xem: LINH CHÍ THÀNH (Toàn Công Ty) hoặc 1 xe cụ thể.
 /// GHI CHÚ (Giai đoạn 1): bấm chọn xe hiện mới chỉ đổi NHÃN đang xem
 /// (state.currentVehicleId) — việc tự động tải đúng dữ liệu (ca/tài xế)
 /// riêng của xe đó, và màn LCT tổng hợp tất cả xe, sẽ làm ở bước tiếp
 /// theo. Không đụng gì tới dữ liệu Xe #1 đang chạy.
 function renderVehiclePickerModal(){
   const rows = [
-    { id:null, label:'🏢 LCT (Toàn Công Ty)', sub:'Tổng hợp tất cả xe' },
+    { id:null, label:'🏢 LINH CHÍ THÀNH (Toàn Công Ty)', sub:'Tổng hợp tất cả xe' },
     ...state.vehicles.map(v=>({ id:v.id, label:`🚛 ${v.name||v.plate}`, sub: v.isPrimary?'Xe chính':'' }))
   ];
   openModal(`
@@ -1266,14 +1266,41 @@ function renderAddVehicleModal(){
     state.vehicles.push(v);
     saveVehicles();
     showToast(`Đã thêm ${name}.`);
-    renderVehiclePickerModal();
+    switchVehicle(v.id);
   });
 }
-function switchVehicle(vid){
+/// Tải riêng Ca Làm Việc + Tài Xế của ĐÚNG 1 xe vào bộ nhớ (thay thế
+/// hoàn toàn state.drivers/state.shifts đang có) — dùng mỗi khi chuyển
+/// sang xem/sửa 1 xe cụ thể. vehicleDataRef() tự đảm bảo Xe #1 luôn đọc
+/// đúng path gốc, nên bước này không có rủi ro nào với dữ liệu Xe #1.
+async function loadVehicleWorkingSet(vehicleId){
+  try {
+    const [dSnap, sSnap] = await Promise.all([
+      vehicleDataRef(vehicleId, 'drivers').get(),
+      vehicleDataRef(vehicleId, 'shifts').get()
+    ]);
+    const dData = dSnap.exists ? dSnap.data() : null;
+    const sData = sSnap.exists ? sSnap.data() : null;
+    state.drivers = dData && Array.isArray(dData.list) ? dData.list : [];
+    state.shifts = sData && Array.isArray(sData.list) ? sData.list : [];
+  } catch(e) {
+    showToast('Lỗi tải dữ liệu xe — kiểm tra mạng.');
+  }
+}
+async function switchVehicle(vid){
   state.currentVehicleId = vid || null;
   closeModal();
   updateVehicleScopeBar();
-  const label = vid===null ? 'LCT (Toàn Công Ty)' : ((state.vehicles.find(v=>v.id===vid)||{}).name||'');
+  // Chỉ 1 xe (chưa thêm xe khác) → activeVehicleIdForEditing() tự quy về
+  // đúng Xe #1 dù nhãn đang hiện LINH CHÍ THÀNH — tải lại vẫn ra đúng dữ
+  // liệu Xe #1 y hệt cũ, không có gì đổi. Có ≥2 xe mà đang ở LINH CHÍ
+  // THÀNH → không tải xe nào cả (chưa xây màn tổng hợp), Ca Làm Việc/Tài
+  // Xế sẽ tự hiện lời nhắc chọn xe.
+  const editingId = activeVehicleIdForEditing();
+  if(editingId) await loadVehicleWorkingSet(editingId);
+  state.view='list'; state.draftShift=null;
+  renderAll();
+  const label = vid===null ? 'LINH CHÍ THÀNH (Toàn Công Ty)' : ((state.vehicles.find(v=>v.id===vid)||{}).name||'');
   showToast(`Đang xem: ${label}`);
 }
 /// Cập nhật thanh chọn Xe ngay dưới header — gọi từ renderAll() mỗi lần
@@ -1282,13 +1309,38 @@ function updateVehicleScopeBar(){
   const bar = document.getElementById('vehicleScopeBar');
   if(!bar) return;
   const vid = state.currentVehicleId;
-  const label = vid===null ? '🏢 LCT (Toàn Công Ty)' : `🚛 ${escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'')}`;
+  const label = vid===null ? '🏢 LINH CHÍ THÀNH (Toàn Công Ty)' : `🚛 ${escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'')}`;
   bar.innerHTML = `<span>${label}</span><span class="vsb-chev">Đổi xe ▾</span>`;
   bar.onclick = renderVehiclePickerModal;
 }
 
+/// Trả về ĐÚNG document Firestore của 1 xe. Xe #1 (isPrimary:true) LUÔN
+/// trả về path GỐC không hậu tố (sharedDataRef(name)) — TUYỆT ĐỐI không
+/// bao giờ đổi, để dữ liệu xe 29E-691.12 đang chạy không bị động vào dù
+/// chỉ 1 ký tự (yêu cầu Ông Chủ 2026-08-14). Xe thêm sau dùng path RIÊNG,
+/// hậu tố đúng id xe, khởi đầu rỗng, hoàn toàn tách biệt Xe #1.
+function vehicleDataRef(vehicleId, name){
+  const v = state.vehicles.find(x=>x.id===vehicleId);
+  if(!v || v.isPrimary) return sharedDataRef(name);
+  return sharedDataRef(`${name}_${vehicleId}`);
+}
+/// Xe nào đang THỰC SỰ được sửa/lưu dữ liệu (Ca Làm Việc/Tài Xế) — khác
+/// với state.currentVehicleId (chỉ là NHÃN đang xem):
+///  - Đang chọn đúng 1 xe cụ thể → dùng luôn xe đó.
+///  - Đang ở LINH CHÍ THÀNH (currentVehicleId=null) NHƯNG cả hệ thống chỉ
+///    có đúng 1 xe (chưa thêm xe nào khác) → tự động dùng xe đó, để mọi
+///    hành vi y hệt hôm qua, không có gì phải hỏi thêm — đúng yêu cầu
+///    "không được động vào dữ liệu xe 29E69112 đang có".
+///  - Đang ở LINH CHÍ THÀNH mà có ≥2 xe → trả về null (mập mờ, chưa biết
+///    lưu cho xe nào) — màn Ca Làm Việc/Tài Xế sẽ tự hiện lời nhắc chọn
+///    xe cụ thể, không tự đoán bừa.
+function activeVehicleIdForEditing(){
+  if(state.currentVehicleId) return state.currentVehicleId;
+  if(state.vehicles.length<=1) return (state.vehicles[0]||{}).id || null;
+  return null;
+}
 async function saveDrivers(){
-  try { await sharedDataRef('drivers').set({ list: state.drivers }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'drivers').set({ list: state.drivers }); }
   catch(e){ showToast('Lỗi lưu dữ liệu tài xế — kiểm tra mạng.'); }
 }
 async function saveSuppliers(){
@@ -1316,7 +1368,7 @@ async function saveSupplierPayments(){
   catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); }
 }
 async function saveShifts(){
-  try { await sharedDataRef('shifts').set({ list: state.shifts }); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'shifts').set({ list: state.shifts }); }
   catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
 }
 async function saveRepairs(){
@@ -2881,7 +2933,25 @@ function driverAvatarIcon(){
     <path d="M19 36.5l5 4.5 5-4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
   </svg>`;
 }
+/// Màn nhắc chọn xe — chỉ hiện khi đang ở LINH CHÍ THÀNH (Toàn Công Ty)
+/// MÀ có từ 2 xe trở lên (activeVehicleIdForEditing() trả về null), vì
+/// Ca Làm Việc/Tài Xế bắt buộc phải rõ đang thao tác đúng xe nào mới lưu
+/// đúng chỗ. Với đúng 1 xe (hiện tại) hàm này sẽ không bao giờ hiện ra.
+function renderChooseVehiclePrompt(){
+  const app=document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <div class="card" style="text-align:center; padding:28px 16px;">
+        <div style="font-size:32px; margin-bottom:10px;">🚛</div>
+        <div style="font-weight:800; margin-bottom:6px;">Chọn 1 xe cụ thể để xem/sửa</div>
+        <div class="hint" style="margin-bottom:16px;">Đang ở chế độ LINH CHÍ THÀNH (Toàn Công Ty) — mục này chỉ thao tác được trên đúng 1 xe.</div>
+        <button class="btn btn-accent btn-block" id="chooseVehiclePromptBtn">Chọn Xe →</button>
+      </div>
+    </section>`;
+  document.getElementById('chooseVehiclePromptBtn').addEventListener('click', renderVehiclePickerModal);
+}
 function renderShiftList(){
+  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
   const app=document.getElementById('app');
 
   const warnings = computeAllWarnings();
@@ -4281,6 +4351,7 @@ async function saveDraftShift(){
 // ========================= DRIVERS TAB =========================
 
 function renderDrivers(){
+  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
   const app=document.getElementById('app');
   const s = state.settings;
   app.innerHTML = `
