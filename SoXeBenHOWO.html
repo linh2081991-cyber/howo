@@ -3116,8 +3116,7 @@ function renderShiftList(){
     <div style="display:flex; gap:8px; margin-top:8px;">
       <input type="month" id="shiftArchiveMonthPicker" style="flex:1;">
       <button class="btn btn-ghost" id="viewOtherMonthBtn">+ Thêm Tháng Mới</button>
-    </div>
-    <div class="search-bar-hint" style="margin-top:4px;">Xem lại nguyên 1 tháng đã qua (VD Tháng 7 khi đang ở Tháng 8) — màn xem lại chỉ đọc, không sửa/xoá được.</div>`;
+    </div>`;
 
   if(state.shifts.length===0){
     app.innerHTML = warningsBannerHtml + searchBarHtml + `
@@ -7712,7 +7711,20 @@ function computePeriodSummary(from, to){
   const repairsHere = repairsInRange(from, to);
   const repairTotal = repairsHere.reduce((s,r)=>s+(Number(r.amount)||0),0);
   const roadFee = roadFeeForRange(from, to);
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  // TÁCH RÕ 2 khái niệm (yêu cầu Ông Chủ 2026-08-15, đối chiếu đúng chuẩn
+  // kế toán):
+  //  - otherFixedMonthly (dùng cho LỢI NHUẬN THỰC TẾ + Điểm Hoà Vốn + Cảnh
+  //    Báo Tài Chính): CHỈ trừ LÃI VAY (không trừ GỐC vay — gốc là trả
+  //    bớt nợ, làm giảm số dư nợ vay trên bảng cân đối kế toán, KHÔNG
+  //    phải chi phí làm giảm lợi nhuận) + khấu hao (chi phí phân bổ chuẩn
+  //    kế toán, dù không phải tiền mặt) + bảo hiểm + đăng kiểm.
+  //  - otherFixedMonthlyForCashFlow (dùng RIÊNG cho DÒNG TIỀN THUẦN): trừ
+  //    ĐỦ Gốc+Lãi vay (cả 2 đều là tiền mặt thật rời túi ngày 20 hàng
+  //    tháng) + bảo hiểm + đăng kiểm — KHÔNG trừ khấu hao (không phải
+  //    tiền mặt, không có giao dịch ngân hàng nào cho riêng khoản này).
+  const insuranceAndRegistration = (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + insuranceAndRegistration;
+  const otherFixedMonthlyForCashFlow = (Number(state.settings.monthlyLoanPayment)||0) + insuranceAndRegistration;
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - otherFixedMonthly;
   const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
   const citPeriodKey = `${from}_${to}`;
@@ -7720,8 +7732,8 @@ function computePeriodSummary(from, to){
   const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const operatingCashCost = inRange.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
-  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthly;
-  return { from, to, inRange, gTotal, repairTotal, roadFee, otherFixedMonthly, finalNetProfit,
+  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthlyForCashFlow;
+  return { from, to, inRange, gTotal, repairTotal, roadFee, otherFixedMonthly, otherFixedMonthlyForCashFlow, finalNetProfit,
            vatPayableInRange, manualCitValue, cashIn, cashOutToSuppliers, operatingCashCost, netOperatingCashFlow };
 }
 function computeAllSiteBilledEvents(){
@@ -8108,12 +8120,13 @@ function renderResults(){
   const repairsHere = repairsInRange(from, to);
   const repairTotal = periodSummary.repairTotal;
   const roadFee = state.resultsRoadFeeOverride!==null ? state.resultsRoadFeeOverride : periodSummary.roadFee;
-  // Chi phí cố định hàng tháng khác — Khấu hao xe dự kiến + Gốc/lãi vay
-  // ngân hàng + Bảo hiểm xe + Đăng kiểm/Đăng ký/Phù hiệu vận tải (Cài Đặt).
-  // Trước đây các khoản này KHÔNG hề được cộng vào bất kỳ công thức tài
-  // chính nào; nay được cộng đồng bộ vào Lợi Nhuận Thực Tế, Điểm Hoà Vốn
-  // và Cảnh Báo Tài Chính, giống hệt cách chi phí luật đường đã được cộng.
+  // Chi phí cố định hàng tháng khác dùng cho LỢI NHUẬN THỰC TẾ (chuẩn kế
+  // toán): khấu hao xe + LÃI VAY (không gồm gốc — gốc là trả nợ, không
+  // phải chi phí) + bảo hiểm + đăng kiểm. Bản dùng cho Dòng Tiền Thuần
+  // (otherFixedMonthlyForCashFlow, gồm ĐỦ gốc+lãi, không gồm khấu hao)
+  // lấy riêng ngay dưới đây (yêu cầu Ông Chủ 2026-08-15).
   const otherFixedMonthly = periodSummary.otherFixedMonthly;
+  const otherFixedMonthlyForCashFlow = periodSummary.otherFixedMonthlyForCashFlow;
   // roadFee có thể bị Ông Chủ ghi đè riêng cho màn hình này (state.resultsRoadFeeOverride)
   // nên finalNetProfit tính lại tại đây thay vì lấy thẳng periodSummary.finalNetProfit,
   // để tôn trọng đúng giá trị đang hiển thị trên màn hình.
@@ -8144,8 +8157,7 @@ function renderResults(){
   const cashIn = periodSummary.cashIn;
   const cashOutToSuppliers = periodSummary.cashOutToSuppliers;
   const operatingCashCost = periodSummary.operatingCashCost;
-  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthly;
-
+  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthlyForCashFlow;
   // Data-integrity check: any ca in range with real fuel consumed but no
   // đơn giá dầu entered contributes 0đ to Tiền dầu tiêu hao (consumed × 0),
   // which is exactly the pattern that quietly understates the period's
@@ -8245,11 +8257,11 @@ function renderResults(){
         <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
         <div class="summary-row"><span>− Chi phí luật đường (kỳ này)</span><span class="val">${fmtVND(roadFee)}</span></div>
         <div class="summary-row"><span>− Khấu hao xe dự kiến / tháng</span><span class="val">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</span></div>
-        <div class="summary-row"><span>− Gốc + lãi vay ngân hàng / tháng</span><span class="val">${fmtVND(state.settings.monthlyLoanPayment||0)}</span></div>
+        <div class="summary-row"><span>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</span><span class="val">${fmtVND(state.settings.monthlyLoanInterest||0)}</span></div>
         <div class="summary-row"><span>− Bảo hiểm xe / tháng</span><span class="val">${fmtVND(state.settings.monthlyInsurance||0)}</span></div>
         <div class="summary-row"><span>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</span><span class="val">${fmtVND(state.settings.monthlyRegistrationFee||0)}</span></div>
         <div class="summary-row total"><span>LỢI NHUẬN THỰC TẾ</span><span class="val" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</span></div>
-        <div class="hint" style="margin-top:6px;">4 khoản khấu hao/vay/bảo hiểm/đăng kiểm lấy từ Cài Đặt (đ/tháng cố định) — vào tab Cài Đặt để sửa nếu cần.</div>
+        <div class="hint" style="margin-top:6px;">Đúng chuẩn kế toán: chỉ trừ LÃI vay (không trừ Gốc — gốc là trả bớt nợ vay, không phải chi phí) + khấu hao/bảo hiểm/đăng kiểm, lấy từ Cài Đặt. Gốc vay vẫn được trừ đủ ở "Dòng Tiền Thuần" bên dưới, vì đó là tiền mặt thật đã rời túi.</div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
@@ -8265,9 +8277,11 @@ function renderResults(){
         <div class="summary-row"><span>Tiền khách bank vào (thật, trong kỳ)</span><span class="val" style="color:var(--profit);">+${fmtVND(cashIn)}</span></div>
         <div class="summary-row"><span>− Tiền bank cho mỏ (thật, trong kỳ)</span><span class="val">${fmtVND(cashOutToSuppliers)}</span></div>
         <div class="summary-row"><span>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(operatingCashCost)}</span></div>
-        <div class="summary-row"><span>− Sửa chữa + luật đường + cố định khác</span><span class="val">${fmtVND(repairTotal+roadFee+otherFixedMonthly)}</span></div>
+        <div class="summary-row"><span>− Sửa chữa + luật đường</span><span class="val">${fmtVND(repairTotal+roadFee)}</span></div>
+        <div class="summary-row"><span>− Gốc + lãi vay ngân hàng (thật, cả 2)</span><span class="val">${fmtVND(state.settings.monthlyLoanPayment||0)}</span></div>
+        <div class="summary-row"><span>− Bảo hiểm + đăng kiểm/đăng ký/phù hiệu</span><span class="val">${fmtVND((Number(state.settings.monthlyInsurance)||0)+(Number(state.settings.monthlyRegistrationFee)||0))}</span></div>
         <div class="summary-row total" style="font-size:17px;"><span>DÒNG TIỀN THUẦN</span><span class="val" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</span></div>
-        <div class="hint" style="margin-top:4px;">Tính theo tiền THẬT đã ghi ở Sổ Tiền Khách Bank Vào + Sổ Tiền Bank Cho Mỏ (mục Công Nợ bên dưới) — khác với Lợi Nhuận Thực Tế ở trên (tính theo doanh thu/chi phí đã phát sinh, kể cả phần chưa thu/chưa trả tiền). 2 số này lệch nhau đúng bằng phần công nợ còn treo.</div>
+        <div class="hint" style="margin-top:4px;">Tính theo tiền THẬT — trừ đủ mọi khoản tiền mặt thật rời túi, KHÔNG trừ khấu hao xe (vì khấu hao không phải tiền mặt, không có giao dịch ngân hàng nào cho riêng khoản này). Khác với Lợi Nhuận Thực Tế ở trên (trừ Lãi vay + khấu hao theo đúng chuẩn kế toán, KHÔNG trừ Gốc vay). 2 số này lệch nhau = Gốc vay + phần công nợ còn treo − Khấu hao.</div>
 
         <div class="field" style="margin-top:14px; margin-bottom:0;">
           <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
@@ -9608,7 +9622,11 @@ function computeBankLoanAmortization(loan, refDate){
 function recomputeBankLoanMonthlyPayment(){
   if(!state.settings || !state.settings.bankLoan) return;
   const r = computeBankLoanAmortization(state.settings.bankLoan, new Date());
-  state.settings.monthlyLoanPayment = Math.round(r.totalPaymentCurrent);
+  state.settings.monthlyLoanPayment = Math.round(r.totalPaymentCurrent); // Gốc+Lãi — dùng cho DÒNG TIỀN THUẦN (tiền mặt thật)
+  // Chỉ phần LÃI — dùng cho LỢI NHUẬN THỰC TẾ (đúng chuẩn kế toán: gốc vay
+  // là trả nợ/giảm nợ vay, KHÔNG phải chi phí làm giảm lợi nhuận; chỉ lãi
+  // vay mới là chi phí thật) (yêu cầu Ông Chủ 2026-08-15).
+  state.settings.monthlyLoanInterest = Math.round(r.monthlyInterestCurrent);
 }
 function renderSettings(){
   const app=document.getElementById('app');
@@ -10195,7 +10213,7 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   out.push(['− Chi phí sửa chữa/khấu hao', Math.round(repairTotal)]);
   out.push(['− Chi phí luật đường', Math.round(roadFee)]);
   out.push(['− Khấu hao xe dự kiến/tháng', Math.round(state.settings.monthlyVehicleDepreciation||0)]);
-  out.push(['− Gốc + lãi vay ngân hàng/tháng', Math.round(state.settings.monthlyLoanPayment||0)]);
+  out.push(['− Lãi vay ngân hàng/tháng (chỉ phần lãi, không gồm gốc)', Math.round(state.settings.monthlyLoanInterest||0)]);
   out.push(['− Bảo hiểm xe/tháng', Math.round(state.settings.monthlyInsurance||0)]);
   out.push(['− Đăng kiểm/Đăng ký/Phù hiệu vận tải/tháng', Math.round(state.settings.monthlyRegistrationFee||0)]);
   out.push(['LỢI NHUẬN THỰC TẾ', Math.round(finalNetProfit)]);
@@ -10480,7 +10498,7 @@ function ktBuildTongQuan(wb, S, companyName, mst){
   line('Tiền khách bank vào (thật)', S.cashIn, {color:'FF1F7A4D'});
   line('Tiền bank cho mỏ (thật)', -S.cashOutToSuppliers);
   line('Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)', -S.operatingCashCost);
-  line('Sửa chữa + luật đường + khấu hao/vay/bảo hiểm/đăng kiểm', -(S.repairTotal+S.roadFee+S.otherFixedMonthly));
+  line('Sửa chữa + luật đường + gốc/lãi vay/bảo hiểm/đăng kiểm (thật)', -(S.repairTotal+S.roadFee+S.otherFixedMonthlyForCashFlow));
   line('DÒNG TIỀN THUẦN', S.netOperatingCashFlow, {bold:true, color:S.netOperatingCashFlow>=0?'FF1F7A4D':'FFB23A2E'});
 }
 function ktBuildHoaDonRa(wb, taxData, from, to){
