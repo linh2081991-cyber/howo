@@ -441,9 +441,9 @@
      danh sách xe (yêu cầu Ông Chủ 2026-08-14/15, làm nổi bật + đẹp hơn
      theo yêu cầu). Nền cam nhạt nổi bật, chữ đậm, có icon + nút "Đổi xe"
      rõ ràng thay vì 1 dòng chữ mờ nhạt như trước. */
-  .vehicle-scope-bar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 16px; background:var(--accent-soft); border-bottom:1.5px solid var(--accent); cursor:pointer; user-select:none; }
-  .vehicle-scope-bar .vsb-label{ display:flex; align-items:center; gap:8px; font-size:15px; font-weight:800; color:var(--accent); }
-  .vehicle-scope-bar .vsb-icon{ font-size:19px; }
+  .vehicle-scope-bar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; background:var(--accent-soft); border-bottom:1.5px solid var(--accent); cursor:pointer; user-select:none; }
+  .vehicle-scope-bar .vsb-label{ display:flex; align-items:center; gap:8px; font-size:17.5px; font-weight:900; color:var(--accent); letter-spacing:0.2px; }
+  .vehicle-scope-bar .vsb-icon{ font-size:21px; }
   .vehicle-scope-bar .vsb-chev{ display:flex; align-items:center; gap:4px; color:var(--accent); font-size:12.5px; font-weight:700; background:var(--surface); padding:5px 10px; border-radius:20px; border:1px solid var(--accent); }
 
   /* Badge trạng thái VAT trên dòng tiêu đề mỗi nhóm giao dịch đối tác — 3
@@ -1365,8 +1365,9 @@ function updateVehicleScopeBar(){
   const bar = document.getElementById('vehicleScopeBar');
   if(!bar) return;
   const vid = state.currentVehicleId;
-  const label = vid===null ? '🏢 LINH CHÍ THÀNH' : `🚛 ${escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'')}`;
-  bar.innerHTML = `<span>${label}</span><span class="vsb-chev">Đổi xe ▾</span>`;
+  const icon = vid===null ? '🏢' : '🚛';
+  const name = vid===null ? 'LINH CHÍ THÀNH' : escapeHtml((state.vehicles.find(v=>v.id===vid)||{}).name||'');
+  bar.innerHTML = `<span class="vsb-label"><span class="vsb-icon">${icon}</span>${name}</span><span class="vsb-chev">Đổi xe ▾</span>`;
   bar.onclick = renderVehiclePickerModal;
 }
 
@@ -3060,7 +3061,7 @@ function renderChooseVehiclePrompt(){
       <div class="card" style="text-align:center; padding:28px 16px;">
         <div style="font-size:32px; margin-bottom:10px;">🚛</div>
         <div style="font-weight:800; margin-bottom:6px;">Chọn 1 xe cụ thể để xem/sửa</div>
-        <div class="hint" style="margin-bottom:16px;">Đang ở chế độ LINH CHÍ THÀNH — mục này chỉ thao tác được trên đúng 1 xe.</div>
+        <div class="hint" style="margin-bottom:16px;">Đang ở chế độ Tổng Linh Chí Thành</div>
         <button class="btn btn-accent btn-block" id="chooseVehiclePromptBtn">Chọn Xe →</button>
       </div>
     </section>`;
