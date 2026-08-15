@@ -674,6 +674,8 @@ let state = {
   shiftArchiveMonth: null, // null = xem Danh Sách Ca bình thường (tháng hiện tại); "YYYY-MM" = đang xem lại 1 tháng cũ (xem VÀ sửa được)
   shiftArchiveDriverTab: null, // tab tài xế đang chọn RIÊNG cho màn xem lại tháng cũ — tách biệt với state.shiftDriverTab của Danh Sách Ca bình thường
   resultsRange: null,
+  customerDetailRange: null, // {from,to} hoặc null = xem toàn bộ thời gian — runtime only, không backup/sync, giống resultsRange
+  supplierDetailRange: null, // y hệt customerDetailRange nhưng cho màn Chi Tiết Nhà Cung Cấp
   resultsRoadFeeOverride: null, // nếu có gõ đè, ưu tiên số này hơn số tính từ Tiền Luật Đường Theo Tháng cho kỳ đang xem
   sitePayments: [], // {id, siteName, date, partnerName, customerId (mới — gắn đúng Khách Hàng nếu có), amount, notes} — money RECEIVED from a construction site's client
   // Khách Hàng (đối tác mua hàng) — khai 1 lần, dùng lại cho mọi công
@@ -7709,9 +7711,11 @@ function computeSupplierDebt(supplierId){
 /// phân phối qua phép cộng, cộng dồn từng chuyến lại LUÔN khớp tuyệt đối
 /// với đúng số công nợ đang hiển thị ở trên, không có rủi ro lệch số dù
 /// tách nhỏ tới cấp chuyến.
-function partnerTripRows(partnerId, side){
+function partnerTripRows(partnerId, side, from, to){
   const groups = [];
   for(const sh of allShiftsCompanyWide()){
+    if(from && sh.date<from) continue;
+    if(to && sh.date>to) continue;
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
       const match = side==='customer' ? s.customerId===partnerId : s.supplierId===partnerId;
@@ -7774,43 +7778,53 @@ function partnerTripRows(partnerId, side){
 /// nổi bật — cột kia chỉ để đối chiếu tham khảo. 1 dòng "Tổng ngày" chốt
 /// lại, số tô đậm luôn khớp tuyệt đối với "Còn Nợ" ở trên (cùng công thức
 /// gốc, chỉ trình bày tách cột).
-function partnerTransactionTableHtml(partnerId, side){
-  const groups = partnerTripRows(partnerId, side);
+function partnerTransactionTableHtml(partnerId, side, from, to){
+  const groups = partnerTripRows(partnerId, side, from, to);
   if(groups.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  // 2026-08-16 (yêu cầu Ông Chủ): bỏ trạng thái riêng "💰 Giá đã gồm VAT" —
+  // gộp về ĐÚNG 2 trạng thái thực tế cần biết (đã/chưa xuất hoá đơn), luôn
+  // cập nhật realtime theo dữ liệu hiện tại, giống cách hiển thị bên Nhà
+  // Cung Cấp. priceIncludesVat cũng coi là "đã xuất hoá đơn" vì VAT đã được
+  // áp dụng thật trên số tiền, không còn ở trạng thái "chưa có căn cứ VAT".
   const invoiceBadge = g=>{
-    if(g.priceIncludesVat) return `<span class="vat-badge vat-included">💰 Giá đã gồm VAT</span>`;
-    if(g.invoiceEffective) return `<span class="vat-badge vat-yes">✅ Đã xuất hoá đơn (+VAT ${Math.round(g.vatFrac*100)}%)</span>`;
-    return `<span class="vat-badge vat-no">○ Chưa xuất hoá đơn (không VAT)</span>`;
+    const hasInvoice = g.invoiceEffective || g.priceIncludesVat;
+    return hasInvoice
+      ? `<span class="vat-badge vat-yes">✅ Đã xuất hoá đơn (+VAT ${Math.round(g.vatFrac*100)}%)</span>`
+      : `<span class="vat-badge vat-no">○ Chưa xuất hoá đơn (không VAT)</span>`;
   };
   const rowsHtml = groups.map(g=>{
     const header = `<tr class="grid-group-row"><td colspan="6">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến ${invoiceBadge(g)}</td></tr>`;
-    const netCls = g.vatApplied ? 'num' : 'num vat-cell-active';
-    const vatCls = g.vatApplied ? 'num vat-cell-active' : 'num';
+    // 2026-08-16: màu CỐ ĐỊNH theo yêu cầu Ông Chủ — Có VAT luôn màu đen
+    // (mặc định), Chưa VAT luôn màu xanh — không đổi màu qua lại theo dòng
+    // nữa. Vẫn giữ CHỮ ĐẬM ở cột đang thực sự dùng để tính công nợ (để
+    // biết cột nào là số THẬT), chỉ khác ở việc không đổi màu nữa.
+    const vatWeight = g.vatApplied ? '800' : '400';
+    const netWeight = g.vatApplied ? '400' : '800';
     const tripLines = g.trips.map(t=>`
       <tr>
         <td>${escapeHtml(t.goodsType)}</td>
         <td>${escapeHtml(t.tripLocation)}</td>
         <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
         <td class="num">${fmtVND(t.price)}</td>
-        <td class="${netCls}">${fmtVND(t.netAmt)}</td>
-        <td class="${vatCls}">${fmtVND(t.withVatAmt)}</td>
+        <td class="num" style="color:var(--ink); font-weight:${vatWeight};">${fmtVND(t.withVatAmt)}</td>
+        <td class="num" style="color:var(--profit); font-weight:${netWeight};">${fmtVND(t.netAmt)}</td>
       </tr>`).join('');
     const totalLine = `<tr class="grid-total-row">
         <td colspan="4">Tổng ngày (${g.vatApplied?'ĐÃ tính VAT':'CHƯA tính VAT'})</td>
-        <td class="${netCls}">${fmtVND(g.totalNet)}</td>
-        <td class="${vatCls}">${fmtVND(g.totalWithVat)}</td>
+        <td class="num" style="color:var(--ink); font-weight:${vatWeight};">${fmtVND(g.totalWithVat)}</td>
+        <td class="num" style="color:var(--profit); font-weight:${netWeight};">${fmtVND(g.totalNet)}</td>
       </tr>`;
     return header + tripLines + totalLine;
   }).join('');
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Chưa VAT</th><th>Có VAT</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Có VAT</th><th>Chưa VAT</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
-    <div class="hint" style="margin-top:8px;">Cột tô đậm xanh ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ.</div>`;
+    <div class="hint" style="margin-top:8px;">Cột chữ đậm ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ.</div>`;
 }
 /// Gộp TOÀN BỘ chuyến (mọi thời điểm — CÙNG phạm vi "toàn bộ" với "Phải
 /// Trả (tổng)" ở đầu màn Chi Tiết Nhà Cung Cấp, KHÔNG lọc theo kỳ) của 1
@@ -7821,8 +7835,8 @@ function partnerTransactionTableHtml(partnerId, side){
 /// tuyệt đối với commercialCashToSupplier() ở cấp công trình (đã kiểm
 /// chứng ở partnerTripRows), nên totalCash dưới đây LUÔN bằng đúng
 /// debt.payable, không có đường tính nào khác gây lệch số.
-function supplierGoodsBreakdown(supplierId){
-  const groups = partnerTripRows(supplierId, 'supplier');
+function supplierGoodsBreakdown(supplierId, from, to){
+  const groups = partnerTripRows(supplierId, 'supplier', from, to);
   const byGoods = {};
   let totalVol=0, totalTrips=0, totalNet=0, totalVat=0, totalCash=0;
   for(const g of groups){
@@ -7842,12 +7856,38 @@ function supplierGoodsBreakdown(supplierId){
   const rows = Object.values(byGoods).sort((a,b)=>b.cash-a.cash);
   return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash };
 }
+/// Y HỆT supplierGoodsBreakdown() ở trên nhưng cho phía KHÁCH HÀNG (yêu
+/// cầu Ông Chủ 2026-08-16, "hiển thị đầy đủ giống y hệt nhà cung cấp") —
+/// dùng chung partnerTripRows(side='customer'), cash mỗi chuyến LUÔN khớp
+/// tuyệt đối commercialCashFromCustomer() ở cấp công trình, nên totalCash
+/// dưới đây LUÔN bằng đúng debt.billed (không lọc theo kỳ) hoặc đúng phần
+/// billed trong kỳ (khi có lọc from/to) — không có đường tính nào khác.
+function customerGoodsBreakdown(customerId, from, to){
+  const groups = partnerTripRows(customerId, 'customer', from, to);
+  const byGoods = {};
+  let totalVol=0, totalTrips=0, totalNet=0, totalVat=0, totalCash=0;
+  for(const g of groups){
+    for(const t of g.trips){
+      const key = t.goodsType || '(chưa khai)';
+      if(!byGoods[key]) byGoods[key] = { goodsType:key, trips:0, vol:0, net:0, vat:0, cash:0 };
+      const b = byGoods[key];
+      const vat = g.vatApplied ? (t.withVatAmt - t.netAmt) : 0;
+      b.trips += 1; b.vol += t.vol; b.net += t.netAmt; b.vat += vat; b.cash += t.cash;
+      totalVol += t.vol; totalTrips += 1; totalNet += t.netAmt; totalVat += vat; totalCash += t.cash;
+    }
+  }
+  const rows = Object.values(byGoods).sort((a,b)=>b.cash-a.cash);
+  return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash };
+}
 /// Render bảng chi tiết theo loại hàng — nhận thẳng object đã tính từ
-/// supplierGoodsBreakdown() (KHÔNG tính lại), để dùng chung 1 lần tính
-/// duy nhất với thẻ tổng hợp phía trên trong openSupplierDetail — tránh
-/// 2 nơi tính riêng rẽ có thể lệch nhau.
-function supplierGoodsBreakdownHtml(b){
-  if(!b || b.totalTrips===0) return '<div class="hint">Chưa có chuyến hàng thương mại nào gắn nhà cung cấp này.</div>';
+/// supplierGoodsBreakdown()/customerGoodsBreakdown() (KHÔNG tính lại), để
+/// dùng chung 1 lần tính duy nhất với thẻ tổng hợp phía trên — tránh 2 nơi
+/// tính riêng rẽ có thể lệch nhau. cashColLabel tuỳ biến theo góc nhìn:
+/// "Có VAT (Thực Trả)" cho Nhà Cung Cấp (tiền Ông Chủ trả), "Có VAT (Thực
+/// Thu)" cho Khách Hàng (tiền Ông Chủ nhận).
+function supplierGoodsBreakdownHtml(b, cashColLabel){
+  if(!b || b.totalTrips===0) return '<div class="hint">Chưa có chuyến hàng thương mại nào gắn đối tác này.</div>';
+  const label = cashColLabel || 'Có VAT (Thực Trả)';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const rowsHtml = b.rows.map(r=>`
     <tr>
@@ -7861,7 +7901,7 @@ function supplierGoodsBreakdownHtml(b){
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th><th>Chưa VAT</th><th>VAT</th><th>Có VAT (Thực Trả)</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th><th>Chưa VAT</th><th>VAT</th><th>${label}</th></tr></thead>
         <tbody>
           ${rowsHtml}
           <tr class="grid-total-row">
@@ -8805,48 +8845,87 @@ function openCustomerDetail(customerId){
   const cus = customerById(customerId);
   const app = document.getElementById('app');
   if(!cus){ renderAll(); return; }
-  const debt = computeCustomerDebt(customerId);
+  const debt = computeCustomerDebt(customerId); // TOÀN BỘ THỜI GIAN, tuyệt đối — không đổi theo bộ lọc kỳ bên dưới
+  const range = state.customerDetailRange; // {from,to} hoặc null
+  // Tính 1 LẦN — goodsAllTime cho thẻ Phải Thu (luôn toàn bộ thời gian,
+  // khớp đúng debt.billed), goodsForDisplay cho bảng Chi Tiết Tiền Hàng +
+  // bảng Giao Dịch bên dưới (lọc theo range nếu có chọn).
+  const goodsAllTime = customerGoodsBreakdown(customerId);
+  const goodsForDisplay = range ? customerGoodsBreakdown(customerId, range.from, range.to) : goodsAllTime;
   const payments = state.sitePayments.filter(p=>p.customerId===customerId).sort((a,b)=>b.date.localeCompare(a.date));
   // 2026-08-16 (yêu cầu Ông Chủ, khách CT TNHH Đàm Vương Gia): holdbackPercent
-  // giờ là thực tế kinh doanh THẬT (khách giữ đúng % này mỗi hoá đơn, trả nốt
-  // khi Linh Chí Thành xuất đủ hoá đơn) — ước tính phần đang giữ hợp lệ để
-  // TÁCH RIÊNG khỏi phần cần đòi ngay. Kẹp trong khoảng [0, debt.owed] vì
-  // không thể giữ nhiều hơn số hiện đang thật sự còn nợ. Đây LUÔN LÀ SỐ ƯỚC
-  // TÍNH hiển thị PHỤ — không đụng vào debt.owed (vẫn tuyệt đối = Phải Thu
-  // − Đã Nhận, số thật để khớp KT Thuế).
+  // là thực tế kinh doanh THẬT (khách giữ đúng % này mỗi hoá đơn, trả nốt khi
+  // Linh Chí Thành xuất đủ hoá đơn) — ước tính phần đang giữ hợp lệ để TÁCH
+  // RIÊNG khỏi phần cần đòi ngay. Kẹp trong khoảng [0, debt.owed]. Đây LUÔN
+  // LÀ SỐ ƯỚC TÍNH hiển thị PHỤ — không đụng vào debt.owed (vẫn tuyệt đối =
+  // Phải Thu − Đã Nhận, số thật để khớp KT Thuế).
   const holdbackPct = Number(cus.holdbackPercent)||0;
   const estimatedHeldBack = (holdbackPct>0 && debt.owed>0) ? Math.max(0, Math.min(debt.owed, debt.billed*holdbackPct/100)) : 0;
   const estimatedDueNow = debt.owed - estimatedHeldBack;
+  // Phát sinh RIÊNG của kỳ đã chọn (nếu có) — CHÊNH LỆCH TRONG KỲ, KHÁC với
+  // "CÒN NỢ" (số chạy dồn toàn bộ thời gian, luôn hiện ở thẻ trên, không đổi).
+  const periodCollected = range ? payments.filter(p=>p.date>=range.from && p.date<=range.to).reduce((s,p)=>s+(Number(p.amount)||0),0) : 0;
+  const periodBilled = range ? goodsForDisplay.totalCash : 0;
+  const periodNet = periodBilled - periodCollected;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="custDetailBackBtn">← Quay Lại Kết Quả</button>
     </section>
     <section class="group">
-      <div class="card">
-        <h3 style="margin-top:0;">${escapeHtml(cus.name)}</h3>
-        ${cus.phone?`<div class="summary-row"><span>SĐT</span><span class="val">${escapeHtml(cus.phone)}</span></div>`:''}
-        ${cus.address?`<div class="summary-row"><span>Địa chỉ</span><span class="val">${escapeHtml(cus.address)}</span></div>`:''}
-        ${cus.holdbackPercent?`<div class="hint" style="margin-top:6px;">Khách này giữ lại ${cus.holdbackPercent}% mỗi hoá đơn, trả nốt khi Linh Chí Thành xuất đủ hoá đơn — đã tách riêng ở ước tính bên dưới.</div>`:''}
+      <div class="card" style="text-align:center; padding:20px 16px;">
+        <h3 style="margin:0; font-size:22px; font-weight:800; color:var(--ink); letter-spacing:-0.2px;">${escapeHtml(cus.name)}</h3>
+        ${cus.phone?`<div style="margin-top:6px; color:var(--ink-soft); font-size:13.5px;">${escapeHtml(cus.phone)}</div>`:''}
+        ${cus.address?`<div style="margin-top:2px; color:var(--ink-soft); font-size:13.5px;">${escapeHtml(cus.address)}</div>`:''}
       </div>
     </section>
     <section class="group">
       <div class="card">
-        <div class="summary-row"><span>Phải thu (tổng)</span><span class="val">${fmtVND(debt.billed)}</span></div>
-        <div class="summary-row"><span>Đã nhận (tổng)</span><span class="val">${fmtVND(debt.collected)}</span></div>
+        ${goodsAllTime.totalTrips>0 ? `
+        <div class="summary-row"><span>Tổng tiền hàng đã bán (chưa VAT)</span><span class="val">${fmtVND(goodsAllTime.totalNet)}</span></div>
+        <div class="summary-row"><span>+ VAT</span><span class="val">${fmtVND(goodsAllTime.totalVat)}</span></div>
+        ` : ''}
+        <div class="summary-row total"><span>= Phải thu (tổng)</span><span class="val">${fmtVND(debt.billed)}</span></div>
+        <div class="summary-row" style="margin-top:10px;"><span>Đã nhận (tổng)</span><span class="val">${fmtVND(debt.collected)}</span></div>
         <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (khách tạm ứng dư)':''}</span></div>
         ${holdbackPct>0 && debt.owed>0 ? `
         <div class="formula-divider" style="margin:10px 0;"></div>
-        <div class="hint" style="margin-bottom:6px;">Trong CÒN NỢ ở trên, ước tính theo đúng thoả thuận giữ ${holdbackPct}%/hoá đơn (= ${fmtVND(debt.billed)} × ${holdbackPct}%, kẹp không vượt quá số còn nợ thật):</div>
-        <div class="summary-row"><span>— Đang giữ hợp lệ chờ hoá đơn (ước tính)</span><span class="val">${fmtVND(estimatedHeldBack)}</span></div>
+        <div class="summary-row"><span>— Đang giữ hợp lệ chờ hoá đơn (ước tính ${holdbackPct}%)</span><span class="val">${fmtVND(estimatedHeldBack)}</span></div>
         <div class="summary-row"><span style="font-weight:700;">— Cần đòi ngay (ngoài phần giữ hoá đơn)</span><span class="val" style="font-weight:700; color:var(--loss);">${fmtVND(estimatedDueNow)}</span></div>
-        <div class="hint" style="margin-top:6px;">2 dòng trên là ƯỚC TÍNH theo tỷ lệ đã khai ở hồ sơ khách hàng — số CÒN NỢ phía trên vẫn luôn là số THẬT tuyệt đối (Phải Thu − Đã Nhận), không bị đổi bởi ước tính này.</div>
         ` : ''}
       </div>
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
     </section>
     <section class="group">
-      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
-      ${partnerTransactionTableHtml(customerId, 'customer')}
+      <h3>Khoảng Thời Gian</h3>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="cus_rangeFrom" value="${range?range.from:''}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="cus_rangeTo" value="${range?range.to:''}">
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-accent btn-block" id="cus_rangeApplyBtn">Xem Theo Khoảng Này</button>
+        ${range?'<button class="btn btn-ghost" id="cus_rangeResetBtn">Xem Tất Cả</button>':''}
+      </div>
+      ${range?`
+      <div class="card" style="margin-top:10px;">
+        <div style="font-weight:700; margin-bottom:6px;">Phát sinh từ ${formatDateVN(range.from)} đến ${formatDateVN(range.to)}</div>
+        <div class="summary-row"><span>Tiền hàng bán trong kỳ</span><span class="val">${fmtVND(periodBilled)}</span></div>
+        <div class="summary-row"><span>Đã thu trong kỳ</span><span class="val">${fmtVND(periodCollected)}</span></div>
+        <div class="summary-row total"><span>CHÊNH LỆCH TRONG KỲ</span><span class="val" style="color:${periodNet>0?'var(--loss)':'var(--profit)'}">${fmtVND(periodNet)}</span></div>
+      </div>` : ''}
+    </section>
+    <section class="group">
+      <h3>📦 Chi Tiết Tiền Hàng — Theo Loại Hàng (Base A / Base B...)${range?` — ${formatDateVN(range.from)} → ${formatDateVN(range.to)}`:''}</h3>
+      ${supplierGoodsBreakdownHtml(goodsForDisplay, 'Có VAT (Thực Thu)')}
+    </section>
+    <section class="group">
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)${range?` — ${formatDateVN(range.from)} → ${formatDateVN(range.to)}`:''}</h3>
+      ${partnerTransactionTableHtml(customerId, 'customer', range?range.from:undefined, range?range.to:undefined)}
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Thu</h3>
@@ -8868,6 +8947,16 @@ function openCustomerDetail(customerId){
   `;
   document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>openCustomerPaymentEditor(null, customerId));
+  document.getElementById('cus_rangeApplyBtn').addEventListener('click', ()=>{
+    const f = document.getElementById('cus_rangeFrom').value;
+    const t = document.getElementById('cus_rangeTo').value;
+    if(!f || !t){ alert('Chọn đủ Từ ngày và Đến ngày trước khi xem.'); return; }
+    if(f>t){ alert('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
+    state.customerDetailRange = {from:f, to:t};
+    openCustomerDetail(customerId);
+  });
+  const custRangeResetBtn = document.getElementById('cus_rangeResetBtn');
+  if(custRangeResetBtn) custRangeResetBtn.addEventListener('click', ()=>{ state.customerDetailRange=null; openCustomerDetail(customerId); });
 }
 function openCustomerPaymentEditor(id, customerId){
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
@@ -8966,28 +9055,31 @@ function openSupplierDetail(supplierId){
   const sup = supplierById(supplierId);
   const app = document.getElementById('app');
   if(!sup){ renderAll(); return; }
-  const debt = computeSupplierDebt(supplierId);
-  // Tính 1 LẦN DUY NHẤT, dùng chung cho cả thẻ tổng hợp lẫn bảng theo loại
-  // hàng bên dưới — tránh 2 nơi tính riêng rẽ có thể lệch nhau. goods.totalCash
-  // LUÔN khớp tuyệt đối debt.payable (đã kiểm chứng ở supplierGoodsBreakdown),
-  // nhưng dòng "= Phải trả (tổng)" bên dưới vẫn LẤY ĐÚNG debt.payable (giá trị
-  // gốc từ computeSupplierDebt) để không bao giờ tách rời khỏi công thức lõi.
-  const goods = supplierGoodsBreakdown(supplierId);
+  const debt = computeSupplierDebt(supplierId); // TOÀN BỘ THỜI GIAN, tuyệt đối — không đổi theo bộ lọc kỳ bên dưới
+  const range = state.supplierDetailRange; // {from,to} hoặc null
+  // Tính 1 LẦN — goodsAllTime cho thẻ Phải Trả (luôn toàn bộ thời gian,
+  // khớp đúng debt.payable), goodsForDisplay cho bảng Chi Tiết Tiền Hàng +
+  // bảng Giao Dịch bên dưới (lọc theo range nếu có chọn).
+  const goodsAllTime = supplierGoodsBreakdown(supplierId);
+  const goodsForDisplay = range ? supplierGoodsBreakdown(supplierId, range.from, range.to) : goodsAllTime;
   const payments = state.supplierPayments.filter(p=>p.supplierId===supplierId).sort((a,b)=>b.date.localeCompare(a.date));
+  const periodPaid = range ? payments.filter(p=>p.date>=range.from && p.date<=range.to).reduce((s,p)=>s+(Number(p.amount)||0),0) : 0;
+  const periodPayable = range ? goodsForDisplay.totalCash : 0;
+  const periodNet = periodPayable - periodPaid;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="supDetailBackBtn">← Quay Lại Kết Quả</button>
     </section>
     <section class="group">
-      <div class="card">
-        <h3 style="margin-top:0;">${escapeHtml(sup.name)}</h3>
+      <div class="card" style="text-align:center; padding:20px 16px;">
+        <h3 style="margin:0; font-size:22px; font-weight:800; color:var(--ink); letter-spacing:-0.2px;">${escapeHtml(sup.name)}</h3>
       </div>
     </section>
     <section class="group">
       <div class="card">
-        ${goods.totalTrips>0 ? `
-        <div class="summary-row"><span>Tổng tiền hàng đã lấy (chưa VAT)</span><span class="val">${fmtVND(goods.totalNet)}</span></div>
-        <div class="summary-row"><span>+ VAT</span><span class="val">${fmtVND(goods.totalVat)}</span></div>
+        ${goodsAllTime.totalTrips>0 ? `
+        <div class="summary-row"><span>Tổng tiền hàng đã lấy (chưa VAT)</span><span class="val">${fmtVND(goodsAllTime.totalNet)}</span></div>
+        <div class="summary-row"><span>+ VAT</span><span class="val">${fmtVND(goodsAllTime.totalVat)}</span></div>
         ` : ''}
         <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
         <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
@@ -8997,12 +9089,36 @@ function openSupplierDetail(supplierId){
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
     <section class="group">
-      <h3>📦 Chi Tiết Tiền Hàng — Theo Loại Hàng (Base A / Base B...)</h3>
-      ${supplierGoodsBreakdownHtml(goods)}
+      <h3>Khoảng Thời Gian</h3>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="sup_rangeFrom" value="${range?range.from:''}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="sup_rangeTo" value="${range?range.to:''}">
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-accent btn-block" id="sup_rangeApplyBtn">Xem Theo Khoảng Này</button>
+        ${range?'<button class="btn btn-ghost" id="sup_rangeResetBtn">Xem Tất Cả</button>':''}
+      </div>
+      ${range?`
+      <div class="card" style="margin-top:10px;">
+        <div style="font-weight:700; margin-bottom:6px;">Phát sinh từ ${formatDateVN(range.from)} đến ${formatDateVN(range.to)}</div>
+        <div class="summary-row"><span>Tiền hàng lấy trong kỳ</span><span class="val">${fmtVND(periodPayable)}</span></div>
+        <div class="summary-row"><span>Đã trả trong kỳ</span><span class="val">${fmtVND(periodPaid)}</span></div>
+        <div class="summary-row total"><span>CHÊNH LỆCH TRONG KỲ</span><span class="val" style="color:${periodNet>0?'var(--loss)':'var(--profit)'}">${fmtVND(periodNet)}</span></div>
+      </div>` : ''}
     </section>
     <section class="group">
-      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
-      ${partnerTransactionTableHtml(supplierId, 'supplier')}
+      <h3>📦 Chi Tiết Tiền Hàng — Theo Loại Hàng (Base A / Base B...)${range?` — ${formatDateVN(range.from)} → ${formatDateVN(range.to)}`:''}</h3>
+      ${supplierGoodsBreakdownHtml(goodsForDisplay)}
+    </section>
+    <section class="group">
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)${range?` — ${formatDateVN(range.from)} → ${formatDateVN(range.to)}`:''}</h3>
+      ${partnerTransactionTableHtml(supplierId, 'supplier', range?range.from:undefined, range?range.to:undefined)}
     </section>
     <section class="group">
       <h3>Lịch Sử Đã Trả</h3>
@@ -9025,6 +9141,16 @@ function openSupplierDetail(supplierId){
   document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>openSupplierPaymentEditor(null, supplierId));
   document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId));
+  document.getElementById('sup_rangeApplyBtn').addEventListener('click', ()=>{
+    const f = document.getElementById('sup_rangeFrom').value;
+    const t = document.getElementById('sup_rangeTo').value;
+    if(!f || !t){ alert('Chọn đủ Từ ngày và Đến ngày trước khi xem.'); return; }
+    if(f>t){ alert('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
+    state.supplierDetailRange = {from:f, to:t};
+    openSupplierDetail(supplierId);
+  });
+  const supRangeResetBtn = document.getElementById('sup_rangeResetBtn');
+  if(supRangeResetBtn) supRangeResetBtn.addEventListener('click', ()=>{ state.supplierDetailRange=null; openSupplierDetail(supplierId); });
 }
 function openSupplierPaymentEditor(id, supplierId){
   const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
