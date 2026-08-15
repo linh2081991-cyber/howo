@@ -677,10 +677,11 @@ let state = {
   resultsRoadFeeOverride: null, // nếu có gõ đè, ưu tiên số này hơn số tính từ Tiền Luật Đường Theo Tháng cho kỳ đang xem
   sitePayments: [], // {id, siteName, date, partnerName, customerId (mới — gắn đúng Khách Hàng nếu có), amount, notes} — money RECEIVED from a construction site's client
   // Khách Hàng (đối tác mua hàng) — khai 1 lần, dùng lại cho mọi công
-  // trình thương mại bán cho đúng khách đó. holdbackPercent CHỈ để ghi
-  // chú tham khảo (khách này thường giữ khoảng bao nhiêu % chờ hoá đơn) —
-  // KHÔNG dùng để tự trừ vào công nợ, vì khách tạm ứng tự do không theo tỷ
-  // lệ cố định. Công nợ luôn = Phải Thu − Đã Nhận (số thật).
+  // trình thương mại bán cho đúng khách đó. holdbackPercent (2026-08-16):
+  // % khách THẬT SỰ giữ lại mỗi hoá đơn chờ đủ chứng từ mới trả nốt — dùng
+  // để ước tính "đang giữ hợp lệ chờ hoá đơn" hiển thị riêng ở chi tiết
+  // khách hàng. KHÔNG đổi công thức CÒN NỢ gốc = Phải Thu − Đã Nhận (số
+  // thật, khớp KT Thuế).
   customers: [], // {id, name, phone, address, notes, holdbackPercent}
   // Sổ tiền Ông Chủ đã bank cho nhà cung cấp (mỏ) — chiều ngược lại của
   // sitePayments, cùng vai trò nuôi dữ liệu Công Nợ Nhà Cung Cấp + Dòng
@@ -2245,11 +2246,14 @@ function renderInvoiceLotDetailModal(goodsType, from, to){
 }
 
 /// Modal quản lý Khách Hàng — thêm/sửa/xoá, mirror y hệt Nhà Cung Cấp.
-/// holdbackPercent CHỈ để ghi chú tham khảo (khách này thường giữ khoảng
-/// bao nhiêu % chờ hoá đơn) — KHÔNG dùng để tự trừ vào công nợ, vì khách
-/// tạm ứng tự do không theo tỷ lệ cố định. Công nợ luôn tính bằng đúng số
-/// tiền Phải Thu trừ đúng số tiền Đã Nhận (sitePayments), không suy đoán
-/// theo %.
+/// holdbackPercent (2026-08-16, yêu cầu Ông Chủ): khách này giữ lại ĐÚNG %
+/// này của MỖI hoá đơn cho tới khi Linh Chí Thành xuất đủ hoá đơn mới trả
+/// nốt — đây là thực tế kinh doanh THẬT, không còn là ghi chú suông. Dùng
+/// để ước tính "đang giữ hợp lệ chờ hoá đơn" hiển thị TÁCH RIÊNG cạnh CÒN
+/// NỢ (xem openCustomerDetail) — giúp phân biệt phần nợ CẦN ĐÒI GẤP với
+/// phần đang bị giữ đúng thoả thuận. KHÔNG đụng vào công thức CÒN NỢ gốc:
+/// số đó vẫn tuyệt đối = Phải Thu (billed) trừ Đã Nhận (collected), đúng
+/// tiền thật đã ghi nhận, để khớp tuyệt đối với KT Thuế dù 1đ.
 function renderCustomerManagerModal(editingId, linkToSiteIdx){
   const editing = editingId ? customerById(editingId) : null;
   const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
@@ -2283,7 +2287,7 @@ function renderCustomerManagerModal(editingId, linkToSiteIdx){
       <input type="text" id="cus_address" value="${escapeHtml(val(editing,'address'))}">
     </div>
     <div class="field">
-      <label>% giữ lại chờ hoá đơn (chỉ để ghi chú tham khảo)</label>
+      <label>% khách giữ lại chờ đủ hoá đơn mới thanh toán</label>
       <input type="text" inputmode="decimal" id="cus_holdback" placeholder="VD: 20" value="${val(editing,'holdbackPercent')}">
       <div class="hint" style="margin-top:4px;">Không dùng để tự trừ vào công nợ — chỉ hiện cạnh số công nợ để Ông Chủ nhớ tình hình. Công nợ thật luôn tính bằng Phải Thu trừ đúng số tiền đã ghi nhận thu được.</div>
     </div>
@@ -7421,8 +7425,10 @@ Tổng doanh thu = ${fmtVND(be.dayRevenue)} + ${fmtVND(be.nightRevenue)} = ${fmt
 
     <div class="modal-step">
       <div class="st-title">Bước 3 — Tách chi phí BIẾN ĐỔI (tăng/giảm theo số chuyến)</div>
-      <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, và chi phí phát sinh lặt vặt trong ca.</div>
-      <div class="st-formula">Chi phí biến đổi (cả kỳ) = ${fmtVND(be.variableCost)}
+      <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, luật đường phát sinh/ca, chi phí phát sinh lặt vặt, và giá vốn hàng mua-bán (thương mại).</div>
+      <div class="st-formula">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường/ca) = ${fmtVND(be.pureOperatingVariable!==undefined?be.pureOperatingVariable:be.variableCost)}
+Giá vốn hàng mua-bán thương mại trong kỳ = ${fmtVND(be.materialCost||0)}
+→ Chi phí biến đổi (cả kỳ) = ${fmtVND(be.variableCost)}
 Chi phí biến đổi bình quân / chuyến = ${fmtVND(be.variableCost)} ÷ ${be.totalTrips} = ${be.avgVariableCostPerTrip!==undefined?fmtVND(be.avgVariableCostPerTrip):'—'}</div>
     </div>
 
@@ -7453,6 +7459,56 @@ Biên lãi gộp bình quân/chuyến = Doanh thu bình quân − Chi phí biế
     <div class="modal-step">
       <div class="st-title">Kết luận</div>
       <div class="st-body">Kỳ này đã chạy thực tế ${be.actualTrips} chuyến, so với ${be.breakEvenTrips} chuyến cần để hoà vốn → ${be.surplusTrips>=0?`DƯ ${be.surplusTrips} chuyến, tức đã có lãi thật sau khi bù đủ chi phí cố định`:`THIẾU ${Math.abs(be.surplusTrips)} chuyến, tức lợi nhuận gộp kỳ này chưa đủ bù chi phí cố định`}.</div>
+    </div>` : ''}
+  `);
+}
+
+/// Modal "Chi Tiết Cách Tính" cho khối "Dự Đoán Hoà Vốn Cả Tháng" — cùng
+/// phong cách renderBreakEvenExplainerModal() ở trên, nhưng dùng đúng số
+/// liệu của computeMonthlyBreakEvenProjection() (chi phí cố định lấy từ hồ
+/// sơ tháng gốc, biên lãi gộp lấy từ N ngày gần nhất) để không lẫn với
+/// "Điểm Hoà Vốn Trong Kỳ".
+function renderMonthlyProjectionExplainerModal(m){
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🎯 Cách Tính Dự Đoán Hoà Vốn Cả Tháng — Giải Trình Chi Tiết</h3>
+    <div class="hint" style="margin-bottom:10px;">Khối này KHÔNG dùng chi phí cộng dồn theo từng ca đã ghi như "Điểm Hoà Vốn Trong Kỳ" — mà lấy chi phí cố định ỔN ĐỊNH từ hồ sơ tháng gốc (lương/nhà/ăn theo ngày công chuẩn), rồi ước tính biên lãi gộp/chuyến từ dữ liệu vận hành ${m.marginWindowDays} ngày gần nhất, để ra 1 mục tiêu đứng yên suốt tháng.</div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 1 — Chi phí cố định cả tháng (từ hồ sơ tháng gốc)</div>
+      <div class="st-body">Lương cứng + tiền nhà + tiền ăn của mọi tài xế đang hoạt động (quy theo ngày công chuẩn/tháng), cộng luật đường tháng này và khấu hao/lãi vay/bảo hiểm/đăng kiểm từ Cài Đặt.</div>
+      <div class="st-formula">Chi phí cố định cả tháng = Lương cứng + Tiền nhà + Tiền ăn + Luật đường tháng này + Khấu hao/vay/bảo hiểm/đăng kiểm
+= ${fmtVND(m.monthlySalary)} + ${fmtVND(m.monthlyHousing)} + ${fmtVND(m.monthlyFood)} + ${fmtVND(m.monthlyRoadFee)} + ${fmtVND(m.otherFixedMonthly)}
+= ${fmtVND(m.fixedCost)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 2 — Biên lãi gộp bình quân/chuyến (${m.marginWindowDays} ngày gần nhất: ${formatDateVN(m.fromDate)} → ${formatDateVN(m.toDate)})</div>
+      <div class="st-body">Lấy đúng doanh thu và chi phí biến đổi (dầu + lương chuyến + phát sinh + luật đường/ca + giá vốn hàng mua-bán) của ${m.totalTrips} chuyến gần nhất, chia đều ra biên lãi gộp trung bình mỗi chuyến.</div>
+      <div class="st-formula">Biên lãi gộp BQ/chuyến = (Doanh thu − Chi phí biến đổi) ÷ Số chuyến
+= (${fmtVND(m.totalRevenue)} − ${fmtVND(m.variableCost)}) ÷ ${m.totalTrips}
+= ${m.marginPerTrip!==undefined?fmtVND(m.marginPerTrip):'—'}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">Bước 3 — Số chuyến cần cho cả tháng</div>
+      <div class="st-body">Chi phí cố định cả tháng chia cho biên lãi gộp bình quân/chuyến ở Bước 2 — ra số chuyến TỐI THIỂU cần chạy trong THÁNG để doanh thu bù đủ chi phí cố định cả tháng.</div>
+      <div class="st-formula">Số chuyến cần cho cả tháng = Chi phí cố định cả tháng ÷ Biên lãi gộp BQ/chuyến
+= ${fmtVND(m.fixedCost)} ÷ ${m.marginPerTrip!==undefined?fmtVND(m.marginPerTrip):'—'}
+= ${m.breakEvenTrips!==null?m.breakEvenTrips+' chuyến':'Không xác định — '+escapeHtml(m.note||'')}</div>
+    </div>
+
+    ${m.breakEvenTrips!==null ? `
+    <div class="modal-step">
+      <div class="st-title">Bước 4 — Tốc độ hiện tại &amp; dự kiến cuối tháng</div>
+      <div class="st-body">Lấy tốc độ chạy thực tế (chuyến/ngày, bình quân ${m.marginWindowDays} ngày gần nhất) chiếu ra hết những ngày còn lại của tháng, để biết có khả năng đạt hoà vốn hay không.</div>
+      <div class="st-formula">Tốc độ hiện tại = ${m.tripsSoFarThisMonth} chuyến đã chạy ÷ ${m.marginWindowDays} ngày = ${m.tripsPerDay.toFixed(2)} chuyến/ngày
+Dự kiến cả tháng = ${m.tripsSoFarThisMonth} chuyến đã chạy + (${m.tripsPerDay.toFixed(2)} chuyến/ngày × ${m.daysRemaining} ngày còn lại)
+= ${Math.round(m.projectedTotalTripsThisMonth)} chuyến</div>
+    </div>
+    <div class="modal-step">
+      <div class="st-title">Kết luận</div>
+      <div class="st-body">Dự kiến cả tháng ${Math.round(m.projectedTotalTripsThisMonth)} chuyến, so với ${m.breakEvenTrips} chuyến cần để hoà vốn cả tháng → ${m.onTrackToHitBreakEven?`ĐANG ĐI ĐÚNG HƯỚNG, dự kiến đạt hoà vốn cả tháng`:`CHƯA ĐỦ TỐC ĐỘ, cần chạy nhanh hơn hoặc nhiều hơn để kịp hoà vốn cả tháng`}.</div>
     </div>` : ''}
   `);
 }
@@ -8555,6 +8611,7 @@ function renderResults(){
         </div>`}
         `}
       </div>
+      <button class="btn btn-ghost btn-block" id="monthlyProjectionDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
       <div class="hint" style="margin-top:8px;">Mục tiêu này dùng để lên kế hoạch vận hành cho cả tháng — không thay thế "Điểm Hoà Vốn Trong Kỳ" ở trên, chỉ bổ sung góc nhìn tổng thể.</div>
     </section>
 
@@ -8669,7 +8726,9 @@ function renderResults(){
     state.resultsRange.to = e.target.value; state.resultsRoadFeeOverride=null; renderResults();
   });
   document.getElementById('addRepairBtn').addEventListener('click', ()=>openRepairEditor(null));
-  document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal(breakEven));
+  document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal({...breakEven, materialCost: breakEvenMaterialCost, pureOperatingVariable: breakEvenPureOperatingVariable}));
+  const monthlyProjectionDetailBtn = document.getElementById('monthlyProjectionDetailBtn');
+  if(monthlyProjectionDetailBtn) monthlyProjectionDetailBtn.addEventListener('click', ()=>renderMonthlyProjectionExplainerModal(monthlyProjection));
   document.querySelectorAll('#marginWindowToggle button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       state.resultsMarginWindowDays = Number(btn.dataset.val);
@@ -8748,6 +8807,16 @@ function openCustomerDetail(customerId){
   if(!cus){ renderAll(); return; }
   const debt = computeCustomerDebt(customerId);
   const payments = state.sitePayments.filter(p=>p.customerId===customerId).sort((a,b)=>b.date.localeCompare(a.date));
+  // 2026-08-16 (yêu cầu Ông Chủ, khách CT TNHH Đàm Vương Gia): holdbackPercent
+  // giờ là thực tế kinh doanh THẬT (khách giữ đúng % này mỗi hoá đơn, trả nốt
+  // khi Linh Chí Thành xuất đủ hoá đơn) — ước tính phần đang giữ hợp lệ để
+  // TÁCH RIÊNG khỏi phần cần đòi ngay. Kẹp trong khoảng [0, debt.owed] vì
+  // không thể giữ nhiều hơn số hiện đang thật sự còn nợ. Đây LUÔN LÀ SỐ ƯỚC
+  // TÍNH hiển thị PHỤ — không đụng vào debt.owed (vẫn tuyệt đối = Phải Thu
+  // − Đã Nhận, số thật để khớp KT Thuế).
+  const holdbackPct = Number(cus.holdbackPercent)||0;
+  const estimatedHeldBack = (holdbackPct>0 && debt.owed>0) ? Math.max(0, Math.min(debt.owed, debt.billed*holdbackPct/100)) : 0;
+  const estimatedDueNow = debt.owed - estimatedHeldBack;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="custDetailBackBtn">← Quay Lại Kết Quả</button>
@@ -8757,7 +8826,7 @@ function openCustomerDetail(customerId){
         <h3 style="margin-top:0;">${escapeHtml(cus.name)}</h3>
         ${cus.phone?`<div class="summary-row"><span>SĐT</span><span class="val">${escapeHtml(cus.phone)}</span></div>`:''}
         ${cus.address?`<div class="summary-row"><span>Địa chỉ</span><span class="val">${escapeHtml(cus.address)}</span></div>`:''}
-        ${cus.holdbackPercent?`<div class="hint" style="margin-top:6px;">Ghi chú: khách này thường giữ lại khoảng ${cus.holdbackPercent}% chờ đủ hoá đơn mới thanh toán hết (chỉ tham khảo, không dùng để tính công nợ).</div>`:''}
+        ${cus.holdbackPercent?`<div class="hint" style="margin-top:6px;">Khách này giữ lại ${cus.holdbackPercent}% mỗi hoá đơn, trả nốt khi Linh Chí Thành xuất đủ hoá đơn — đã tách riêng ở ước tính bên dưới.</div>`:''}
       </div>
     </section>
     <section class="group">
@@ -8765,6 +8834,13 @@ function openCustomerDetail(customerId){
         <div class="summary-row"><span>Phải thu (tổng)</span><span class="val">${fmtVND(debt.billed)}</span></div>
         <div class="summary-row"><span>Đã nhận (tổng)</span><span class="val">${fmtVND(debt.collected)}</span></div>
         <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (khách tạm ứng dư)':''}</span></div>
+        ${holdbackPct>0 && debt.owed>0 ? `
+        <div class="formula-divider" style="margin:10px 0;"></div>
+        <div class="hint" style="margin-bottom:6px;">Trong CÒN NỢ ở trên, ước tính theo đúng thoả thuận giữ ${holdbackPct}%/hoá đơn (= ${fmtVND(debt.billed)} × ${holdbackPct}%, kẹp không vượt quá số còn nợ thật):</div>
+        <div class="summary-row"><span>— Đang giữ hợp lệ chờ hoá đơn (ước tính)</span><span class="val">${fmtVND(estimatedHeldBack)}</span></div>
+        <div class="summary-row"><span style="font-weight:700;">— Cần đòi ngay (ngoài phần giữ hoá đơn)</span><span class="val" style="font-weight:700; color:var(--loss);">${fmtVND(estimatedDueNow)}</span></div>
+        <div class="hint" style="margin-top:6px;">2 dòng trên là ƯỚC TÍNH theo tỷ lệ đã khai ở hồ sơ khách hàng — số CÒN NỢ phía trên vẫn luôn là số THẬT tuyệt đối (Phải Thu − Đã Nhận), không bị đổi bởi ước tính này.</div>
+        ` : ''}
       </div>
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
     </section>
@@ -9828,14 +9904,12 @@ function renderSettings(){
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <div class="hint" style="margin-bottom:10px;">Nhập chu kỳ (ví dụ thay dầu mỗi 5.000km) và lần làm gần nhất — app tự tính còn bao nhiêu km nữa tới hạn dựa trên ODO mới nhất Ông Chủ ghi, đồng thời dự đoán khoảng ngày phải bảo dưỡng dựa trên tốc độ chạy thực tế gần đây.</div>
       <div id="maintenanceListWrap"></div>
       <button class="btn btn-ghost btn-block" id="addMaintenanceBtn">+ Thêm Hạng Mục Bảo Dưỡng</button>
     </section>
 
     <section class="group">
       <h3>Tiền Luật Đường Theo Tháng</h3>
-      <div class="hint" style="margin-bottom:10px;">Mỗi tháng chi phí luật đường khác nhau tuỳ cung đường chạy trong tháng đó. Gõ đúng TỔNG số tiền thực đã đóng trong tháng (kể cả các khoản đóng thêm khi đổi cung, đã trừ phần được giảm do trùng đơn vị luật cũ) — cả app sẽ lấy đúng số của từng tháng này để tính toán.</div>
       <div class="card" id="roadFeeMonthListWrap"></div>
       <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
         <input type="month" id="rf_newMonth" style="flex:1;">
