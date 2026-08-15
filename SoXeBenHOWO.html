@@ -4067,7 +4067,7 @@ function updateSiteCalc(idx){
     // Dòng "gồm VAT ..." chỉ hiện khi thực sự có VAT ở đầu đó
     const sellSub = outVatCash>0 ? `<div class="cb-line cb-sub" style="padding-left:0;"><span class="cb-lbl">Trong đó VAT giữ hộ của khách</span><span class="cb-val">${fmtVND(outVatCash)}</span></div>` : '';
     const buySub = inVatCash>0
-      ? `<div class="cb-line cb-sub"><span class="cb-lbl">trong đó VAT đã trả mỏ ${deductible?'(được khấu trừ)':''}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
+      ? `<div class="cb-line cb-sub" style="padding-left:0;"><span class="cb-lbl">Trong đó VAT đã trả mỏ ${deductible?'(giúp giảm VAT phải nộp)':'(KHÔNG giảm được VAT phải nộp)'}</span><span class="cb-val">${fmtVND(inVatCash)}</span></div>`
       : '';
     const lotInfo = missingVol>0 ? siteInvoiceLotBreakdown(s) : { allocations:[], shortfallVolume:0, byGroup:[] };
     const missingGroups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0.001);
