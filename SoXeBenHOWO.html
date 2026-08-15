@@ -4169,9 +4169,9 @@ function renderSiteCashFlowExplainerModal(s){
     <div class="modal-step">
       <div class="st-title">Bước 1 — Thông số áp dụng</div>
       <div class="st-body">${sup?`Nhà cung cấp đang gắn: <b>${escapeHtml(sup.name)}</b>.`:'Chưa gắn nhà cung cấp.'} ${cus?`Khách hàng đang gắn: <b>${escapeHtml(cus.name)}</b>.`:'Chưa gắn khách hàng.'}</div>
-      <div class="st-formula">Thuế suất VAT = ${rVat.val}%  (nguồn: ${rVat.src})
-% hoá đơn mỏ xuất được = ${rInv.val}%  (nguồn: ${rInv.src})
-Hệ số quy đổi (tấn→khối) = ${rDen.val!==null?rDen.val:'chưa khai'}  (nguồn: ${rDen.src})</div>
+      <div class="st-formula">Thuế suất VAT = ${rVat.val}%
+% hoá đơn mỏ xuất được = ${rInv.val}%
+Hệ số quy đổi (tấn→khối) = ${rDen.val!==null?rDen.val:'chưa khai'}</div>
     </div>
 
     <div class="modal-step">
@@ -4237,8 +4237,7 @@ VAT phải nộp = ${fmtVND(outputVatForPayable)} − ${fmtVND(inputVatCreditFro
         return `<div class="st-formula"><b>${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}</b>
 KL mua = ${fmtQty(g.buyVolume)} tấn · KL bán = ${fmtQty(g.sellVolume)} khối
 KL có chứng từ = ${documentedVol!==null ? `(${fmtQty(g.buyVolume)} × ${rInv.val}%) ÷ ${rDen.val} = ${fmtQty(documentedVol)} khối` : 'không quy đổi được (thiếu % hoá đơn hoặc hệ số quy đổi)'}
-KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(documentedVol):'—'}) = ${fmtQty(g.missingVolume)} khối
-Giá trị quy đổi nội bộ = ${fmtQty(g.missingVolume)} × đơn giá mua BQ ${fmtVND(g.avgBuyUnitPrice)} = ${fmtVND(g.missingValue)}</div>`;
+KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(documentedVol):'—'}) = ${fmtQty(g.missingVolume)} khối</div>`;
       }).join('')}
       ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — lô mua trước dùng trước)</b>
 ${lotInfo.allocations.map(a=>{
