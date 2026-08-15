@@ -2719,6 +2719,19 @@ function commercialVatPayable(s){
   const inputVatFromSupplement = siteInvoiceSupplementVatCredit(s); // hoá đơn bù luôn có VAT được khấu trừ, không phụ thuộc buyIsDeductible
   return Math.max(0, outputVat - inputVatFromBuy - inputVatFromSupplement);
 }
+/// LÃI THỰC NHẬN (TIỀN MẶT) của 1 công trình thương mại — tách thành hàm
+/// dùng CHUNG (trước đây chỉ tính lồng trong updateSiteCalc()), để cả thẻ
+/// xem trước từng công trình LẪN "TIỀN THỰC ĐÚT TÚI (CẢ CA)" mới thêm
+/// (yêu cầu Ông Chủ 2026-08-15) luôn dùng đúng 1 công thức, không có
+/// đường tính thứ 2 nào khác gây lệch số.
+function siteCashTakeHome(s){
+  if(s.siteType!=='commercial') return 0;
+  const cashIn = commercialCashFromCustomer(s);
+  const cashToSupplier = commercialCashToSupplier(s);
+  const vatToState = commercialVatPayable(s);
+  const supplementCost = siteInvoiceSupplementCost(s);
+  return cashIn - cashToSupplier - vatToState - supplementCost;
+}
 // ---- DÒNG TIỀN THỰC TẾ (tiền mặt thật vào/ra), để hiển thị cho Ông Chủ
 // thấy rõ không phải bỏ túi trả thuế. Ba dòng dưới đây LUÔN cân đúng:
 //   Khách trả − Trả mỏ − VAT nộp nhà nước = Lãi bỏ túi (= net bán − net mua).
@@ -4037,7 +4050,7 @@ function updateSiteCalc(idx){
     // có) — chi phí bổ sung chứng từ là tiền mặt thật trả riêng để mua hoá
     // đơn, TÁCH khỏi "trả nhà cung cấp" (đó là trả mỏ). VAT nộp đã tự giảm
     // nhờ khấu trừ thêm từ hoá đơn bù rồi, không cộng lại ở đây kẻo tính 2 lần.
-    const takeHome = cashIn - cashToSupplier - vatToState - supplementCost;
+    const takeHome = siteCashTakeHome(s);
     const outVatCash = commercialCashOutputVat(s);
     const inVatCash = commercialCashInputVat(s);
     const deductible = buyIsDeductible(s);
@@ -4392,6 +4405,22 @@ function shiftFinancialSummaryHtml(sh){
     { label:'Chi phí phát sinh', value: Number(sh.incidentalCost)||0 },
     { label:'Tiền luật phát sinh', value: Number(sh.roadFeeIncidental)||0 }
   ];
+  // 2026-08-15: "TIỀN THỰC ĐÚT TÚI (CẢ CA)" — số CUỐI CÙNG tính hoàn toàn
+  // bằng tiền mặt thật từ đầu tới cuối (không qua bước bóc VAT kế toán
+  // như LỢI NHUẬN RÒNG) — đã kiểm chứng khớp tuyệt đối với cách cộng trừ
+  // tiền mặt thô tay (Khách trả − Trả mỏ − VAT nộp − Mua hoá đơn bù − CP
+  // vận hành). Công trình thương mại lấy đúng siteCashTakeHome() (đã nét
+  // mua-bán-VAT-hoá đơn bù ra tiền mặt thật); công trình chở cước lấy
+  // đúng siteRevenue() (bản chất đã là tiền mặt thật, không có giá vốn
+  // hàng hoá tách riêng) — rồi trừ ĐÚNG shiftOperatingCashCost() (dầu/
+  // lương/ăn/nhà/phát sinh/luật — y hệt operatingItems ở trên, không tính
+  // theo cách khác). Với ca KHÔNG có công trình thương mại nào, số này
+  // luôn khớp tuyệt đối bằng LỢI NHUẬN RÒNG (đã kiểm chứng bằng toán học:
+  // materialCost=supplementCost=0 nên shiftTotalCost=shiftOperatingCashCost),
+  // nên chỉ hiện thêm dòng này khi CÓ công trình thương mại, tránh trùng lặp.
+  const cashPocketBySite = (sh.siteLogs||[]).reduce((sum,s)=>
+    sum + (s.siteType==='commercial' ? siteCashTakeHome(s) : siteRevenue(s)), 0);
+  const cashPocketTotal = cashPocketBySite - shiftOperatingCashCost(sh);
   return `
     <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
@@ -4405,6 +4434,10 @@ function shiftFinancialSummaryHtml(sh){
     <div class="summary-row total" style="font-size:15.5px;"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
+    ${hasCommercialCost ? `
+    <div class="summary-row total" style="font-size:17px; border-top:1.5px dashed var(--border);"><span style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">TIỀN THỰC ĐÚT TÚI (CẢ CA)</span><span class="val" style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">${cashPocketTotal>=0?'+':''}${fmtVND(cashPocketTotal)}</span></div>
+    <div class="hint" style="margin-top:2px;">Tính hoàn toàn bằng tiền mặt thật (LÃI THỰC NHẬN từng công trình − chi phí vận hành ca) — khác với LỢI NHUẬN RÒNG ở trên (sổ sách, đã bóc VAT). 2 số lệch nhau đúng bằng phần VAT khấu trừ hoá đơn bù (hoặc VAT mua chưa khấu trừ được) — xem "Chi Tiết Cách Tính" ở từng công trình để biết chi tiết.</div>
+    ` : ''}
   `;
 }
 function updateSummary(){
