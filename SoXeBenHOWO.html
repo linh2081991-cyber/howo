@@ -653,11 +653,15 @@ let state = {
   // hậu tố đúng id xe — xem sharedDataRefForVehicle().
   vehicles: [],
   currentVehicleId: null,
-  // Bộ nhớ đệm CA CỦA TẤT CẢ XE gộp lại — { [vehicleId]: [ca...] } — dùng
-  // RIÊNG cho các phần THẬT SỰ dùng chung toàn công ty (Kho Hoá Đơn Bù,
-  // Công Nợ Khách Hàng/Nhà Cung Cấp). KHÁC với state.shifts (chỉ ca của
-  // xe đang xem/sửa). Xem allShiftsCompanyWide()/refreshAllVehiclesShiftsCache().
+  // Bộ nhớ đệm DỮ LIỆU CỦA TẤT CẢ XE gộp lại — { [vehicleId]: [...] / {...} } —
+  // dùng RIÊNG cho các phần THẬT SỰ dùng chung toàn công ty (Công Nợ,
+  // Kho Hoá Đơn Bù, và từ 2026-08-15: Dòng Tiền Thuần khi ở chế độ LINH
+  // CHÍ THÀNH). KHÁC với state.shifts/state.repairs/... (chỉ của xe đang
+  // xem/sửa). Xem allShiftsCompanyWide()/refreshAllVehiclesDataCache().
   allVehiclesShifts: {},
+  allVehiclesRepairs: {},
+  allVehiclesRoadFee: {},
+  allVehiclesSettings: {},
   drivers: [],
   shifts: [],
   repairs: [], // {id, date, item, invoiceCode, amount, notes}
@@ -1338,7 +1342,12 @@ async function loadVehicleWorkingSet(vehicleId){
         }
       }
     }
-    if(vehicleId) state.allVehiclesShifts[vehicleId] = state.shifts;
+    if(vehicleId){
+      state.allVehiclesShifts[vehicleId] = state.shifts;
+      state.allVehiclesRepairs[vehicleId] = state.repairs;
+      state.allVehiclesRoadFee[vehicleId] = state.roadFeeByMonth;
+      state.allVehiclesSettings[vehicleId] = state.settings;
+    }
   } catch(e) {
     showToast('Lỗi tải dữ liệu xe — kiểm tra mạng.');
   }
@@ -1432,17 +1441,33 @@ async function saveShifts(){
   }
   catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
 }
-/// Tải lại CA CỦA TỪNG XE (mọi xe, không chỉ xe đang xem) vào bộ nhớ đệm
-/// state.allVehiclesShifts — gọi 1 lần khi mở app; saveShifts()/
-/// loadVehicleWorkingSet() tự đồng bộ lại đúng 1 xe mỗi khi có thay đổi,
-/// nên không cần gọi lại hàm này thường xuyên.
+/// Tải lại DỮ LIỆU CỦA TỪNG XE (mọi xe, không chỉ xe đang xem) vào bộ nhớ
+/// đệm — gọi 1 lần khi mở app; saveShifts()/saveRepairs()/
+/// saveRoadFeeByMonth()/saveSettings()/loadVehicleWorkingSet() tự đồng bộ
+/// lại đúng 1 xe mỗi khi có thay đổi, nên không cần gọi lại hàm này
+/// thường xuyên. Mở rộng thêm repairs/roadFee/settings (yêu cầu Ông Chủ
+/// 2026-08-15: Dòng Tiền Thuần ở chế độ LINH CHÍ THÀNH cần gộp đủ chi phí
+/// vận hành/cố định của TẤT CẢ xe, không chỉ xe đang xem).
 async function refreshAllVehiclesShiftsCache(){
   const entries = await Promise.all(state.vehicles.map(async v=>{
-    const snap = await vehicleDataRef(v.id, 'shifts').get();
-    const list = snap.exists && Array.isArray(snap.data().list) ? snap.data().list : [];
-    return [v.id, list];
+    const [sSnap, rSnap, roadFeeSnap, stSnap] = await Promise.all([
+      vehicleDataRef(v.id, 'shifts').get(),
+      vehicleDataRef(v.id, 'repairs').get(),
+      vehicleDataRef(v.id, 'roadFeeByMonth').get(),
+      vehicleDataRef(v.id, 'settings').get()
+    ]);
+    const shiftsList = sSnap.exists && Array.isArray(sSnap.data().list) ? sSnap.data().list : [];
+    const repairsList = rSnap.exists && Array.isArray(rSnap.data().list) ? rSnap.data().list : [];
+    const roadFeeList = roadFeeSnap.exists && Array.isArray(roadFeeSnap.data().list) ? roadFeeSnap.data().list : [];
+    const settingsObj = stSnap.exists ? stSnap.data() : defaultSettingsShape();
+    return [v.id, shiftsList, repairsList, roadFeeList, settingsObj];
   }));
-  entries.forEach(([vid,list])=>{ state.allVehiclesShifts[vid]=list; });
+  entries.forEach(([vid,shiftsList,repairsList,roadFeeList,settingsObj])=>{
+    state.allVehiclesShifts[vid]=shiftsList;
+    state.allVehiclesRepairs[vid]=repairsList;
+    state.allVehiclesRoadFee[vid]=roadFeeList;
+    state.allVehiclesSettings[vid]=settingsObj;
+  });
 }
 /// Gộp CA CỦA TẤT CẢ XE thành 1 mảng — dùng cho những phần THẬT SỰ dùng
 /// chung toàn công ty (Công Nợ Khách Hàng/Nhà Cung Cấp, nhu cầu rút Kho
@@ -1472,12 +1497,69 @@ function allShiftsForLedgerCompanyWide(){
   }
   return list;
 }
+// ================= 2026-08-15: DÒNG TIỀN THUẦN Ở CHẾ ĐỘ LINH CHÍ THÀNH =================
+// Tiền khách bank vào / Tiền bank cho mỏ vốn ĐÃ dùng chung toàn công ty từ
+// trước (state.sitePayments/state.supplierPayments không tách theo xe) —
+// không cần hàm riêng. 4 hàm dưới đây gộp đúng phần còn lại (chi phí vận
+// hành + sửa chữa + luật đường + cố định) của TẤT CẢ xe, để "Dòng Tiền
+// Thuần" ở LINH CHÍ THÀNH không còn bị trộn nhầm chi phí của 1 xe với
+// tiền mặt của cả công ty như trước.
+/// Y HỆT repairsInRange() (dòng ~7096) nhưng gộp Sửa Chữa của TẤT CẢ xe.
+function repairsInRangeCompanyWide(from, to){
+  const combined = [];
+  Object.values(state.allVehiclesRepairs).forEach(list=>{
+    combined.push(...list.filter(r=>r.date>=from && r.date<=to));
+  });
+  return combined;
+}
+/// Y HỆT roadFeeForRange() (dòng ~1509) nhưng gộp Luật Đường của TẤT CẢ xe.
+function roadFeeForRangeCompanyWide(from, to){
+  const months = monthsBetween(from, to);
+  let sum = 0;
+  Object.values(state.allVehiclesRoadFee).forEach(list=>{
+    months.forEach(ym=>{
+      const e = list.find(x=>x.month===ym);
+      if(e) sum += (Number(e.amount)||0);
+    });
+  });
+  return sum;
+}
+/// Gộp Chi Phí Vận Hành (dầu/lương/ăn/nhà/phát sinh) của TẤT CẢ xe trong
+/// khoảng ngày — dùng sanitizeShiftForRevenue() y hệt bản 1 xe, để ca nào
+/// còn thiếu ODO/dầu của BẤT KỲ xe nào cũng không bị tính sai tiền dầu.
+function companyWideOperatingCashCost(from, to){
+  let sum = 0;
+  Object.values(state.allVehiclesShifts).forEach(list=>{
+    list.forEach(sh=>{
+      if(sh.date>=from && sh.date<=to) sum += shiftOperatingCashCost(sanitizeShiftForRevenue(sh));
+    });
+  });
+  return sum;
+}
+/// Gộp Gốc+Lãi vay ngân hàng + Bảo hiểm + Đăng kiểm (ĐỦ cả, vì đều là
+/// tiền mặt thật) của TẤT CẢ xe — mỗi xe có khoản vay/bảo hiểm/đăng kiểm
+/// riêng, công ty phải trả đủ cho từng xe nên cộng dồn lại.
+function companyWideCashFlowFixedMonthly(){
+  let sum = 0;
+  Object.values(state.allVehiclesSettings).forEach(s=>{
+    sum += (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  });
+  return sum;
+}
 async function saveRepairs(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'repairs').set({ list: state.repairs }); }
+  try {
+    const vid = activeVehicleIdForEditing();
+    await vehicleDataRef(vid, 'repairs').set({ list: state.repairs });
+    if(vid) state.allVehiclesRepairs[vid] = state.repairs;
+  }
   catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa — kiểm tra mạng.'); }
 }
 async function saveRoadFeeByMonth(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'roadFeeByMonth').set({ list: state.roadFeeByMonth }); }
+  try {
+    const vid = activeVehicleIdForEditing();
+    await vehicleDataRef(vid, 'roadFeeByMonth').set({ list: state.roadFeeByMonth });
+    if(vid) state.allVehiclesRoadFee[vid] = state.roadFeeByMonth;
+  }
   catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường — kiểm tra mạng.'); }
 }
 // "2026-07" -> "7/2026" để hiện nhãn gọn cho từng dòng trong danh sách.
@@ -1551,6 +1633,8 @@ async function saveSettings(){
       sharedDataRef('companySettings').set(shared),
       vehicleDataRef(activeVehicleIdForEditing(), 'settings').set(state.settings)
     ]);
+    const vid = activeVehicleIdForEditing();
+    if(vid) state.allVehiclesSettings[vid] = state.settings;
   }
   catch(e){ showToast('Lỗi lưu cài đặt — kiểm tra mạng.'); }
 }
@@ -7731,10 +7815,31 @@ function computePeriodSummary(from, to){
   const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey] || 0;
   const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const operatingCashCost = inRange.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
-  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthlyForCashFlow;
+  // 2026-08-15: "Dòng Tiền Thuần" CHỈ có ý nghĩa đúng ở CẤP CÔNG TY — tiền
+  // khách trả/trả mỏ (cashIn/cashOutToSuppliers) vốn ĐÃ dùng chung toàn
+  // công ty từ trước, không thể quy đúng cho riêng 1 xe. Khi đang ở LINH
+  // CHÍ THÀNH (currentVehicleId=null), gộp ĐỦ chi phí vận hành/sửa chữa/
+  // luật đường/cố định của TẤT CẢ xe — khi đang xem 1 xe cụ thể, vẫn tính
+  // theo đúng xe đó để renderResults() còn số tham khảo, NHƯNG UI sẽ ẩn
+  // hẳn khối này đi (xem isCompanyWide) vì trộn tiền công ty với chi phí
+  // 1 xe là sai, không phải vì công thức bên dưới sai.
+  const isCompanyWide = state.currentVehicleId === null;
+  let operatingCashCost, netOperatingCashFlow, cashFlowRepairTotal, cashFlowRoadFee, cashFlowFixedMonthly;
+  if(isCompanyWide){
+    operatingCashCost = companyWideOperatingCashCost(from, to);
+    cashFlowRepairTotal = repairsInRangeCompanyWide(from, to).reduce((s,r)=>s+(Number(r.amount)||0),0);
+    cashFlowRoadFee = roadFeeForRangeCompanyWide(from, to);
+    cashFlowFixedMonthly = companyWideCashFlowFixedMonthly();
+  } else {
+    operatingCashCost = inRange.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
+    cashFlowRepairTotal = repairTotal;
+    cashFlowRoadFee = roadFee;
+    cashFlowFixedMonthly = otherFixedMonthlyForCashFlow;
+  }
+  netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - cashFlowRepairTotal - cashFlowRoadFee - cashFlowFixedMonthly;
   return { from, to, inRange, gTotal, repairTotal, roadFee, otherFixedMonthly, otherFixedMonthlyForCashFlow, finalNetProfit,
-           vatPayableInRange, manualCitValue, cashIn, cashOutToSuppliers, operatingCashCost, netOperatingCashFlow };
+           vatPayableInRange, manualCitValue, cashIn, cashOutToSuppliers, operatingCashCost, netOperatingCashFlow,
+           isCompanyWide, cashFlowRepairTotal, cashFlowRoadFee, cashFlowFixedMonthly };
 }
 function computeAllSiteBilledEvents(){
   const map = {};
@@ -8157,7 +8262,12 @@ function renderResults(){
   const cashIn = periodSummary.cashIn;
   const cashOutToSuppliers = periodSummary.cashOutToSuppliers;
   const operatingCashCost = periodSummary.operatingCashCost;
-  const netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthlyForCashFlow;
+  // Ở chế độ LINH CHÍ THÀNH, dùng thẳng số đã tính company-wide từ
+  // periodSummary (ô ghi đè "Chi phí luật đường trong kỳ này" bên dưới là
+  // của riêng xe đang xem, không áp dụng cho tổng công ty).
+  const netOperatingCashFlow = periodSummary.isCompanyWide
+    ? periodSummary.netOperatingCashFlow
+    : cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - otherFixedMonthlyForCashFlow;
   // Data-integrity check: any ca in range with real fuel consumed but no
   // đơn giá dầu entered contributes 0đ to Tiền dầu tiêu hao (consumed × 0),
   // which is exactly the pattern that quietly understates the period's
@@ -8273,15 +8383,19 @@ function renderResults(){
         <div class="hint" style="margin-top:4px;">Không tự tính theo %, vì KT có thể tối ưu thấp hơn qua các cách hợp pháp app không mô phỏng được — Ông Chủ gõ đúng số KT đưa cho đúng kỳ đang xem, app chỉ hiển thị lại.</div>
 
         <div class="formula-divider" style="margin:14px 0;"></div>
-        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH</div>
+        ${periodSummary.isCompanyWide ? `
+        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (TOÀN CÔNG TY)</div>
         <div class="summary-row"><span>Tiền khách bank vào (thật, trong kỳ)</span><span class="val" style="color:var(--profit);">+${fmtVND(cashIn)}</span></div>
         <div class="summary-row"><span>− Tiền bank cho mỏ (thật, trong kỳ)</span><span class="val">${fmtVND(cashOutToSuppliers)}</span></div>
-        <div class="summary-row"><span>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(operatingCashCost)}</span></div>
-        <div class="summary-row"><span>− Sửa chữa + luật đường</span><span class="val">${fmtVND(repairTotal+roadFee)}</span></div>
-        <div class="summary-row"><span>− Gốc + lãi vay ngân hàng (thật, cả 2)</span><span class="val">${fmtVND(state.settings.monthlyLoanPayment||0)}</span></div>
-        <div class="summary-row"><span>− Bảo hiểm + đăng kiểm/đăng ký/phù hiệu</span><span class="val">${fmtVND((Number(state.settings.monthlyInsurance)||0)+(Number(state.settings.monthlyRegistrationFee)||0))}</span></div>
-        <div class="summary-row total" style="font-size:17px;"><span>DÒNG TIỀN THUẦN</span><span class="val" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</span></div>
-        <div class="hint" style="margin-top:4px;">Tính theo tiền THẬT — trừ đủ mọi khoản tiền mặt thật rời túi, KHÔNG trừ khấu hao xe (vì khấu hao không phải tiền mặt, không có giao dịch ngân hàng nào cho riêng khoản này). Khác với Lợi Nhuận Thực Tế ở trên (trừ Lãi vay + khấu hao theo đúng chuẩn kế toán, KHÔNG trừ Gốc vay). 2 số này lệch nhau = Gốc vay + phần công nợ còn treo − Khấu hao.</div>
+        <div class="summary-row"><span>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh) — tất cả xe</span><span class="val">${fmtVND(operatingCashCost)}</span></div>
+        <div class="summary-row"><span>− Sửa chữa + luật đường — tất cả xe</span><span class="val">${fmtVND(periodSummary.cashFlowRepairTotal+periodSummary.cashFlowRoadFee)}</span></div>
+        <div class="summary-row"><span>− Gốc + lãi vay ngân hàng + bảo hiểm + đăng kiểm — tất cả xe (thật)</span><span class="val">${fmtVND(periodSummary.cashFlowFixedMonthly)}</span></div>
+        <div class="summary-row total" style="font-size:17px;"><span>DÒNG TIỀN THUẦN (TOÀN CÔNG TY)</span><span class="val" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</span></div>
+        <div class="hint" style="margin-top:4px;">Tính theo tiền THẬT của CẢ CÔNG TY (gộp mọi xe) — trừ đủ mọi khoản tiền mặt thật rời túi (kể cả Gốc vay ngân hàng của từng xe), KHÔNG trừ khấu hao xe (không phải tiền mặt). Khác với "Lợi Nhuận Thực Tế"/"Lãi Gộp Mua-Bán" ở trên (tính RIÊNG theo từng xe, trừ Lãi vay + khấu hao theo đúng chuẩn kế toán, KHÔNG trừ Gốc vay).</div>
+        ` : `
+        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH</div>
+        <div class="hint">💡 Đây là tiền mặt thật của CẢ CÔNG TY (tiền khách trả/trả mỏ dùng chung, không thể quy đúng cho riêng 1 xe) — chỉ xem được ở chế độ <b>LINH CHÍ THÀNH</b>. Bấm "Đổi xe" ở đầu trang, chọn LINH CHÍ THÀNH để xem đúng số này.</div>
+        `}
 
         <div class="field" style="margin-top:14px; margin-bottom:0;">
           <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
