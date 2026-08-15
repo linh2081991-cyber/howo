@@ -7504,8 +7504,8 @@ function renderMonthlyProjectionExplainerModal(m){
     <div class="modal-step">
       <div class="st-title">Bước 4 — Tốc độ hiện tại &amp; dự kiến cuối tháng</div>
       <div class="st-body">Lấy tốc độ chạy thực tế (chuyến/ngày, bình quân ${m.marginWindowDays} ngày gần nhất) chiếu ra hết những ngày còn lại của tháng, để biết có khả năng đạt hoà vốn hay không.</div>
-      <div class="st-formula">Tốc độ hiện tại = ${m.tripsSoFarThisMonth} chuyến đã chạy ÷ ${m.marginWindowDays} ngày = ${m.tripsPerDay.toFixed(2)} chuyến/ngày
-Dự kiến cả tháng = ${m.tripsSoFarThisMonth} chuyến đã chạy + (${m.tripsPerDay.toFixed(2)} chuyến/ngày × ${m.daysRemaining} ngày còn lại)
+      <div class="st-formula">Tốc độ hiện tại = ${m.totalTrips} chuyến (trong ${m.marginWindowDays} ngày gần nhất) ÷ ${m.marginWindowDays} ngày = ${m.tripsPerDay.toFixed(2)} chuyến/ngày
+Dự kiến cả tháng = ${m.tripsSoFarThisMonth} chuyến đã chạy từ đầu tháng + (${m.tripsPerDay.toFixed(2)} chuyến/ngày × ${m.daysRemaining} ngày còn lại)
 = ${Math.round(m.projectedTotalTripsThisMonth)} chuyến</div>
     </div>
     <div class="modal-step">
