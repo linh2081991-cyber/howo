@@ -8335,6 +8335,12 @@ function renderResults(){
   const insights = generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, from, to, siteRanking});
   const financialWarnings = computeFinancialWarnings({ gTotal, finalNetProfit, repairTotal, roadFee, otherFixedMonthly, inRangeShifts:inRange, missingFuelPriceShifts, missingFuelPriceLiters, from, to });
   const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal, otherFixedMonthly);
+  // Chỉ để TÁCH HIỂN THỊ cho rõ ràng — KHÔNG đụng tới breakEven.variableCost
+  // hay breakEven.grossProfit (2 số đó vẫn tính y nguyên trong
+  // computeBreakEvenDetailed, đã đóng băng). breakEvenPureOperatingVariable
+  // + breakEvenMaterialCost cộng lại luôn khớp tuyệt đối = breakEven.variableCost.
+  const breakEvenMaterialCost = inRange.reduce((s,sh)=>s+shiftMaterialCost(sh),0);
+  const breakEvenPureOperatingVariable = breakEven.variableCost - breakEvenMaterialCost;
   const monthlyProjection = computeMonthlyBreakEvenProjection(state.resultsMarginWindowDays===10 ? 10 : 30);
   const costTrend = computeCostPerKmTrend(6);
 
@@ -8468,9 +8474,12 @@ function renderResults(){
 
       <div class="card">
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu) = <strong>${fmtVND(breakEven.fixedCost)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Tổng chi phí biến đổi thực tế (dầu + lương chuyến + tiền ăn + phát sinh) = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường phát sinh/ca) = <strong>${fmtVND(breakEvenPureOperatingVariable)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Giá vốn hàng mua-bán thương mại trong kỳ (tiền mua vật liệu từ mỏ) = <strong>${fmtVND(breakEvenMaterialCost)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink-soft); margin-top:6px;">→ Tổng chi phí biến đổi thực tế = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div style="font-weight:800; font-size:15.5px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi) = ${fmtVND(breakEven.grossProfit)}</div>
+        <div class="hint" style="margin-top:8px;">Số này là lãi gộp THEO CHI PHÍ BIẾN ĐỔI — riêng để tính điểm hoà vốn. KHÁC với "Lợi nhuận gộp ca" ở bảng Kết Quả phía trên (đã trừ thêm cả lương cứng + tiền nhà phân bổ, 2 khoản đó được xếp vào chi phí CỐ ĐỊNH ở khối này) — 2 số khác nhau do 2 mục đích tính khác nhau, không phải sai lệch dữ liệu.</div>
       </div>
 
       <div class="card" style="margin-top:10px;">
