@@ -1038,8 +1038,6 @@ function computeShiftIssues(sh){
 
   return issues;
 }
-function shiftHasIssues(sh){ return computeShiftIssues(sh).length > 0; }
-
 // ========================= EXCLUDE INCOMPLETE "REALTIME" CA FROM AGGREGATES =========================
 // A ca vừa mới chạy xong thường chưa kịp nhập ODO cuối ca / dầu cuối ca —
 // nhưng shiftFuelConsumed()/shiftOdoDriven() vẫn âm thầm trả về số liệu
@@ -2482,11 +2480,6 @@ function siteGoodsTypeGroups(s){
 function siteMissingDocumentedVolume(s){
   return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingVolume, 0);
 }
-/// Giá trị (net, theo đơn giá mua BÌNH QUÂN của TỪNG NHÓM loại hàng) của
-/// phần khối lượng thiếu chứng từ — cộng dồn qua các nhóm.
-function siteMissingDocumentedValue(s){
-  return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingValue, 0);
-}
 /// ==== KHO HOÁ ĐƠN BÙ (mua theo lô lớn, rút dần cho từng ca thiếu chứng
 /// từ) — khớp theo LOẠI HÀNG (VD Base A, Base B...), KHÔNG còn ràng buộc
 /// theo mỏ/nhà cung cấp — 1 lô có thể bù cho bất kỳ công trình nào cùng
@@ -2690,10 +2683,6 @@ function commercialGrossBuy(s){
 function commercialGrossSell(s){
   return (s.commercialTrips||[]).reduce((sum,t)=>sum+(Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0),0);
 }
-// VAT đầu ra (trên tiền bán) và VAT đầu vào (trên tiền mua) — chỉ có khi
-// đầu đó chọn "có VAT". VAT đầu vào chỉ được KHẤU TRỪ khi có hoá đơn mua.
-function commercialOutputVat(s){ return commercialGrossSell(s) - commercialNetSell(s); }
-function commercialInputVat(s){ return commercialGrossBuy(s) - commercialNetBuy(s); }
 // Có được KHẤU TRỪ VAT đầu vào không? = có nhận được hoá đơn VAT mua hay
 // không (buyHasInvoice). ĐỘC LẬP với chuyện giá nhập đã gồm VAT hay chưa.
 // Dữ liệu cũ chưa có cờ này → suy mặc định theo buyIncludesVat để không
@@ -3130,10 +3119,6 @@ function renderShiftCard(sh){
 /// bằng màu sắc dù tên tài xế trùng chữ cái đầu.
 const DRIVER_COLUMN_PALETTE = ['#E8720C','#2563A8','#1F7A4D','#8A4FBF','#B23A2E','#0E7C86'];
 function driverColumnAccent(index){ return DRIVER_COLUMN_PALETTE[index % DRIVER_COLUMN_PALETTE.length]; }
-function driverInitial(name){
-  const n = (name||'').trim();
-  return n ? n.charAt(0).toUpperCase() : '?';
-}
 /// Icon SVG tài xế (thay cho avatar tròn chữ cái đầu cũ) — hình vẽ gốc,
 /// đơn giản, dùng currentColor để tự nhuộm theo màu accent riêng của mỗi
 /// cột tài xế (đặt màu qua CSS .avatar{ color:var(--col-accent) }).
@@ -5547,10 +5532,14 @@ function aggregateStrategyData(from, to){
   // Snapshot chi phí cố định THÁNG HIỆN TẠI — nguyên liệu cho góc nhìn
   // "chuyên gia kế toán - tài chính" (đúng số đang dùng ở tab Kết Quả,
   // không phải số ước lượng riêng).
+  // 2026-08-16: đổi monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ
+  // LÃI) để khớp đúng quy tắc đã chốt ở computePeriodSummary (~dòng 7850):
+  // Gốc vay là trả bớt nợ, không phải chi phí làm giảm lợi nhuận — AI không
+  // được bình luận trên số chi phí cố định bị phóng đại vì cộng nhầm Gốc.
   const todayYM = todayLocalDateStr();
   const financialSnapshot = {
     roadFeeThisMonth: Math.round(roadFeeForRange(todayYM, todayYM)),
-    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
+    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
   };
 
   return {
@@ -5825,7 +5814,9 @@ function computeHiringAdvisorMetrics(draft){
   const currentMonthlyFood = activeDrivers.reduce((s,d)=>s+(Number(d.dailyFoodAllowance)||0),0)*workDays;
   const today = todayLocalDateStr();
   const monthlyRoadFee = roadFeeForRange(today, today);
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  // 2026-08-16: monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ Lãi)
+  // — khớp đúng quy tắc otherFixedMonthly ở computePeriodSummary (~7850).
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const currentFixedCost = currentMonthlySalary + currentMonthlyHousing + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   // ----- Kịch bản HIỆN TẠI (1 lái) — quy đổi nhịp độ thực tế trong khoảng
@@ -6443,7 +6434,10 @@ function computeAppraisalMetrics(p){
   const fixedBaseSalaryMonthly = Number(p.fixedBaseSalaryMonthly)||0;
   const fixedHousingMonthly = Number(p.fixedHousingMonthly)||0;
   const fixedDepreciationMonthly = Number(p.fixedDepreciationMonthly)||0;
-  const fixedLoanMonthly = Number(state.settings.monthlyLoanPayment)||0; // lấy tự động từ Công Cụ Tính Gốc+Lãi ở Cài Đặt — chi phí cố định áp dụng cho toàn bộ app, không gõ tay riêng theo từng công trình nữa
+  // 2026-08-16: đổi monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ
+  // LÃI) — khớp đúng quy tắc otherFixedMonthly ở computePeriodSummary
+  // (~7850): Gốc vay là trả bớt nợ, không phải chi phí làm giảm lợi nhuận.
+  const fixedLoanMonthly = Number(state.settings.monthlyLoanInterest)||0; // lấy tự động từ Công Cụ Tính Gốc+Lãi ở Cài Đặt — chi phí cố định áp dụng cho toàn bộ app, không gõ tay riêng theo từng công trình nữa
   const fixedInsuranceMonthly = Number(p.fixedInsuranceMonthly)||0;
   const fixedRegistrationMonthly = Number(p.fixedRegistrationMonthly)||0;
   const fixedOtherMonthly = Number(p.fixedOtherMonthly)||0;
@@ -6939,7 +6933,7 @@ function openProjectAppraisalEditor(id){
       <div class="summary-row"><span>Lương cứng</span><span class="val">${fmtVND(m.fixedBaseSalaryMonthly)}</span></div>
       <div class="summary-row"><span>Nhà ở</span><span class="val">${fmtVND(m.fixedHousingMonthly)}</span></div>
       <div class="summary-row"><span>Khấu hao xe</span><span class="val">${fmtVND(m.fixedDepreciationMonthly)}</span></div>
-      <div class="summary-row"><span>Gốc + lãi vay ngân hàng (tự động từ Cài Đặt)</span><span class="val">${fmtVND(m.fixedLoanMonthly)}</span></div>
+      <div class="summary-row"><span>Lãi vay ngân hàng/tháng (tự động từ Cài Đặt, không gồm Gốc)</span><span class="val">${fmtVND(m.fixedLoanMonthly)}</span></div>
       <div class="summary-row"><span>Bảo hiểm</span><span class="val">${fmtVND(m.fixedInsuranceMonthly)}</span></div>
       <div class="summary-row"><span>Đăng kiểm/đăng ký</span><span class="val">${fmtVND(m.fixedRegistrationMonthly)}</span></div>
       <div class="summary-row"><span>Chi phí cố định khác</span><span class="val">${fmtVND(m.fixedOtherMonthly)}</span></div>
@@ -7357,7 +7351,12 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
   const today = todayLocalDateStr();
   const monthlyRoadFee = roadFeeForRange(today, today);
-  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  // 2026-08-16: monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ Lãi)
+  // — trước đây khối này tính "chi phí cố định" CAO HƠN khối "Điểm Hoà Vốn
+  // Trong Kỳ" ở computePeriodSummary (~7850) vì cộng nhầm cả Gốc vay, khiến
+  // "số chuyến hoà vốn cả tháng" bị đội lên sai. Sửa để 2 khối luôn khớp
+  // cùng 1 chuẩn kế toán (Gốc vay là trả nợ, không phải chi phí).
+  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
   const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   const toDate = today;
@@ -7554,10 +7553,6 @@ function computeSiteRanking(inRangeShifts){
     })
     .map(x=>({ ...x, revenuePerTrip: x.trips>0 ? x.revenue/x.trips : 0 }))
     .sort((a,b)=>b.revenuePerTrip-a.revenuePerTrip);
-}
-
-function sitePaymentsInRange(siteName, from, to){
-  return state.sitePayments.filter(p=>p.siteName===siteName && p.date>=from && p.date<=to);
 }
 
 /// Full drill-down for ONE construction site within [from, to]: total
