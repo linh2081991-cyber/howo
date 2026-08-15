@@ -2162,6 +2162,7 @@ function renderInvoiceLotOverview(){
   const inStock = lotsForType.reduce((sum,l)=>sum+l.remaining,0);
   const enough = inStock >= demand.totalMissing - 0.001;
 
+  const vatByShift = computeInvoiceLotVatCreditByShift(from, to);
   wrap.innerHTML = `
     <div class="field">
       <label>Loại hàng</label>
@@ -2178,6 +2179,26 @@ function renderInvoiceLotOverview(){
       <div class="summary-row"><span>Đang có trong kho (${escapeHtml(goodsType)})</span><span class="val" style="color:${enough?'var(--profit)':'var(--loss)'}; font-weight:700;">${inStock.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${enough?'':' ⚠️ không đủ'}</span></div>
     </div>
     <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;">📋 Chi Tiết Từng Ngày</button>
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <div style="font-weight:700; margin-bottom:6px;">💰 VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
+    ${vatByShift.rows.length===0 ? `<div class="hint" style="margin-bottom:14px;">Không có ca nào hưởng VAT khấu trừ từ Kho Hoá Đơn Bù trong khoảng ngày này.</div>` : `
+    <div class="card dash-wrap" style="padding:0; margin-bottom:6px;">
+      <table class="dash">
+        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>VAT Hưởng</th></tr></thead>
+        <tbody>
+          ${vatByShift.rows.map(r=>`<tr>
+            <td>${formatDateVN(r.date)}</td>
+            <td>${shiftTypeLabel(r.shiftType)}</td>
+            <td>${escapeHtml(r.driverName)}</td>
+            <td style="font-weight:700; color:var(--profit);">${fmtVND(r.vatCredit)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="card" style="background:var(--profit-soft); margin-bottom:14px;">
+      <div class="summary-row" style="border:none;"><span style="font-weight:800;">TỔNG VAT HƯỞNG CẢ KỲ</span><span class="val" style="font-weight:800; color:var(--profit); font-size:16px;">${fmtVND(vatByShift.totalVatCredit)}</span></div>
+    </div>
+    `}
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">Tổng quan tất cả Loại hàng</div>
     <div class="card dash-wrap" style="padding:0;">
@@ -2633,6 +2654,33 @@ function siteInvoiceSupplementVatCredit(s){
   return siteInvoiceLotBreakdown(s).allocations.reduce((sum,a)=>sum+a.vat, 0);
 }
 function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementCost(s),0); }
+/// Y HỆT shiftInvoiceSupplementCost() ở trên nhưng cho VAT được khấu trừ
+/// (thay vì chi phí) — dùng để dựng bảng "VAT Hưởng Theo Ca" ở mục Kho Hoá
+/// Đơn Bù (yêu cầu Ông Chủ 2026-08-16).
+function shiftInvoiceSupplementVatCredit(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementVatCredit(s),0); }
+/// Bảng "mỗi CA được hưởng bao nhiêu VAT từ Kho Hoá Đơn Bù" trong khoảng
+/// [from,to] — GỘP QUA MỌI LOẠI HÀNG của ca đó (không lọc riêng 1 loại
+/// hàng như bộ lọc phía trên), vì 1 ca có thể có nhiều công trình/loại
+/// hàng khác nhau cùng rút kho — Ông Chủ cần biết TỔNG VAT ca đó hưởng,
+/// không phải chỉ phần của 1 loại hàng. Chỉ liệt kê ca có VAT hưởng > 0,
+/// sắp mới nhất trước; totalVatCredit LUÔN khớp tuyệt đối tổng cộng dồn
+/// siteInvoiceSupplementVatCredit() ở cấp công trình — không có đường
+/// tính nào khác.
+function computeInvoiceLotVatCreditByShift(from, to){
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const shifts = allShiftsCompanyWide().filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
+  const rows = [];
+  let totalVatCredit = 0;
+  for(const sh of shifts){
+    const vatCredit = shiftInvoiceSupplementVatCredit(sh);
+    if(vatCredit <= 0.5) continue; // bỏ ca không hưởng VAT nào từ kho, tránh bảng dài vô ích
+    const driver = driverById(sh.driverId);
+    rows.push({ date: sh.date, shiftType: sh.shiftType, driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'), vatCredit });
+    totalVatCredit += vatCredit;
+  }
+  rows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  return { rows, totalVatCredit };
+}
 
 /// Bảng đối soát theo khoảng ngày cho 1 loại hàng — mỗi dòng đúng 1 NHÓM
 /// loại hàng (trong 1 công trình/ca) trong khoảng ngày đó có phát sinh
@@ -4437,7 +4485,7 @@ function shiftFinancialSummaryHtml(sh){
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
     ${hasCommercialCost ? `
     <div class="summary-row total" style="font-size:17px; border-top:1.5px dashed var(--border);"><span style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">TIỀN THỰC ĐÚT TÚI (CẢ CA)</span><span class="val" style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">${cashPocketTotal>=0?'+':''}${fmtVND(cashPocketTotal)}</span></div>
-    <div class="hint" style="margin-top:2px;">Tính hoàn toàn bằng tiền mặt thật (LÃI THỰC NHẬN từng công trình − chi phí vận hành ca) — khác với LỢI NHUẬN RÒNG ở trên (sổ sách, đã bóc VAT). 2 số lệch nhau đúng bằng phần VAT khấu trừ hoá đơn bù (hoặc VAT mua chưa khấu trừ được) — xem "Chi Tiết Cách Tính" ở từng công trình để biết chi tiết.</div>
+    <div class="hint" style="margin-top:2px;">Cơ sở tiền mặt (cash basis) — khác LỢI NHUẬN RÒNG ở trên (cơ sở dồn tích, đã bóc VAT) đúng phần VAT hoá đơn bù/VAT mua chưa khấu trừ.</div>
     ` : ''}
   `;
 }
@@ -7782,16 +7830,18 @@ function partnerTransactionTableHtml(partnerId, side, from, to){
   const groups = partnerTripRows(partnerId, side, from, to);
   if(groups.length===0) return '<div class="hint">Chưa có công trình thương mại nào gắn đối tác này.</div>';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
-  // 2026-08-16 (yêu cầu Ông Chủ): bỏ trạng thái riêng "💰 Giá đã gồm VAT" —
-  // gộp về ĐÚNG 2 trạng thái thực tế cần biết (đã/chưa xuất hoá đơn), luôn
-  // cập nhật realtime theo dữ liệu hiện tại, giống cách hiển thị bên Nhà
-  // Cung Cấp. priceIncludesVat cũng coi là "đã xuất hoá đơn" vì VAT đã được
-  // áp dụng thật trên số tiền, không còn ở trạng thái "chưa có căn cứ VAT".
+  // 2026-08-16 (sửa lại cho CHUẨN XÁC, yêu cầu Ông Chủ — ví dụ khách DVG):
+  // "Đã xuất hoá đơn" CHỈ được coi là true khi mục Đã Xuất Hoá Đơn thật
+  // (invoiceEffective = sellHasInvoice/buyIsDeductible) được tick — TUYỆT
+  // ĐỐI KHÔNG suy từ priceIncludesVat nữa, vì 2 việc này khác nhau: DVG
+  // luôn nhập giá đã gồm VAT nhưng THỰC TẾ giữ lại 20% tiền, chỉ thanh toán
+  // nốt khi Linh Chí Thành xuất đủ hoá đơn — nên "giá đã gồm VAT" KHÔNG
+  // đồng nghĩa "đã có hoá đơn". Vẫn giữ 3 trạng thái rõ ràng, không mất
+  // thông tin VAT có đang thực áp dụng cho chuyến đó hay không.
   const invoiceBadge = g=>{
-    const hasInvoice = g.invoiceEffective || g.priceIncludesVat;
-    return hasInvoice
-      ? `<span class="vat-badge vat-yes">✅ Đã xuất hoá đơn (+VAT ${Math.round(g.vatFrac*100)}%)</span>`
-      : `<span class="vat-badge vat-no">○ Chưa xuất hoá đơn (không VAT)</span>`;
+    if(g.invoiceEffective) return `<span class="vat-badge vat-yes">✅ Đã xuất hoá đơn (+VAT ${Math.round(g.vatFrac*100)}%)</span>`;
+    if(g.priceIncludesVat) return `<span class="vat-badge vat-included">○ Chưa xuất hoá đơn (giá đã gồm VAT ${Math.round(g.vatFrac*100)}%)</span>`;
+    return `<span class="vat-badge vat-no">○ Chưa xuất hoá đơn (không VAT)</span>`;
   };
   const rowsHtml = groups.map(g=>{
     const header = `<tr class="grid-group-row"><td colspan="6">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến ${invoiceBadge(g)}</td></tr>`;
