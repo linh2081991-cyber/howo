@@ -390,18 +390,15 @@
   /* muốn, nên xếp dọc là cách duy nhất chắc chắn không tràn. */
   .date-range{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
   .date-range .field{ flex:1; min-width:0; margin-bottom:0; }
-  /* Thu nhỏ riêng khối "Từ ngày/Đến ngày" (yêu cầu Ông Chủ 2026-08-16, đối
-     chiếu iPhone Pro Max) — CHỈ áp dụng trong .date-range, KHÔNG đụng tới
-     input[type=date] gốc toàn app (các ô ngày khác như Ngày Nhận Tiền/Ngày
-     Giải Ngân giữ nguyên cỡ chữ 19px đã sửa kỹ trước đây). Dùng đúng kỹ
-     thuật ép font-size lên pseudo-element ::-webkit-date-and-time-value đã
-     kiểm chứng hiệu quả (xem rule input[type=date] gốc phía trên) — chỉ hạ
-     cỡ số xuống cho gọn, không đổi cách hoạt động.
+  /* 2026-08-16: ĐÃ THỬ VÀ BỎ — từng thu nhỏ riêng font-size + height của ô
+     Từ ngày/Đến ngày trong .date-range, nhưng Ông Chủ chỉ rõ ý không phải
+     thu nhỏ CHỮ, mà là làm cho KHUNG Ô TRỐNG bằng đúng khung ô input
+     thường (VD ô "Chi phí luật đường"). Rule input[type=date] gốc phía
+     trên (padding:13px kế thừa từ rule chung + height:48px + font-size:19px)
+     ĐÃ được thiết kế để khớp đúng kích cỡ khung với input[type=text/number]
+     thường — nên KHÔNG cần ghi đè gì thêm ở đây nữa, để .date-range tự
+     dùng đúng rule gốc là khớp kích cỡ như yêu cầu.
   */
-  .date-range .field label{ font-size:13px; margin-bottom:5px; }
-  .date-range input[type=date]{ height:42px; line-height:18px; font-size:15.5px; padding:11px 12px; }
-  .date-range input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:15.5px; line-height:18px; }
-  .date-range input[type=date]::-webkit-datetime-edit{ font-size:15.5px; line-height:18px; }
 
   table.dash{ width:100%; border-collapse:collapse; font-size:13px; }
   table.dash th, table.dash td{ padding:9px 6px; text-align:right; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
