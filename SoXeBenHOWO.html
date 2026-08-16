@@ -1316,24 +1316,59 @@ async function saveVehicles(){
 /// theo. Không đụng gì tới dữ liệu Xe #1 đang chạy.
 function renderVehiclePickerModal(){
   const rows = [
-    { id:null, label:'🏢 LINH CHÍ THÀNH', sub:'Tổng hợp tất cả xe' },
-    ...state.vehicles.map(v=>({ id:v.id, label:`🚛 ${v.name||v.plate}`, sub: v.isPrimary?'Xe chính':'' }))
+    { id:null, label:'🏢 LINH CHÍ THÀNH', sub:'Tổng hợp tất cả xe', deletable:false },
+    ...state.vehicles.map(v=>({ id:v.id, label:`🚛 ${v.name||v.plate}`, sub:'', deletable: !v.isPrimary }))
   ];
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
     <h3>Chọn Xe</h3>
     ${rows.map(r=>`
-      <div class="summary-row vehicle-pick-row" data-vid="${r.id===null?'':r.id}" style="cursor:pointer; padding:12px 4px;">
-        <span>${escapeHtml(r.label)}${r.sub?` <span style="color:var(--ink-soft); font-size:11px;">(${escapeHtml(r.sub)})</span>`:''}</span>
-        <span class="val">${(state.currentVehicleId===r.id) ? '✓' : ''}</span>
+      <div class="summary-row" style="padding:12px 4px; gap:8px;">
+        <span class="vehicle-pick-row" data-vid="${r.id===null?'':r.id}" style="cursor:pointer; flex:1; display:flex; justify-content:space-between; align-items:center;">
+          <span>${escapeHtml(r.label)}${r.sub?` <span style="color:var(--ink-soft); font-size:11px;">(${escapeHtml(r.sub)})</span>`:''}</span>
+          <span class="val">${(state.currentVehicleId===r.id) ? '✓' : ''}</span>
+        </span>
+        ${r.deletable ? `<button type="button" class="vehicle-delete-btn" data-vid="${r.id}" data-vname="${escapeHtml(r.label.replace('🚛 ',''))}" style="background:none; border:none; color:var(--loss); font-size:18px; padding:4px 6px; flex-shrink:0;">🗑️</button>` : ''}
       </div>`).join('')}
     <button class="btn btn-accent btn-block" id="addVehicleBtn" style="margin-top:14px;">+ Thêm Xe</button>
   `);
   document.querySelectorAll('.vehicle-pick-row').forEach(row=>{
     row.addEventListener('click', ()=>{ switchVehicle(row.dataset.vid || null); });
   });
+  document.querySelectorAll('.vehicle-delete-btn').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      renderDeleteVehicleConfirmModal(btn.dataset.vid, btn.dataset.vname);
+    });
+  });
   const addBtn = document.getElementById('addVehicleBtn');
   if(addBtn) addBtn.addEventListener('click', renderAddVehicleModal);
+}
+/// Xác nhận xoá 1 xe KHÔNG PHẢI xe chính (yêu cầu Ông Chủ 2026-08-16) —
+/// chỉ xoá xe khỏi DANH SÁCH chọn xe (state.vehicles) + saveVehicles(),
+/// KHÔNG động tới dữ liệu ca/tài xế/sửa chữa... đã lỡ lưu riêng cho xe đó
+/// trên Firestore (nếu có) — an toàn tuyệt đối, tránh xoá nhầm dữ liệu
+/// thật chỉ vì thao tác xoá xe khỏi danh sách. Nếu đang xem đúng xe bị
+/// xoá, tự động chuyển về chế độ Tổng Linh Chí Thành.
+function renderDeleteVehicleConfirmModal(vehicleId, vehicleName){
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🗑️ Xoá ${escapeHtml(vehicleName)}?</h3>
+    <div class="hint" style="margin-bottom:14px;">Chỉ xoá xe này khỏi danh sách chọn xe — không đụng tới dữ liệu ca làm việc/tài xế/sửa chữa đã lỡ ghi cho xe này (nếu có). Không thể hoàn tác thao tác này.</div>
+    <button class="btn btn-danger btn-block" id="confirmDeleteVehicleBtn">Xác Nhận Xoá</button>
+    <button class="btn btn-ghost btn-block" id="cancelDeleteVehicleBtn" style="margin-top:8px;">Huỷ</button>
+  `);
+  document.getElementById('cancelDeleteVehicleBtn').addEventListener('click', renderVehiclePickerModal);
+  document.getElementById('confirmDeleteVehicleBtn').addEventListener('click', async ()=>{
+    state.vehicles = state.vehicles.filter(v=>v.id!==vehicleId);
+    await saveVehicles();
+    if(state.currentVehicleId===vehicleId){
+      await switchVehicle(null);
+    } else {
+      showToast(`Đã xoá ${vehicleName}.`);
+      renderVehiclePickerModal();
+    }
+  });
 }
 function renderAddVehicleModal(){
   openModal(`
