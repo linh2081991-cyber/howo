@@ -408,13 +408,31 @@
     flex-direction:column; align-items:center; justify-content:center; color:var(--ink-soft); font-size:14px;
   }
 
-  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:2px 10px; margin-bottom:6px; }
-  .search-bar .ic{ font-size:16px; pointer-events:none; }
+  /* 2026-08-16 LẦN 3 (yêu cầu Ông Chủ, đối chiếu mẫu "Thuế TNDN"): trước
+     đây .search-bar bị ĐỆM KÉP — vừa có padding riêng của khung ngoài,
+     vừa có padding riêng của input bên trong — cộng dồn lại thành khung
+     cao hơn hẳn 1 input chuẩn. Sửa: cho khung ngoài mang ĐÚNG padding
+     13px như input chuẩn (input[type=text] gốc), input bên trong bỏ hết
+     đệm riêng (padding:0), chỉ còn đúng 1 lớp đệm duy nhất — khớp thẳng
+     kích thước ô "Thuế TNDN dự kiến" làm mẫu. */
+  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1.5px solid var(--border); border-radius:11px; padding:13px 13px; margin-bottom:6px; }
+  .search-bar .ic{ font-size:17px; pointer-events:none; flex-shrink:0; line-height:20px; }
   /* Ô ngày chiếm trọn thanh (cả chiều cao) để dễ chạm trực tiếp — trên iPhone */
   /* iOS chỉ mở lịch khi chạm THẲNG vào ô này, nên KHÔNG che/ẩn nó đi. */
-  .search-bar input[type=date]{ border:none; flex:1; padding:12px 4px; width:100%; min-width:0; background:transparent; color:var(--ink); font-size:17px; }
+  .search-bar input[type=date]{ border:none; flex:1; padding:0; margin:0; width:100%; min-width:0; background:transparent; color:var(--ink); font-size:17px; height:20px; line-height:20px; }
+  .search-bar input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; padding:0; height:20px; font-size:17px; line-height:20px; }
+  .search-bar input[type=date]::-webkit-datetime-edit{ font-size:17px; line-height:20px; }
   .search-bar button{ background:none; border:none; color:var(--accent); font-size:14px; font-weight:700; flex-shrink:0; }
   .search-bar-hint{ font-size:11px; color:var(--ink-soft); margin:0 2px 14px; }
+
+  /* Hàng "Thêm Tháng Mới" (ô chọn Tháng/Năm + nút) — thu nhỏ đồng bộ với
+     .search-bar ở trên, thêm khoảng cách dưới trước khối 2 tài xế cho
+     thoáng mắt (yêu cầu Ông Chủ 2026-08-16). */
+  .month-picker-row{ display:flex; gap:8px; margin-top:8px; margin-bottom:20px; }
+  .month-picker-row input[type=month]{ flex:1; height:44px; padding:0 13px; font-size:15.5px; }
+  .month-picker-row input[type=month]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:15.5px; line-height:18px; }
+  .month-picker-row input[type=month]::-webkit-datetime-edit{ font-size:15.5px; line-height:18px; }
+  .month-picker-row .btn{ flex-shrink:0; height:44px; padding:0 16px; font-size:13.5px; white-space:nowrap; }
 
   /* 2 ô "Từ ngày / Đến ngày" xếp DỌC (mỗi ô 1 dòng riêng), không xếp ngang */
   /* nữa: iOS hiển thị ngày dạng dài "ngày 31 thg 7, 2026" nên 2 ô cạnh nhau */
@@ -3439,8 +3457,8 @@ function renderShiftList(){
       ${state.searchDate ? '<button type="button" id="clearSearchBtn">Xoá</button>' : ''}
     </div>
     <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)} (xuyên suốt mọi tháng).` : 'Bấm vào ô ngày để mở lịch, chọn ngày cần xem. Chưa chọn (hoặc bấm "Xoá") sẽ xem ca của THÁNG NÀY, mới nhất trước.'}</div>
-    <div style="display:flex; gap:8px; margin-top:8px;">
-      <input type="month" id="shiftArchiveMonthPicker" style="flex:1;">
+    <div class="month-picker-row">
+      <input type="month" id="shiftArchiveMonthPicker">
       <button class="btn btn-ghost" id="viewOtherMonthBtn">+ Thêm Tháng Mới</button>
     </div>`;
 
