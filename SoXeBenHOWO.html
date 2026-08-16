@@ -189,10 +189,23 @@
      input[type=date] bên dưới — khiến trình duyệt hiểu nhầm cả khối chữ
      Việt lẫn rule thật là 1 selector vô nghĩa và ÂM THẦM BỎ QUA toàn bộ
      rule đó. Vì vậy "font-size:19px" chưa từng thực sự chạy trên máy Ông
-     Chủ — không phải do cache. Đã chuyển đúng về "/* */". */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; }
+     Chủ — không phải do cache. Đã chuyển đúng về "/* */".
+     SỬA TIẾP 2026-08-16 (yêu cầu Ông Chủ, ảnh chụp "tràn viền"): dù chữ đã
+     đúng cỡ 19px như input thường, chuỗi ngày tiếng Việt đầy đủ (VD "ngày
+     1 thg 8, 2026") vẫn có thể dài hơn bề rộng khả dụng trên máy to
+     (iPhone Pro Max) và tràn ra khỏi góc bo tròn của khung — height/
+     font-size không kiểm soát được việc TRÀN NGANG này. Thêm
+     overflow:hidden ngay trên input[type=date] (an toàn tuyệt đối — chỉ
+     CẮT phần chữ vượt khung theo đúng góc bo, KHÔNG ẩn/che/đổi vùng bấm mở
+     lịch, cả khung input vẫn bấm được y nguyên) để chữ dài nhất cũng không
+     bao giờ tràn ra ngoài viền nữa. */
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; overflow:hidden; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
   input[type=date]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
+  /* "Từ ngày/Đến ngày" cho chữ nhãn NỔI hơn hẳn (yêu cầu Ông Chủ 2026-08-16)
+     — đậm + đen hẳn thay vì xám nhạt như nhãn thường, áp dụng tự động cho
+     toàn bộ 10 chỗ dùng chung class .date-range trong app. */
+  .date-range .field label{ font-weight:800; color:var(--ink); }
   .seg{ display:flex; border:1.5px solid var(--border); border-radius:11px; overflow:hidden; }
   .seg button{ flex:1; padding:13px 0; border:none; background:var(--surface); font-size:15.5px; font-weight:600; color:var(--ink-soft); }
   .seg button.active{ background:var(--accent); color:#fff; }
