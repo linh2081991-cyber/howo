@@ -449,15 +449,17 @@
      đối không tràn ra ngoài — an toàn để xếp ngang trở lại. */
   .date-range{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
   .date-range .field{ min-width:0; margin-bottom:0; }
-  /* 2026-08-16: ĐÃ THỬ VÀ BỎ — từng thu nhỏ riêng font-size + height của ô
-     Từ ngày/Đến ngày trong .date-range, nhưng Ông Chủ chỉ rõ ý không phải
-     thu nhỏ CHỮ, mà là làm cho KHUNG Ô TRỐNG bằng đúng khung ô input
-     thường (VD ô "Chi phí luật đường"). Rule input[type=date] gốc phía
-     trên (padding:13px kế thừa từ rule chung + height:48px + font-size:19px)
-     ĐÃ được thiết kế để khớp đúng kích cỡ khung với input[type=text/number]
-     thường — nên KHÔNG cần ghi đè gì thêm ở đây nữa, để .date-range tự
-     dùng đúng rule gốc là khớp kích cỡ như yêu cầu.
-  */
+  /* 2026-08-16 LẦN 4 (yêu cầu Ông Chủ, ghi đè quyết định LẦN 3 ngay dưới
+     đây): trước đó Ông Chủ chỉ muốn khớp kích cỡ input chuẩn, KHÔNG thu
+     nhỏ chữ — nhưng lần này yêu cầu THÊM 1 bước nữa: thu nhỏ khung y hệt
+     cách vừa sửa cho .search-bar/.month-picker-row (tab Ca Làm Việc), và
+     đảm bảo tuyệt đối không tràn màn hình. Vì input[type=date] đã có sẵn
+     overflow:hidden (rule gốc) nên dù 2 cột hẹp lại, chữ dài nhất chỉ bị
+     CẮT gọn theo khung, không bao giờ tràn — an toàn để thu nhỏ. */
+  .date-range .field label{ font-weight:800; color:var(--ink); font-size:13px; margin-bottom:5px; }
+  .date-range input[type=date]{ height:44px; padding:0 12px; font-size:14.5px; }
+  .date-range input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
+  .date-range input[type=date]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
 
   table.dash{ width:100%; border-collapse:collapse; font-size:13px; }
   table.dash th, table.dash td{ padding:9px 6px; text-align:right; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
