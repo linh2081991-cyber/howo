@@ -390,6 +390,18 @@
   /* muốn, nên xếp dọc là cách duy nhất chắc chắn không tràn. */
   .date-range{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
   .date-range .field{ flex:1; min-width:0; margin-bottom:0; }
+  /* Thu nhỏ riêng khối "Từ ngày/Đến ngày" (yêu cầu Ông Chủ 2026-08-16, đối
+     chiếu iPhone Pro Max) — CHỈ áp dụng trong .date-range, KHÔNG đụng tới
+     input[type=date] gốc toàn app (các ô ngày khác như Ngày Nhận Tiền/Ngày
+     Giải Ngân giữ nguyên cỡ chữ 19px đã sửa kỹ trước đây). Dùng đúng kỹ
+     thuật ép font-size lên pseudo-element ::-webkit-date-and-time-value đã
+     kiểm chứng hiệu quả (xem rule input[type=date] gốc phía trên) — chỉ hạ
+     cỡ số xuống cho gọn, không đổi cách hoạt động.
+  */
+  .date-range .field label{ font-size:13px; margin-bottom:5px; }
+  .date-range input[type=date]{ height:42px; line-height:18px; font-size:15.5px; padding:11px 12px; }
+  .date-range input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:15.5px; line-height:18px; }
+  .date-range input[type=date]::-webkit-datetime-edit{ font-size:15.5px; line-height:18px; }
 
   table.dash{ width:100%; border-collapse:collapse; font-size:13px; }
   table.dash th, table.dash td{ padding:9px 6px; text-align:right; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
@@ -9169,8 +9181,12 @@ function openCustomerDetail(customerId){
         <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (khách tạm ứng dư)':''}</span></div>
         ${holdbackPct>0 && debt.owed>0 ? `
         <div class="formula-divider" style="margin:10px 0;"></div>
-        <div class="summary-row"><span>— Đang giữ hợp lệ chờ hoá đơn (tính trên phần CHƯA xuất HĐ)</span><span class="val">${fmtVND(legitimateHoldback)}</span></div>
-        <div class="summary-row"><span style="font-weight:700;">— Cần đòi ngay</span><span class="val" style="font-weight:700; color:var(--loss);">${fmtVND(dueNow)}</span></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Phân Bổ Còn Nợ</span>
+          <span style="font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:20px; background:var(--accent-soft); color:var(--accent); white-space:nowrap;">Giữ ${holdbackPct}% phần chưa xuất HĐ</span>
+        </div>
+        <div class="summary-row"><span>Đang giữ hợp lệ</span><span class="val">${fmtVND(legitimateHoldback)}</span></div>
+        <div class="summary-row"><span style="font-weight:700;">Cần đòi ngay</span><span class="val" style="font-weight:700; color:var(--loss);">${fmtVND(dueNow)}</span></div>
         ` : ''}
       </div>
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
