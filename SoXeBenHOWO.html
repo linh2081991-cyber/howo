@@ -163,7 +163,7 @@
   /* input[type=date] gốc, không che/ẩn/đè gì cả — chấp nhận chữ hiển thị */
   /* hơi to hơn app một chút, đổi lấy chắc chắn bấm mở lịch được và không */
   /* bao giờ che trường khác. */
-  input[type=text], input[type=number], input[type=date], select, textarea{
+  input[type=text], input[type=number], input[type=date], input[type=month], select, textarea{
     width:100%; font-size:19px; font-weight:500; padding:13px 13px; border-radius:11px;
     border:1.5px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit;
   }
@@ -213,6 +213,15 @@
   input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; overflow:hidden; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
   input[type=date]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
+  /* input[type=month] (ô "Thêm Tháng Mới") TRƯỚC ĐÂY chưa từng được style
+     (không có mặt trong rule chung phía trên) — hiện ra như 1 ô trống/xám
+     mặc định của trình duyệt, lệch hẳn với ô nút "+ Thêm Tháng Mới" bên
+     cạnh (ảnh Ông Chủ chỉ 2026-08-16). Thêm rule riêng y hệt input[type=date]
+     ở trên (cùng lỗi shadow pseudo-element của iOS Safari không tự nhận
+     font-size) để đồng bộ kích cỡ, không còn ô trống bất thường nữa. */
+  input[type=month]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; overflow:hidden; }
+  input[type=month]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
+  input[type=month]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
   /* "Từ ngày/Đến ngày" cho chữ nhãn NỔI hơn hẳn (yêu cầu Ông Chủ 2026-08-16)
      — đậm + đen hẳn thay vì xám nhạt như nhãn thường, áp dụng tự động cho
      toàn bộ 10 chỗ dùng chung class .date-range trong app. */
@@ -399,11 +408,11 @@
     flex-direction:column; align-items:center; justify-content:center; color:var(--ink-soft); font-size:14px;
   }
 
-  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px 10px; margin-bottom:6px; }
+  .search-bar{ display:flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:2px 10px; margin-bottom:6px; }
   .search-bar .ic{ font-size:16px; pointer-events:none; }
   /* Ô ngày chiếm trọn thanh (cả chiều cao) để dễ chạm trực tiếp — trên iPhone */
   /* iOS chỉ mở lịch khi chạm THẲNG vào ô này, nên KHÔNG che/ẩn nó đi. */
-  .search-bar input[type=date]{ border:none; flex:1; padding:14px 4px; width:100%; min-width:0; background:transparent; color:var(--ink); font-size:17px; }
+  .search-bar input[type=date]{ border:none; flex:1; padding:12px 4px; width:100%; min-width:0; background:transparent; color:var(--ink); font-size:17px; }
   .search-bar button{ background:none; border:none; color:var(--accent); font-size:14px; font-weight:700; flex-shrink:0; }
   .search-bar-hint{ font-size:11px; color:var(--ink-soft); margin:0 2px 14px; }
 
