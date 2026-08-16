@@ -2238,6 +2238,69 @@ function renderInvoiceLotOverview(){
   document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>renderInvoiceLotDetailModal(goodsType, from, to));
 }
 
+/// Bảng "🔒 Đối Soát Hoá Đơn Theo Tháng" trong tab Kết Quả — 6 tháng gần
+/// nhất, mỗi tháng 1 thẻ hiện rõ tiến độ Bán/Mua + trạng thái tổng, có nút
+/// Chi Tiết mở modal liệt kê từng dòng còn thiếu khi tháng đó chưa chốt.
+function renderMonthlyInvoiceReconciliation(){
+  const wrap = document.getElementById('monthlyInvoiceReconWrap');
+  if(!wrap) return;
+  const months = computeMonthlyInvoiceReconciliation(6);
+  if(months.length===0){
+    wrap.innerHTML = '<div class="hint">Chưa có công trình thương mại nào để đối soát.</div>';
+    return;
+  }
+  const monthLabel = ym=>{ const [y,mo]=ym.split('-'); return `Tháng ${mo}/${y}`; };
+  wrap.innerHTML = months.map(m=>`
+    <div class="card" style="margin-bottom:10px; border-left:4px solid ${m.fullyClosed?'var(--profit)':'var(--loss)'};">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+        <div style="font-weight:800; font-size:15.5px;">${monthLabel(m.yearMonth)}</div>
+        <div style="font-weight:800; font-size:12.5px; padding:3px 10px; border-radius:20px; background:${m.fullyClosed?'var(--profit-soft)':'var(--loss-soft)'}; color:${m.fullyClosed?'var(--profit)':'var(--loss)'};">${m.fullyClosed?'✅ ĐÃ CHỐT ĐỦ 2 ĐẦU':'⏳ CÒN THIẾU CHỨNG TỪ'}</div>
+      </div>
+      <div class="summary-row"><span>🧑‍💼 Bán — Đã xuất hoá đơn</span><span class="val" style="color:${m.sellDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.sellInvoicedTrips}/${m.sellTotalTrips} chuyến${m.sellDone?' ✓':''}</span></div>
+      <div class="summary-row"><span>🏔️ Mua — Đủ chứng từ (kể cả đã bù kho)</span><span class="val" style="color:${m.buyDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.buyDocumentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}/${m.buyTotalVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${m.buyDone?' ✓':''}</span></div>
+      ${!m.fullyClosed ? `<button class="btn btn-ghost btn-sm monthReconDetailBtn" data-ym="${m.yearMonth}" style="width:auto; padding:6px 12px; margin-top:8px;">📋 Xem Chi Tiết Còn Thiếu</button>` : ''}
+    </div>`).join('');
+  wrap.querySelectorAll('.monthReconDetailBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const m = months.find(x=>x.yearMonth===btn.dataset.ym);
+      if(m) renderMonthlyInvoiceReconciliationDetailModal(m);
+    });
+  });
+}
+
+/// Modal liệt kê chi tiết từng dòng còn thiếu chứng từ của 1 tháng — đủ
+/// trường để Ông Chủ biết đúng ca nào/khách nào/mỏ nào cần đi đòi hoá đơn.
+function renderMonthlyInvoiceReconciliationDetailModal(m){
+  const [y,mo] = m.yearMonth.split('-');
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🔒 Còn Thiếu Chứng Từ — Tháng ${mo}/${y}</h3>
+    <div style="font-weight:700; margin:10px 0 6px;">🧑‍💼 Bán — Chưa xuất hoá đơn${m.sellPendingRows.length>0?` (${m.sellPendingRows.length} dòng)`:''}</div>
+    ${m.sellPendingRows.length===0 ? `<div class="hint" style="color:var(--profit);">✓ Đầu Bán đã xuất đủ hoá đơn cho tháng này.</div>` : `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Khách Hàng</th><th class="num">Chuyến</th></tr></thead>
+        <tbody>${m.sellPendingRows.map(r=>`<tr>
+          <td>${formatDateVN(r.date)}</td><td>${shiftTypeLabel(r.shiftType)}</td><td>${escapeHtml(r.driverName)}</td>
+          <td>${escapeHtml(r.customerName)}</td><td class="num">${r.trips}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`}
+    <div style="font-weight:700; margin:16px 0 6px;">🏔️ Mua — Còn thiếu chứng từ${m.buyPendingRows.length>0?` (${m.buyPendingRows.length} dòng)`:''}</div>
+    ${m.buyPendingRows.length===0 ? `<div class="hint" style="color:var(--profit);">✓ Đầu Mua đã đủ chứng từ (kể cả đã bù Kho Hoá Đơn Bù) cho tháng này.</div>` : `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Nhà Cung Cấp</th><th>Loại Hàng</th><th class="num">Còn Thiếu</th></tr></thead>
+        <tbody>${m.buyPendingRows.map(r=>`<tr>
+          <td>${formatDateVN(r.date)}</td><td>${shiftTypeLabel(r.shiftType)}</td><td>${escapeHtml(r.driverName)}</td>
+          <td>${escapeHtml(r.supplierName)}</td><td>${escapeHtml(r.goodsType)}</td>
+          <td class="num" style="color:var(--loss); font-weight:700;">${r.missingVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`}
+  `);
+}
+
 /// Modal đối soát từng ngày cho 1 loại hàng trong khoảng ngày đã chọn —
 /// đúng để Ông Chủ so với số liệu KT Thuế: ngày nào, tài xế nào, mấy
 /// chuyến, bán bao nhiêu, mỏ xuất được bao nhiêu, còn thiếu bao nhiêu.
@@ -2716,6 +2779,78 @@ function invoiceDemandByDateRange(goodsType, from, to){
   rows.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
   const totalMissing = rows.reduce((sum,r)=>sum+r.missingVolume,0);
   return { rows, totalMissing };
+}
+/// Đối soát hoá đơn 2 ĐẦU (Mua từ mỏ / Bán cho khách) THEO TỪNG THÁNG —
+/// nhóm theo ngày ghi ca (yêu cầu Ông Chủ 2026-08-16), luôn tính REAL-TIME
+/// từ trạng thái tick hiện tại (không chụp ảnh lịch sử) — vì Ông Chủ có
+/// thể tick bổ sung hoá đơn cho ca tháng trước bất cứ lúc nào mới mua
+/// được hoá đơn, và tháng đó phải tự cập nhật lại ngay.
+///
+/// BÁN đủ = mọi chuyến thương mại trong tháng đã tick "Đã xuất hoá đơn
+/// BÁN" (sellHasInvoice) — CHỈ xét trạng thái xuất hoá đơn, KHÔNG xét đã
+/// thu tiền hay chưa (tiền theo dõi riêng ở Công Nợ, đúng ý Ông Chủ).
+///
+/// MUA đủ = dùng ĐÚNG cơ chế Kho Hoá Đơn Bù đã có (siteGoodsTypeGroups +
+/// siteInvoiceGroupBreakdown) — 1 nhóm loại hàng coi là ĐỦ chứng từ khi
+/// KHÔNG còn shortfallVolume treo (đã có hoá đơn mỏ xuất trực tiếp ĐỦ,
+/// HOẶC phần thiếu đã được rút đủ từ Kho Hoá Đơn Bù) — KHÔNG dùng riêng
+/// cờ buyHasInvoice (cờ đó chỉ để tính khấu trừ VAT, không phản ánh đúng
+/// khối lượng thực tế còn thiếu chứng từ).
+function computeMonthlyInvoiceReconciliation(monthsBack){
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const shifts = allShiftsForLedgerCompanyWide().filter(sh=>!excludedShiftIds.has(sh.id));
+  const byMonth = {};
+  for(const sh of shifts){
+    const ym = sh.date.slice(0,7);
+    if(!byMonth[ym]) byMonth[ym] = {
+      yearMonth: ym, sellTotalTrips:0, sellInvoicedTrips:0, sellPendingRows:[],
+      buyTotalVolume:0, buyDocumentedVolume:0, buyPendingRows:[]
+    };
+    const m = byMonth[ym];
+    const driver = driverById(sh.driverId);
+    const driverName = driver ? driver.name : (sh.driverNameSnapshot||'—');
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      const tripsCount = (s.commercialTrips||[]).length;
+      if(tripsCount>0){
+        m.sellTotalTrips += tripsCount;
+        if(s.sellHasInvoice){
+          m.sellInvoicedTrips += tripsCount;
+        } else {
+          const customer = s.customerId ? customerById(s.customerId) : null;
+          m.sellPendingRows.push({ date: sh.date, shiftType: sh.shiftType, driverName,
+            customerName: customer ? customer.name : '(chưa gắn khách hàng)', trips: tripsCount });
+        }
+      }
+      for(const g of siteGoodsTypeGroups(s)){
+        if(g.sellVolume<=0) continue;
+        m.buyTotalVolume += g.sellVolume;
+        if(g.missingVolume<=0.001){
+          m.buyDocumentedVolume += g.sellVolume;
+          continue;
+        }
+        const brk = siteInvoiceGroupBreakdown(s, g.goodsType);
+        m.buyDocumentedVolume += g.sellVolume - brk.shortfallVolume;
+        if(brk.shortfallVolume>0.001){
+          const supplier = s.supplierId ? supplierById(s.supplierId) : null;
+          m.buyPendingRows.push({ date: sh.date, shiftType: sh.shiftType, driverName,
+            supplierName: supplier ? supplier.name : '(chưa gắn nhà cung cấp)',
+            goodsType: g.goodsType, missingVolume: brk.shortfallVolume });
+        }
+      }
+    }
+  }
+  return Object.values(byMonth)
+    .sort((a,b)=>b.yearMonth.localeCompare(a.yearMonth))
+    .slice(0, monthsBack)
+    .map(m=>{
+      m.sellPendingRows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+      m.buyPendingRows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+      const sellDone = m.sellPendingRows.length===0;
+      const buyPendingVolume = Math.max(0, m.buyTotalVolume - m.buyDocumentedVolume);
+      const buyDone = buyPendingVolume<=0.001;
+      return { ...m, sellDone, buyPendingVolume, buyDone, fullyClosed: sellDone && buyDone };
+    });
 }
 // Tổng tiền MUA quy về NET (chưa VAT) — chỉ để tính lãi gộp. Nếu giá nhập
 // đã gồm VAT thì bóc ra; nếu giá nhập là net thì giữ nguyên. LƯU Ý: việc
@@ -8778,6 +8913,12 @@ function renderResults(){
       <button class="btn btn-ghost btn-sm" id="openInvoiceLotManagerBtn" style="width:auto; padding:8px 14px; margin-top:8px;">📦 Quản Lý Kho Hoá Đơn Bù</button>
     </section>
 
+    <section class="group">
+      <h3>🔒 Đối Soát Hoá Đơn Theo Tháng</h3>
+      <div class="hint" style="margin-bottom:10px;">Tháng nào đã xuất ĐỦ hoá đơn cả 2 đầu (Bán cho khách + Mua từ mỏ, kể cả đã bù qua Kho Hoá Đơn Bù) thì coi như chốt xong, sẵn sàng đối chiếu KT Thuế. Chỉ xét trạng thái hoá đơn — không xét đã thu/trả tiền hay chưa (tiền theo dõi riêng ở mục Công Nợ phía trên). Luôn tính lại real-time theo đúng tick hiện tại, kể cả ca của tháng trước mới được bổ sung hoá đơn hôm nay.</div>
+      <div id="monthlyInvoiceReconWrap"></div>
+    </section>
+
     ${insights.length>0 ? `
     <section class="group">
       <h3>🧭 Tư Vấn Chiến Lược</h3>
@@ -8807,6 +8948,7 @@ function renderResults(){
   renderPartnersOverview();
   renderCustomerSupplierDebtOverview();
   renderInvoiceLotOverview();
+  renderMonthlyInvoiceReconciliation();
   document.getElementById('openInvoiceLotManagerBtn').addEventListener('click', ()=>renderInvoiceLotManagerModal(null));
 
   document.getElementById('res_from').addEventListener('change', e=>{
