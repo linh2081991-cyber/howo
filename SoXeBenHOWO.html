@@ -8788,7 +8788,6 @@ function renderResults(){
           <label>Thuế TNDN dự kiến (KT thuế tư vấn — Ông Chủ tự nhập theo đúng kỳ này)</label>
           <input type="text" inputmode="decimal" id="res_manualCit" placeholder="Chưa nhập">
         </div>
-        <div class="hint" style="margin-top:4px;">Không tự tính theo %, vì KT có thể tối ưu thấp hơn qua các cách hợp pháp app không mô phỏng được — Ông Chủ gõ đúng số KT đưa cho đúng kỳ đang xem, app chỉ hiển thị lại.</div>
 
         <div class="formula-divider" style="margin:14px 0;"></div>
         ${periodSummary.isCompanyWide ? `
@@ -8799,7 +8798,7 @@ function renderResults(){
         <div class="summary-row"><span>− Sửa chữa + luật đường — tất cả xe</span><span class="val">${fmtVND(periodSummary.cashFlowRepairTotal+periodSummary.cashFlowRoadFee)}</span></div>
         <div class="summary-row"><span>− Gốc + lãi vay ngân hàng + bảo hiểm + đăng kiểm — tất cả xe (thật)</span><span class="val">${fmtVND(periodSummary.cashFlowFixedMonthly)}</span></div>
         <div class="summary-row total" style="font-size:17px;"><span>DÒNG TIỀN THUẦN (TOÀN CÔNG TY)</span><span class="val" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</span></div>
-        <div class="hint" style="margin-top:4px;">Tính theo tiền THẬT của CẢ CÔNG TY (gộp mọi xe) — trừ đủ mọi khoản tiền mặt thật rời túi (kể cả Gốc vay ngân hàng của từng xe), KHÔNG trừ khấu hao xe (không phải tiền mặt). Khác với "Lợi Nhuận Thực Tế"/"Lãi Gộp Mua-Bán" ở trên (tính RIÊNG theo từng xe, trừ Lãi vay + khấu hao theo đúng chuẩn kế toán, KHÔNG trừ Gốc vay).</div>
+
         ` : `
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH</div>
         <div class="hint">💡 Đây là tiền mặt thật của CẢ CÔNG TY (tiền khách trả/trả mỏ dùng chung, không thể quy đúng cho riêng 1 xe) — chỉ xem được ở chế độ <b>LINH CHÍ THÀNH</b>. Bấm "Đổi xe" ở đầu trang, chọn LINH CHÍ THÀNH để xem đúng số này.</div>
@@ -8865,12 +8864,12 @@ function renderResults(){
         `}
       </div>
       <button class="btn btn-ghost btn-block" id="breakEvenDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
-      <div class="hint" style="margin-top:8px;">Số chuyến tối thiểu cần chạy trong kỳ để doanh thu bù đủ chi phí cố định — chạy nhiều hơn số này mới bắt đầu có lãi thật.</div>
+
     </section>
 
     <section class="group">
       <h3>🎯 Dự Đoán Hoà Vốn Cả Tháng ${monthLabelVN(todayLocalDateStr().slice(0,7))}</h3>
-      <div class="hint" style="margin-bottom:10px;">Khác với "Điểm Hoà Vốn Trong Kỳ" ở trên (đổi theo từng ngày đã ghi) — đây là 1 MỤC TIÊU ỔN ĐỊNH cho cả tháng, không nhảy số theo ngày, để Ông Chủ có cái nhìn tổng thể và mục tiêu vận hành rõ ràng.</div>
+
 
       <div class="seg" id="marginWindowToggle">
         <button data-val="10" class="${monthlyProjection.marginWindowDays===10?'active':''}">Bình quân 10 ngày gần nhất</button>
@@ -8925,7 +8924,7 @@ function renderResults(){
         `}
       </div>
       <button class="btn btn-ghost btn-block" id="monthlyProjectionDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
-      <div class="hint" style="margin-top:8px;">Mục tiêu này dùng để lên kế hoạch vận hành cho cả tháng — không thay thế "Điểm Hoà Vốn Trong Kỳ" ở trên, chỉ bổ sung góc nhìn tổng thể.</div>
+
     </section>
 
     <section class="group">
@@ -8990,13 +8989,13 @@ function renderResults(){
 
     <section class="group">
       <h3>🏔️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</h3>
-      <div class="hint" style="margin-bottom:10px;">Công nợ THẬT tính đến hôm nay theo đúng Nhà Cung Cấp/Khách Hàng đã gắn ở từng công trình thương mại.</div>
+
       <div id="customerSupplierDebtWrap"></div>
     </section>
 
     <section class="group">
       <h3>📦 Kho Hoá Đơn Bù</h3>
-      <div class="hint" style="margin-bottom:10px;">Hoá đơn mua theo lô lớn để bù phần khối lượng mỏ không xuất đủ — rút dần theo từng ca, lô mua trước dùng trước. Số liệu dưới đây tính lại từ toàn bộ lịch sử, luôn khớp thật.</div>
+
       <div id="invoiceLotOverviewWrap"></div>
       <button class="btn btn-ghost btn-sm" id="openInvoiceLotManagerBtn" style="width:auto; padding:8px 14px; margin-top:8px;">📦 Quản Lý Kho Hoá Đơn Bù</button>
     </section>
