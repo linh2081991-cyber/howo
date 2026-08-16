@@ -412,8 +412,16 @@
   /* luôn vượt quá chiều ngang màn hình điện thoại, bắt phải kéo sang phải */
   /* mới thấy hết. Input ngày gốc của iOS cũng không thể thu nhỏ chữ theo ý */
   /* muốn, nên xếp dọc là cách duy nhất chắc chắn không tràn. */
-  .date-range{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
-  .date-range .field{ flex:1; min-width:0; margin-bottom:0; }
+  /* 2026-08-16 LẦN 2 (yêu cầu Ông Chủ, đối chiếu mẫu Kho Hoá Đơn Bù): quay
+     lại xếp NGANG 2 cột bằng nhau — y hệt .two-col đang dùng ở Kho Hoá
+     Đơn Bù, gọn và cân đối hơn hẳn so với xếp dọc (mỗi ô chiếm nguyên 1
+     dòng nhìn to/dài dòng không cần thiết). Lý do xếp dọc cũ (né tràn
+     ngang vì chữ ngày dài) KHÔNG còn cần thiết nữa: input[type=date] đã
+     được thêm overflow:hidden (xem rule gốc phía trên) nên dù 2 ô cạnh
+     nhau bị hẹp lại, chữ dài nhất cũng chỉ bị CẮT gọn theo khung, tuyệt
+     đối không tràn ra ngoài — an toàn để xếp ngang trở lại. */
+  .date-range{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .date-range .field{ min-width:0; margin-bottom:0; }
   /* 2026-08-16: ĐÃ THỬ VÀ BỎ — từng thu nhỏ riêng font-size + height của ô
      Từ ngày/Đến ngày trong .date-range, nhưng Ông Chủ chỉ rõ ý không phải
      thu nhỏ CHỮ, mà là làm cho KHUNG Ô TRỐNG bằng đúng khung ô input
