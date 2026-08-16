@@ -8548,7 +8548,6 @@ function renderResults(){
         <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù (Kho Hoá Đơn Bù)</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
         <div class="summary-row total" style="font-size:16px;"><span style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
-        <div class="hint" style="margin:2px 0 8px;">Tính theo doanh thu/giá vốn đã bóc VAT (sổ sách) — KHÁC với "Lãi Thực Nhận (Tiền Mặt)" xem ở từng công trình (Ca Làm Việc), vì đó tính bằng tiền mặt thật đã trừ VAT thực nộp.</div>
         <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(gTotal.operatingCashCost)}</span></div>
         <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px;"><span>= Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
         <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
@@ -8558,7 +8557,6 @@ function renderResults(){
         <div class="summary-row"><span>− Bảo hiểm xe / tháng</span><span class="val">${fmtVND(state.settings.monthlyInsurance||0)}</span></div>
         <div class="summary-row"><span>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</span><span class="val">${fmtVND(state.settings.monthlyRegistrationFee||0)}</span></div>
         <div class="summary-row total"><span>LỢI NHUẬN THỰC TẾ</span><span class="val" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</span></div>
-        <div class="hint" style="margin-top:6px;">Đúng chuẩn kế toán: chỉ trừ LÃI vay (không trừ Gốc — gốc là trả bớt nợ vay, không phải chi phí) + khấu hao/bảo hiểm/đăng kiểm, lấy từ Cài Đặt. Gốc vay vẫn được trừ đủ ở "Dòng Tiền Thuần" bên dưới, vì đó là tiền mặt thật đã rời túi.</div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
@@ -8620,7 +8618,6 @@ function renderResults(){
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink-soft); margin-top:6px;">→ Tổng chi phí biến đổi thực tế = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div style="font-weight:800; font-size:15.5px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi) = ${fmtVND(breakEven.grossProfit)}</div>
-        <div class="hint" style="margin-top:8px;">Số này là lãi gộp THEO CHI PHÍ BIẾN ĐỔI — riêng để tính điểm hoà vốn. KHÁC với "Lợi nhuận gộp ca" ở bảng Kết Quả phía trên (đã trừ thêm cả lương cứng + tiền nhà phân bổ, 2 khoản đó được xếp vào chi phí CỐ ĐỊNH ở khối này) — 2 số khác nhau do 2 mục đích tính khác nhau, không phải sai lệch dữ liệu.</div>
       </div>
 
       <div class="card" style="margin-top:10px;">
@@ -8692,9 +8689,12 @@ function renderResults(){
         </div>
         ${monthlyProjection.remainingTripsNeeded>0 ? `
         <div class="summary-row">
-          <span>Còn thiếu để hoà vốn cả tháng</span>
-          <span class="val" style="color:var(--loss); font-weight:800;">${monthlyProjection.remainingTripsNeeded} chuyến${monthlyProjection.daysRemaining>0 ? ` (còn ${monthlyProjection.daysRemaining} ngày — cần ${monthlyProjection.neededPacePerRemainingDay.toFixed(1)} chuyến/ngày)` : ' — đã hết ngày của tháng'}</span>
-        </div>` : `
+          <span>Còn thiếu để hoà vốn cả tháng (tính đến hôm nay)</span>
+          <span class="val" style="color:${monthlyProjection.onTrackToHitBreakEven?'var(--profit)':'var(--loss)'}; font-weight:800;">${monthlyProjection.remainingTripsNeeded} chuyến${monthlyProjection.daysRemaining>0 ? ` (còn ${monthlyProjection.daysRemaining} ngày — cần ${monthlyProjection.neededPacePerRemainingDay.toFixed(1)} chuyến/ngày)` : ' — đã hết ngày của tháng'}</span>
+        </div>
+        <div class="hint" style="margin-top:2px;">${monthlyProjection.onTrackToHitBreakEven
+          ? `Tốc độ hiện tại (${monthlyProjection.tripsPerDay.toFixed(1)} chuyến/ngày) đã CAO HƠN tốc độ cần để bù (${monthlyProjection.neededPacePerRemainingDay.toFixed(1)} chuyến/ngày) → giữ nguyên nhịp độ là tự bù đủ ${monthlyProjection.remainingTripsNeeded} chuyến còn thiếu, không cần tăng tốc.`
+          : `Tốc độ hiện tại (${monthlyProjection.tripsPerDay.toFixed(1)} chuyến/ngày) đang THẤP HƠN tốc độ cần để bù (${monthlyProjection.neededPacePerRemainingDay.toFixed(1)} chuyến/ngày) → cần tăng tốc mới kịp hoà vốn cả tháng.`}</div>` : `
         <div class="summary-row">
           <span>Đã đủ chuyến hoà vốn cả tháng</span>
           <span class="val" style="color:var(--profit); font-weight:800;">✓ Dư ${Math.max(0, monthlyProjection.tripsSoFarThisMonth - monthlyProjection.breakEvenTrips)} chuyến</span>
