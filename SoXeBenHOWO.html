@@ -184,12 +184,23 @@
      giữ nguyên tinh thần "an toàn" đã chọn trước đây) là đủ để chữ nhỏ
      lại đúng cỡ 19px như các ô khác, và khung ô tự co theo, không cần
      đụng gì thêm.
-     SỬA LẠI 2026-08-10 LẦN 2: bản trước dùng nhầm "///" (cú pháp comment
-     của JS) thay vì "/* */" (cú pháp comment của CSS) ngay phía trên rule
+     SỬA LẠI 2026-08-10 LẦN 2: bản trước dùng nhầm dấu 3 gạch chéo (cú
+     pháp comment của JS) thay vì đúng cú pháp comment CSS chuẩn (gạch
+     chéo-sao mở đầu, sao-gạch chéo kết thúc) ngay phía trên rule
      input[type=date] bên dưới — khiến trình duyệt hiểu nhầm cả khối chữ
      Việt lẫn rule thật là 1 selector vô nghĩa và ÂM THẦM BỎ QUA toàn bộ
      rule đó. Vì vậy "font-size:19px" chưa từng thực sự chạy trên máy Ông
-     Chủ — không phải do cache. Đã chuyển đúng về "/* */".
+     Chủ — không phải do cache. Đã chuyển đúng về cú pháp comment CSS
+     chuẩn.
+     SỬA LẠI 2026-08-16 LẦN 3 (LỖI NẶNG, gây vỡ toàn bộ CSS phía sau — vd
+     mất định dạng thanh chọn xe): đoạn văn ngay phía trên (SỬA LẠI LẦN 2)
+     từng viết nguyên văn ký hiệu mở-đóng comment CSS làm ví dụ minh hoạ —
+     nhưng CSS KHÔNG hỗ trợ comment lồng nhau, nên hễ gặp ký hiệu ĐÓNG đầu
+     tiên bên trong ví dụ đó là toàn bộ comment bị đóng sớm ngay tại chỗ,
+     biến hết phần chữ Việt còn lại (và bất kỳ đoạn nào được thêm nối vào
+     sau này) thành CSS thật — hỏng toàn bộ rule phía sau trong file. Đã
+     viết lại không dùng nguyên văn ký hiệu đó nữa (mô tả bằng lời thay vì
+     ký hiệu) để không bao giờ tái diễn.
      SỬA TIẾP 2026-08-16 (yêu cầu Ông Chủ, ảnh chụp "tràn viền"): dù chữ đã
      đúng cỡ 19px như input thường, chuỗi ngày tiếng Việt đầy đủ (VD "ngày
      1 thg 8, 2026") vẫn có thể dài hơn bề rộng khả dụng trên máy to
