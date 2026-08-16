@@ -2298,7 +2298,7 @@ function renderMonthlyInvoiceReconciliation(){
         <div style="font-weight:800; font-size:12.5px; padding:3px 10px; border-radius:20px; background:${m.fullyClosed?'var(--profit-soft)':'var(--loss-soft)'}; color:${m.fullyClosed?'var(--profit)':'var(--loss)'};">${m.fullyClosed?'✅ ĐÃ CHỐT ĐỦ 2 ĐẦU':'⏳ CÒN THIẾU CHỨNG TỪ'}</div>
       </div>
       <div class="summary-row"><span>🧑‍💼 Bán — Đã xuất hoá đơn</span><span class="val" style="color:${m.sellDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.sellInvoicedTrips}/${m.sellTotalTrips} chuyến${m.sellDone?' ✓':''}</span></div>
-      <div class="summary-row"><span>🏔️ Mua — Đủ chứng từ (kể cả đã bù kho)</span><span class="val" style="color:${m.buyDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.buyDocumentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}/${m.buyTotalVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${m.buyDone?' ✓':''}</span></div>
+      <div class="summary-row"><span>🏔️ Mua — Đủ chứng từ (đã tick tay hoặc đã bù kho)</span><span class="val" style="color:${m.buyDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.buyDocumentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}/${m.buyTotalVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${m.buyDone?' ✓':''}</span></div>
       ${!m.fullyClosed ? `<button class="btn btn-ghost btn-sm monthReconDetailBtn" data-ym="${m.yearMonth}" style="width:auto; padding:6px 12px; margin-top:8px;">📋 Xem Chi Tiết Còn Thiếu</button>` : ''}
     </div>`).join('');
   wrap.querySelectorAll('.monthReconDetailBtn').forEach(btn=>{
@@ -2831,12 +2831,16 @@ function invoiceDemandByDateRange(goodsType, from, to){
 /// BÁN" (sellHasInvoice) — CHỈ xét trạng thái xuất hoá đơn, KHÔNG xét đã
 /// thu tiền hay chưa (tiền theo dõi riêng ở Công Nợ, đúng ý Ông Chủ).
 ///
-/// MUA đủ = dùng ĐÚNG cơ chế Kho Hoá Đơn Bù đã có (siteGoodsTypeGroups +
-/// siteInvoiceGroupBreakdown) — 1 nhóm loại hàng coi là ĐỦ chứng từ khi
-/// KHÔNG còn shortfallVolume treo (đã có hoá đơn mỏ xuất trực tiếp ĐỦ,
-/// HOẶC phần thiếu đã được rút đủ từ Kho Hoá Đơn Bù) — KHÔNG dùng riêng
-/// cờ buyHasInvoice (cờ đó chỉ để tính khấu trừ VAT, không phản ánh đúng
-/// khối lượng thực tế còn thiếu chứng từ).
+/// MUA đủ (SỬA 2026-08-16, LỖI THẬT — Ông Chủ đã tick tay "Đã nhận hóa
+/// đơn MUA" cho ca 28/7-31/7 nhưng bản trước vẫn báo thiếu): ƯU TIÊN
+/// TUYỆT ĐỐI ô tick tay buyIsDeductible(s) — Ông Chủ đã xác nhận trực
+/// tiếp trên từng ca là CĂN CỨ CAO NHẤT, phải coi ngay là đủ chứng từ
+/// 100% cho ca đó, không chờ so với % ước lượng thống kê nữa. Chỉ khi
+/// CHƯA tick (buyIsDeductible=false) mới rơi về dùng cơ chế Kho Hoá Đơn
+/// Bù (siteGoodsTypeGroups + siteInvoiceGroupBreakdown) như cũ, coi đó là
+/// gợi ý tự động khi chưa có xác nhận tay. Lưu ý: đây CHỈ đổi cách hiển
+/// thị ở khối Đối Soát này — KHÔNG đụng gì tới siteGoodsTypeGroups hay
+/// công thức chi phí/VAT hoá đơn bù (frozen, dùng cho P&L thật).
 function computeMonthlyInvoiceReconciliation(monthsBack){
   const excludedShiftIds = getRevenueExcludedShiftIds();
   const shifts = allShiftsForLedgerCompanyWide().filter(sh=>!excludedShiftIds.has(sh.id));
@@ -2863,10 +2867,11 @@ function computeMonthlyInvoiceReconciliation(monthsBack){
             customerName: customer ? customer.name : '(chưa gắn khách hàng)', trips: tripsCount });
         }
       }
+      const buyConfirmedByHand = buyIsDeductible(s); // ô tick tay "Đã nhận hóa đơn MUA" — căn cứ cao nhất
       for(const g of siteGoodsTypeGroups(s)){
         if(g.sellVolume<=0) continue;
         m.buyTotalVolume += g.sellVolume;
-        if(g.missingVolume<=0.001){
+        if(buyConfirmedByHand || g.missingVolume<=0.001){
           m.buyDocumentedVolume += g.sellVolume;
           continue;
         }
