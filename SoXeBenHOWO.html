@@ -2240,7 +2240,7 @@ function renderInvoiceLotOverview(){
         ${goodsTypes.map(g=>`<option value="${escapeHtml(g)}" ${g===goodsType?'selected':''}>${escapeHtml(g)}</option>`).join('')}
       </select>
     </div>
-    <div class="two-col">
+    <div class="date-range">
       <div class="field"><label>Từ ngày</label><input type="date" id="lotFilterFrom" value="${from}"></div>
       <div class="field"><label>Đến ngày</label><input type="date" id="lotFilterTo" value="${to}"></div>
     </div>
@@ -8101,24 +8101,31 @@ function partnerTransactionTableHtml(partnerId, side, from, to){
     return `<span class="vat-badge vat-no">○ Chưa xuất hoá đơn (không VAT)</span>`;
   };
   const rowsHtml = groups.map(g=>{
-    const header = `<tr class="grid-group-row"><td colspan="6">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến ${invoiceBadge(g)}</td></tr>`;
+    const header = `<tr class="grid-group-row"><td colspan="5">📅 ${formatDateVN(g.date)} · ${shiftTypeLabel(g.shiftType)} · ${escapeHtml(g.driverName)} — ${g.trips.length} chuyến ${invoiceBadge(g)}</td></tr>`;
     // 2026-08-16: màu CỐ ĐỊNH theo yêu cầu Ông Chủ — Có VAT luôn màu đen
     // (mặc định), Chưa VAT luôn màu xanh — không đổi màu qua lại theo dòng
     // nữa. Vẫn giữ CHỮ ĐẬM ở cột đang thực sự dùng để tính công nợ (để
     // biết cột nào là số THẬT), chỉ khác ở việc không đổi màu nữa.
     const vatWeight = g.vatApplied ? '800' : '400';
     const netWeight = g.vatApplied ? '400' : '800';
+    // 2026-08-16 (yêu cầu Ông Chủ — bảng bị kéo dài do "Điểm Múc-Điểm Đổ"
+    // xuống dòng liên tục khi làm cột riêng trong màn hẹp): gộp địa điểm
+    // vào ngay dưới Loại Hàng thành 1 dòng phụ nhỏ, CẮT GỌN 1 dòng duy
+    // nhất (ellipsis) thay vì xuống dòng lặp lại nhiều lần — giảm hẳn 1
+    // cột, bảng gọn và khoa học hơn hẳn.
     const tripLines = g.trips.map(t=>`
       <tr>
-        <td>${escapeHtml(t.goodsType)}</td>
-        <td>${escapeHtml(t.tripLocation)}</td>
+        <td>
+          <div>${escapeHtml(t.goodsType)}</div>
+          <div style="font-size:11px; color:var(--ink-soft); font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">${escapeHtml(t.tripLocation)}</div>
+        </td>
         <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
         <td class="num">${fmtVND(t.price)}</td>
         <td class="num" style="color:var(--ink); font-weight:${vatWeight};">${fmtVND(t.withVatAmt)}</td>
         <td class="num" style="color:var(--profit); font-weight:${netWeight};">${fmtVND(t.netAmt)}</td>
       </tr>`).join('');
     const totalLine = `<tr class="grid-total-row">
-        <td colspan="4">Tổng ngày (${g.vatApplied?'ĐÃ tính VAT':'CHƯA tính VAT'})</td>
+        <td colspan="3">Tổng ngày (${g.vatApplied?'ĐÃ tính VAT':'CHƯA tính VAT'})</td>
         <td class="num" style="color:var(--ink); font-weight:${vatWeight};">${fmtVND(g.totalWithVat)}</td>
         <td class="num" style="color:var(--profit); font-weight:${netWeight};">${fmtVND(g.totalNet)}</td>
       </tr>`;
@@ -8127,11 +8134,11 @@ function partnerTransactionTableHtml(partnerId, side, from, to){
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Điểm Múc - Điểm Đổ</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Có VAT</th><th>Chưa VAT</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Có VAT</th><th>Chưa VAT</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
-    <div class="hint" style="margin-top:8px;">Cột chữ đậm ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ.</div>`;
+    <div class="hint" style="margin-top:8px;">Cột chữ đậm ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ. Dòng nhỏ dưới Loại Hàng là điểm múc-đổ của chuyến đó.</div>`;
 }
 /// Gộp TOÀN BỘ chuyến (mọi thời điểm — CÙNG phạm vi "toàn bộ" với "Phải
 /// Trả (tổng)" ở đầu màn Chi Tiết Nhà Cung Cấp, KHÔNG lọc theo kỳ) của 1
