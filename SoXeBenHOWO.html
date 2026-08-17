@@ -8172,8 +8172,7 @@ function partnerTransactionTableHtml(partnerId, side, from, to){
         <thead><tr><th>Loại Hàng</th><th>Khối Lượng</th><th>Đơn Giá</th><th>Có VAT</th><th>Chưa VAT</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
-    </div>
-    <div class="hint" style="margin-top:8px;">Cột chữ đậm ở mỗi dòng là số tiền THỰC TẾ đang dùng để tính công nợ ${side==='customer'?'phải thu':'phải trả'} — cột còn lại chỉ để đối chiếu, không cộng vào công nợ. Dòng nhỏ dưới Loại Hàng là điểm múc-đổ của chuyến đó.</div>`;
+    </div>`;
 }
 /// Gộp TOÀN BỘ chuyến (mọi thời điểm — CÙNG phạm vi "toàn bộ" với "Phải
 /// Trả (tổng)" ở đầu màn Chi Tiết Nhà Cung Cấp, KHÔNG lọc theo kỳ) của 1
@@ -9297,7 +9296,6 @@ function openCustomerDetail(customerId){
     </section>
     <section class="group">
       <h3>📅 Sổ Công Nợ Theo Tháng (Số Thật)</h3>
-      <div class="hint" style="margin-bottom:10px;">Bán = đúng ngày ghi ca. Đã nhận = đúng ngày trong Lịch Sử Đã Thu bên dưới (kể cả tạm ứng) — KHÔNG suy diễn khoản nào trả cho tháng nào. Nợ luỹ kế cộng dồn qua các tháng theo đúng trình tự thời gian thật, cộng lại LUÔN khớp tuyệt đối "CÒN NỢ" ở thẻ trên. Bấm "Chi Tiết" để xem đúng từng khoản đã nhận trong tháng đó.</div>
       ${monthlyLedger.months.length===0 ? `<div class="hint">Chưa có phát sinh nào gắn khách hàng này.</div>` : `
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -9377,6 +9375,15 @@ function openCustomerDetail(customerId){
       </div>`}
     </section>
   `;
+  // 2026-08-16 (yêu cầu Ông Chủ): trang Chi Tiết Khách Hàng trước đây GIỮ
+  // NGUYÊN vị trí cuộn cũ từ trang Kết Quả (vì saveMainScroll() chỉ LƯU
+  // lại, không có gì đưa trang mới về đầu) — nếu bấm vào khách hàng lúc
+  // đang cuộn giữa/cuối trang Kết Quả, trang chi tiết mở ra cũng hiện
+  // luôn ở đúng vị trí cuộn đó (nhìn như bị "đẩy xuống cuối"). Cuộn cứng
+  // về đầu (0) ngay khi mở, độc lập với savedMainScrollTop (số đó chỉ
+  // dùng để KHÔI PHỤC lại đúng chỗ cũ khi bấm "Quay Lại", không liên quan
+  // gì tới trang chi tiết vừa mở).
+  getActualScrollEl().scrollTop = 0;
   document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>openCustomerPaymentEditor(null, customerId));
   document.querySelectorAll('.monthLedgerDetailBtn').forEach(btn=>{
@@ -9576,6 +9583,7 @@ function openSupplierDetail(supplierId){
       </div>`}
     </section>
   `;
+  getActualScrollEl().scrollTop = 0;
   document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>openSupplierPaymentEditor(null, supplierId));
   document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId));
