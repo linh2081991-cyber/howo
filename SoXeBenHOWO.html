@@ -509,7 +509,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-18 · #49';
+const APP_BUILD = '2026-08-18 · #50';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -698,6 +698,11 @@ let state = {
   // Dự Án (Ông Chủ tự điền, dùng làm mốc "từ ngày nào" để cộng dồn Lợi
   // Nhuận Luỹ Kế — nếu để trống, app tự lấy ngày ca đầu tiên đã ghi).
   equityProjectInfo: { initialInvestment: 0, startDate: null },
+  // Bấm "🏢 LINH CHÍ THÀNH" ở header mở trang này TOÀN MÀN HÌNH (không
+  // phải modal nhỏ nữa) — yêu cầu Ông Chủ 2026-08-15: "1 trang làm việc
+  // đàng hoàng, chi tiết đầy đủ". Bấm bất kỳ tab nào ở thanh dưới cùng sẽ
+  // tự tắt cờ này (xem wiring nav.tabbar).
+  showCompanyDashboard: false,
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' | 'bonus' — which screen is showing inside the "Trợ Lý" tab right now
   bonusAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null,
@@ -1402,7 +1407,7 @@ function updateVehicleScopeBar(){
   if(!bar) return;
   bar.innerHTML = `<span class="vsb-label" id="vsbEquityLink" style="cursor:pointer;"><span class="vsb-icon">🏢</span>LINH CHÍ THÀNH</span><span class="vsb-chev" id="vsbVehicleLink" style="cursor:pointer;">Đổi xe ▾</span>`;
   bar.onclick = null;
-  document.getElementById('vsbEquityLink').addEventListener('click', e=>{ e.stopPropagation(); renderOwnerEquityModal(); });
+  document.getElementById('vsbEquityLink').addEventListener('click', e=>{ e.stopPropagation(); state.showCompanyDashboard = true; renderAll(); });
   document.getElementById('vsbVehicleLink').addEventListener('click', e=>{ e.stopPropagation(); renderVehiclePickerModal(); });
 }
 
@@ -1591,23 +1596,30 @@ function companyWideCashFlowFixedMonthly(from, to){
 /// ĐẦU DỰ ÁN (state.equityProjectInfo.startDate, Ông Chủ tự điền — nếu để
 /// trống thì tự lấy ngày CA ĐẦU TIÊN đã ghi của bất kỳ xe nào) tới ngày
 /// `toOverride` (mặc định HÔM NAY, cho phép truyền ngày khác để tính "tại
-/// đúng thời điểm cuối tháng X" — dùng cho biểu đồ theo thời gian).
+/// đúng thời điểm cuối tháng X" — dùng cho biểu đồ theo thời gian). Trả
+/// về ĐỦ từng thành phần (không chỉ số cuối) để trang "Dự Án Đầu Tư Xe"
+/// hiện chi tiết minh bạch từng khoản, không chỉ 1 số gộp.
 /// companyWideCashFlowFixedMonthly()/roadFeeForRangeCompanyWide() đều đã
 /// tự phân bổ đúng theo số ngày thật trong khoảng (proratedMonthlyCost).
-function computeCumulativeCompanyProfit(toOverride){
+function computeCumulativeCashFlowBreakdown(toOverride){
   const allShifts = allShiftsCompanyWide();
-  if(allShifts.length===0) return 0;
+  const empty = { from:null, to:null, cashIn:0, cashOutToSuppliers:0, operatingCashCost:0, repairTotal:0, roadFee:0, fixedMonthly:0, total:0 };
+  if(allShifts.length===0) return empty;
   const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
   const from = state.equityProjectInfo.startDate || earliestShiftDate;
   const to = toOverride || todayLocalDateStr();
-  if(from>to) return 0; // ngày bắt đầu dự án Ông Chủ điền sau cả ngày đang xét -> chưa có gì để cộng dồn
+  if(from>to) return { ...empty, from, to };
   const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const operatingCashCost = companyWideOperatingCashCost(from, to);
   const repairTotal = repairsInRangeCompanyWide(from, to).reduce((s,r)=>s+(Number(r.amount)||0),0);
   const roadFee = roadFeeForRangeCompanyWide(from, to);
   const fixedMonthly = companyWideCashFlowFixedMonthly(from, to);
-  return cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - fixedMonthly;
+  const total = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - fixedMonthly;
+  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, fixedMonthly, total };
+}
+function computeCumulativeCompanyProfit(toOverride){
+  return computeCumulativeCashFlowBreakdown(toOverride).total;
 }
 /// Vốn Chủ Sở Hữu hiện tại = Vốn Đầu Tư Ban Đầu + Tổng đã góp thêm − Tổng
 /// đã rút + Lợi Nhuận Luỹ Kế. Số dương = xe đang giữ/sinh thêm đúng phần
@@ -1700,12 +1712,14 @@ function renderEquityTimelineChartSVG(timeline){
     </div>
   `;
 }
-function renderOwnerEquityModal(){
+function renderCompanyDashboardPage(){
   const eq = computeOwnerEquity();
   const timeline = computeMonthlyEquityTimeline();
   const recentRate3 = computeRecentMonthlyRate(timeline, 3);
   const recentRate6 = computeRecentMonthlyRate(timeline, 6);
   const sorted = [...state.ownerEquityEntries].sort((a,b)=>b.date.localeCompare(a.date));
+  const breakdown = computeCumulativeCashFlowBreakdown();
+  const debtSummary = computeAllPartnersDebtSummary();
 
   let roiHtml = '';
   if(eq.initialInvestment>0){
@@ -1732,83 +1746,120 @@ function renderOwnerEquityModal(){
     </div>`;
   }
 
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ×</button></div>
-    <h3 style="margin-bottom:2px;">💰 Dự Án Đầu Tư Xe</h3>
-    <div class="hint" style="margin-top:0; margin-bottom:12px;">Vốn Chủ Sở Hữu — Toàn Công Ty, không tách riêng theo xe</div>
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="companyDashBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🏢 LINH CHÍ THÀNH</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Dự Án Đầu Tư Xe — Toàn Công Ty, không tách riêng theo xe</div>
 
-    <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
-      <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
-      <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
-    </div>
-
-    <div class="card" style="margin-top:12px;">
-      <div class="summary-row"><span>Vốn đầu tư ban đầu</span><span class="val">${fmtVND(eq.initialInvestment)}</span></div>
-      <div class="summary-row"><span>+ Đã góp thêm sau này</span><span class="val" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</span></div>
-      <div class="summary-row"><span>− Đã rút ra</span><span class="val" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</span></div>
-      <div class="summary-row total"><span>+ Lợi nhuận luỹ kế</span><span class="val" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</span></div>
-    </div>
-    <div class="hint" style="margin-top:6px;">Vốn đầu tư ban đầu + Đã góp thêm − Đã rút + Lợi nhuận luỹ kế (Dòng Tiền Thuần cộng dồn từ ngày bắt đầu dự án tới hôm nay). Số DƯƠNG = xe đang giữ/sinh thêm đúng phần đó cho Ông Chủ. Số ÂM = xe đang "ăn" vào đúng phần vốn đã bỏ vào, dù từng kỳ riêng lẻ vẫn có lãi.</div>
-
-    ${roiHtml}
-
-    <div class="card" style="margin-top:14px;">
-      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📈 Biến Động Vốn Chủ Sở Hữu Theo Tháng</div>
-      ${renderEquityTimelineChartSVG(timeline)}
-    </div>
-
-    <div class="card" style="margin-top:14px;">
-      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⚙️ Thông Tin Dự Án</div>
-      <div class="field">
-        <label>Vốn đầu tư ban đầu (giá xe + chi phí liên quan mua xe)</label>
-        <input type="text" inputmode="decimal" id="epi_investment">
+      <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
+        <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
+        <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
       </div>
-      <div class="field" style="margin-bottom:0;">
-        <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
-        <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
-      </div>
-      <button class="btn btn-ghost btn-block" id="epi_saveBtn" style="margin-top:12px;">Lưu Thông Tin Dự Án</button>
-    </div>
 
-    <div class="card" style="margin-top:14px;">
-      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">✍️ Ghi Khoản Góp/Rút Mới</div>
-      <div class="field">
-        <label>Ngày</label>
-        <input type="date" id="oe_date" value="${todayLocalDateStr()}">
+      <div class="card" style="margin-top:12px;">
+        <div class="summary-row"><span>Vốn đầu tư ban đầu</span><span class="val">${fmtVND(eq.initialInvestment)}</span></div>
+        <div class="summary-row"><span>+ Đã góp thêm sau này</span><span class="val" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</span></div>
+        <div class="summary-row"><span>− Đã rút ra</span><span class="val" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</span></div>
+        <div class="summary-row total"><span>+ Lợi nhuận luỹ kế</span><span class="val" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</span></div>
       </div>
-      <div class="field">
-        <label>Loại</label>
-        <select id="oe_type">
-          <option value="contribution">⬆️ Góp vào (tiền túi bỏ thêm)</option>
-          <option value="withdrawal">⬇️ Rút ra (rút lãi tiêu riêng)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Số tiền</label>
-        <input type="text" inputmode="decimal" id="oe_amount">
-      </div>
-      <div class="field" style="margin-bottom:0;">
-        <label>Ghi chú (VD: đổ dầu bằng tiền túi, rút lãi tiêu Tết...)</label>
-        <input type="text" id="oe_note" placeholder="Không bắt buộc">
-      </div>
-      <button class="btn btn-accent btn-block" id="oe_addBtn" style="margin-top:12px;">+ Ghi Khoản Này</button>
-    </div>
+      <div class="hint" style="margin-top:6px;">Vốn đầu tư ban đầu + Đã góp thêm − Đã rút + Lợi nhuận luỹ kế (Dòng Tiền Thuần cộng dồn từ ngày bắt đầu dự án tới hôm nay). Số DƯƠNG = xe đang giữ/sinh thêm đúng phần đó cho Ông Chủ. Số ÂM = xe đang "ăn" vào đúng phần vốn đã bỏ vào, dù từng kỳ riêng lẻ vẫn có lãi.</div>
 
-    <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">📜 Lịch Sử Góp/Rút</div>
-    <div class="card" style="padding:0; overflow:hidden;" id="oe_listWrap">
-      ${sorted.length===0 ? '<div class="hint" style="padding:14px;">Chưa có khoản góp/rút nào.</div>' : sorted.map(e=>`
-        <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-          <div>
-            <div style="font-weight:700;">${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'} — ${formatDateVN(e.date)}</div>
-            ${e.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.note)}</div>` : ''}
-          </div>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-weight:800; white-space:nowrap; color:${e.type==='contribution'?'var(--profit)':'var(--loss)'};">${e.type==='contribution'?'+':'−'}${fmtVND(e.amount)}</span>
-            <button class="link-btn" data-del-equity="${e.id}" style="color:var(--loss); padding:0;">Xoá</button>
-          </div>
-        </div>`).join('')}
-    </div>
-  `);
+      ${roiHtml}
+
+      <div class="card" style="margin-top:14px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📈 Biến Động Vốn Chủ Sở Hữu Theo Tháng</div>
+        ${renderEquityTimelineChartSVG(timeline)}
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📒 Tổng Kết Dòng Tiền Toàn Công Ty</h3>
+      <div class="hint" style="margin-top:-6px; margin-bottom:10px;">${breakdown.from?`Cộng dồn từ ${formatDateVN(breakdown.from)} tới hôm nay`:'Chưa có ca nào được ghi'}</div>
+      <div class="card">
+        <div class="summary-row"><span>+ Tiền khách đã chuyển vào (thật)</span><span class="val" style="color:var(--profit);">+${fmtVND(breakdown.cashIn)}</span></div>
+        <div class="summary-row"><span>− Tiền đã chuyển cho mỏ (thật)</span><span class="val">−${fmtVND(breakdown.cashOutToSuppliers)}</span></div>
+        <div class="summary-row"><span>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</span><span class="val">−${fmtVND(breakdown.operatingCashCost)}</span></div>
+        <div class="summary-row"><span>− Sửa chữa</span><span class="val">−${fmtVND(breakdown.repairTotal)}</span></div>
+        <div class="summary-row"><span>− Luật đường</span><span class="val">−${fmtVND(breakdown.roadFee)}</span></div>
+        <div class="summary-row"><span>− Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</span><span class="val">−${fmtVND(breakdown.fixedMonthly)}</span></div>
+        <div class="summary-row total"><span>= Lợi Nhuận Luỹ Kế</span><span class="val" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</span></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Công Nợ Hiện Tại (Toàn Công Ty)</div>
+        <div class="summary-row"><span>Khách hàng còn nợ Ông Chủ</span><span class="val" style="color:${debtSummary.totalCustomerOwed>=0?'var(--profit)':'var(--loss)'};">${fmtVND(debtSummary.totalCustomerOwed)}</span></div>
+        <div class="summary-row"><span>Ông Chủ còn nợ nhà cung cấp</span><span class="val" style="color:${debtSummary.totalSupplierOwed>=0?'var(--loss)':'var(--profit)'};">${fmtVND(debtSummary.totalSupplierOwed)}</span></div>
+        <div class="hint" style="margin-top:6px;">Số dương ở "Khách hàng còn nợ" = tiền Ông Chủ SẼ nhận thêm (tài sản). Số dương ở "Còn nợ nhà cung cấp" = tiền Ông Chủ CÒN PHẢI trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản).</div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>⚙️ Thông Tin Dự Án</h3>
+      <div class="card">
+        <div class="field">
+          <label>Vốn đầu tư ban đầu (giá xe + chi phí liên quan mua xe)</label>
+          <input type="text" inputmode="decimal" id="epi_investment">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
+          <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
+        </div>
+        <button class="btn btn-ghost btn-block" id="epi_saveBtn" style="margin-top:12px;">Lưu Thông Tin Dự Án</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>✍️ Ghi Khoản Góp/Rút Mới</h3>
+      <div class="hint" style="margin-top:-6px; margin-bottom:10px;">Chọn đúng ngày Ông Chủ đã bỏ tiền/rút tiền trong QUÁ KHỨ nếu cần khai bù, không bắt buộc là hôm nay.</div>
+      <div class="card">
+        <div class="field">
+          <label>Ngày</label>
+          <input type="date" id="oe_date" value="${todayLocalDateStr()}">
+        </div>
+        <div class="field">
+          <label>Loại</label>
+          <select id="oe_type">
+            <option value="contribution">⬆️ Góp vào (tiền túi bỏ thêm)</option>
+            <option value="withdrawal">⬇️ Rút ra (rút lãi tiêu riêng)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Số tiền</label>
+          <input type="text" inputmode="decimal" id="oe_amount">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú (VD: đổ dầu bằng tiền túi, rút lãi tiêu Tết...)</label>
+          <input type="text" id="oe_note" placeholder="Không bắt buộc">
+        </div>
+        <button class="btn btn-accent btn-block" id="oe_addBtn" style="margin-top:12px;">+ Ghi Khoản Này</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📜 Lịch Sử Góp/Rút</h3>
+      <div class="card" style="padding:0; overflow:hidden;" id="oe_listWrap">
+        ${sorted.length===0 ? '<div class="hint" style="padding:14px;">Chưa có khoản góp/rút nào.</div>' : sorted.map(e=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'} — ${formatDateVN(e.date)}</div>
+              ${e.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap; color:${e.type==='contribution'?'var(--profit)':'var(--loss)'};">${e.type==='contribution'?'+':'−'}${fmtVND(e.amount)}</span>
+              <button class="link-btn" data-del-equity="${e.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </section>
+  `;
+  document.getElementById('companyDashBackBtn').addEventListener('click', ()=>{
+    state.showCompanyDashboard = false;
+    renderAll();
+  });
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
   let epiInvestmentVal = state.equityProjectInfo.initialInvestment||0;
@@ -1818,7 +1869,7 @@ function renderOwnerEquityModal(){
     state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
     await saveEquityProjectInfo();
     showToast('Đã lưu thông tin dự án.');
-    renderOwnerEquityModal();
+    renderCompanyDashboardPage();
   });
   document.getElementById('oe_addBtn').addEventListener('click', async ()=>{
     const date = document.getElementById('oe_date').value;
@@ -1829,14 +1880,14 @@ function renderOwnerEquityModal(){
     state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note });
     await saveOwnerEquityEntries();
     showToast('Đã ghi khoản mới.');
-    renderOwnerEquityModal();
+    renderCompanyDashboardPage();
   });
   document.querySelectorAll('[data-del-equity]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
       await saveOwnerEquityEntries();
       showToast('Đã xoá.');
-      renderOwnerEquityModal();
+      renderCompanyDashboardPage();
     });
   });
 }
@@ -7961,6 +8012,16 @@ function computeSupplierDebt(supplierId){
   // phải trả tính đến giờ.
   return { payable, paid, owed: payable-paid };
 }
+/// Tổng Công Nợ TOÀN CÔNG TY — cộng dồn owed của TẤT CẢ khách hàng và
+/// TẤT CẢ nhà cung cấp — dùng cho trang "Dự Án Đầu Tư Xe" (yêu cầu Ông
+/// Chủ 2026-08-15: "toàn bộ tiền liên quan công ty"). owed>0 ở khách hàng
+/// nghĩa là khách còn nợ Ông Chủ (tài sản); owed>0 ở nhà cung cấp nghĩa
+/// là Ông Chủ còn nợ mỏ (khoản phải trả).
+function computeAllPartnersDebtSummary(){
+  const totalCustomerOwed = state.customers.reduce((sum,c)=>sum+computeCustomerDebt(c.id).owed, 0);
+  const totalSupplierOwed = state.suppliers.reduce((sum,s)=>sum+computeSupplierDebt(s.id).owed, 0);
+  return { totalCustomerOwed, totalSupplierOwed };
+}
 /// Chi tiết TỪNG CHUYẾN (không gộp theo công trình nữa) gắn với đúng
 /// khách hàng/nhà cung cấp — nhóm theo NGÀY để Ông Chủ thấy rõ CẢ "hôm đó
 /// chạy mấy chuyến" LẪN "mỗi chuyến loại hàng gì, đổ ở đâu, bao nhiêu
@@ -10110,7 +10171,6 @@ function renderSettings(){
   const s = state.settings;
   const hasGeminiKey = !!(s.geminiApiKey || '').trim();
   const revealKeyInput = !hasGeminiKey || showGeminiKeyInput;
-  const eq = computeOwnerEquity();
   app.innerHTML = `
     <section class="group">
       <div class="card" style="padding:10px 14px; background:var(--bg);">
@@ -10118,14 +10178,6 @@ function renderSettings(){
           <span>Phiên bản app</span>
           <span style="font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums;">${APP_BUILD}</span>
         </div>
-      </div>
-    </section>
-    <section class="group">
-      <h3>💰 Vốn Chủ Sở Hữu <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">(Toàn Công Ty)</span></h3>
-      <div class="card" id="ownerEquityCard" style="border:1.5px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
-        <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:2px;">Vốn hiện tại (Đã góp − Đã rút + Lợi nhuận luỹ kế)</div>
-        <div style="font-size:26px; font-weight:900; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
-        <div class="hint" style="margin-top:6px;">Bấm để xem chi tiết / ghi khoản góp-rút mới →</div>
       </div>
     </section>
     <section class="group">
@@ -10474,7 +10526,6 @@ function renderSettings(){
   if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
   const cancelKeyEditBtn = document.getElementById('cancelGeminiKeyEditBtn');
   if(cancelKeyEditBtn) cancelKeyEditBtn.addEventListener('click', ()=>{ showGeminiKeyInput = false; renderAll(); });
-  document.getElementById('ownerEquityCard').addEventListener('click', renderOwnerEquityModal);
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
     s.monthlyVehicleDepreciation = sVals.depreciation;
@@ -11533,6 +11584,11 @@ function renderAll(){
   updateVehicleScopeBar();
   refreshSiteDatalist();
   refreshGoodsTypesDatalist();
+  if(state.showCompanyDashboard){
+    renderCompanyDashboardPage();
+    document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.remove('active'));
+    return;
+  }
   if(state.currentTab==='shifts'){
     if(state.view==='form') renderShiftForm();
     else if(state.shiftArchiveMonth) renderShiftMonthArchive();
@@ -11572,6 +11628,7 @@ document.querySelectorAll('nav.tabbar button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     state.currentTab = btn.dataset.tab;
     state.view='list'; state.draftShift=null;
+    state.showCompanyDashboard = false;
     renderAll();
   });
 });
