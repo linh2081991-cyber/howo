@@ -509,7 +509,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-18 · #47';
+const APP_BUILD = '2026-08-18 · #48';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10150,14 +10150,12 @@ function renderSettings(){
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <div class="hint" style="margin-bottom:10px;">Nhập chu kỳ (ví dụ thay dầu mỗi 5.000km) và lần làm gần nhất — app tự tính còn bao nhiêu km nữa tới hạn dựa trên ODO mới nhất Ông Chủ ghi, đồng thời dự đoán khoảng ngày phải bảo dưỡng dựa trên tốc độ chạy thực tế gần đây.</div>
       <div id="maintenanceListWrap"></div>
       <button class="btn btn-ghost btn-block" id="addMaintenanceBtn">+ Thêm Hạng Mục Bảo Dưỡng</button>
     </section>
 
     <section class="group">
       <h3>Tiền Luật Đường Theo Tháng</h3>
-      <div class="hint" style="margin-bottom:10px;">Mỗi tháng chi phí luật đường khác nhau tuỳ cung đường chạy trong tháng đó. Gõ đúng TỔNG số tiền thực đã đóng trong tháng (kể cả các khoản đóng thêm khi đổi cung, đã trừ phần được giảm do trùng đơn vị luật cũ) — cả app sẽ lấy đúng số của từng tháng này để tính toán.</div>
       <div class="card" id="roadFeeMonthListWrap"></div>
       <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
         <input type="month" id="rf_newMonth" style="flex:1;">
@@ -10180,13 +10178,11 @@ function renderSettings(){
           <label>Đăng kiểm / Đăng ký / Phù hiệu vận tải / tháng</label>
           <input type="text" inputmode="decimal" id="s_registration">
         </div>
-        <div class="hint">Tất cả các khoản trên (kể cả sửa chữa/khấu hao phát sinh thực tế, và Gốc+Lãi vay ngân hàng tính tự động ở khối bên dưới) đều được trừ vào Lợi Nhuận Gộp để ra Lợi Nhuận Thực Tế Cuối Cùng, và được cộng vào chi phí cố định khi tính Điểm Hoà Vốn — xem ở tab "Kết Quả".</div>
       </div>
     </section>
 
     <section class="group">
       <h3>🏦 Công Cụ Tính Gốc + Lãi Vay Ngân Hàng Tự Động (Dư Nợ Giảm Dần)</h3>
-      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Nhập đủ các ô dưới đây, app tự tính số tháng đã vay từ Ngày Giải Ngân đến hôm nay và ra đúng số Gốc+Lãi phải trả THÁNG NÀY — số này tự động dùng làm chi phí cố định cho toàn bộ app (Điểm Hoà Vốn, Lợi Nhuận Thực Tế, Thẩm Định Công Trình...), Ông Chủ không cần gõ tay ở bất kỳ đâu khác nữa.</div>
       <div class="card">
         <div class="two-col">
           <div class="field">
