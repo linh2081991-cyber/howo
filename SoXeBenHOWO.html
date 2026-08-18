@@ -692,6 +692,12 @@ let state = {
   // Dòng Tiền Thuần: "Lợi Nhuận Luỹ Kế" trong công thức Vốn Chủ Sở Hữu chỉ
   // tính đúng được ở cấp công ty.
   ownerEquityEntries: [], // {id, date, type:'contribution'|'withdrawal', amount, note}
+  // "Dự Án Đầu Tư Xe" (2026-08-15) — Vốn Đầu Tư Ban Đầu (giá xe + chi phí
+  // liên quan mua xe, Ông Chủ tự điền tay) TÁCH RIÊNG hẳn khỏi Sổ Vốn Chủ
+  // Sở Hữu ở trên (đó là các lần góp/rút LẺ TẺ về sau) — và Ngày Bắt Đầu
+  // Dự Án (Ông Chủ tự điền, dùng làm mốc "từ ngày nào" để cộng dồn Lợi
+  // Nhuận Luỹ Kế — nếu để trống, app tự lấy ngày ca đầu tiên đã ghi).
+  equityProjectInfo: { initialInvestment: 0, startDate: null },
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' | 'bonus' — which screen is showing inside the "Trợ Lý" tab right now
   bonusAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null,
@@ -1162,7 +1168,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1182,7 +1188,8 @@ async function loadAll(){
       sharedDataRef('driverExpenseReports').get(),
       sharedDataRef('vehicles').get(),
       sharedDataRef('companySettings').get(),
-      sharedDataRef('ownerEquityEntries').get()
+      sharedDataRef('ownerEquityEntries').get(),
+      sharedDataRef('equityProjectInfo').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1212,6 +1219,10 @@ async function loadAll(){
     state.supplierPayments = supplierPaymentData && Array.isArray(supplierPaymentData.list) ? supplierPaymentData.list : [];
     const ownerEquityData = ownerEquitySnap.exists ? ownerEquitySnap.data() : null;
     state.ownerEquityEntries = ownerEquityData && Array.isArray(ownerEquityData.list) ? ownerEquityData.list : [];
+    if(equityProjectInfoSnap.exists){
+      const epi = equityProjectInfoSnap.data();
+      state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null };
+    }
     const invoiceLotData = invoiceLotSnap.exists ? invoiceLotSnap.data() : null;
     state.invoiceLots = invoiceLotData && Array.isArray(invoiceLotData.list) ? invoiceLotData.list : [];
     const driverAdvanceData = driverAdvanceSnap.exists ? driverAdvanceSnap.data() : null;
@@ -1446,6 +1457,10 @@ async function saveOwnerEquityEntries(){
   try { await sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries }); }
   catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu — kiểm tra mạng.'); }
 }
+async function saveEquityProjectInfo(){
+  try { await sharedDataRef('equityProjectInfo').set(state.equityProjectInfo); }
+  catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư — kiểm tra mạng.'); }
+}
 async function saveShifts(){
   try {
     const vid = activeVehicleIdForEditing();
@@ -1566,16 +1581,20 @@ function companyWideCashFlowFixedMonthly(from, to){
   return sum;
 }
 // ================= 2026-08-15: SỔ VỐN CHỦ SỞ HỮU =================
-/// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ CA ĐẦU
-/// TIÊN từng ghi (của bất kỳ xe nào) tới HÔM NAY — 1 thành phần của công
-/// thức Vốn Chủ Sở Hữu. companyWideCashFlowFixedMonthly()/
-/// roadFeeForRangeCompanyWide() đều đã tự phân bổ đúng theo số ngày thật
-/// trong khoảng (proratedMonthlyCost), kể cả khoảng trải dài nhiều tháng.
-function computeCumulativeCompanyProfit(){
+/// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
+/// ĐẦU DỰ ÁN (state.equityProjectInfo.startDate, Ông Chủ tự điền — nếu để
+/// trống thì tự lấy ngày CA ĐẦU TIÊN đã ghi của bất kỳ xe nào) tới ngày
+/// `toOverride` (mặc định HÔM NAY, cho phép truyền ngày khác để tính "tại
+/// đúng thời điểm cuối tháng X" — dùng cho biểu đồ theo thời gian).
+/// companyWideCashFlowFixedMonthly()/roadFeeForRangeCompanyWide() đều đã
+/// tự phân bổ đúng theo số ngày thật trong khoảng (proratedMonthlyCost).
+function computeCumulativeCompanyProfit(toOverride){
   const allShifts = allShiftsCompanyWide();
   if(allShifts.length===0) return 0;
-  const from = allShifts.map(sh=>sh.date).sort()[0];
-  const to = todayLocalDateStr();
+  const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
+  const from = state.equityProjectInfo.startDate || earliestShiftDate;
+  const to = toOverride || todayLocalDateStr();
+  if(from>to) return 0; // ngày bắt đầu dự án Ông Chủ điền sau cả ngày đang xét -> chưa có gì để cộng dồn
   const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const operatingCashCost = companyWideOperatingCashCost(from, to);
@@ -1584,30 +1603,169 @@ function computeCumulativeCompanyProfit(){
   const fixedMonthly = companyWideCashFlowFixedMonthly(from, to);
   return cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - fixedMonthly;
 }
-/// Vốn Chủ Sở Hữu hiện tại = Tổng đã góp − Tổng đã rút + Lợi Nhuận Luỹ
-/// Kế. Số dương = xe đang giữ/sinh thêm đúng phần đó cho Ông Chủ; số âm
-/// = xe đang "ăn" vào đúng phần vốn Ông Chủ đã bỏ vào.
+/// Vốn Chủ Sở Hữu hiện tại = Vốn Đầu Tư Ban Đầu + Tổng đã góp thêm − Tổng
+/// đã rút + Lợi Nhuận Luỹ Kế. Số dương = xe đang giữ/sinh thêm đúng phần
+/// đó cho Ông Chủ; số âm = xe đang "ăn" vào đúng phần vốn Ông Chủ đã bỏ
+/// vào (kể cả vốn đầu tư ban đầu mua xe).
 function computeOwnerEquity(){
-  const contributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const initialInvestment = Number(state.equityProjectInfo.initialInvestment)||0;
+  const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const cumulativeProfit = computeCumulativeCompanyProfit();
-  return { contributed, withdrawn, cumulativeProfit, equity: contributed - withdrawn + cumulativeProfit };
+  const contributed = initialInvestment + contributedExtra;
+  return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, equity: contributed - withdrawn + cumulativeProfit };
+}
+/// Dựng dãy [{month, equity, cumulativeProfit}] từ THÁNG BẮT ĐẦU DỰ ÁN
+/// tới THÁNG HIỆN TẠI — mỗi điểm là Vốn Chủ Sở Hữu "chốt" tại đúng ngày
+/// cuối tháng đó (hoặc hôm nay, nếu tháng đang xét chưa qua hết) — dùng
+/// vẽ biểu đồ đường theo thời gian (yêu cầu Ông Chủ 2026-08-15: "xem dạng
+/// đường ngay trong app").
+function computeMonthlyEquityTimeline(){
+  const allShifts = allShiftsCompanyWide();
+  if(allShifts.length===0) return [];
+  const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
+  const startDate = state.equityProjectInfo.startDate || earliestShiftDate;
+  const today = todayLocalDateStr();
+  if(startDate>today) return [];
+  const months = monthsBetween(startDate, today);
+  const initialInvestment = Number(state.equityProjectInfo.initialInvestment)||0;
+  return months.map(ym=>{
+    const dim = daysInMonth(`${ym}-01`);
+    const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
+    const snapshotDate = monthEnd < today ? monthEnd : today;
+    const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const cumulativeProfit = computeCumulativeCompanyProfit(snapshotDate);
+    const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit;
+    return { month: ym, equity, cumulativeProfit };
+  });
+}
+/// Tốc độ thu hồi vốn trung bình mỗi tháng, tính từ CHÊNH LỆCH LỢI NHUẬN
+/// LUỸ KẾ (không phải chênh lệch Vốn Chủ Sở Hữu — vì Vốn Chủ Sở Hữu có
+/// thể nhảy đột ngột do góp/rút thủ công, làm sai lệch nhịp độ THẬT của
+/// hoạt động kinh doanh) trong `windowMonths` tháng gần nhất.
+function computeRecentMonthlyRate(timeline, windowMonths){
+  if(timeline.length<2) return null;
+  const window = timeline.slice(-Math.min(windowMonths+1, timeline.length));
+  if(window.length<2) return null;
+  const deltaProfit = window[window.length-1].cumulativeProfit - window[0].cumulativeProfit;
+  return deltaProfit / (window.length-1);
+}
+function monthShortLabel(ym){
+  const [y,m] = ym.split('-');
+  return `T${Number(m)}/${y.slice(2)}`;
+}
+/// Biểu đồ đường Vốn Chủ Sở Hữu theo từng tháng — SVG thuần (đúng phong
+/// cách renderComparisonChartSVG() đã có, không thêm thư viện ngoài).
+/// Vùng dưới đường tô nhạt màu accent; mốc 0đ kẻ nét đứt để thấy rõ ngay
+/// khi nào vốn "âm" (đang ăn vào vốn gốc). Cuộn ngang được trên iPhone
+/// nếu timeline dài, không bị bóp méo nhãn tháng.
+function renderEquityTimelineChartSVG(timeline){
+  if(timeline.length<2) return '<div class="hint">Cần ít nhất 2 tháng dữ liệu (kể từ Ngày Bắt Đầu Dự Án) mới vẽ được biểu đồ.</div>';
+  const values = timeline.map(t=>t.equity);
+  const minV = Math.min(0, ...values);
+  const maxV = Math.max(0, ...values);
+  const range = (maxV-minV) || 1;
+  const chartH = 190, padL=8, padR=8, padT=20, padB=26;
+  const innerH = chartH - padT - padB;
+  const stepX = 56;
+  const chartW = Math.max(300, padL+padR+stepX*(timeline.length-1));
+  const yFor = v => padT + innerH - ((v-minV)/range)*innerH;
+  const xFor = i => padL + i*stepX;
+  const zeroY = yFor(0);
+  const points = timeline.map((t,i)=>`${xFor(i)},${yFor(t.equity)}`).join(' ');
+  const areaPoints = `${xFor(0)},${zeroY} ${points} ${xFor(timeline.length-1)},${zeroY}`;
+  const dots = timeline.map((t,i)=>`<circle cx="${xFor(i)}" cy="${yFor(t.equity)}" r="3.5" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" stroke="var(--surface)" stroke-width="1.5"></circle>`).join('');
+  const valueLabels = timeline.map((t,i)=>{
+    const above = yFor(t.equity) > padT+12;
+    return `<text x="${xFor(i)}" y="${above?yFor(t.equity)-8:yFor(t.equity)+14}" font-size="9" text-anchor="middle" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" font-weight="700">${fmtShortVND(t.equity)}</text>`;
+  }).join('');
+  const monthLabels = timeline.map((t,i)=>`<text x="${xFor(i)}" y="${chartH-8}" font-size="9.5" text-anchor="middle" fill="var(--ink-soft)">${monthShortLabel(t.month)}</text>`).join('');
+  return `
+    <div style="overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -14px; padding:0 14px;">
+    <svg viewBox="0 0 ${chartW} ${chartH}" style="width:${chartW}px; height:${chartH*0.84}px; display:block;">
+      <line x1="${padL}" y1="${zeroY}" x2="${chartW-padR}" y2="${zeroY}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"></line>
+      <polygon points="${areaPoints}" fill="var(--accent)" opacity="0.10"></polygon>
+      <polyline points="${points}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      ${dots}
+      ${valueLabels}
+      ${monthLabels}
+    </svg>
+    </div>
+  `;
 }
 function renderOwnerEquityModal(){
   const eq = computeOwnerEquity();
+  const timeline = computeMonthlyEquityTimeline();
+  const recentRate3 = computeRecentMonthlyRate(timeline, 3);
+  const recentRate6 = computeRecentMonthlyRate(timeline, 6);
   const sorted = [...state.ownerEquityEntries].sort((a,b)=>b.date.localeCompare(a.date));
+
+  let roiHtml = '';
+  if(eq.initialInvestment>0){
+    const recoveredPercent = Math.max(0, Math.min(100, (eq.cumulativeProfit/eq.initialInvestment)*100));
+    const remainingToRecover = eq.initialInvestment - eq.cumulativeProfit;
+    let breakEvenLine;
+    if(eq.cumulativeProfit>=eq.initialInvestment){
+      breakEvenLine = `<span style="color:var(--profit);">ĐÃ THU HỒI ĐỦ VỐN ✅</span>`;
+    } else if(recentRate3!==null && recentRate3>0){
+      breakEvenLine = `còn ~${Math.ceil(remainingToRecover/recentRate3)} tháng (theo nhịp 3 tháng gần nhất)`;
+    } else {
+      breakEvenLine = `Chưa đủ dữ liệu / đang chững lại`;
+    }
+    roiHtml = `
+    <div class="card" style="margin-top:14px;">
+      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🎯 Hiệu Quả Đầu Tư</div>
+      <div class="summary-row"><span>Đã thu hồi được</span><span class="val" style="font-weight:800;">${recoveredPercent.toFixed(1)}% vốn đầu tư ban đầu</span></div>
+      <div style="background:var(--border); height:8px; border-radius:4px; overflow:hidden; margin:8px 0 12px 0;">
+        <div style="background:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
+      </div>
+      <div class="summary-row"><span>Tốc độ thu hồi TB 3 tháng gần nhất</span><span class="val">${recentRate3!==null?(recentRate3>=0?'+':'')+fmtVND(recentRate3)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
+      <div class="summary-row"><span>Tốc độ thu hồi TB 6 tháng gần nhất</span><span class="val">${recentRate6!==null?(recentRate6>=0?'+':'')+fmtVND(recentRate6)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
+      <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
+    </div>`;
+  }
+
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ×</button></div>
-    <h3>💰 Vốn Chủ Sở Hữu — Toàn Công Ty</h3>
-    <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft);">
-      <div class="summary-row"><span>Tổng đã góp vào</span><span class="val" style="color:var(--profit);">+${fmtVND(eq.contributed)}</span></div>
-      <div class="summary-row"><span>Tổng đã rút ra</span><span class="val" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</span></div>
-      <div class="summary-row"><span>Lợi nhuận luỹ kế (Dòng Tiền Thuần, từ ca đầu tiên tới hôm nay)</span><span class="val" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</span></div>
-      <div class="summary-row total" style="font-size:19px;"><span>VỐN CHỦ SỞ HỮU HIỆN TẠI</span><span class="val" style="color:${eq.equity>=0?'var(--profit)':'var(--loss)'}">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</span></div>
+    <h3 style="margin-bottom:2px;">💰 Dự Án Đầu Tư Xe</h3>
+    <div class="hint" style="margin-top:0; margin-bottom:12px;">Vốn Chủ Sở Hữu — Toàn Công Ty, không tách riêng theo xe</div>
+
+    <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
+      <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
+      <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
     </div>
-    <div class="hint" style="margin-top:8px;">Công thức: Đã góp − Đã rút + Lợi nhuận luỹ kế. Số DƯƠNG = xe đang giữ/sinh thêm đúng phần đó cho Ông Chủ. Số ÂM = xe đang "ăn" vào đúng phần vốn Ông Chủ đã bỏ vào, dù từng kỳ riêng lẻ vẫn có lãi.</div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="summary-row"><span>Vốn đầu tư ban đầu</span><span class="val">${fmtVND(eq.initialInvestment)}</span></div>
+      <div class="summary-row"><span>+ Đã góp thêm sau này</span><span class="val" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</span></div>
+      <div class="summary-row"><span>− Đã rút ra</span><span class="val" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</span></div>
+      <div class="summary-row total"><span>+ Lợi nhuận luỹ kế</span><span class="val" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</span></div>
+    </div>
+    <div class="hint" style="margin-top:6px;">Vốn đầu tư ban đầu + Đã góp thêm − Đã rút + Lợi nhuận luỹ kế (Dòng Tiền Thuần cộng dồn từ ngày bắt đầu dự án tới hôm nay). Số DƯƠNG = xe đang giữ/sinh thêm đúng phần đó cho Ông Chủ. Số ÂM = xe đang "ăn" vào đúng phần vốn đã bỏ vào, dù từng kỳ riêng lẻ vẫn có lãi.</div>
+
+    ${roiHtml}
 
     <div class="card" style="margin-top:14px;">
+      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📈 Biến Động Vốn Chủ Sở Hữu Theo Tháng</div>
+      ${renderEquityTimelineChartSVG(timeline)}
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⚙️ Thông Tin Dự Án</div>
+      <div class="field">
+        <label>Vốn đầu tư ban đầu (giá xe + chi phí liên quan mua xe)</label>
+        <input type="text" inputmode="decimal" id="epi_investment">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
+        <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
+      </div>
+      <button class="btn btn-ghost btn-block" id="epi_saveBtn" style="margin-top:12px;">Lưu Thông Tin Dự Án</button>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">✍️ Ghi Khoản Góp/Rút Mới</div>
       <div class="field">
         <label>Ngày</label>
         <input type="date" id="oe_date" value="${todayLocalDateStr()}">
@@ -1630,7 +1788,8 @@ function renderOwnerEquityModal(){
       <button class="btn btn-accent btn-block" id="oe_addBtn" style="margin-top:12px;">+ Ghi Khoản Này</button>
     </div>
 
-    <div class="card" style="margin-top:14px; padding:0; overflow:hidden;" id="oe_listWrap">
+    <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">📜 Lịch Sử Góp/Rút</div>
+    <div class="card" style="padding:0; overflow:hidden;" id="oe_listWrap">
       ${sorted.length===0 ? '<div class="hint" style="padding:14px;">Chưa có khoản góp/rút nào.</div>' : sorted.map(e=>`
         <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
           <div>
@@ -1646,6 +1805,15 @@ function renderOwnerEquityModal(){
   `);
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
+  let epiInvestmentVal = state.equityProjectInfo.initialInvestment||0;
+  attachMoneyInput(document.getElementById('epi_investment'), epiInvestmentVal, v=>epiInvestmentVal=v);
+  document.getElementById('epi_saveBtn').addEventListener('click', async ()=>{
+    state.equityProjectInfo.initialInvestment = epiInvestmentVal;
+    state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
+    await saveEquityProjectInfo();
+    showToast('Đã lưu thông tin dự án.');
+    renderOwnerEquityModal();
+  });
   document.getElementById('oe_addBtn').addEventListener('click', async ()=>{
     const date = document.getElementById('oe_date').value;
     const type = document.getElementById('oe_type').value;
