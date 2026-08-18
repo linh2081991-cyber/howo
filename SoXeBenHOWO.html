@@ -509,7 +509,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-18 · #50';
+const APP_BUILD = '2026-08-18 · #51';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -703,6 +703,13 @@ let state = {
   // đàng hoàng, chi tiết đầy đủ". Bấm bất kỳ tab nào ở thanh dưới cùng sẽ
   // tự tắt cờ này (xem wiring nav.tabbar).
   showCompanyDashboard: false,
+  // Cơ chế KHỚP SỐ DƯ NGÂN HÀNG THẬT (2026-08-18) — mỗi lần Ông Chủ biết
+  // chính xác số dư ngân hàng THẬT vào 1 ngày cụ thể (nhìn app ngân hàng
+  // ngoài đời), ghi lại thành 1 "mốc chốt" ở đây. App sẽ tự cộng dồn ĐÚNG
+  // dòng tiền phát sinh SAU mốc đó (Dòng Tiền Thuần công ty + Góp/Rút Vốn
+  // Chủ Sở Hữu) để luôn tính ra đúng số dư NGAY BÂY GIỜ, khớp app ngân
+  // hàng thật — không cần nhớ hết mọi khoản đã bơm vào từ trước tới nay.
+  bankBalanceCheckpoints: [], // {id, date, balance, note}
   strategyAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null },
   strategyView: 'hub', // 'hub' | 'ai' | 'appraisal' | 'bonus' — which screen is showing inside the "Trợ Lý" tab right now
   bonusAnalysis: { from: null, to: null, loading: false, error: null, result: null, generatedAt: null,
@@ -1173,7 +1180,7 @@ function sharedDataRef(name){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1194,7 +1201,8 @@ async function loadAll(){
       sharedDataRef('vehicles').get(),
       sharedDataRef('companySettings').get(),
       sharedDataRef('ownerEquityEntries').get(),
-      sharedDataRef('equityProjectInfo').get()
+      sharedDataRef('equityProjectInfo').get(),
+      sharedDataRef('bankBalanceCheckpoints').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1228,6 +1236,8 @@ async function loadAll(){
       const epi = equityProjectInfoSnap.data();
       state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null };
     }
+    const bankBalanceData = bankBalanceCheckpointsSnap.exists ? bankBalanceCheckpointsSnap.data() : null;
+    state.bankBalanceCheckpoints = bankBalanceData && Array.isArray(bankBalanceData.list) ? bankBalanceData.list : [];
     const invoiceLotData = invoiceLotSnap.exists ? invoiceLotSnap.data() : null;
     state.invoiceLots = invoiceLotData && Array.isArray(invoiceLotData.list) ? invoiceLotData.list : [];
     const driverAdvanceData = driverAdvanceSnap.exists ? driverAdvanceSnap.data() : null;
@@ -1472,6 +1482,10 @@ async function saveEquityProjectInfo(){
   try { await sharedDataRef('equityProjectInfo').set(state.equityProjectInfo); }
   catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư — kiểm tra mạng.'); }
 }
+async function saveBankBalanceCheckpoints(){
+  try { await sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints }); }
+  catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng — kiểm tra mạng.'); }
+}
 async function saveShifts(){
   try {
     const vid = activeVehicleIdForEditing();
@@ -1599,15 +1613,29 @@ function companyWideCashFlowFixedMonthly(from, to){
 /// đúng thời điểm cuối tháng X" — dùng cho biểu đồ theo thời gian). Trả
 /// về ĐỦ từng thành phần (không chỉ số cuối) để trang "Dự Án Đầu Tư Xe"
 /// hiện chi tiết minh bạch từng khoản, không chỉ 1 số gộp.
+/// `fromOverride` (2026-08-18, cơ chế khớp số dư ngân hàng): cho phép
+/// tính dòng tiền từ 1 NGÀY BẤT KỲ khác (không phụ thuộc Ngày Bắt Đầu Dự
+/// Án) — dùng để cộng dồn đúng dòng tiền phát sinh SAU 1 mốc chốt số dư
+/// ngân hàng thật Ông Chủ đã khai báo.
 /// companyWideCashFlowFixedMonthly()/roadFeeForRangeCompanyWide() đều đã
 /// tự phân bổ đúng theo số ngày thật trong khoảng (proratedMonthlyCost).
-function computeCumulativeCashFlowBreakdown(toOverride){
+function addDaysToDateStr(dateStr, days){
+  const d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+days);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   const allShifts = allShiftsCompanyWide();
   const empty = { from:null, to:null, cashIn:0, cashOutToSuppliers:0, operatingCashCost:0, repairTotal:0, roadFee:0, fixedMonthly:0, total:0 };
-  if(allShifts.length===0) return empty;
-  const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
-  const from = state.equityProjectInfo.startDate || earliestShiftDate;
   const to = toOverride || todayLocalDateStr();
+  let from;
+  if(fromOverride){
+    from = fromOverride;
+  } else {
+    if(allShifts.length===0) return empty;
+    const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
+    from = state.equityProjectInfo.startDate || earliestShiftDate;
+  }
   if(from>to) return { ...empty, from, to };
   const cashIn = state.sitePayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutToSuppliers = state.supplierPayments.filter(p=>p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
@@ -1720,6 +1748,7 @@ function renderCompanyDashboardPage(){
   const sorted = [...state.ownerEquityEntries].sort((a,b)=>b.date.localeCompare(a.date));
   const breakdown = computeCumulativeCashFlowBreakdown();
   const debtSummary = computeAllPartnersDebtSummary();
+  const bankRecon = computeBankBalanceReconciliation();
 
   let roiHtml = '';
   if(eq.initialInvestment>0){
@@ -1795,6 +1824,48 @@ function renderCompanyDashboardPage(){
         <div class="summary-row"><span>Ông Chủ còn nợ nhà cung cấp</span><span class="val" style="color:${debtSummary.totalSupplierOwed>=0?'var(--loss)':'var(--profit)'};">${fmtVND(debtSummary.totalSupplierOwed)}</span></div>
         <div class="hint" style="margin-top:6px;">Số dương ở "Khách hàng còn nợ" = tiền Ông Chủ SẼ nhận thêm (tài sản). Số dương ở "Còn nợ nhà cung cấp" = tiền Ông Chủ CÒN PHẢI trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản).</div>
       </div>
+
+      <div class="card" style="margin-top:12px; border:1.5px solid var(--accent);">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🏦 Khớp Số Dư Ngân Hàng</div>
+        ${bankRecon ? `
+        <div class="summary-row"><span>Mốc chốt gần nhất (${formatDateVN(bankRecon.checkpoint.date)})</span><span class="val">${fmtVND(bankRecon.checkpoint.balance)}</span></div>
+        <div class="summary-row"><span>+ Dòng tiền công ty phát sinh sau đó</span><span class="val" style="color:${bankRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${bankRecon.cashFlowSince>=0?'+':''}${fmtVND(bankRecon.cashFlowSince)}</span></div>
+        <div class="summary-row"><span>+ Đã góp thêm sau đó</span><span class="val" style="color:var(--profit);">+${fmtVND(bankRecon.contributedSince)}</span></div>
+        <div class="summary-row"><span>− Đã rút ra sau đó</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.withdrawnSince)}</span></div>
+        <div class="summary-row total"><span>= Số dư app tính</span><span class="val" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</span></div>
+        <div class="hint" style="margin-top:6px;">So số này với đúng số dư trên app ngân hàng ngoài đời NGAY BÂY GIỜ. Khớp → mọi thu chi đã khai đủ trên app. Lệch → còn khoản nào đó (thu/chi/góp/rút) chưa nhập, hoặc khai 1 mốc chốt MỚI bên dưới để bắt đầu khớp lại từ hôm nay.</div>
+        ` : `
+        <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đầu tiên bên dưới (đúng số dư ngân hàng THẬT ngay lúc này) để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
+        `}
+        <div class="formula-divider" style="margin:12px 0;"></div>
+        <div class="field">
+          <label>Ngày chốt</label>
+          <input type="date" id="bbc_date" value="${todayLocalDateStr()}">
+        </div>
+        <div class="field">
+          <label>Số dư ngân hàng THẬT vào đúng ngày này</label>
+          <input type="text" inputmode="decimal" id="bbc_balance">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="bbc_note" placeholder="Không bắt buộc">
+        </div>
+        <button class="btn btn-accent btn-block" id="bbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
+      </div>
+      ${state.bankBalanceCheckpoints.length>0 ? `
+      <div class="card" style="margin-top:12px; padding:0; overflow:hidden;">
+        ${[...state.bankBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${formatDateVN(c.date)}</div>
+              ${c.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(c.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
+              <button class="link-btn" data-del-bankcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
     </section>
 
     <section class="group">
@@ -1887,6 +1958,26 @@ function renderCompanyDashboardPage(){
       state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
       await saveOwnerEquityEntries();
       showToast('Đã xoá.');
+      renderCompanyDashboardPage();
+    });
+  });
+  let bbcBalanceVal = 0;
+  attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
+  document.getElementById('bbc_addBtn').addEventListener('click', async ()=>{
+    const date = document.getElementById('bbc_date').value;
+    const note = document.getElementById('bbc_note').value.trim();
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(state.bankBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
+    state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
+    await saveBankBalanceCheckpoints();
+    showToast('Đã khai báo mốc chốt.');
+    renderCompanyDashboardPage();
+  });
+  document.querySelectorAll('[data-del-bankcheckpoint]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
+      await saveBankBalanceCheckpoints();
+      showToast('Đã xoá mốc chốt.');
       renderCompanyDashboardPage();
     });
   });
@@ -5918,7 +6009,12 @@ function aggregateStrategyData(from, to){
   const todayYM = todayLocalDateStr();
   const financialSnapshot = {
     roadFeeThisMonth: Math.round(roadFeeForRange(todayYM, todayYM)),
-    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
+    // SỬA 2026-08-18 (audit toàn diện): trước đây cộng cả GỐC vay ngân
+    // hàng vào đây — sai chuẩn kế toán (gốc là trả nợ, không phải chi
+    // phí — xem lý do đầy đủ ở computePeriodSummary). Nay CHỈ cộng LÃI
+    // vay, đúng khớp với "LỢI NHUẬN THỰC TẾ" ở tab Kết Quả — AI Trợ Lý
+    // không còn nhận số chi phí cố định bị thổi phồng nữa.
+    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
   };
 
   return {
@@ -6193,7 +6289,12 @@ function computeHiringAdvisorMetrics(draft){
   const currentMonthlyFood = activeDrivers.reduce((s,d)=>s+(Number(d.dailyFoodAllowance)||0),0)*workDays;
   const today = todayLocalDateStr();
   const monthlyRoadFee = roadFeeForRange(today, today);
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanPayment)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  // SỬA 2026-08-18 (audit toàn diện): trước đây cộng cả GỐC vay ngân hàng
+  // vào chi phí cố định — sai chuẩn kế toán, không khớp với "Điểm Hoà
+  // Vốn"/"LỢI NHUẬN THỰC TẾ" ở tab Kết Quả (chỉ trừ LÃI vay). Nay đồng bộ
+  // đúng công thức đó, để Dự Đoán Hoà Vốn Cả Tháng không bị thổi phồng
+  // chi phí cố định so với thực tế.
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const currentFixedCost = currentMonthlySalary + currentMonthlyHousing + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   // ----- Kịch bản HIỆN TẠI (1 lái) — quy đổi nhịp độ thực tế trong khoảng
@@ -6811,7 +6912,7 @@ function computeAppraisalMetrics(p){
   const fixedBaseSalaryMonthly = Number(p.fixedBaseSalaryMonthly)||0;
   const fixedHousingMonthly = Number(p.fixedHousingMonthly)||0;
   const fixedDepreciationMonthly = Number(p.fixedDepreciationMonthly)||0;
-  const fixedLoanMonthly = Number(state.settings.monthlyLoanPayment)||0; // lấy tự động từ Công Cụ Tính Gốc+Lãi ở Cài Đặt — chi phí cố định áp dụng cho toàn bộ app, không gõ tay riêng theo từng công trình nữa
+  const fixedLoanMonthly = Number(state.settings.monthlyLoanInterest)||0; // SỬA 2026-08-18 (audit toàn diện): CHỈ LÃI vay, không gồm gốc — gốc là trả nợ, không phải chi phí, đúng khớp với "LỢI NHUẬN THỰC TẾ" ở tab Kết Quả
   const fixedInsuranceMonthly = Number(p.fixedInsuranceMonthly)||0;
   const fixedRegistrationMonthly = Number(p.fixedRegistrationMonthly)||0;
   const fixedOtherMonthly = Number(p.fixedOtherMonthly)||0;
@@ -7307,7 +7408,7 @@ function openProjectAppraisalEditor(id){
       <div class="summary-row"><span>Lương cứng</span><span class="val">${fmtVND(m.fixedBaseSalaryMonthly)}</span></div>
       <div class="summary-row"><span>Nhà ở</span><span class="val">${fmtVND(m.fixedHousingMonthly)}</span></div>
       <div class="summary-row"><span>Khấu hao xe</span><span class="val">${fmtVND(m.fixedDepreciationMonthly)}</span></div>
-      <div class="summary-row"><span>Gốc + lãi vay ngân hàng (tự động từ Cài Đặt)</span><span class="val">${fmtVND(m.fixedLoanMonthly)}</span></div>
+      <div class="summary-row"><span>Lãi vay ngân hàng (tự động từ Cài Đặt, chỉ phần lãi)</span><span class="val">${fmtVND(m.fixedLoanMonthly)}</span></div>
       <div class="summary-row"><span>Bảo hiểm</span><span class="val">${fmtVND(m.fixedInsuranceMonthly)}</span></div>
       <div class="summary-row"><span>Đăng kiểm/đăng ký</span><span class="val">${fmtVND(m.fixedRegistrationMonthly)}</span></div>
       <div class="summary-row"><span>Chi phí cố định khác</span><span class="val">${fmtVND(m.fixedOtherMonthly)}</span></div>
@@ -7725,7 +7826,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
   const today = todayLocalDateStr();
   const monthlyRoadFee = roadFeeForRange(today, today);
-  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0); // SỬA 2026-08-18 (audit toàn diện): CHỈ LÃI vay, không gồm gốc
   const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   const toDate = today;
@@ -8021,6 +8122,23 @@ function computeAllPartnersDebtSummary(){
   const totalCustomerOwed = state.customers.reduce((sum,c)=>sum+computeCustomerDebt(c.id).owed, 0);
   const totalSupplierOwed = state.suppliers.reduce((sum,s)=>sum+computeSupplierDebt(s.id).owed, 0);
   return { totalCustomerOwed, totalSupplierOwed };
+}
+/// Đối chiếu số dư ngân hàng THẬT (2026-08-18) — lấy mốc chốt GẦN NHẤT
+/// (ngày ≤ hôm nay) Ông Chủ đã khai báo, cộng dồn ĐÚNG Dòng Tiền Thuần
+/// công ty + Góp/Rút Vốn Chủ Sở Hữu phát sinh SAU đúng ngày đó, ra số dư
+/// "app tính" — để Ông Chủ tự so với số dư THẬT trên app ngân hàng ngoài
+/// đời. Trả về null nếu CHƯA khai báo mốc chốt nào — không tự suy đoán.
+function computeBankBalanceReconciliation(){
+  const today = todayLocalDateStr();
+  const sorted = [...state.bankBalanceCheckpoints].filter(c=>c.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
+  if(sorted.length===0) return null;
+  const latest = sorted[0];
+  const from = addDaysToDateStr(latest.date, 1);
+  const breakdown = from<=today ? computeCumulativeCashFlowBreakdown(today, from) : { total:0 };
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const computedBalance = latest.balance + breakdown.total + contributedSince - withdrawnSince;
+  return { checkpoint: latest, cashFlowSince: breakdown.total, contributedSince, withdrawnSince, computedBalance };
 }
 /// Chi tiết TỪNG CHUYẾN (không gộp theo công trình nữa) gắn với đúng
 /// khách hàng/nhà cung cấp — nhóm theo NGÀY để Ông Chủ thấy rõ CẢ "hôm đó
