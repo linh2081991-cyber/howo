@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-19 · #55';
+const APP_BUILD = '2026-08-19 · #57';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -788,7 +788,7 @@ let state = {
   // Sở Hữu ở trên (đó là các lần góp/rút LẺ TẺ về sau) — và Ngày Bắt Đầu
   // Dự Án (Ông Chủ tự điền, dùng làm mốc "từ ngày nào" để cộng dồn Lợi
   // Nhuận Luỹ Kế — nếu để trống, app tự lấy ngày ca đầu tiên đã ghi).
-  equityProjectInfo: { initialInvestment: 0, startDate: null },
+  equityProjectInfo: { initialInvestment: 0, startDate: null, registeredCharterCapital: 0, charterCapitalDeadline: null },
   // Bấm "🏢 LINH CHÍ THÀNH" ở header mở trang này TOÀN MÀN HÌNH (không
   // phải modal nhỏ) — yêu cầu Ông Chủ 2026-08-15: "1 trang làm việc đàng
   // hoàng, chi tiết đầy đủ". Bấm bất kỳ tab nào ở thanh dưới cùng sẽ tự
@@ -1323,7 +1323,8 @@ async function loadAll(){
     state.ownerEquityEntries = ownerEquityData && Array.isArray(ownerEquityData.list) ? ownerEquityData.list : [];
     if(equityProjectInfoSnap.exists){
       const epi = equityProjectInfoSnap.data();
-      state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null };
+      state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null,
+        registeredCharterCapital: Number(epi.registeredCharterCapital)||0, charterCapitalDeadline: epi.charterCapitalDeadline||null };
     }
     const bankBalanceData = bankBalanceCheckpointsSnap.exists ? bankBalanceCheckpointsSnap.data() : null;
     state.bankBalanceCheckpoints = bankBalanceData && Array.isArray(bankBalanceData.list) ? bankBalanceData.list : [];
@@ -8270,6 +8271,17 @@ function computeAllPartnersDebtSummary(){
 /// công ty + Góp/Rút Vốn Chủ Sở Hữu phát sinh SAU đúng ngày đó, ra số dư
 /// "app tính" — để Ông Chủ tự so với số dư THẬT trên app ngân hàng ngoài
 /// đời. Trả về null nếu CHƯA khai báo mốc chốt nào — không tự suy đoán.
+/// SỬA 2026-08-19 (lỗi thật, đã đối chiếu đúng số Ông Chủ báo): Góp/Rút
+/// Vốn Chủ Sở Hữu ghi ĐÚNG NGÀY với mốc chốt (VD khai mốc chốt 18/08 buổi
+/// sáng, tối 18/08 mới góp thêm 400tr) trước đây bị so sánh bằng dấu >
+/// (chặt), khiến khoản ghi CÙNG NGÀY mốc chốt bị loại (18/08 > 18/08 =
+/// sai) — coi như đã nằm sẵn trong số dư đã khai, dù thực tế KHÔNG PHẢI.
+/// App chỉ lưu NGÀY, không lưu GIỜ, nên không thể biết chính xác góp
+/// trước/sau lúc khai mốc chốt — nhưng vì Ông Chủ chủ động ghi riêng biệt
+/// khoản Góp/Rút (khác hẳn với dòng tiền công ty tự động từ ca/sổ tiền,
+/// vốn có thể đã phát sinh trước lúc kiểm tra số dư), nên coi khoản Góp/
+/// Rút ghi CÙNG ngày mốc chốt là PHÁT SINH SAU (dùng >=) hợp lý hơn — Ông
+/// Chủ luôn chủ động ghi đúng lúc/ngay sau khi có giao dịch thật.
 function computeBankBalanceReconciliation(){
   const today = todayLocalDateStr();
   const sorted = [...state.bankBalanceCheckpoints].filter(c=>c.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
@@ -8277,10 +8289,29 @@ function computeBankBalanceReconciliation(){
   const latest = sorted[0];
   const from = addDaysToDateStr(latest.date, 1);
   const breakdown = from<=today ? computeCumulativeCashFlowBreakdown(today, from) : { total:0 };
-  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + breakdown.total + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince: breakdown.total, contributedSince, withdrawnSince, computedBalance };
+}
+/// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
+/// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
+/// mọi khoản góp vào, vì có thể có tiền góp thêm cho vốn lưu động, KHÔNG
+/// tính vào cam kết vốn điều lệ khi đăng ký kinh doanh) với số ĐÃ ĐĂNG KÝ
+/// (registeredCharterCapital, Ông Chủ tự khai theo đúng giấy đăng ký kinh
+/// doanh) — cảnh báo nếu QUÁ HẠN mà CHƯA góp đủ, để tránh bị Sở KH-ĐT/
+/// Cơ Quan Thuế xử phạt theo đúng Luật Doanh Nghiệp (thường hạn 90 ngày kể
+/// từ ngày được cấp Giấy CN Đăng Ký Doanh Nghiệp — Ông Chủ tự nhập đúng
+/// hạn thật ghi trên giấy tờ công ty, app không tự đoán).
+function computeCharterCapitalStatus(){
+  const registered = Number(state.equityProjectInfo.registeredCharterCapital)||0;
+  const contributed = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.isCharterCapital).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const remaining = Math.max(0, registered - contributed);
+  const deadline = state.equityProjectInfo.charterCapitalDeadline;
+  const today = todayLocalDateStr();
+  const isPastDeadline = !!(deadline && today > deadline && remaining > 0);
+  const daysUntilDeadline = deadline ? Math.round((new Date(deadline+'T00:00:00') - new Date(today+'T00:00:00'))/86400000) : null;
+  return { registered, contributed, remaining, deadline, isPastDeadline, daysUntilDeadline };
 }
 /// Chi tiết TỪNG CHUYẾN (không gộp theo công trình nữa) gắn với đúng
 /// khách hàng/nhà cung cấp — nhóm theo NGÀY để Ông Chủ thấy rõ CẢ "hôm đó
@@ -10686,6 +10717,7 @@ function recomputeBankLoanMonthlyPayment(){
 }
 function renderCompanyDashboardPage(){
   const eq = computeOwnerEquity();
+  const charterStatus = computeCharterCapitalStatus();
   const timeline = computeMonthlyEquityTimeline();
   const recentRate3 = computeRecentMonthlyRate(timeline, 3);
   const recentRate6 = computeRecentMonthlyRate(timeline, 6);
@@ -10732,6 +10764,23 @@ function renderCompanyDashboardPage(){
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
       </div>
+
+      ${charterStatus.registered>0 ? `
+      <div class="card" style="margin-top:12px; border:1.5px solid ${charterStatus.isPastDeadline?'var(--loss)':'var(--accent)'};">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📜 Vốn Điều Lệ</div>
+        <div class="summary-row"><span>Đã đăng ký (theo Giấy CN ĐKDN)</span><span class="val">${fmtVND(charterStatus.registered)}</span></div>
+        <div class="summary-row"><span>Đã góp (đánh dấu vốn điều lệ)</span><span class="val" style="color:var(--profit);">${fmtVND(charterStatus.contributed)}</span></div>
+        <div class="summary-row total"><span>Còn thiếu</span><span class="val" style="color:${charterStatus.remaining>0?'var(--loss)':'var(--profit)'};">${charterStatus.remaining>0?fmtVND(charterStatus.remaining):'Đã góp đủ ✅'}</span></div>
+        ${charterStatus.deadline ? `<div class="hint" style="margin-top:6px;">Hạn góp đủ: ${formatDateVN(charterStatus.deadline)}${charterStatus.remaining>0 ? (charterStatus.isPastDeadline ? ` — <b style="color:var(--loss);">ĐÃ QUÁ HẠN ${Math.abs(charterStatus.daysUntilDeadline)} ngày!</b>` : (charterStatus.daysUntilDeadline<=30 ? ` — còn <b style="color:var(--loss);">${charterStatus.daysUntilDeadline} ngày</b>` : ` — còn ${charterStatus.daysUntilDeadline} ngày`)) : ''}</div>` : ''}
+        ${charterStatus.isPastDeadline ? `<div style="margin-top:8px; padding:10px 12px; background:var(--loss); color:#fff; border-radius:8px; font-weight:700; font-size:13px;">⚠️ ĐÃ QUÁ HẠN góp đủ vốn điều lệ theo Luật Doanh Nghiệp — có thể bị Sở KH-ĐT/Cơ Quan Thuế xử phạt hoặc yêu cầu điều chỉnh giảm vốn điều lệ đã đăng ký. Nên góp bù ngay hoặc liên hệ kế toán/tư vấn pháp lý để làm thủ tục điều chỉnh kịp thời.</div>` : ''}
+        <button class="btn btn-ghost btn-block" id="charterCapitalDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Các Khoản Đã Góp Vốn Điều Lệ</button>
+      </div>
+      ` : `
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:6px;">📜 Vốn Điều Lệ</div>
+        <div class="hint">Chưa khai "Vốn điều lệ đã đăng ký" ở mục "⚙️ Thông Tin Dự Án" bên dưới — khai vào đó để app tự theo dõi tiến độ góp đủ, tránh bị Cơ Quan Thuế xử phạt do góp thiếu/trễ hạn.</div>
+      </div>
+      `}
 
       <div class="card" style="margin-top:12px;">
         <div class="summary-row"><span>Vốn đầu tư ban đầu (mua xe)</span><span class="val">${fmtVND(eq.initialInvestment)}</span></div>
@@ -10822,9 +10871,17 @@ function renderCompanyDashboardPage(){
           <label>Vốn đầu tư ban đầu (giá xe + chi phí liên quan mua xe)</label>
           <input type="text" inputmode="decimal" id="epi_investment">
         </div>
-        <div class="field" style="margin-bottom:0;">
+        <div class="field">
           <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
           <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
+        </div>
+        <div class="field">
+          <label>Vốn điều lệ đã đăng ký (theo Giấy CN Đăng Ký Doanh Nghiệp)</label>
+          <input type="text" inputmode="decimal" id="epi_charterCapital">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Hạn góp đủ vốn điều lệ (để trống = không cảnh báo hạn)</label>
+          <input type="date" id="epi_charterDeadline" value="${state.equityProjectInfo.charterCapitalDeadline||''}">
         </div>
         <button class="btn btn-ghost btn-block" id="epi_saveBtn" style="margin-top:12px;">Lưu Thông Tin Dự Án</button>
       </div>
@@ -10853,6 +10910,10 @@ function renderCompanyDashboardPage(){
           <label>Ghi chú (VD: đổ dầu bằng tiền túi, rút lãi tiêu Tết...)</label>
           <input type="text" id="oe_note" placeholder="Không bắt buộc">
         </div>
+        <label id="oe_charterLabel" style="display:flex; align-items:center; gap:8px; margin-top:14px; cursor:pointer;">
+          <input type="checkbox" id="oe_isCharterCapital" style="width:20px; height:20px; margin:0;">
+          <span style="font-size:14px;">Đây là góp <b>vốn điều lệ</b> (theo cam kết đăng ký kinh doanh)</span>
+        </label>
         <button class="btn btn-accent btn-block" id="oe_addBtn" style="margin-top:12px;">+ Ghi Khoản Này</button>
       </div>
     </section>
@@ -10864,6 +10925,7 @@ function renderCompanyDashboardPage(){
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
               <div style="font-weight:700;">${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'} — ${formatDateVN(e.date)}</div>
+              ${e.isCharterCapital ? `<div style="margin-top:3px;"><span style="background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:800; padding:2px 8px; border-radius:20px;">📜 Vốn điều lệ</span></div>` : ''}
               ${e.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.note)}</div>` : ''}
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
@@ -10883,24 +10945,36 @@ function renderCompanyDashboardPage(){
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', renderCashFlowBreakdownDetailPage);
   const bankReconDetailBtn = document.getElementById('bankReconDetailBtn');
   if(bankReconDetailBtn) bankReconDetailBtn.addEventListener('click', renderBankReconDetailPage);
+  const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
+  if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', renderCharterCapitalDetailPage);
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
   let epiInvestmentVal = state.equityProjectInfo.initialInvestment||0;
   attachMoneyInput(document.getElementById('epi_investment'), epiInvestmentVal, v=>epiInvestmentVal=v);
+  let epiCharterCapitalVal = state.equityProjectInfo.registeredCharterCapital||0;
+  attachMoneyInput(document.getElementById('epi_charterCapital'), epiCharterCapitalVal, v=>epiCharterCapitalVal=v);
   document.getElementById('epi_saveBtn').addEventListener('click', async ()=>{
     state.equityProjectInfo.initialInvestment = epiInvestmentVal;
     state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
+    state.equityProjectInfo.registeredCharterCapital = epiCharterCapitalVal;
+    state.equityProjectInfo.charterCapitalDeadline = document.getElementById('epi_charterDeadline').value || null;
     await saveEquityProjectInfo();
     showToast('Đã lưu thông tin dự án.');
     renderCompanyDashboardPage();
   });
+  const oeCharterLabel = document.getElementById('oe_charterLabel');
+  const oeTypeSelect = document.getElementById('oe_type');
+  const syncCharterLabelVisibility = () => { oeCharterLabel.style.display = oeTypeSelect.value==='contribution' ? 'flex' : 'none'; };
+  syncCharterLabelVisibility();
+  oeTypeSelect.addEventListener('change', syncCharterLabelVisibility);
   document.getElementById('oe_addBtn').addEventListener('click', async ()=>{
     const date = document.getElementById('oe_date').value;
     const type = document.getElementById('oe_type').value;
     const note = document.getElementById('oe_note').value.trim();
+    const isCharterCapital = type==='contribution' && document.getElementById('oe_isCharterCapital').checked;
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
     if(!oeAmountVal || oeAmountVal<=0){ showToast('Nhập số tiền trước đã.'); return; }
-    state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note });
+    state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note, isCharterCapital });
     await saveOwnerEquityEntries();
     showToast('Đã ghi khoản mới.');
     renderCompanyDashboardPage();
@@ -10960,10 +11034,10 @@ function computeCompanyCashFlowLedger(){
 }
 function renderCompanyCashFlowLedgerPage(){
   const entries = computeCompanyCashFlowLedger();
-  const totalIn = state.sitePayments.reduce((s,p)=>s+(Number(p.amount)||0),0)
-                + state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const totalOut = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0)
-                 + state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const totalFromCustomers = state.sitePayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const totalContributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const totalToSuppliers = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const totalWithdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -10973,8 +11047,10 @@ function renderCompanyCashFlowLedgerPage(){
       <h2 style="margin-bottom:2px;">📋 Sao Kê Toàn Bộ Dòng Tiền</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách bank vào + Tiền bank cho mỏ + Góp/Rút Vốn Chủ Sở Hữu (tiền mặt) — cập nhật real-time đúng dữ liệu Ông Chủ đã nhập trên app, sắp theo ngày gần nhất trước.</div>
       <div class="card">
-        <div class="summary-row"><span>Tổng tiền vào (khách trả + góp vốn)</span><span class="val" style="color:var(--profit);">+${fmtVND(totalIn)}</span></div>
-        <div class="summary-row"><span>Tổng tiền ra (trả mỏ + rút vốn)</span><span class="val" style="color:var(--loss);">−${fmtVND(totalOut)}</span></div>
+        <div class="summary-row"><span>Khách hàng đã trả</span><span class="val" style="color:var(--profit);">+${fmtVND(totalFromCustomers)}</span></div>
+        <div class="summary-row"><span>Ông Chủ góp vốn</span><span class="val" style="color:var(--profit);">+${fmtVND(totalContributed)}</span></div>
+        <div class="summary-row"><span>Đã trả nhà cung cấp (mỏ)</span><span class="val" style="color:var(--loss);">−${fmtVND(totalToSuppliers)}</span></div>
+        <div class="summary-row"><span>Ông Chủ đã rút vốn</span><span class="val" style="color:var(--loss);">−${fmtVND(totalWithdrawn)}</span></div>
       </div>
     </section>
     <section class="group">
@@ -11095,7 +11171,14 @@ function renderCashFlowBreakdownDetailPage(){
 function renderBankReconDetailPage(){
   const bankRecon = computeBankBalanceReconciliation();
   const allEntries = computeCompanyCashFlowLedger();
-  const entries = bankRecon ? allEntries.filter(e=>e.date>bankRecon.checkpoint.date) : allEntries;
+  // Cùng logic với computeBankBalanceReconciliation(): khoản Góp/Rút Vốn
+  // Chủ Sở Hữu ghi CÙNG ngày mốc chốt vẫn tính là "sau đó" (>=, vì Ông Chủ
+  // chủ động ghi riêng biệt khoản này); tiền khách/mỏ dùng > (từ ngày kế
+  // tiếp), khớp đúng với cách tính "Dòng tiền công ty phát sinh sau đó".
+  const entries = bankRecon ? allEntries.filter(e=>{
+    const isEquity = e.category.indexOf('vốn (tiền mặt)')>=0;
+    return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
+  }) : allEntries;
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -11118,6 +11201,51 @@ function renderBankReconDetailPage(){
     </section>
   `;
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
+}
+/// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
+/// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
+/// để Ông Chủ tự đối chiếu đúng đã góp bao nhiêu, còn thiếu bao nhiêu so
+/// với số đã đăng ký, tránh bị Cơ Quan Thuế/Sở KH-ĐT xử phạt do góp thiếu.
+function renderCharterCapitalDetailPage(){
+  const status = computeCharterCapitalStatus();
+  const entries = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.isCharterCapital).sort((a,b)=>a.date.localeCompare(b.date));
+  let running = 0;
+  const rows = entries.map(e=>{
+    running += Number(e.amount)||0;
+    return `
+      <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+        <div>
+          <div style="font-weight:700;">${formatDateVN(e.date)}</div>
+          ${e.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.note)}</div>` : ''}
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:800; color:var(--profit);">+${fmtVND(e.amount)}</div>
+          <div class="hint" style="margin-top:2px;">Luỹ kế: ${fmtVND(running)}</div>
+        </div>
+      </div>`;
+  }).join('');
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="charterDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📜 Chi Tiết Vốn Điều Lệ</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Chỉ liệt kê các khoản Góp Vào đã đánh dấu "Vốn điều lệ" — không gồm góp thêm vốn lưu động thông thường.</div>
+      <div class="card">
+        <div class="summary-row"><span>Đã đăng ký</span><span class="val">${fmtVND(status.registered)}</span></div>
+        <div class="summary-row"><span>Đã góp</span><span class="val" style="color:var(--profit);">${fmtVND(status.contributed)}</span></div>
+        <div class="summary-row total"><span>Còn thiếu</span><span class="val" style="color:${status.remaining>0?'var(--loss)':'var(--profit)'};">${status.remaining>0?fmtVND(status.remaining):'Đã góp đủ ✅'}</span></div>
+        ${status.deadline ? `<div class="hint" style="margin-top:6px;">Hạn góp đủ: ${formatDateVN(status.deadline)}</div>` : ''}
+      </div>
+    </section>
+    <section class="group">
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có khoản nào được đánh dấu Vốn Điều Lệ. Vào "Ghi Khoản Góp/Rút Mới" ở trang trước, tick ô "Đây là góp vốn điều lệ" khi ghi khoản mới — hoặc xoá khoản cũ rồi ghi lại có tick ô đó nếu cần khai bù cho khoản đã ghi trước đây.</div>' : rows}
+      </div>
+    </section>
+  `;
+  document.getElementById('charterDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
 }
 function renderSettings(){
   const app=document.getElementById('app');
