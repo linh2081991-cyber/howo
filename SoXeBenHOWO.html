@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-19 · #57';
+const APP_BUILD = '2026-08-19 · #59';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -8267,32 +8267,41 @@ function computeAllPartnersDebtSummary(){
   return { totalCustomerOwed, totalSupplierOwed };
 }
 /// Đối chiếu số dư ngân hàng THẬT (2026-08-18) — lấy mốc chốt GẦN NHẤT
-/// (ngày ≤ hôm nay) Ông Chủ đã khai báo, cộng dồn ĐÚNG Dòng Tiền Thuần
-/// công ty + Góp/Rút Vốn Chủ Sở Hữu phát sinh SAU đúng ngày đó, ra số dư
-/// "app tính" — để Ông Chủ tự so với số dư THẬT trên app ngân hàng ngoài
-/// đời. Trả về null nếu CHƯA khai báo mốc chốt nào — không tự suy đoán.
-/// SỬA 2026-08-19 (lỗi thật, đã đối chiếu đúng số Ông Chủ báo): Góp/Rút
-/// Vốn Chủ Sở Hữu ghi ĐÚNG NGÀY với mốc chốt (VD khai mốc chốt 18/08 buổi
-/// sáng, tối 18/08 mới góp thêm 400tr) trước đây bị so sánh bằng dấu >
-/// (chặt), khiến khoản ghi CÙNG NGÀY mốc chốt bị loại (18/08 > 18/08 =
-/// sai) — coi như đã nằm sẵn trong số dư đã khai, dù thực tế KHÔNG PHẢI.
-/// App chỉ lưu NGÀY, không lưu GIỜ, nên không thể biết chính xác góp
-/// trước/sau lúc khai mốc chốt — nhưng vì Ông Chủ chủ động ghi riêng biệt
-/// khoản Góp/Rút (khác hẳn với dòng tiền công ty tự động từ ca/sổ tiền,
-/// vốn có thể đã phát sinh trước lúc kiểm tra số dư), nên coi khoản Góp/
-/// Rút ghi CÙNG ngày mốc chốt là PHÁT SINH SAU (dùng >=) hợp lý hơn — Ông
-/// Chủ luôn chủ động ghi đúng lúc/ngay sau khi có giao dịch thật.
+/// (ngày ≤ hôm nay) Ông Chủ đã khai báo, cộng dồn ĐÚNG tiền chảy qua
+/// TÀI KHOẢN NGÂN HÀNG phát sinh SAU đúng ngày đó, ra số dư "app tính" —
+/// để Ông Chủ tự so với số dư THẬT trên app ngân hàng ngoài đời. Trả về
+/// null nếu CHƯA khai báo mốc chốt nào — không tự suy đoán.
+/// SỬA 2026-08-19 (lỗi thật, đã đối chiếu đúng thực tế Ông Chủ báo): 2 lỗi
+/// gộp lại —
+///  (1) Góp/Rút Vốn Chủ Sở Hữu ghi CÙNG NGÀY mốc chốt trước đây bị so
+///      sánh bằng dấu > (chặt) nên bị loại nhầm — đã sửa dùng >=.
+///  (2) QUAN TRỌNG HƠN: trước đây dùng thẳng computeCumulativeCashFlowBreakdown()
+///      — gồm CẢ chi phí vận hành (dầu/lương/ăn/nhà/phát sinh), sửa chữa,
+///      luật đường, vay/bảo hiểm/đăng kiểm — những khoản này ở thực tế
+///      Ông Chủ THƯỜNG TRẢ BẰNG TIỀN MẶT, không hề chảy qua tài khoản
+///      ngân hàng, nên KHÔNG được phép trừ vào số dư ngân hàng (VD: 70tr
+///      trả mỏ HÔM NAY là tiền mặt, không phải chuyển khoản — nếu vẫn trừ
+///      vào số dư ngân hàng thì SAI hoàn toàn thực tế). Nay CHỈ tính đúng
+///      2 sổ có gắn "Phương thức" rõ ràng (Sổ Tiền Khách Bank Vào + Sổ
+///      Tiền Bank Cho Mỏ + Góp/Rút Vốn Chủ Sở Hữu) VÀ lọc đúng
+///      method!=='cash' (khoản Tiền Mặt bị loại hẳn). Chi phí vận hành/
+///      sửa chữa/luật đường/vay/bảo hiểm/đăng kiểm KHÔNG có trường
+///      "Phương thức" riêng (không phải sổ giao dịch rời rạc), nên TẠM
+///      THỜI không tính vào đây — vẫn tính đủ ở "Lợi Nhuận Luỹ Kế" (đó là
+///      tổng LỢI NHUẬN công ty, đúng và khác hẳn "Khớp Số Dư Ngân Hàng").
 function computeBankBalanceReconciliation(){
   const today = todayLocalDateStr();
   const sorted = [...state.bankBalanceCheckpoints].filter(c=>c.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
   if(sorted.length===0) return null;
   const latest = sorted[0];
   const from = addDaysToDateStr(latest.date, 1);
-  const breakdown = from<=today ? computeCumulativeCashFlowBreakdown(today, from) : { total:0 };
-  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const computedBalance = latest.balance + breakdown.total + contributedSince - withdrawnSince;
-  return { checkpoint: latest, cashFlowSince: breakdown.total, contributedSince, withdrawnSince, computedBalance };
+  const cashInBank = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const cashOutBank = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const cashFlowSince = cashInBank - cashOutBank;
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
+  return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -9647,7 +9656,7 @@ function openCustomerDetail(customerId){
           <tbody>
             ${payments.map(p=>`
             <tr class="grid-clickable-row" data-id="${p.id}" onclick="openCustomerPaymentEditor('${p.id}','${customerId}')">
-              <td>${formatDateVN(p.date)}</td>
+              <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
               <td>${p.notes?escapeHtml(p.notes):'—'}</td>
               <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</td>
             </tr>`).join('')}
@@ -9688,7 +9697,8 @@ function openCustomerPaymentEditor(id, customerId){
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
   const cid = customerId || (existing && existing.customerId);
   const cus = customerById(cid);
-  const draft = existing ? {...existing} : { id: uid('pay'), siteName: cus?cus.name:'', customerId: cid, partnerName: cus?cus.name:'', date: todayLocalDateStr(), amount:0, notes:'' };
+  const draft = existing ? {...existing} : { id: uid('pay'), siteName: cus?cus.name:'', customerId: cid, partnerName: cus?cus.name:'', date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
+  if(!draft.method) draft.method = 'bank';
   const goBack = () => { openCustomerDetail(draft.customerId); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -9702,6 +9712,13 @@ function openCustomerPaymentEditor(id, customerId){
         <div class="field">
           <label>Số tiền thu về</label>
           <input type="text" inputmode="decimal" id="cp_amount">
+        </div>
+        <div class="field">
+          <label>Phương thức</label>
+          <select id="cp_method">
+            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
+            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+          </select>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Nội dung / ghi chú</label>
@@ -9719,6 +9736,7 @@ function openCustomerPaymentEditor(id, customerId){
   document.getElementById('saveCustPaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('cp_date').value || draft.date;
     draft.notes = document.getElementById('cp_notes').value.trim();
+    draft.method = document.getElementById('cp_method').value;
     const idx = state.sitePayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.sitePayments[idx]=draft; else state.sitePayments.push(draft);
     await saveSitePayments();
@@ -9855,7 +9873,7 @@ function openSupplierDetail(supplierId){
           <tbody>
             ${payments.map(p=>`
             <tr class="grid-clickable-row" data-id="${p.id}" onclick="openSupplierPaymentEditor('${p.id}','${supplierId}')">
-              <td>${formatDateVN(p.date)}</td>
+              <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
               <td>${p.notes?escapeHtml(p.notes):'—'}</td>
               <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(p.amount)}</td>
             </tr>`).join('')}
@@ -9883,12 +9901,13 @@ function openSupplierPaymentEditor(id, supplierId){
   const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
   const sid = supplierId || (existing && existing.supplierId);
   const sup = supplierById(sid);
-  const draft = existing ? {...existing} : { id: uid('spay'), supplierId: sid, date: todayLocalDateStr(), amount:0, notes:'' };
+  const draft = existing ? {...existing} : { id: uid('spay'), supplierId: sid, date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
+  if(!draft.method) draft.method = 'bank'; // khoản cũ trước khi có trường này -> mặc định NGÂN HÀNG, giữ đúng hành vi cũ
   const goBack = () => { openSupplierDetail(draft.supplierId); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Đã Bank Cho Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
+      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Đã Trả Cho Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày chuyển tiền</label>
@@ -9897,6 +9916,13 @@ function openSupplierPaymentEditor(id, supplierId){
         <div class="field">
           <label>Số tiền đã chuyển</label>
           <input type="text" inputmode="decimal" id="sp2_amount">
+        </div>
+        <div class="field">
+          <label>Phương thức</label>
+          <select id="sp2_method">
+            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
+            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+          </select>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Nội dung / ghi chú</label>
@@ -9914,6 +9940,7 @@ function openSupplierPaymentEditor(id, supplierId){
   document.getElementById('saveSupPaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('sp2_date').value || draft.date;
     draft.notes = document.getElementById('sp2_notes').value.trim();
+    draft.method = document.getElementById('sp2_method').value;
     const idx = state.supplierPayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.supplierPayments[idx]=draft; else state.supplierPayments.push(draft);
     await saveSupplierPayments();
@@ -10132,7 +10159,7 @@ function renderSitePaymentList(payments, partnerName){
         <strong>${fmtVND(p.amount)}</strong>
         <button class="link-btn editSitePaymentBtn" data-id="${p.id}">Sửa</button>
       </div>
-      <div class="hint">${formatDateVN(p.date)} · ${escapeHtml(p.siteName)} · ${escapeHtml(p.notes||'')}</div>
+      <div class="hint">${formatDateVN(p.date)} ${(p.method||'bank')==='cash'?'💵':'🏦'} · ${escapeHtml(p.siteName)} · ${escapeHtml(p.notes||'')}</div>
     </div>
   `).join('');
   wrap.querySelectorAll('.editSitePaymentBtn').forEach(btn=>{
@@ -10175,7 +10202,8 @@ function openAddSitePaymentForPartner(partnerName){
 function openSitePaymentEditor(id, siteName, from, to, partnerName){
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
   const resolvedSiteName = existing ? existing.siteName : siteName;
-  const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'' };
+  const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'', method:'bank' };
+  if(!draft.method) draft.method = 'bank';
   const goBack = () => { openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -10193,6 +10221,13 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
         <div class="field">
           <label>Số tiền thu về</label>
           <input type="text" inputmode="decimal" id="sp_amount">
+        </div>
+        <div class="field">
+          <label>Phương thức</label>
+          <select id="sp_method">
+            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
+            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+          </select>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Nội dung thu tiền</label>
@@ -10212,6 +10247,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     draft.date = document.getElementById('sp_date').value || draft.date;
     draft.partnerName = document.getElementById('sp_partner').value.trim();
     draft.notes = document.getElementById('sp_notes').value.trim();
+    draft.method = document.getElementById('sp_method').value;
     const idx = state.sitePayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.sitePayments[idx]=draft; else state.sitePayments.push(draft);
     await saveSitePayments();
@@ -10724,6 +10760,17 @@ function renderCompanyDashboardPage(){
   const sorted = [...state.ownerEquityEntries].sort((a,b)=>b.date.localeCompare(a.date));
   const breakdown = computeCumulativeCashFlowBreakdown();
   const debtSummary = computeAllPartnersDebtSummary();
+  // Hiển thị công nợ KHÔNG dùng dấu +/- (yêu cầu Ông Chủ 2026-08-19) — đổi
+  // hẳn NHÃN theo đúng chiều thực tế, luôn hiện số DƯƠNG (giá trị tuyệt
+  // đối), màu sắc phản ánh đúng lợi/hại cho Ông Chủ.
+  const custOwed = debtSummary.totalCustomerOwed;
+  const custDebtLine = custOwed>=0
+    ? { label:'Khách hàng còn nợ Ông Chủ', value:custOwed, color:'var(--profit)' }
+    : { label:'Ông Chủ đang tạm ứng dư cho khách hàng', value:-custOwed, color:'var(--loss)' };
+  const supOwed = debtSummary.totalSupplierOwed;
+  const supDebtLine = supOwed>=0
+    ? { label:'Ông Chủ còn nợ nhà cung cấp', value:supOwed, color:'var(--loss)' }
+    : { label:'Nhà cung cấp đang giữ tiền Ông Chủ tạm ứng dư', value:-supOwed, color:'var(--profit)' };
   const bankRecon = computeBankBalanceReconciliation();
 
   let roiHtml = '';
@@ -10815,9 +10862,9 @@ function renderCompanyDashboardPage(){
 
       <div class="card" style="margin-top:12px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Công Nợ Hiện Tại (Toàn Công Ty)</div>
-        <div class="summary-row"><span>Khách hàng còn nợ Ông Chủ</span><span class="val" style="color:${debtSummary.totalCustomerOwed>=0?'var(--profit)':'var(--loss)'};">${fmtVND(debtSummary.totalCustomerOwed)}</span></div>
-        <div class="summary-row"><span>Ông Chủ còn nợ nhà cung cấp</span><span class="val" style="color:${debtSummary.totalSupplierOwed>=0?'var(--loss)':'var(--profit)'};">${fmtVND(debtSummary.totalSupplierOwed)}</span></div>
-        <div class="hint" style="margin-top:6px;">Số dương ở "Khách hàng còn nợ" = tiền Ông Chủ SẼ nhận thêm (tài sản). Số dương ở "Còn nợ nhà cung cấp" = tiền Ông Chủ CÒN PHẢI trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản).</div>
+        <div class="summary-row"><span>${custDebtLine.label}</span><span class="val" style="color:${custDebtLine.color};">${fmtVND(custDebtLine.value)}</span></div>
+        <div class="summary-row"><span>${supDebtLine.label}</span><span class="val" style="color:${supDebtLine.color};">${fmtVND(supDebtLine.value)}</span></div>
+        <div class="hint" style="margin-top:6px;">Màu XANH = tiền Ông Chủ sẽ nhận thêm hoặc đang được giữ hộ (có lợi). Màu ĐỎ = tiền Ông Chủ còn phải trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản).</div>
         <button class="btn btn-ghost btn-block" id="debtDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Theo Từng Khách/Nhà Cung Cấp</button>
       </div>
 
@@ -10825,7 +10872,7 @@ function renderCompanyDashboardPage(){
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🏦 Khớp Số Dư Ngân Hàng</div>
         ${bankRecon ? `
         <div class="summary-row"><span>Mốc chốt gần nhất (${formatDateVN(bankRecon.checkpoint.date)})</span><span class="val">${fmtVND(bankRecon.checkpoint.balance)}</span></div>
-        <div class="summary-row"><span>+ Dòng tiền công ty phát sinh sau đó</span><span class="val" style="color:${bankRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${bankRecon.cashFlowSince>=0?'+':''}${fmtVND(bankRecon.cashFlowSince)}</span></div>
+        <div class="summary-row"><span>+ Thu/Chi QUA NGÂN HÀNG phát sinh sau đó</span><span class="val" style="color:${bankRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${bankRecon.cashFlowSince>=0?'+':''}${fmtVND(bankRecon.cashFlowSince)}</span></div>
         <div class="summary-row"><span>+ Đã góp thêm sau đó</span><span class="val" style="color:var(--profit);">+${fmtVND(bankRecon.contributedSince)}</span></div>
         <div class="summary-row"><span>− Đã rút ra sau đó</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.withdrawnSince)}</span></div>
         <div class="summary-row total"><span>= Số dư app tính</span><span class="val" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</span></div>
@@ -10906,6 +10953,13 @@ function renderCompanyDashboardPage(){
           <label>Số tiền</label>
           <input type="text" inputmode="decimal" id="oe_amount">
         </div>
+        <div class="field">
+          <label>Phương thức</label>
+          <select id="oe_method">
+            <option value="bank">🏦 Chuyển khoản ngân hàng</option>
+            <option value="cash">💵 Tiền mặt</option>
+          </select>
+        </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú (VD: đổ dầu bằng tiền túi, rút lãi tiêu Tết...)</label>
           <input type="text" id="oe_note" placeholder="Không bắt buộc">
@@ -10924,7 +10978,7 @@ function renderCompanyDashboardPage(){
         ${sorted.length===0 ? '<div class="hint" style="padding:14px;">Chưa có khoản góp/rút nào.</div>' : sorted.map(e=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
-              <div style="font-weight:700;">${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'} — ${formatDateVN(e.date)}</div>
+              <div style="font-weight:700;">${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">${(e.method||'bank')==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</span></div>
               ${e.isCharterCapital ? `<div style="margin-top:3px;"><span style="background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:800; padding:2px 8px; border-radius:20px;">📜 Vốn điều lệ</span></div>` : ''}
               ${e.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.note)}</div>` : ''}
             </div>
@@ -10972,9 +11026,10 @@ function renderCompanyDashboardPage(){
     const type = document.getElementById('oe_type').value;
     const note = document.getElementById('oe_note').value.trim();
     const isCharterCapital = type==='contribution' && document.getElementById('oe_isCharterCapital').checked;
+    const method = document.getElementById('oe_method').value;
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
     if(!oeAmountVal || oeAmountVal<=0){ showToast('Nhập số tiền trước đã.'); return; }
-    state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note, isCharterCapital });
+    state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note, isCharterCapital, method });
     await saveOwnerEquityEntries();
     showToast('Đã ghi khoản mới.');
     renderCompanyDashboardPage();
@@ -11017,17 +11072,17 @@ function renderCompanyDashboardPage(){
 function computeCompanyCashFlowLedger(){
   const entries = [];
   state.sitePayments.forEach(p=>{
-    entries.push({ date:p.date, category:'Khách hàng bank vào', amount:Number(p.amount)||0, sign:1,
-      desc: p.partnerName || p.siteName || '', id:p.id });
+    entries.push({ date:p.date, category:'Khách hàng trả', amount:Number(p.amount)||0, sign:1,
+      desc: p.partnerName || p.siteName || '', id:p.id, method: p.method||'bank' });
   });
   state.supplierPayments.forEach(p=>{
     const supplier = state.suppliers.find(s=>s.id===p.supplierId);
-    entries.push({ date:p.date, category:'Bank cho mỏ', amount:Number(p.amount)||0, sign:-1,
-      desc: supplier ? supplier.name : (p.notes||''), id:p.id });
+    entries.push({ date:p.date, category:'Trả nhà cung cấp (mỏ)', amount:Number(p.amount)||0, sign:-1,
+      desc: supplier ? supplier.name : (p.notes||''), id:p.id, method: p.method||'bank' });
   });
   state.ownerEquityEntries.forEach(e=>{
-    entries.push({ date:e.date, category: e.type==='contribution' ? 'Góp vốn (tiền mặt)' : 'Rút vốn (tiền mặt)',
-      amount:Number(e.amount)||0, sign: e.type==='contribution' ? 1 : -1, desc: e.note||'', id:e.id });
+    entries.push({ date:e.date, category: e.type==='contribution' ? 'Góp vốn' : 'Rút vốn',
+      amount:Number(e.amount)||0, sign: e.type==='contribution' ? 1 : -1, desc: e.note||'', id:e.id, method: e.method||'bank' });
   });
   entries.sort((a,b)=> b.date===a.date ? 0 : (b.date>a.date?1:-1));
   return entries;
@@ -11045,7 +11100,7 @@ function renderCompanyCashFlowLedgerPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📋 Sao Kê Toàn Bộ Dòng Tiền</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách bank vào + Tiền bank cho mỏ + Góp/Rút Vốn Chủ Sở Hữu (tiền mặt) — cập nhật real-time đúng dữ liệu Ông Chủ đã nhập trên app, sắp theo ngày gần nhất trước.</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách trả + Tiền trả nhà cung cấp + Góp/Rút Vốn Chủ Sở Hữu — mỗi dòng ghi rõ 🏦 chuyển khoản ngân hàng hay 💵 tiền mặt — cập nhật real-time đúng dữ liệu Ông Chủ đã nhập trên app, sắp theo ngày gần nhất trước.</div>
       <div class="card">
         <div class="summary-row"><span>Khách hàng đã trả</span><span class="val" style="color:var(--profit);">+${fmtVND(totalFromCustomers)}</span></div>
         <div class="summary-row"><span>Ông Chủ góp vốn</span><span class="val" style="color:var(--profit);">+${fmtVND(totalContributed)}</span></div>
@@ -11058,7 +11113,7 @@ function renderCompanyCashFlowLedgerPage(){
         ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có giao dịch nào.</div>' : entries.map(e=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
-              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)}</div>
+              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">${e.method==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</span></div>
               ${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}
             </div>
             <span style="font-weight:800; white-space:nowrap; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
@@ -11084,19 +11139,31 @@ function renderDebtDetailPage(){
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Theo từng khách hàng / nhà cung cấp (toàn công ty) — bấm vào từng dòng để xem chi tiết giao dịch.</div>
       <h3>Khách Hàng Còn Nợ</h3>
       <div class="card" style="padding:0; overflow:hidden;">
-        ${customersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có khách hàng nào còn nợ.</div>' : customersWithDebt.map(c=>`
+        ${customersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có khách hàng nào còn nợ.</div>' : customersWithDebt.map(c=>{
+          const isOwedByThem = c.debt.owed>=0;
+          return `
           <div class="driver-row" data-open-customer="${c.id}" style="padding:12px 14px; border-bottom:1px solid var(--border); cursor:pointer;">
-            <div style="font-weight:700;">${escapeHtml(c.name)}</div>
-            <span style="font-weight:800; white-space:nowrap; color:${c.debt.owed>=0?'var(--profit)':'var(--loss)'};">${fmtVND(c.debt.owed)}</span>
-          </div>`).join('')}
+            <div>
+              <div style="font-weight:700;">${escapeHtml(c.name)}</div>
+              <div class="hint" style="margin-top:2px;">${isOwedByThem?'Khách hàng còn nợ':'Ông Chủ tạm ứng dư cho khách'}</div>
+            </div>
+            <span style="font-weight:800; white-space:nowrap; color:${isOwedByThem?'var(--profit)':'var(--loss)'};">${fmtVND(Math.abs(c.debt.owed))}</span>
+          </div>`;
+        }).join('')}
       </div>
       <h3 style="margin-top:16px;">Nhà Cung Cấp Còn Nợ</h3>
       <div class="card" style="padding:0; overflow:hidden;">
-        ${suppliersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có nhà cung cấp nào còn nợ.</div>' : suppliersWithDebt.map(s=>`
+        ${suppliersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có nhà cung cấp nào còn nợ.</div>' : suppliersWithDebt.map(s=>{
+          const weOweThem = s.debt.owed>=0;
+          return `
           <div class="driver-row" data-open-supplier="${s.id}" style="padding:12px 14px; border-bottom:1px solid var(--border); cursor:pointer;">
-            <div style="font-weight:700;">${escapeHtml(s.name)}</div>
-            <span style="font-weight:800; white-space:nowrap; color:${s.debt.owed>=0?'var(--loss)':'var(--profit)'};">${fmtVND(s.debt.owed)}</span>
-          </div>`).join('')}
+            <div>
+              <div style="font-weight:700;">${escapeHtml(s.name)}</div>
+              <div class="hint" style="margin-top:2px;">${weOweThem?'Ông Chủ còn nợ':'Nhà cung cấp giữ tiền tạm ứng dư'}</div>
+            </div>
+            <span style="font-weight:800; white-space:nowrap; color:${weOweThem?'var(--loss)':'var(--profit)'};">${fmtVND(Math.abs(s.debt.owed))}</span>
+          </div>`;
+        }).join('')}
       </div>
     </section>
   `;
@@ -11171,14 +11238,21 @@ function renderCashFlowBreakdownDetailPage(){
 function renderBankReconDetailPage(){
   const bankRecon = computeBankBalanceReconciliation();
   const allEntries = computeCompanyCashFlowLedger();
-  // Cùng logic với computeBankBalanceReconciliation(): khoản Góp/Rút Vốn
-  // Chủ Sở Hữu ghi CÙNG ngày mốc chốt vẫn tính là "sau đó" (>=, vì Ông Chủ
-  // chủ động ghi riêng biệt khoản này); tiền khách/mỏ dùng > (từ ngày kế
-  // tiếp), khớp đúng với cách tính "Dòng tiền công ty phát sinh sau đó".
+  // Khớp CHÍNH XÁC với computeBankBalanceReconciliation(): CHỈ hiện giao
+  // dịch NGÂN HÀNG (loại hẳn method==='cash') — khoản Tiền Mặt không chảy
+  // qua tài khoản ngân hàng, không được tính vào đây. Góp/Rút Vốn Chủ Sở
+  // Hữu ghi CÙNG ngày mốc chốt vẫn tính là "sau đó" (>=, Ông Chủ chủ động
+  // ghi riêng biệt khoản này); tiền khách/mỏ dùng > (từ ngày kế tiếp).
   const entries = bankRecon ? allEntries.filter(e=>{
-    const isEquity = e.category.indexOf('vốn (tiền mặt)')>=0;
+    if(e.method==='cash') return false;
+    const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
     return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
-  }) : allEntries;
+  }) : [];
+  const cashEntries = bankRecon ? allEntries.filter(e=>{
+    if(e.method!=='cash') return false;
+    const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
+    return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
+  }) : [];
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -11186,18 +11260,30 @@ function renderBankReconDetailPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">🏦 Chi Tiết Dòng Tiền Từ Mốc Chốt</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay`:'Chưa khai mốc chốt nào'}</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay — CHỈ giao dịch NGÂN HÀNG (không gồm tiền mặt)`:'Chưa khai mốc chốt nào'}</div>
       <div class="card" style="padding:0; overflow:hidden;">
-        ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có giao dịch nào sau mốc chốt.</div>' : entries.map(e=>`
+        ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có giao dịch ngân hàng nào sau mốc chốt.</div>' : entries.map(e=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
-              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)}</div>
+              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">🏦 Ngân hàng</span></div>
               ${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}
             </div>
             <span style="font-weight:800; white-space:nowrap; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>
-      <div class="hint" style="margin-top:8px;">Danh sách này chỉ gồm tiền khách/mỏ/góp/rút (khoản đã KHAI riêng lẻ) — CHƯA gồm chi phí vận hành/sửa chữa/luật đường/vay tính theo công thức. Xem đủ mọi khoản ở "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" tại mục Tổng Kết Dòng Tiền.</div>
+      ${cashEntries.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">💵 Giao dịch Tiền Mặt cùng khoảng thời gian (KHÔNG tính vào số dư ngân hàng)</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${cashEntries.map(e=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border); opacity:0.65;">
+            <div>
+              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">💵 Tiền mặt</span></div>
+              ${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}
+            </div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--ink-soft);">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      <div class="hint" style="margin-top:8px;">Danh sách này chỉ gồm tiền khách/mỏ/góp/rút CÓ GẮN "Phương thức" (khoản đã KHAI riêng lẻ) — CHƯA gồm chi phí vận hành/sửa chữa/luật đường/vay tính theo công thức (những khoản này thường trả tiền mặt, không tính vào số dư ngân hàng). Xem đủ MỌI khoản (kể cả tiền mặt) ở "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" tại mục Tổng Kết Dòng Tiền.</div>
     </section>
   `;
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
