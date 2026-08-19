@@ -210,9 +210,27 @@
      CẮT phần chữ vượt khung theo đúng góc bo, KHÔNG ẩn/che/đổi vùng bấm mở
      lịch, cả khung input vẫn bấm được y nguyên) để chữ dài nhất cũng không
      bao giờ tràn ra ngoài viền nữa. */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; overflow:hidden; }
-  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
-  input[type=date]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
+  /* SỬA TIẾP 2026-08-19 (yêu cầu Ông Chủ: "rà soát toàn app... hiển thị
+     lớn hơn bình thường... cơ cấu lại cho nhỏ như ô số tiền, gọn đẹp khoa
+     học"): dù đã đúng cỡ 19px như input thường (fix trước), chuỗi ngày
+     tiếng Việt đầy đủ ("ngày 19 thg 8, 2026") tự bản chất DÀI hơn nhiều so
+     với 1 số tiền hay chữ ngắn — nên dù cùng font-size 19px, ô ngày vẫn
+     trông "to/cồng kềnh" hơn hẳn ô tiền/chữ bên cạnh. Đồng bộ TOÀN BỘ ô
+     ngày trong app (không riêng gì ô mới) về ĐÚNG cỡ đã được kiểm chứng ổn
+     định từ trước ở class .date-range (14.5px, cao 44px, có đủ 3 phần:
+     input gốc + 2 pseudo-element hiển thị chữ) — SỬA DUY NHẤT Ở ĐÂY, ảnh
+     hưởng đồng bộ mọi ô ngày độc lập trong toàn app, không cần sửa từng
+     ô riêng lẻ. .date-range vẫn hoạt động bình thường (chỉ đang tự lặp lại
+     đúng giá trị này, không đổi gì thêm). GIỮ NGUYÊN overflow:hidden (an
+     toàn chống tràn viền đã có từ trước). LƯU Ý CHO LẦN SỬA SAU: KHÔNG
+     dùng style="" trực tiếp trên thẻ input để chỉnh cỡ chữ ngày — hoàn
+     toàn KHÔNG có tác dụng, vì phần chữ hiển thị nằm trong pseudo-element
+     ::-webkit-date-and-time-value, CHỈ nhận được cỡ chữ từ 1 RULE CSS có
+     chọn đúng pseudo-element đó (như 3 dòng ngay dưới đây), không bao giờ
+     nhận từ thuộc tính style="" gắn trên input. */
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; }
+  input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
+  input[type=date]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
   /* input[type=month] (ô "Thêm Tháng Mới") TRƯỚC ĐÂY chưa từng được style
      (không có mặt trong rule chung phía trên) — hiện ra như 1 ô trống/xám
      mặc định của trình duyệt, lệch hẳn với ô nút "+ Thêm Tháng Mới" bên
@@ -579,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-19 · #54';
+const APP_BUILD = '2026-08-19 · #55';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10769,15 +10787,15 @@ function renderCompanyDashboardPage(){
         <div class="formula-divider" style="margin:12px 0;"></div>
         <div class="field">
           <label>Ngày chốt</label>
-          <input type="date" id="bbc_date" value="${todayLocalDateStr()}" style="height:44px; font-size:15px;">
+          <input type="date" id="bbc_date" value="${todayLocalDateStr()}">
         </div>
         <div class="field">
           <label>Số dư ngân hàng THẬT vào đúng ngày này</label>
-          <input type="text" inputmode="decimal" id="bbc_balance" style="height:44px; font-size:15px;">
+          <input type="text" inputmode="decimal" id="bbc_balance">
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú</label>
-          <input type="text" id="bbc_note" placeholder="Không bắt buộc" style="height:44px; font-size:15px;">
+          <input type="text" id="bbc_note" placeholder="Không bắt buộc">
         </div>
         <button class="btn btn-accent btn-block" id="bbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
       </div>
