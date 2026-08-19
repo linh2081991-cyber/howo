@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-19 · #61';
+const APP_BUILD = '2026-08-20 · #62';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3903,6 +3903,7 @@ function bindArchiveMonthPicker(){
     if(picked===todayLocalDateStr().slice(0,7)){
       showToast('Đây là tháng hiện tại — vẫn xem ở màn chính, sửa/xoá bình thường.');
     }
+    saveMainScroll();
     state.shiftArchiveMonth = picked;
     state.shiftArchiveDriverTab = null;
     renderAll();
@@ -5541,7 +5542,7 @@ function renderDriverAdvanceOnlyHistoryHtml(driverId){
         <thead><tr><th>Ngày</th><th>Ghi Chú</th><th class="num">Số Tiền</th></tr></thead>
         <tbody>
           ${items.map(a=>`
-          <tr class="grid-clickable-row" onclick="openDriverAdvanceEditor('${a.id}','${driverId}')">
+          <tr class="grid-clickable-row" onclick="saveMainScroll(); openDriverAdvanceEditor('${a.id}','${driverId}')">
             <td>${formatDateVN(a.date)}</td>
             <td>${a.note?escapeHtml(a.note):'—'}</td>
             <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(Number(a.amount)||0)}</td>
@@ -5564,7 +5565,7 @@ function renderDriverExpenseReportHistoryHtml(driverId){
         <thead><tr><th>Ngày</th><th>Hạng Mục</th><th>Ghi Chú</th><th class="num">Số Tiền</th></tr></thead>
         <tbody>
           ${items.map(r=>`
-          <tr class="grid-clickable-row" onclick="openDriverExpenseReportEditor('${r.id}','${driverId}')">
+          <tr class="grid-clickable-row" onclick="saveMainScroll(); openDriverExpenseReportEditor('${r.id}','${driverId}')">
             <td>${formatDateVN(r.date)}</td>
             <td>${r.item?escapeHtml(r.item):'—'}</td>
             <td>${r.note?escapeHtml(r.note):'—'}</td>
@@ -5609,8 +5610,8 @@ function openDriverAdvanceDetail(driverId){
     </section>
   `;
   document.getElementById('advDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('addAdvanceBtn').addEventListener('click', ()=>openDriverAdvanceEditor(null, driverId));
-  document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>openDriverExpenseReportEditor(null, driverId));
+  document.getElementById('addAdvanceBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceEditor(null, driverId); });
+  document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverExpenseReportEditor(null, driverId); });
 }
 function openDriverAdvanceEditor(id, driverId){
   const existing = id ? state.driverAdvances.find(a=>a.id===id) : null;
@@ -9760,10 +9761,12 @@ function openCustomerDetail(customerId){
     if(!f || !t){ alert('Chọn đủ Từ ngày và Đến ngày trước khi xem.'); return; }
     if(f>t){ alert('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
     state.customerDetailRange = {from:f, to:t};
+    saveMainScroll();
     openCustomerDetail(customerId);
+    restoreMainScroll();
   });
   const custRangeResetBtn = document.getElementById('cus_rangeResetBtn');
-  if(custRangeResetBtn) custRangeResetBtn.addEventListener('click', ()=>{ state.customerDetailRange=null; openCustomerDetail(customerId); });
+  if(custRangeResetBtn) custRangeResetBtn.addEventListener('click', ()=>{ state.customerDetailRange=null; saveMainScroll(); openCustomerDetail(customerId); restoreMainScroll(); });
 }
 function openCustomerPaymentEditor(id, customerId){
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
@@ -9967,10 +9970,12 @@ function openSupplierDetail(supplierId){
     if(!f || !t){ alert('Chọn đủ Từ ngày và Đến ngày trước khi xem.'); return; }
     if(f>t){ alert('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
     state.supplierDetailRange = {from:f, to:t};
+    saveMainScroll();
     openSupplierDetail(supplierId);
+    restoreMainScroll();
   });
   const supRangeResetBtn = document.getElementById('sup_rangeResetBtn');
-  if(supRangeResetBtn) supRangeResetBtn.addEventListener('click', ()=>{ state.supplierDetailRange=null; openSupplierDetail(supplierId); });
+  if(supRangeResetBtn) supRangeResetBtn.addEventListener('click', ()=>{ state.supplierDetailRange=null; saveMainScroll(); openSupplierDetail(supplierId); restoreMainScroll(); });
 }
 function openSupplierPaymentEditor(id, supplierId){
   const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
@@ -10211,7 +10216,9 @@ function openSiteDetail(siteName, from, to){
     const record = { id: contract ? contract.id : uid('contract'), siteName, totalContractValue: contractDraftValue, notes: contract ? contract.notes : '' };
     if(idx>=0) state.siteContracts[idx]=record; else state.siteContracts.push(record);
     await saveSiteContracts();
+    saveMainScroll();
     openSiteDetail(siteName, from, to);
+    restoreMainScroll();
     showToast('Đã lưu giá trị hợp đồng.');
   });
 
