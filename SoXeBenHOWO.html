@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-19 · #60';
+const APP_BUILD = '2026-08-19 · #61';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -8517,8 +8517,19 @@ function partnerTransactionTableHtml(partnerId, side, from, to){
 /// tuyệt đối với commercialCashToSupplier() ở cấp công trình (đã kiểm
 /// chứng ở partnerTripRows), nên totalCash dưới đây LUÔN bằng đúng
 /// debt.payable, không có đường tính nào khác gây lệch số.
+/// SỬA 2026-08-19 (yêu cầu Ông Chủ: cột "HĐ Mỏ Thực Trả" đúng đơn vị TẤN
+/// mỏ xuất hoá đơn thật, không phải khối — vì bên MUA (buyVolume) vốn đã
+/// tính bằng tấn sẵn, khớp đúng đơn vị hoá đơn mỏ xuất, không cần quy đổi
+/// gì thêm): mỗi dòng/tổng cộng có thêm expectedInvoiceVolume = Khối
+/// Lượng (tấn) × % hoá đơn ĐÃ CẤU HÌNH RIÊNG cho đúng nhà cung cấp này
+/// (Cài Đặt Nhà Cung Cấp → invoicedBuyPercent, mặc định 100% nếu chưa
+/// khai) — áp dụng ĐÚNG cho từng mỏ khác nhau, vì tra cứu theo supplierId
+/// truyền vào, không phải số cố định.
 function supplierGoodsBreakdown(supplierId, from, to){
   const groups = partnerTripRows(supplierId, 'supplier', from, to);
+  const sup = supplierById(supplierId);
+  const rawPct = sup && sup.invoicedBuyPercent!==undefined && sup.invoicedBuyPercent!==null && sup.invoicedBuyPercent!=='' ? sup.invoicedBuyPercent : undefined;
+  const invoicedPct = (rawPct===undefined) ? 100 : Number(rawPct);
   const byGoods = {};
   let totalVol=0, totalTrips=0, totalNet=0, totalVat=0, totalCash=0;
   for(const g of groups){
@@ -8535,8 +8546,11 @@ function supplierGoodsBreakdown(supplierId, from, to){
       totalVol += t.vol; totalTrips += 1; totalNet += t.netAmt; totalVat += vat; totalCash += t.cash;
     }
   }
-  const rows = Object.values(byGoods).sort((a,b)=>b.cash-a.cash);
-  return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash };
+  const rows = Object.values(byGoods)
+    .map(r=>({ ...r, expectedInvoiceVolume: r.vol * invoicedPct / 100 }))
+    .sort((a,b)=>b.cash-a.cash);
+  const totalExpectedInvoiceVolume = totalVol * invoicedPct / 100;
+  return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash, invoicedPct, totalExpectedInvoiceVolume };
 }
 /// Y HỆT supplierGoodsBreakdown() ở trên nhưng cho phía KHÁCH HÀNG (yêu
 /// cầu Ông Chủ 2026-08-16, "hiển thị đầy đủ giống y hệt nhà cung cấp") —
@@ -8571,11 +8585,13 @@ function supplierGoodsBreakdownHtml(b, cashColLabel){
   if(!b || b.totalTrips===0) return '<div class="hint">Chưa có chuyến hàng thương mại nào gắn đối tác này.</div>';
   const label = cashColLabel || 'Có VAT (Thực Trả)';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const showInvoiceCol = b.rows.length>0 && b.rows[0].expectedInvoiceVolume!==undefined;
   const rowsHtml = b.rows.map(r=>`
     <tr>
       <td>${escapeHtml(r.goodsType)}</td>
       <td class="num">${r.trips} chuyến</td>
       <td class="num">${fmtQty(r.vol)} tấn</td>
+      ${showInvoiceCol ? `<td class="num" style="color:var(--accent); font-weight:700;">${fmtQty(r.expectedInvoiceVolume)} tấn</td>` : ''}
       <td class="num">${fmtVND(r.net)}</td>
       <td class="num">${fmtVND(r.vat)}</td>
       <td class="num" style="font-weight:800;">${fmtVND(r.cash)}</td>
@@ -8583,20 +8599,22 @@ function supplierGoodsBreakdownHtml(b, cashColLabel){
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Loại Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th><th>Chưa VAT</th><th>VAT</th><th>${label}</th></tr></thead>
+        <thead><tr><th>Loại Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th>${showInvoiceCol?`<th>HĐ Mỏ Thực Trả (${b.invoicedPct}%)</th>`:''}<th>Chưa VAT</th><th>VAT</th><th>${label}</th></tr></thead>
         <tbody>
           ${rowsHtml}
           <tr class="grid-total-row">
             <td>TỔNG CỘNG</td>
             <td class="num">${b.totalTrips} chuyến</td>
             <td class="num">${fmtQty(b.totalVol)} tấn</td>
+            ${showInvoiceCol ? `<td class="num" style="color:var(--accent); font-weight:700;">${fmtQty(b.totalExpectedInvoiceVolume)} tấn</td>` : ''}
             <td class="num">${fmtVND(b.totalNet)}</td>
             <td class="num">${fmtVND(b.totalVat)}</td>
             <td class="num">${fmtVND(b.totalCash)}</td>
           </tr>
         </tbody>
       </table>
-    </div>`;
+    </div>
+    ${showInvoiceCol ? `<div class="hint" style="margin-top:8px;">"HĐ Mỏ Thực Trả" = Khối Lượng × ${b.invoicedPct}% (đúng tỉ lệ hoá đơn đã cấu hình riêng cho nhà cung cấp này, ở mục Nhà Cung Cấp) — số TẤN mỏ dự kiến phải xuất hoá đơn cho đúng khoảng ngày đang xem, dùng để đối chiếu trực tiếp với hoá đơn thật mỏ gửi. Đổi nhà cung cấp khác sẽ tự áp đúng % của mỏ đó.</div>` : ''}`;
 }
 /// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
