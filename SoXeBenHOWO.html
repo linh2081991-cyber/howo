@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-19 · #59';
+const APP_BUILD = '2026-08-19 · #60';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1616,6 +1616,44 @@ async function saveShifts(){
     if(vid) state.allVehiclesShifts[vid] = state.shifts;
   }
   catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
+}
+/// Lưu ĐÚNG danh sách ca của 1 XE CỤ THỂ (không nhất thiết là xe đang
+/// xem) — dùng cho các thao tác HÀNG LOẠT xuyên suốt TOÀN CÔNG TY (VD
+/// Tick Hàng Loạt Hoá Đơn — yêu cầu Ông Chủ 2026-08-19: "tuyệt đối chính
+/// xác toàn app", không chỉ đúng xe đang xem). Đồng bộ luôn state.shifts
+/// nếu vid trùng đúng xe đang active, để UI hiện tại không bị lệch dữ
+/// liệu vừa lưu.
+async function saveShiftsForVehicleId(vid, shiftsList){
+  try {
+    await vehicleDataRef(vid, 'shifts').set({ list: shiftsList });
+    state.allVehiclesShifts[vid] = shiftsList;
+    if(vid === activeVehicleIdForEditing()) state.shifts = shiftsList;
+  }
+  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
+}
+/// Tick/bỏ tick hàng loạt "Đã nhận hóa đơn MUA" hoặc "Đã xuất hóa đơn
+/// BÁN" cho MỌI ca gắn đúng 1 đối tác (nhà cung cấp/khách hàng), trong 1
+/// khoảng ngày — GỘP TẤT CẢ XE (không chỉ xe đang xem), vì hoá đơn không
+/// theo lộ trình cố định, mỏ/khách có thể xuất gộp nhiều chuyến từ NHIỀU
+/// xe cùng lúc. Trả về số ca đã đổi.
+async function bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId, tickField, setTo }){
+  let count = 0;
+  for(const v of state.vehicles){
+    const shiftsList = state.allVehiclesShifts[v.id] || [];
+    let changed = false;
+    shiftsList.forEach(sh=>{
+      if(sh.date<from || sh.date>to) return;
+      (sh.siteLogs||[]).forEach(s=>{
+        if(s.siteType==='commercial' && s[partyField]===partyId){
+          s[tickField] = setTo;
+          count++;
+          changed = true;
+        }
+      });
+    });
+    if(changed) await saveShiftsForVehicleId(v.id, shiftsList);
+  }
+  return count;
 }
 /// Tải lại DỮ LIỆU CỦA TỪNG XE (mọi xe, không chỉ xe đang xem) vào bộ nhớ
 /// đệm — gọi 1 lần khi mở app; saveShifts()/saveRepairs()/
@@ -3075,6 +3113,15 @@ function computeInvoiceLotVatCreditByShift(from, to){
 /// lượng bán, mỏ xuất được bao nhiêu (đã quy đổi), còn thiếu bao nhiêu —
 /// để Ông Chủ đối chiếu với KT Thuế, không phải tin 1 con số tổng suông.
 function invoiceDemandByDateRange(goodsType, from, to){
+  // SỬA 2026-08-19 (yêu cầu Ông Chủ: "tuyệt đối mọi thứ phải chính xác" —
+  // đồng bộ công thức toàn app): ô tick tay "Đã nhận hóa đơn MUA"
+  // (buyIsDeductible) giờ ƯU TIÊN TUYỆT ĐỐI, y hệt cách
+  // computeMonthlyInvoiceReconciliation() đã làm từ 2026-08-16 — trước đây
+  // hàm NÀY (dùng cho "Chi Tiết — Base A/B") chỉ dùng ước tính thống kê Kho
+  // Hoá Đơn Bù (g.missingVolume), bỏ qua ô tick tay, khiến 2 màn báo số
+  // KHÁC NHAU cho cùng 1 ca dù đã xác nhận tay đủ hoá đơn. Vẫn KHÔNG đụng
+  // gì tới siteGoodsTypeGroups/công thức chi phí VAT hoá đơn bù (frozen,
+  // dùng cho P&L thật) — chỉ đổi cách BÓC TÁCH hiển thị ở đúng hàm này.
   const gt = normGoodsType(goodsType);
   const rows = [];
   if(!gt) return { rows, totalMissing:0 };
@@ -3088,6 +3135,9 @@ function invoiceDemandByDateRange(goodsType, from, to){
       const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
       const driver = driverById(sh.driverId);
       const customer = s.customerId ? customerById(s.customerId) : null;
+      const buyConfirmedByHand = buyIsDeductible(s); // ô tick tay "Đã nhận hóa đơn MUA" — căn cứ cao nhất
+      const missingVolume = buyConfirmedByHand ? 0 : g.missingVolume;
+      const documentedVolume = buyConfirmedByHand ? g.sellVolume : Math.max(0, g.sellVolume - g.missingVolume);
       rows.push({
         date: sh.date, shiftType: sh.shiftType,
         driverName: driver ? driver.name : '(chưa gắn tài xế)',
@@ -3095,8 +3145,7 @@ function invoiceDemandByDateRange(goodsType, from, to){
         siteName: s.siteName || '',
         customerName: customer ? customer.name : '(chưa gắn khách hàng)',
         tripsCount, sellVolume: g.sellVolume,
-        documentedVolume: Math.max(0, g.sellVolume - g.missingVolume),
-        missingVolume: g.missingVolume
+        documentedVolume, missingVolume
       });
     });
   });
@@ -5250,7 +5299,7 @@ function renderDrivers(){
     btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverDetail(btn.dataset.id); });
   });
   document.querySelectorAll('.viewDriverAdvanceBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>openDriverAdvanceDetail(btn.dataset.id));
+    btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceDetail(btn.dataset.id); });
   });
   document.querySelectorAll('.toggleDriverActiveBtn').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
@@ -9583,6 +9632,7 @@ function openCustomerDetail(customerId){
         ` : ''}
       </div>
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
+      <button class="btn btn-ghost btn-block" id="bulkTickSellInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Xuất</button>
     </section>
     <section class="group">
       <h3>📅 Sổ Công Nợ Theo Tháng (Số Thật)</h3>
@@ -9655,7 +9705,7 @@ function openCustomerDetail(customerId){
           <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
             ${payments.map(p=>`
-            <tr class="grid-clickable-row" data-id="${p.id}" onclick="openCustomerPaymentEditor('${p.id}','${customerId}')">
+            <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openCustomerPaymentEditor('${p.id}','${customerId}')">
               <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
               <td>${p.notes?escapeHtml(p.notes):'—'}</td>
               <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</td>
@@ -9674,8 +9724,12 @@ function openCustomerDetail(customerId){
   // dùng để KHÔI PHỤC lại đúng chỗ cũ khi bấm "Quay Lại", không liên quan
   // gì tới trang chi tiết vừa mở).
   getActualScrollEl().scrollTop = 0;
-  document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>openCustomerPaymentEditor(null, customerId));
+  document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderDebtDetailPage(); } else { renderAll(); }
+    restoreMainScroll();
+  });
+  document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openCustomerPaymentEditor(null, customerId); });
+  document.getElementById('bulkTickSellInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(customerId, 'sell'));
   document.querySelectorAll('.monthLedgerDetailBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const m = monthlyLedger.months[Number(btn.dataset.idx)];
@@ -9755,15 +9809,25 @@ function openCustomerPaymentEditor(id, customerId){
   });
 }
 
-/// Tick/bỏ tick hàng loạt "Đã nhận hóa đơn MUA" cho MỌI công trình gắn
-/// đúng 1 nhà cung cấp, trong 1 khoảng ngày — vì mỏ thường xuất hoá đơn
-/// gộp nhiều chuyến 1 lần, tick tay từng ca sẽ rất mất công.
-function openBulkInvoiceTickModal(supplierId){
-  const sup = supplierById(supplierId);
+/// Tick/bỏ tick hàng loạt "Đã nhận hóa đơn MUA" (kind='buy', gắn nhà cung
+/// cấp) hoặc "Đã xuất hóa đơn BÁN" (kind='sell', gắn khách hàng) cho MỌI
+/// ca trong 1 khoảng ngày — GỘP TẤT CẢ XE trong công ty (yêu cầu Ông Chủ
+/// 2026-08-19: "tuyệt đối chính xác toàn app" + "ngày xuất hoá đơn mua và
+/// bán không bao giờ cố định" — mỏ/khách có thể xuất gộp nhiều chuyến từ
+/// nhiều xe cùng lúc, tick tay từng ca sẽ rất mất công).
+function openBulkInvoiceTickModal(partyId, kind){
+  const isBuy = kind==='buy';
+  const partyField = isBuy ? 'supplierId' : 'customerId';
+  const tickField = isBuy ? 'buyHasInvoice' : 'sellHasInvoice';
+  const party = isBuy ? supplierById(partyId) : customerById(partyId);
+  const title = isBuy ? 'Đã Nhận Hoá Đơn (MUA)' : 'Đã Xuất Hoá Đơn (BÁN)';
+  const hintText = isBuy
+    ? 'Chọn đúng khoảng ngày mỏ vừa xuất hoá đơn — app tự tick "Đã nhận hóa đơn MUA" cho MỌI ca (TẤT CẢ xe trong công ty) gắn đúng nhà cung cấp này trong khoảng ngày đó, không cần mở từng ca.'
+    : 'Chọn đúng khoảng ngày Ông Chủ vừa xuất hoá đơn cho khách — app tự tick "Đã xuất hóa đơn BÁN" cho MỌI ca (TẤT CẢ xe trong công ty) gắn đúng khách hàng này trong khoảng ngày đó, không cần mở từng ca.';
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>✅ Tick Hàng Loạt Hoá Đơn Đã Nhận — ${escapeHtml(sup?sup.name:'')}</h3>
-    <div class="hint" style="margin-bottom:12px;">Chọn đúng khoảng ngày mỏ vừa xuất hoá đơn — app tự tick "Đã nhận hóa đơn MUA" cho MỌI công trình gắn đúng nhà cung cấp này trong khoảng ngày đó, không cần mở từng ca.</div>
+    <h3>✅ Tick Hàng Loạt ${title} — ${escapeHtml(party?party.name:'')}</h3>
+    <div class="hint" style="margin-bottom:12px;">${hintText}</div>
     <div class="date-range">
       <div class="field"><label>Từ ngày</label><input type="date" id="bulk_from" value="${todayLocalDateStr()}"></div>
       <div class="field"><label>Đến ngày</label><input type="date" id="bulk_to" value="${todayLocalDateStr()}"></div>
@@ -9775,20 +9839,10 @@ function openBulkInvoiceTickModal(supplierId){
     const from = document.getElementById('bulk_from').value;
     const to = document.getElementById('bulk_to').value;
     if(!from || !to){ showToast('Chọn đủ khoảng ngày.'); return; }
-    let count = 0;
-    for(const sh of state.shifts){
-      if(sh.date<from || sh.date>to) continue;
-      for(const s of (sh.siteLogs||[])){
-        if(s.siteType==='commercial' && s.supplierId===supplierId){
-          s.buyHasInvoice = setTo;
-          count++;
-        }
-      }
-    }
-    await saveShifts();
+    const count = await bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId, tickField, setTo });
     closeModal();
-    showToast(`Đã ${setTo?'tick':'bỏ tick'} ${count} công trình.`);
-    openSupplierDetail(supplierId);
+    showToast(`Đã ${setTo?'tick':'bỏ tick'} ${count} công trình (gộp tất cả xe).`);
+    if(isBuy) openSupplierDetail(partyId); else openCustomerDetail(partyId);
   };
   document.getElementById('bulkTickBtn').addEventListener('click', ()=>doBulk(true));
   document.getElementById('bulkUntickBtn').addEventListener('click', ()=>doBulk(false));
@@ -9872,7 +9926,7 @@ function openSupplierDetail(supplierId){
           <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
             ${payments.map(p=>`
-            <tr class="grid-clickable-row" data-id="${p.id}" onclick="openSupplierPaymentEditor('${p.id}','${supplierId}')">
+            <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openSupplierPaymentEditor('${p.id}','${supplierId}')">
               <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
               <td>${p.notes?escapeHtml(p.notes):'—'}</td>
               <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(p.amount)}</td>
@@ -9883,9 +9937,12 @@ function openSupplierDetail(supplierId){
     </section>
   `;
   getActualScrollEl().scrollTop = 0;
-  document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>openSupplierPaymentEditor(null, supplierId));
-  document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId));
+  document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderDebtDetailPage(); } else { renderAll(); }
+    restoreMainScroll();
+  });
+  document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openSupplierPaymentEditor(null, supplierId); });
+  document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId, 'buy'));
   document.getElementById('sup_rangeApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('sup_rangeFrom').value;
     const t = document.getElementById('sup_rangeTo').value;
@@ -11169,10 +11226,10 @@ function renderDebtDetailPage(){
   `;
   document.getElementById('debtDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
   document.querySelectorAll('[data-open-customer]').forEach(el=>{
-    el.addEventListener('click', ()=>openCustomerDetail(el.dataset.openCustomer));
+    el.addEventListener('click', ()=>{ saveMainScroll(); openCustomerDetail(el.dataset.openCustomer); });
   });
   document.querySelectorAll('[data-open-supplier]').forEach(el=>{
-    el.addEventListener('click', ()=>openSupplierDetail(el.dataset.openSupplier));
+    el.addEventListener('click', ()=>{ saveMainScroll(); openSupplierDetail(el.dataset.openSupplier); });
   });
 }
 /// Chi Tiết Lợi Nhuận Luỹ Kế — bóc tách ĐỦ từng khoản đã cộng dồn thành
