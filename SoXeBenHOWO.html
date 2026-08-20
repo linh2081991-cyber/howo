@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #65';
+const APP_BUILD = '2026-08-20 · #66';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3363,16 +3363,29 @@ function shiftOperatingCashCost(sh){
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
        + (Number(sh.roadFeeIncidental)||0);
 }
-/// SỬA 2026-08-20 (Ông Chủ xác nhận rõ: "Chỉ có dầu, lương, ăn là tao lấy
-/// tiền từ tk công ty" — KHÔNG phải toàn bộ chi phí vận hành ca): tách
-/// riêng ĐÚNG 4 khoản có thể trả qua ngân hàng — Dầu + Lương chuyến +
-/// Lương cứng phân bổ + Tiền ăn — dùng RIÊNG cho "Khớp Số Dư Ngân Hàng".
-/// Tiền nhà phân bổ + Chi phí phát sinh + Tiền luật phát sinh LUÔN coi là
-/// tiền mặt, không bao giờ tính vào đây dù ca có đánh dấu "Ngân hàng" hay
-/// không — khác hẳn shiftOperatingCashCost() ở trên (vẫn tính ĐỦ 7 khoản,
-/// dùng cho Lợi Nhuận/Dòng Tiền Thuần — KHÔNG đổi, vẫn đúng như cũ).
+/// Tiền dầu THẬT ĐÃ ĐỔ THÊM (mua/nạp vào bình) trong ca — theo ĐÚNG SỐ
+/// LÍT ĐỔ (fuelAdded), KHÁC với shiftFuelCost() (tính theo lít TIÊU HAO,
+/// 1 con số kế toán phân bổ, không phải giao dịch tiền mặt thật của
+/// riêng ngày đó). Đổ dầu = trả tiền ngay lúc đổ, đúng bằng số lít đổ ×
+/// đơn giá — không liên quan gì tới việc lít đó tiêu hao hết trong ca này
+/// hay còn dư sang ca sau.
+function shiftFuelRefillCost(sh){
+  return (Number(sh.fuelAdded)||0) * (Number(sh.fuelUnitPrice)||0);
+}
+/// SỬA 2026-08-20 (Ông Chủ chỉnh lại chính xác hơn: "chỉ liệt những mục
+/// là tiền dầu đổ thêm, tiền ứng lương của nhân viên ở ca làm việc... vì
+/// lương tao không trả hàng ngày mà chỉ tính khi họ ứng"): BỎ HẲN lương
+/// chuyến/lương cứng/tiền ăn khỏi công thức này — đó là các khoản PHÂN BỔ
+/// KẾ TOÁN theo ca, KHÔNG phải giao dịch tiền mặt thật xảy ra đúng ngày
+/// đó (Ông Chủ chỉ thực trả lương khi tài xế ỨNG, qua đúng field
+/// advanceAmount — "Ứng Lương" trong Sửa Ca). Giờ CHỈ tính đúng 2 khoản
+/// tiền mặt THẬT phát sinh tại ca: Tiền dầu đổ thêm (shiftFuelRefillCost,
+/// theo lít ĐỔ chứ không phải lít tiêu hao) + Tiền ứng lương
+/// (advanceAmount). Dùng RIÊNG cho "Khớp Số Dư Ngân Hàng" — không đụng
+/// gì tới shiftOperatingCashCost() ở trên (vẫn tính đủ 7 khoản như cũ,
+/// dùng cho Lợi Nhuận/Dòng Tiền Thuần).
 function shiftBankableOperatingCost(sh){
-  return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0) + (Number(sh.foodAllowance)||0);
+  return shiftFuelRefillCost(sh) + (Number(sh.advanceAmount)||0);
 }
 
 // ---- Repair/depreciation responsibility (who pays for a breakage) ----
@@ -4272,15 +4285,15 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>💳 Phương Thức Chi Phí Vận Hành Ca Này</h3>
+      <h3>💳 Phương Thức Tiền Dầu Đổ Thêm + Ứng Lương</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
-          <label>Dầu + Lương (chuyến/cứng) + Tiền ăn của CA NÀY trả chủ yếu bằng</label>
+          <label>Tiền dầu đổ thêm (theo lít đổ) + Tiền ứng lương của CA NÀY trả bằng</label>
           <select id="f_operatingCostMethod">
             <option value="cash" ${(sh.operatingCostMethod||'cash')==='cash'?'selected':''}>💵 Tiền mặt (mặc định)</option>
             <option value="bank" ${sh.operatingCostMethod==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
           </select>
-          <div class="hint">CHỈ tính đúng 3 khoản: Dầu + Lương (chuyến + cứng phân bổ) + Tiền ăn — Tiền nhà/Chi phí phát sinh/Tiền luật phát sinh LUÔN coi là tiền mặt, không đổi dù chọn gì ở đây. Chỉ ảnh hưởng tới "Khớp Số Dư Ngân Hàng" ở trang LINH CHÍ THÀNH — chọn "Ngân hàng" nếu 3 khoản này của ca đã trả qua chuyển khoản thật. Không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
+          <div class="hint">CHỈ tính đúng 2 khoản tiền mặt THẬT phát sinh đúng ngày này: Tiền dầu đổ thêm (theo số lít ĐỔ, không phải lít tiêu hao) + Tiền ứng lương (ô "Số tiền ứng" bên dưới). Lương chuyến/lương cứng/tiền ăn là khoản PHÂN BỔ kế toán, không phải tiền mặt trả đúng ngày này, nên KHÔNG tính vào đây. Chỉ ảnh hưởng tới "Khớp Số Dư Ngân Hàng" ở trang LINH CHÍ THÀNH — không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
         </div>
       </div>
     </section>
@@ -11405,12 +11418,12 @@ function renderBankReconDetailPage(){
           </div>`).join('')}
       </div>
       ${bankOperatingShifts.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Dầu + Lương + Ăn Đã Đánh Dấu Trả Qua Ngân Hàng</div>
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tiền Dầu Đổ Thêm + Ứng Lương Đã Đánh Dấu Ngân Hàng</div>
       <div class="card" style="padding:0; overflow:hidden;">
         ${bankOperatingShifts.map(r=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
-              <div style="font-weight:700;">⬇️ Dầu + Lương + Ăn ca — ${formatDateVN(r.date)}</div>
+              <div style="font-weight:700;">⬇️ Tiền dầu đổ thêm + Ứng lương ca — ${formatDateVN(r.date)}</div>
               ${r.vehicleName ? `<div class="hint" style="margin-top:2px;">🚛 ${escapeHtml(r.vehicleName)}</div>` : ''}
             </div>
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
