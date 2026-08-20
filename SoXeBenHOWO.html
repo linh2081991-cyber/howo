@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #66';
+const APP_BUILD = '2026-08-20 · #67';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11138,13 +11138,13 @@ function renderCompanyDashboardPage(){
     state.showCompanyDashboard = false;
     renderAll();
   });
-  document.getElementById('cashFlowLedgerBtn').addEventListener('click', renderCompanyCashFlowLedgerPage);
-  document.getElementById('debtDetailBtn').addEventListener('click', renderDebtDetailPage);
-  document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', renderCashFlowBreakdownDetailPage);
+  document.getElementById('cashFlowLedgerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
+  document.getElementById('debtDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(); });
+  document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const bankReconDetailBtn = document.getElementById('bankReconDetailBtn');
-  if(bankReconDetailBtn) bankReconDetailBtn.addEventListener('click', renderBankReconDetailPage);
+  if(bankReconDetailBtn) bankReconDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
   const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
-  if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', renderCharterCapitalDetailPage);
+  if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
   let epiInvestmentVal = state.equityProjectInfo.initialInvestment||0;
@@ -11158,7 +11158,9 @@ function renderCompanyDashboardPage(){
     state.equityProjectInfo.charterCapitalDeadline = document.getElementById('epi_charterDeadline').value || null;
     await saveEquityProjectInfo();
     showToast('Đã lưu thông tin dự án.');
+    saveMainScroll();
     renderCompanyDashboardPage();
+    restoreMainScroll();
   });
   const oeCharterLabel = document.getElementById('oe_charterLabel');
   const oeTypeSelect = document.getElementById('oe_type');
@@ -11176,14 +11178,18 @@ function renderCompanyDashboardPage(){
     state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note, isCharterCapital, method });
     await saveOwnerEquityEntries();
     showToast('Đã ghi khoản mới.');
+    saveMainScroll();
     renderCompanyDashboardPage();
+    restoreMainScroll();
   });
   document.querySelectorAll('[data-del-equity]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
       await saveOwnerEquityEntries();
       showToast('Đã xoá.');
+      saveMainScroll();
       renderCompanyDashboardPage();
+      restoreMainScroll();
     });
   });
   let bbcBalanceVal = 0;
@@ -11196,14 +11202,18 @@ function renderCompanyDashboardPage(){
     state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
     await saveBankBalanceCheckpoints();
     showToast('Đã khai báo mốc chốt.');
+    saveMainScroll();
     renderCompanyDashboardPage();
+    restoreMainScroll();
   });
   document.querySelectorAll('[data-del-bankcheckpoint]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
       await saveBankBalanceCheckpoints();
       showToast('Đã xoá mốc chốt.');
+      saveMainScroll();
       renderCompanyDashboardPage();
+      restoreMainScroll();
     });
   });
 }
@@ -11265,7 +11275,7 @@ function renderCompanyCashFlowLedgerPage(){
       </div>
     </section>
   `;
-  document.getElementById('ledgerBackBtn').addEventListener('click', renderCompanyDashboardPage);
+  document.getElementById('ledgerBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 /// Chi Tiết Công Nợ — liệt kê TỪNG khách hàng/nhà cung cấp đang còn nợ
 /// (owed khác 0), bấm vào từng dòng mở đúng trang chi tiết đối tác đã có
@@ -11311,7 +11321,7 @@ function renderDebtDetailPage(){
       </div>
     </section>
   `;
-  document.getElementById('debtDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
+  document.getElementById('debtDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
   document.querySelectorAll('[data-open-customer]').forEach(el=>{
     el.addEventListener('click', ()=>{ saveMainScroll(); openCustomerDetail(el.dataset.openCustomer); });
   });
@@ -11374,7 +11384,7 @@ function renderCashFlowBreakdownDetailPage(){
       </div>
     </section>
   `;
-  document.getElementById('cashFlowDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
+  document.getElementById('cashFlowDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 /// Chi Tiết Khớp Ngân Hàng — lọc lại đúng Sao Kê Toàn Bộ Dòng Tiền
 /// (computeCompanyCashFlowLedger) CHỈ những giao dịch SAU mốc chốt gần
@@ -11444,7 +11454,7 @@ function renderBankReconDetailPage(){
       <div class="hint" style="margin-top:8px;">Gồm tiền khách/mỏ/góp/rút CÓ GẮN "Phương thức" + chi phí vận hành của ca nào đã đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng" (ở Sửa Ca). Sửa chữa/luật đường/vay chưa có ô Phương thức riêng, vẫn coi là tiền mặt, không tính vào đây — xem đủ MỌI khoản (kể cả tiền mặt) ở "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" tại mục Tổng Kết Dòng Tiền.</div>
     </section>
   `;
-  document.getElementById('bankReconDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
+  document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 /// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
 /// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
@@ -11489,7 +11499,7 @@ function renderCharterCapitalDetailPage(){
       </div>
     </section>
   `;
-  document.getElementById('charterDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
+  document.getElementById('charterDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 function renderSettings(){
   const app=document.getElementById('app');
