@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #64';
+const APP_BUILD = '2026-08-20 · #65';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3363,6 +3363,17 @@ function shiftOperatingCashCost(sh){
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
        + (Number(sh.roadFeeIncidental)||0);
 }
+/// SỬA 2026-08-20 (Ông Chủ xác nhận rõ: "Chỉ có dầu, lương, ăn là tao lấy
+/// tiền từ tk công ty" — KHÔNG phải toàn bộ chi phí vận hành ca): tách
+/// riêng ĐÚNG 4 khoản có thể trả qua ngân hàng — Dầu + Lương chuyến +
+/// Lương cứng phân bổ + Tiền ăn — dùng RIÊNG cho "Khớp Số Dư Ngân Hàng".
+/// Tiền nhà phân bổ + Chi phí phát sinh + Tiền luật phát sinh LUÔN coi là
+/// tiền mặt, không bao giờ tính vào đây dù ca có đánh dấu "Ngân hàng" hay
+/// không — khác hẳn shiftOperatingCashCost() ở trên (vẫn tính ĐỦ 7 khoản,
+/// dùng cho Lợi Nhuận/Dòng Tiền Thuần — KHÔNG đổi, vẫn đúng như cũ).
+function shiftBankableOperatingCost(sh){
+  return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0) + (Number(sh.foodAllowance)||0);
+}
 
 // ---- Repair/depreciation responsibility (who pays for a breakage) ----
 const REPAIR_RESPONSIBILITY_OPTIONS = [
@@ -4264,12 +4275,12 @@ function renderShiftForm(){
       <h3>💳 Phương Thức Chi Phí Vận Hành Ca Này</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
-          <label>Dầu/lương/ăn/nhà/phát sinh/luật phát sinh của CA NÀY trả chủ yếu bằng</label>
+          <label>Dầu + Lương (chuyến/cứng) + Tiền ăn của CA NÀY trả chủ yếu bằng</label>
           <select id="f_operatingCostMethod">
             <option value="cash" ${(sh.operatingCostMethod||'cash')==='cash'?'selected':''}>💵 Tiền mặt (mặc định)</option>
             <option value="bank" ${sh.operatingCostMethod==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
           </select>
-          <div class="hint">CHỈ ảnh hưởng tới "Khớp Số Dư Ngân Hàng" ở trang LINH CHÍ THÀNH — nếu ca này có khoản nào trả qua ngân hàng (VD đổ dầu chuyển khoản thay vì tiền mặt), chọn "Ngân hàng" để app trừ đúng vào số dư ngân hàng. Không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
+          <div class="hint">CHỈ tính đúng 3 khoản: Dầu + Lương (chuyến + cứng phân bổ) + Tiền ăn — Tiền nhà/Chi phí phát sinh/Tiền luật phát sinh LUÔN coi là tiền mặt, không đổi dù chọn gì ở đây. Chỉ ảnh hưởng tới "Khớp Số Dư Ngân Hàng" ở trang LINH CHÍ THÀNH — chọn "Ngân hàng" nếu 3 khoản này của ca đã trả qua chuyển khoản thật. Không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
         </div>
       </div>
     </section>
@@ -8384,7 +8395,7 @@ function computeBankBalanceReconciliation(){
   // các ca chưa từng đụng tới ô mới này.
   const operatingCostBank = allShiftsCompanyWide()
     .filter(sh=>sh.date>=from && sh.date<=today && sh.operatingCostMethod==='bank')
-    .reduce((s,sh)=>s+shiftOperatingCashCost(sanitizeShiftForRevenue(sh)), 0);
+    .reduce((s,sh)=>s+shiftBankableOperatingCost(sanitizeShiftForRevenue(sh)), 0);
   const cashFlowSince = cashInBank - cashOutBank - operatingCostBank;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
@@ -11373,7 +11384,7 @@ function renderBankReconDetailPage(){
   // đúng với operatingCostBank trong computeBankBalanceReconciliation().
   const bankOperatingShifts = bankRecon ? allShiftsCompanyWide()
     .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr() && sh.operatingCostMethod==='bank')
-    .map(sh=>({ date: sh.date, vehicleName: vehicleNameById(sh._vehicleId), cost: shiftOperatingCashCost(sanitizeShiftForRevenue(sh)) }))
+    .map(sh=>({ date: sh.date, vehicleName: vehicleNameById(sh._vehicleId), cost: shiftBankableOperatingCost(sanitizeShiftForRevenue(sh)) }))
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -11394,12 +11405,12 @@ function renderBankReconDetailPage(){
           </div>`).join('')}
       </div>
       ${bankOperatingShifts.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Chi Phí Vận Hành Đã Đánh Dấu Trả Qua Ngân Hàng</div>
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Dầu + Lương + Ăn Đã Đánh Dấu Trả Qua Ngân Hàng</div>
       <div class="card" style="padding:0; overflow:hidden;">
         ${bankOperatingShifts.map(r=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
-              <div style="font-weight:700;">⬇️ Chi phí vận hành ca — ${formatDateVN(r.date)}</div>
+              <div style="font-weight:700;">⬇️ Dầu + Lương + Ăn ca — ${formatDateVN(r.date)}</div>
               ${r.vehicleName ? `<div class="hint" style="margin-top:2px;">🚛 ${escapeHtml(r.vehicleName)}</div>` : ''}
             </div>
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
