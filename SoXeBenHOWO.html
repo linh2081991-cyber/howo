@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #67';
+const APP_BUILD = '2026-08-20 · #71';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2692,7 +2692,7 @@ function renderInvoiceLotDetailModal(goodsType, from, to){
           ${rows.map(r=>`<tr>
             <td>${formatDateVN(r.date)}</td>
             <td style="font-weight:700;">🚛 ${escapeHtml(r.vehicleName)}</td>
-            <td>${escapeHtml(r.driverName)}</td>
+            <td>${escapeHtml(r.driverName)}${r.pickupNote?`<div class="hint" style="font-size:11px; color:var(--accent); margin-top:2px;">📌 ${escapeHtml(r.pickupNote)}</div>`:''}</td>
             <td>${escapeHtml(r.customerName)}</td>
             <td>${r.tripsCount}</td>
             <td>${r.sellVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}</td>
@@ -3150,9 +3150,21 @@ function invoiceDemandByDateRange(goodsType, from, to){
       const buyConfirmedByHand = buyIsDeductible(s); // ô tick tay "Đã nhận hóa đơn MUA" — căn cứ cao nhất
       const missingVolume = buyConfirmedByHand ? 0 : g.missingVolume;
       const documentedVolume = buyConfirmedByHand ? g.sellVolume : Math.max(0, g.sellVolume - g.missingVolume);
+      // Ghi chú nhỏ nếu có chuyến NÀO trong nhóm này được đánh dấu "Tài xế
+      // lấy hàng" khác tài xế ca (2026-08-20) — CHỈ để hiển thị, không đổi
+      // gì tới ngày/tài xế chính của dòng (vẫn đúng tài xế trực ca, khớp
+      // kế toán ghi theo ngày đổ hàng, không quan tâm ai lấy).
+      const pickupDriverNames = [...new Set(
+        (s.commercialTrips||[])
+          .filter(t=>normGoodsType(t.goodsType)===gt && t.pickupDriverId && t.pickupDriverId!==sh.driverId)
+          .map(t=>{ const pd = driverById(t.pickupDriverId); return pd ? pd.name : null; })
+          .filter(Boolean)
+      )];
+      const pickupNote = pickupDriverNames.length>0 ? `${pickupDriverNames.join(', ')} lấy hộ` : '';
       rows.push({
         date: sh.date, shiftType: sh.shiftType,
         driverName: driver ? driver.name : '(chưa gắn tài xế)',
+        pickupNote,
         vehicleName: vehicleNameById(sh._vehicleId),
         siteName: s.siteName || '',
         customerName: customer ? customer.name : '(chưa gắn khách hàng)',
@@ -3342,6 +3354,47 @@ function siteEffectiveWageTrips(s){
     ? trips : (Number(s.wageQualifyingTripsOverride)||0);
 }
 function siteWageTotal(s){ return siteEffectiveWageTrips(s) * (Number(s.driverWagePerTrip)||0); }
+
+/// Số chuyến + lương chuyến ĐÚNG cho 1 tài xế cụ thể, GỘP TẤT CẢ ca trong
+/// khoảng ngày — tôn trọng field "Tài xế lấy hàng" riêng của từng chuyến
+/// thương mại (t.pickupDriverId, thêm 2026-08-20) — trường hợp lấy hàng
+/// hôm nay nhưng hôm sau tài xế KHÁC đổ hộ, chuyến đó vẫn tính đúng cho
+/// người lấy hàng, không tính cho người trực ca hôm đổ.
+/// AN TOÀN NGƯỢC: nếu 1 site log KHÔNG có bất kỳ chuyến nào bị đổi tài xế
+/// (tuyệt đại đa số, vì mặc định pickupDriverId để trống) — dùng ĐÚNG
+/// công thức cũ (siteTripCount/siteWageTotal, tôn trọng
+/// wageQualifyingTripsOverride nếu có) — KHÔNG đổi hành vi cho ca nào
+/// chưa từng đụng tới ô mới này. Chỉ khi có ít nhất 1 chuyến bị đổi mới
+/// tách riêng theo từng chuyến (dùng driverWagePerTrip phẳng cho mỗi
+/// chuyến hoàn chỉnh — đơn giản, khớp đúng cách tính "1 mức lương cố
+/// định × số chuyến" đã có sẵn).
+function driverTripWageStatsInRange(driverId, from, to, shiftsList){
+  let tripCount = 0, tripWage = 0;
+  (shiftsList || state.shifts).forEach(sh=>{
+    if(sh.date<from || sh.date>to || sh.status!=='active') return;
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial'){
+        if(sh.driverId===driverId){ tripCount += siteTripCount(s); tripWage += siteWageTotal(s); }
+        return;
+      }
+      const hasOverride = (s.commercialTrips||[]).some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId);
+      if(!hasOverride){
+        if(sh.driverId===driverId){ tripCount += siteTripCount(s); tripWage += siteWageTotal(s); }
+        return;
+      }
+      const completeTrips = (s.commercialTrips||[]).filter(t=>
+        (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+        (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0)
+      );
+      const wagePerTrip = Number(s.driverWagePerTrip)||0;
+      completeTrips.forEach(t=>{
+        const effDriver = t.pickupDriverId || sh.driverId;
+        if(effDriver===driverId){ tripCount += 1; tripWage += wagePerTrip; }
+      });
+    });
+  });
+  return { tripCount, tripWage };
+}
 
 function shiftOdoDriven(sh){ return Math.max(0, (Number(sh.odoEnd)||0) - (Number(sh.odoStart)||0)); }
 function shiftFuelConsumed(sh){ return Math.max(0, ((Number(sh.fuelStart)||0)+(Number(sh.fuelAdded)||0)) - (Number(sh.fuelEnd)||0)); }
@@ -4397,6 +4450,14 @@ function renderSiteRows(){
               <div class="field" style="margin-bottom:0;"><label>KL bán (khối)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="sellVolume" placeholder="0" value="${blankIfZero(t.sellVolume)}"></div>
               <div class="field" style="margin-bottom:0;"><label>Đơn giá bán (đ/khối)</label><input type="text" inputmode="decimal" class="ctrip-money" data-idx="${i}" data-tidx="${ti}" data-field="sellUnitPrice" placeholder="0" value="${t.sellUnitPrice?toIntSafe(t.sellUnitPrice).toLocaleString('vi-VN'):''}"></div>
             </div>
+            <div class="field" style="margin-top:8px; margin-bottom:0;">
+              <label>Tài xế lấy hàng (CHỈ đổi nếu KHÁC tài xế trực ca — VD lấy hôm nay, hôm sau tài khác đổ hộ)</label>
+              <select class="ctrip-driver" data-idx="${i}" data-tidx="${ti}" data-field="pickupDriverId">
+                <option value="">— Giống tài xế ca (${escapeHtml(driverById(sh.driverId)?driverById(sh.driverId).name:'chưa gắn')}) —</option>
+                ${state.drivers.map(d=>`<option value="${d.id}" ${t.pickupDriverId===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
+              </select>
+              ${t.pickupDriverId && t.pickupDriverId!==sh.driverId ? `<div class="hint" style="margin-top:4px; color:var(--accent); font-weight:700;">📌 Chuyến này do ${escapeHtml(driverById(t.pickupDriverId)?driverById(t.pickupDriverId).name:'')} lấy hàng — ${escapeHtml(driverById(sh.driverId)?driverById(sh.driverId).name:'tài xế ca')} đổ hộ</div>` : ''}
+            </div>
           </div>`).join('');
       body = `
         <div class="field">
@@ -4571,6 +4632,16 @@ function bindSiteRowEvents(){
       inp.value = digits==='' ? '' : num.toLocaleString('vi-VN');
       sh.siteLogs[idx].commercialTrips[tidx][field] = num;
       updateSiteCalc(idx); updateSummary();
+    });
+  });
+  wrap.querySelectorAll('.ctrip-driver').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const idx=Number(sel.dataset.idx), tidx=Number(sel.dataset.tidx);
+      sh.siteLogs[idx].commercialTrips[tidx].pickupDriverId = sel.value || null;
+      saveMainScroll();
+      renderSiteRows(); // ve lai de hien/an dung dong ghi chu "lay ho/do ho"
+      restoreMainScroll();
+      updateSummary();
     });
   });
   wrap.querySelectorAll('.manageSuppliersBtn').forEach(btn=>{
@@ -5810,7 +5881,13 @@ function openDriverDetail(driverId){
   const inRange = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
   const activeShifts = inRange.filter(sh=>sh.status==='active');
   const activeDates = new Set(activeShifts.map(sh=>sh.date));
-  const totalTrips = activeShifts.reduce((s,sh)=>s+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
+  // Tính đúng số chuyến + lương chuyến cho ĐÚNG tài xế này, tôn trọng
+  // field "Tài xế lấy hàng" riêng của từng chuyến (mặc định = tài xế ca,
+  // không đổi hành vi cũ) — GỘP TẤT CẢ ca của XE NÀY trong kỳ (không chỉ
+  // ca của driverId, vì có thể chuyến của driverId nằm trong ca của tài
+  // xế khác — trường hợp lấy hàng hôm nay, hôm sau người khác đổ hộ).
+  const driverStats = driverTripWageStatsInRange(driverId, from, to, state.shifts);
+  const totalTrips = driverStats.tripCount;
   const totalKm = activeShifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
   const totalRevenue = activeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
   // Lợi nhuận RÒNG mà tài xế này tạo ra trong kỳ — cộng dồn đúng
@@ -5830,7 +5907,7 @@ function openDriverDetail(driverId){
   // ---- Cash flow: same formula as buildDriverPayrollRows(), scoped to
   // this driver + the period picked on this screen. Math core untouched. ----
   const baseSalary = inRange.reduce((s,sh)=>s+(sh.baseSalaryAllocation||0),0);
-  const tripWage = inRange.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  const tripWage = driverStats.tripWage;
   const food = inRange.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const housing = inRange.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
   const advance = inRange.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
@@ -6043,7 +6120,7 @@ function openDriverDetail(driverId){
 // stays fully editable in the shift form before saving, by design — never
 // auto-saved without review.
 
-const GEMINI_MODEL = 'gemini-3.5-flash'; // Google retires model names frequently (1.5-flash, then 2.5-flash, both already shut down for new API keys as of July 2026). This is the current stable "flash" tier with no announced shutdown date. If it ever errors with "model not found", change ONLY this one line to whatever Google's current recommended flash model is.
+const GEMINI_MODEL = 'gemini-3.6-flash'; // SỬA 2026-08-20 (đã tra cứu web, đối chiếu đúng dòng Gemini hiện tại): nâng từ 3.5-flash lên 3.6-flash — đã GA (ổn định sản xuất), RẺ HƠN 3.5, và Google công bố chính thức cải thiện đúng "JSON đầu ra sạch hơn, ít dài dòng hơn" — đúng điểm app cần nhất vì mọi tính toán vẫn do JS đảm nhiệm, AI chỉ cần trả JSON đúng cấu trúc. KHÔNG nhảy lên 3.7-flash dù mới hơn — 3.7 tối ưu riêng cho coding/agent (không đúng việc app đang làm: phân tích tài chính + viết tư vấn tiếng Việt + đọc OCR), và mới GA quá gần đây, chưa đủ thời gian kiểm chứng ổn định cho 1 app tài chính dùng hàng ngày. Google retires model names frequently — nếu sau này lỗi "model not found", chỉ cần đổi ĐÚNG DÒNG NÀY.
 
 // ========================= PERSISTENT RETRY (SHARED BY BOTH GEMINI CALLS) =========================
 // Error codes that will NEVER succeed by simply retrying the exact same
@@ -12053,11 +12130,22 @@ function buildDriverPayrollRows(from, to){
     const b = byDriver[name];
     b.shiftsList.push(sh);
     b.baseSalary += sh.baseSalaryAllocation||0;
-    b.tripWage += shiftTotalTripWage(sh);
+    // Tổng Lương Chuyến KHÔNG cộng ở đây nữa — tính riêng bên dưới, tôn
+    // trọng đúng "Tài xế lấy hàng" riêng của từng chuyến (mặc định = tài
+    // xế ca, không đổi hành vi cũ cho ca chưa từng đụng ô này).
     b.food += sh.foodAllowance||0;
     b.housing += sh.housingAllocation||0;
     b.advance += sh.advanceAmount||0;
   }
+  // Cộng đúng Tổng Lương Chuyến cho ĐÚNG tài xế hiệu lực của từng chuyến —
+  // khớp chính xác với cách tính ở Chi Tiết Tài Xế (driverTripWageStatsInRange).
+  state.drivers.forEach(d=>{
+    const stats = driverTripWageStatsInRange(d.id, from, to, inRange);
+    if(stats.tripWage>0 || stats.tripCount>0){
+      if(!byDriver[d.name]) byDriver[d.name] = { driverId: d.id, shiftsList: inRange.filter(sh=>sh.driverId===d.id), baseSalary:0, tripWage:0, food:0, housing:0, advance:0 };
+      byDriver[d.name].tripWage += stats.tripWage;
+    }
+  });
   Object.keys(byDriver).sort().forEach(name=>{
     const b = byDriver[name];
     const counts = computeDriverShiftCounts(b.shiftsList); // dùng đúng hàm badge trên app đang dùng — không tự đếm riêng nữa
@@ -12245,7 +12333,13 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push([]);
   const counts = computeDriverShiftCounts(shiftsForDriver);
   const baseSalary = shiftsForDriver.reduce((s,sh)=>s+(sh.baseSalaryAllocation||0),0);
-  const tripWage = shiftsForDriver.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  // SỬA 2026-08-20: dùng ĐÚNG driverTripWageStatsInRange (tôn trọng "Tài
+  // xế lấy hàng" riêng của từng chuyến) — GỘP TẤT CẢ ca trong kỳ (không
+  // chỉ shiftsForDriver), để khớp tuyệt đối với sheet tổng hợp "Lương Tài
+  // Xế" (buildDriverPayrollRows, đã sửa cùng ngày). Nếu driverId=null
+  // (chưa gán tài xế) không thể tra cứu theo id, giữ nguyên công thức cũ.
+  const tripWage = driverId ? driverTripWageStatsInRange(driverId, from, to, state.shifts).tripWage
+    : shiftsForDriver.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
   const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const housing = shiftsForDriver.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
   const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
@@ -12691,7 +12785,9 @@ async function exportDriverPayslipXLSX(driverId){
 
   const counts = computeDriverShiftCounts(shiftsForDriver);
   const baseSalary = shiftsForDriver.reduce((s,sh)=>s+(sh.baseSalaryAllocation||0),0);
-  const tripWage = shiftsForDriver.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  // SỬA 2026-08-20: đồng bộ đúng driverTripWageStatsInRange, khớp tuyệt
+  // đối với Chi Tiết Tài Xế + Bảng Lương + Phiếu Lương trong file KT Thuế.
+  const tripWage = driverTripWageStatsInRange(driverId, from, to, state.shifts).tripWage;
   const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
   const repairDeduction = driverResponsibleRepairTotalInRange(driverId, from, to);
