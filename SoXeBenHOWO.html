@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #63';
+const APP_BUILD = '2026-08-20 · #64';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -864,11 +864,23 @@ function saveMainScroll(){
   const el = getActualScrollEl();
   if(el) savedMainScrollTop = el.scrollTop;
 }
+/// SỬA 2026-08-20 (Ông Chủ báo vẫn còn về đầu trang dù logic đã đúng khi
+/// test kỹ trên Chromium — nhiều khả năng do Safari/iOS đôi khi vẽ lại
+/// màn hình TRỄ HƠN 1 khung hình so với desktop, khiến requestAnimationFrame
+/// đơn lẻ áp dụng scrollTop QUÁ SỚM, trước khi layout của nội dung mới
+/// thực sự ổn định): khôi phục theo 3 LỚP AN TOÀN thay vì chỉ 1 lần — 2
+/// lần requestAnimationFrame lồng nhau (đợi đủ 2 khung hình vẽ) CỘNG THÊM
+/// 1 setTimeout dự phòng — nếu lớp nào đó chưa đủ trễ, lớp sau vẫn áp
+/// dụng lại đúng giá trị đã lưu, đảm bảo chắc chắn khôi phục đúng vị trí
+/// dù thiết bị/trình duyệt có độ trễ vẽ khác nhau.
 function restoreMainScroll(){
-  requestAnimationFrame(()=>{
+  const apply = () => {
     const el = getActualScrollEl();
     if(el) el.scrollTop = savedMainScrollTop;
-  });
+  };
+  requestAnimationFrame(()=>requestAnimationFrame(apply));
+  setTimeout(apply, 60);
+  setTimeout(apply, 200);
 }
 
 /// Lightweight bottom-sheet modal used for explainer/detail popups (e.g.
