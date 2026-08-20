@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #62';
+const APP_BUILD = '2026-08-20 · #63';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4249,6 +4249,20 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
+      <h3>💳 Phương Thức Chi Phí Vận Hành Ca Này</h3>
+      <div class="card">
+        <div class="field" style="margin-bottom:0;">
+          <label>Dầu/lương/ăn/nhà/phát sinh/luật phát sinh của CA NÀY trả chủ yếu bằng</label>
+          <select id="f_operatingCostMethod">
+            <option value="cash" ${(sh.operatingCostMethod||'cash')==='cash'?'selected':''}>💵 Tiền mặt (mặc định)</option>
+            <option value="bank" ${sh.operatingCostMethod==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
+          </select>
+          <div class="hint">CHỈ ảnh hưởng tới "Khớp Số Dư Ngân Hàng" ở trang LINH CHÍ THÀNH — nếu ca này có khoản nào trả qua ngân hàng (VD đổ dầu chuyển khoản thay vì tiền mặt), chọn "Ngân hàng" để app trừ đúng vào số dư ngân hàng. Không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
       <h3>Ứng Lương</h3>
       <div class="card">
         <div class="field">
@@ -5078,6 +5092,7 @@ function bindFormEvents(){
   attachMoneyInput(document.getElementById('f_housing'), sh.housingAllocation, v=>{ sh.housingAllocation=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_incidental'), sh.incidentalCost, v=>{ sh.incidentalCost=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_roadFeeIncidental'), sh.roadFeeIncidental, v=>{ sh.roadFeeIncidental=v; updateSummary(); });
+  document.getElementById('f_operatingCostMethod').addEventListener('change', e=>{ sh.operatingCostMethod = e.target.value; });
   attachMoneyInput(document.getElementById('f_advance'), sh.advanceAmount, v=>{ sh.advanceAmount=v; updateSummary(); });
 
   document.getElementById('f_incidentalNotes').addEventListener('input', e=>{ sh.incidentalNotes=e.target.value; });
@@ -8347,11 +8362,22 @@ function computeBankBalanceReconciliation(){
   const from = addDaysToDateStr(latest.date, 1);
   const cashInBank = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutBank = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const cashFlowSince = cashInBank - cashOutBank;
+  // SỬA 2026-08-20 (lỗi thật — Ông Chủ báo đổ dầu chuyển khoản ngân hàng
+  // thật, nhưng "Khớp Số Dư Ngân Hàng" không hề trừ): chi phí vận hành
+  // (dầu/lương/ăn/nhà/phát sinh/luật phát sinh) của CA nào đã đánh dấu
+  // "Phương Thức Chi Phí Vận Hành = Ngân hàng" giờ trừ đúng vào đây —
+  // trước đây LUÔN loại hẳn khỏi tính toán (mặc định coi là tiền mặt),
+  // dù thực tế có ca trả qua chuyển khoản thật. Mặc định vẫn là tiền mặt
+  // (operatingCostMethod chưa khai = 'cash'), không đổi hành vi cũ cho
+  // các ca chưa từng đụng tới ô mới này.
+  const operatingCostBank = allShiftsCompanyWide()
+    .filter(sh=>sh.date>=from && sh.date<=today && sh.operatingCostMethod==='bank')
+    .reduce((s,sh)=>s+shiftOperatingCashCost(sanitizeShiftForRevenue(sh)), 0);
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
-  return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance };
+  return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance, operatingCostBank };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -11320,11 +11346,6 @@ function renderCashFlowBreakdownDetailPage(){
 function renderBankReconDetailPage(){
   const bankRecon = computeBankBalanceReconciliation();
   const allEntries = computeCompanyCashFlowLedger();
-  // Khớp CHÍNH XÁC với computeBankBalanceReconciliation(): CHỈ hiện giao
-  // dịch NGÂN HÀNG (loại hẳn method==='cash') — khoản Tiền Mặt không chảy
-  // qua tài khoản ngân hàng, không được tính vào đây. Góp/Rút Vốn Chủ Sở
-  // Hữu ghi CÙNG ngày mốc chốt vẫn tính là "sau đó" (>=, Ông Chủ chủ động
-  // ghi riêng biệt khoản này); tiền khách/mỏ dùng > (từ ngày kế tiếp).
   const entries = bankRecon ? allEntries.filter(e=>{
     if(e.method==='cash') return false;
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
@@ -11335,6 +11356,13 @@ function renderBankReconDetailPage(){
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
     return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
   }) : [];
+  // Ca nào đã đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng" trong
+  // đúng khoảng sau mốc chốt — hiện riêng để Ông Chủ tự đối chiếu, khớp
+  // đúng với operatingCostBank trong computeBankBalanceReconciliation().
+  const bankOperatingShifts = bankRecon ? allShiftsCompanyWide()
+    .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr() && sh.operatingCostMethod==='bank')
+    .map(sh=>({ date: sh.date, vehicleName: vehicleNameById(sh._vehicleId), cost: shiftOperatingCashCost(sanitizeShiftForRevenue(sh)) }))
+    .sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -11353,6 +11381,18 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>
+      ${bankOperatingShifts.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Chi Phí Vận Hành Đã Đánh Dấu Trả Qua Ngân Hàng</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankOperatingShifts.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">⬇️ Chi phí vận hành ca — ${formatDateVN(r.date)}</div>
+              ${r.vehicleName ? `<div class="hint" style="margin-top:2px;">🚛 ${escapeHtml(r.vehicleName)}</div>` : ''}
+            </div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
+          </div>`).join('')}
+      </div>` : ''}
       ${cashEntries.length>0 ? `
       <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">💵 Giao dịch Tiền Mặt cùng khoảng thời gian (KHÔNG tính vào số dư ngân hàng)</div>
       <div class="card" style="padding:0; overflow:hidden;">
@@ -11365,7 +11405,7 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:var(--ink-soft);">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>` : ''}
-      <div class="hint" style="margin-top:8px;">Danh sách này chỉ gồm tiền khách/mỏ/góp/rút CÓ GẮN "Phương thức" (khoản đã KHAI riêng lẻ) — CHƯA gồm chi phí vận hành/sửa chữa/luật đường/vay tính theo công thức (những khoản này thường trả tiền mặt, không tính vào số dư ngân hàng). Xem đủ MỌI khoản (kể cả tiền mặt) ở "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" tại mục Tổng Kết Dòng Tiền.</div>
+      <div class="hint" style="margin-top:8px;">Gồm tiền khách/mỏ/góp/rút CÓ GẮN "Phương thức" + chi phí vận hành của ca nào đã đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng" (ở Sửa Ca). Sửa chữa/luật đường/vay chưa có ô Phương thức riêng, vẫn coi là tiền mặt, không tính vào đây — xem đủ MỌI khoản (kể cả tiền mặt) ở "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" tại mục Tổng Kết Dòng Tiền.</div>
     </section>
   `;
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', renderCompanyDashboardPage);
