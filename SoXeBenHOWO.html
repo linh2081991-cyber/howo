@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #74';
+const APP_BUILD = '2026-08-20 · #75';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2573,7 +2573,7 @@ function renderInvoiceLotOverview(){
       <div class="summary-row"><span>Tổng cần rút từ kho trong kỳ</span><span class="val" style="color:var(--loss); font-weight:700;">${demand.totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
       <div class="summary-row"><span>Đang có trong kho (${escapeHtml(goodsType)})</span><span class="val" style="color:${enough?'var(--profit)':'var(--loss)'}; font-weight:700;">${inStock.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${enough?'':' ⚠️ không đủ'}</span></div>
     </div>
-    <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;">📋 Chi Tiết Từng Ngày</button>
+    <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;">📋 Xem Chi Tiết Đầy Đủ (Từng Lô + Lịch Sử Rút Kho + Từng Ngày)</button>
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">💰 VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
     ${vatByShift.rows.length===0 ? `<div class="hint" style="margin-bottom:14px;">Không có ca nào hưởng VAT khấu trừ từ Kho Hoá Đơn Bù trong khoảng ngày này.</div>` : `
@@ -2630,7 +2630,7 @@ function renderInvoiceLotOverview(){
   document.getElementById('lotFilterGoodsType').addEventListener('change', e=>{ state.invoiceLotFilter.goodsType = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterFrom').addEventListener('change', e=>{ state.invoiceLotFilter.from = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterTo').addEventListener('change', e=>{ state.invoiceLotFilter.to = e.target.value; renderInvoiceLotOverview(); });
-  document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>renderInvoiceLotDetailModal(goodsType, from, to));
+  document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotFullDetailPage(goodsType, from, to); });
 }
 
 /// Bảng "🔒 Đối Soát Hoá Đơn Theo Tháng" trong tab Kết Quả — 6 tháng gần
@@ -2699,31 +2699,140 @@ function renderMonthlyInvoiceReconciliationDetailModal(m){
 /// Modal đối soát từng ngày cho 1 loại hàng trong khoảng ngày đã chọn —
 /// đúng để Ông Chủ so với số liệu KT Thuế: ngày nào, tài xế nào, mấy
 /// chuyến, bán bao nhiêu, mỏ xuất được bao nhiêu, còn thiếu bao nhiêu.
-function renderInvoiceLotDetailModal(goodsType, from, to){
-  const { rows, totalMissing } = invoiceDemandByDateRange(goodsType, from, to);
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>📋 Chi Tiết — ${escapeHtml(goodsType)}</h3>
-    <div class="hint" style="margin-bottom:10px;">${formatDateVN(from)} → ${formatDateVN(to)} — tổng còn thiếu ${totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối · gộp TẤT CẢ xe (kho dùng chung toàn công ty)</div>
-    ${rows.length===0 ? '<div class="hint">Không có công trình nào đúng loại hàng này trong khoảng ngày đã chọn.</div>' : `
-    <div class="card dash-wrap" style="padding:0; overflow-x:auto;">
-      <table class="dash">
-        <thead><tr><th>Ngày</th><th>Xe</th><th>Tài xế</th><th>Khách hàng</th><th>Chuyến</th><th>KL bán</th><th>Mỏ xuất</th><th>Còn thiếu</th></tr></thead>
-        <tbody>
-          ${rows.map(r=>`<tr>
-            <td>${formatDateVN(r.date)}</td>
-            <td style="font-weight:700;">🚛 ${escapeHtml(r.vehicleName)}</td>
-            <td>${escapeHtml(r.driverName)}${r.pickupNote?`<div class="hint" style="font-size:11px; color:var(--accent); margin-top:2px;">📌 ${escapeHtml(r.pickupNote)}</div>`:''}</td>
-            <td>${escapeHtml(r.customerName)}</td>
-            <td>${r.tripsCount}</td>
-            <td>${r.sellVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}</td>
-            <td>${r.documentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}</td>
-            <td style="font-weight:700; color:${r.missingVolume>0?'var(--loss)':'var(--profit)'};">${r.missingVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`}
-  `);
+/// Trang Chi Tiết ĐẦY ĐỦ Kho Hoá Đơn Bù (2026-08-20, thay hẳn modal tạm
+/// cũ theo đúng yêu cầu Ông Chủ: "hiển thị thật thông minh khoa học hẳn
+/// 1 trang chứ không phải 1 trang tạm") — gộp đủ 4 khối để trả lời trọn
+/// vẹn "hoá đơn đã xuất đi như thế nào, số lượng bao nhiêu, còn thiếu
+/// thừa bao nhiêu":
+///  1. Tổng quan kho (đã mua/đã dùng/còn tồn, TÍNH TỪ TRƯỚC TỚI NAY —
+///     không giới hạn theo khoảng ngày đang lọc, để biết đúng tồn kho
+///     thật hiện có) + so với nhu cầu riêng của khoảng ngày đang xem.
+///  2. Từng LÔ đã mua — ngày mua, nguồn, đã dùng bao nhiêu % (thanh tiến
+///     độ trực quan), còn lại bao nhiêu, giá trị hoá đơn.
+///  3. Lịch sử RÚT KHO theo từng ca — ngày nào, xe nào, tài xế nào đã rút
+///     bao nhiêu, từ đúng lô ngày nào, có thiếu hụt không (kho không đủ).
+///  4. Nhu cầu từng ngày trong khoảng đang xem (bảng đối soát hoá đơn có
+///     sẵn — invoiceDemandByDateRange, KHÔNG đổi công thức, chỉ đặt đúng
+///     trong bối cảnh đầy đủ hơn).
+/// Toàn bộ số liệu lấy TRỰC TIẾP từ buildInvoiceLotLedger()/
+/// invoiceDemandByDateRange() đã có sẵn (frozen, không tính lại kiểu
+/// khác) — trang này chỉ TRÌNH BÀY lại đầy đủ, khoa học hơn.
+function renderInvoiceLotFullDetailPage(goodsType, from, to){
+  const ledger = buildInvoiceLotLedger(goodsType);
+  const demand = invoiceDemandByDateRange(goodsType, from, to);
+  const lotsRaw = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===normGoodsType(goodsType))
+    .sort((a,b)=>(a.purchaseDate||'').localeCompare(b.purchaseDate||''));
+  const totalBought = lotsRaw.reduce((s,l)=>s+(Number(l.totalVolume)||0),0);
+  const totalDemandAllTime = Object.values(ledger.bySiteLog).reduce((sum,rec)=>sum+rec.allocations.reduce((s,a)=>s+a.volume,0)+rec.shortfall,0);
+  const totalRemaining = totalBought - totalDemandAllTime;
+  const enough = totalRemaining >= demand.totalMissing - 0.001;
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+
+  const allSh = allShiftsForLedgerCompanyWide();
+  const drawHistory = [];
+  Object.entries(ledger.bySiteLog).forEach(([key, rec])=>{
+    if(rec.allocations.length===0 && rec.shortfall<=0.001) return;
+    const shiftId = key.split('::')[0];
+    const sh = allSh.find(s=>s.id===shiftId);
+    if(!sh) return;
+    const driver = driverById(sh.driverId);
+    drawHistory.push({
+      date: sh.date, shiftType: sh.shiftType, driverName: driver?driver.name:'(chưa gắn)',
+      vehicleName: vehicleNameById(sh._vehicleId),
+      totalDrawn: rec.allocations.reduce((s,a)=>s+a.volume,0),
+      shortfall: rec.shortfall,
+      lotDatesLabel: rec.allocations.map(a=>formatDateVN(a.purchaseDate)).join(', ')
+    });
+  });
+  drawHistory.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="lotFullDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📦 Chi Tiết Kho Hoá Đơn Bù — ${escapeHtml(goodsType)}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Khoảng ngày đang xem: ${formatDateVN(from)} → ${formatDateVN(to)}</div>
+
+      <div class="card" style="border:1.5px solid ${enough?'var(--profit)':'var(--loss)'};">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📊 Tổng Quan Kho (tính từ trước tới nay)</div>
+        <div class="summary-row"><span>Tổng đã mua (mọi lô)</span><span class="val">${fmtQty(totalBought)} khối</span></div>
+        <div class="summary-row"><span>Tổng đã dùng (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${fmtQty(totalDemandAllTime)} khối</span></div>
+        <div class="summary-row total"><span>Còn tồn kho THẬT hiện nay</span><span class="val" style="color:${totalRemaining>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtQty(totalRemaining)} khối</span></div>
+        <div class="formula-divider" style="margin:10px 0;"></div>
+        <div class="summary-row"><span>Nhu cầu riêng khoảng ngày đang xem</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(demand.totalMissing)} khối</span></div>
+        <div class="summary-row" style="border:none; padding-top:8px;">
+          <span style="font-weight:800;">${enough?'✅ Đủ hàng cho khoảng ngày này':'⚠️ THIẾU cho khoảng ngày này'}</span>
+          <span class="val" style="font-weight:800; color:${enough?'var(--profit)':'var(--loss)'};">${enough?fmtQty(totalRemaining-demand.totalMissing)+' khối dư':fmtQty(demand.totalMissing-totalRemaining)+' khối thiếu'}</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📦 Từng Lô Đã Mua (${lotsRaw.length})</h3>
+      ${lotsRaw.length===0 ? '<div class="hint">Chưa mua lô hoá đơn nào cho loại hàng này.</div>' : `
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${lotsRaw.map(l=>{
+          const st = ledger.byLot[l.id] || { total:Number(l.totalVolume)||0, used:0, remaining:Number(l.totalVolume)||0 };
+          const pct = st.total>0 ? Math.min(100, Math.round(st.used/st.total*100)) : 0;
+          return `
+          <div class="driver-row" data-open-lot="${l.id}" style="padding:12px 14px; border-bottom:1px solid var(--border); display:block; cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+              <div style="font-weight:700;">${formatDateVN(l.purchaseDate)}${l.sourceName?' · '+escapeHtml(l.sourceName):''}</div>
+              <span style="font-weight:800; white-space:nowrap; color:${st.remaining>0.001?'var(--profit)':'var(--ink-soft)'};">còn ${fmtQty(st.remaining)}</span>
+            </div>
+            <div style="height:8px; background:var(--border); border-radius:4px; margin-top:6px; overflow:hidden;">
+              <div style="height:100%; width:${pct}%; background:var(--accent);"></div>
+            </div>
+            <div class="hint" style="margin-top:4px;">Tổng ${fmtQty(st.total)} khối · đã dùng ${fmtQty(st.used)} (${pct}%) · ${fmtVND(l.totalInvoiceValue)}${l.note?' · '+escapeHtml(l.note):''}</div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>📜 Lịch Sử Rút Kho Theo Ca (${drawHistory.length})</h3>
+      ${drawHistory.length===0 ? '<div class="hint">Chưa có ca nào rút từ kho loại hàng này.</div>' : `
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${drawHistory.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${formatDateVN(r.date)} · ${shiftTypeLabel(r.shiftType)} · ${escapeHtml(r.driverName)}</div>
+              <div class="hint" style="margin-top:2px;">🚛 ${escapeHtml(r.vehicleName)}${r.lotDatesLabel?' · Rút từ lô: '+r.lotDatesLabel:''}</div>
+              ${r.shortfall>0.001 ? `<div style="margin-top:3px; color:var(--loss); font-weight:700; font-size:12.5px;">⚠️ Thiếu hụt ${fmtQty(r.shortfall)} khối (kho không đủ lúc đó)</div>` : ''}
+            </div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtQty(r.totalDrawn)}</span>
+          </div>`).join('')}
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>📅 Nhu Cầu Từng Ngày Trong Khoảng Đang Xem</h3>
+      ${demand.rows.length===0 ? '<div class="hint">Không có ca nào cần hoá đơn loại hàng này trong khoảng ngày đã chọn.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Xe</th><th>Tài xế</th><th>Khách hàng</th><th>Chuyến</th><th>KL bán</th><th>Mỏ xuất</th><th>Còn thiếu</th></tr></thead>
+          <tbody>
+            ${demand.rows.map(r=>`<tr>
+              <td>${formatDateVN(r.date)}</td>
+              <td style="font-weight:700;">🚛 ${escapeHtml(r.vehicleName)}</td>
+              <td>${escapeHtml(r.driverName)}${r.pickupNote?`<div class="hint" style="font-size:11px; color:var(--accent); margin-top:2px;">📌 ${escapeHtml(r.pickupNote)}</div>`:''}</td>
+              <td>${escapeHtml(r.customerName)}</td>
+              <td>${r.tripsCount}</td>
+              <td>${fmtQty(r.sellVolume)}</td>
+              <td>${fmtQty(r.documentedVolume)}</td>
+              <td style="font-weight:700; color:${r.missingVolume>0?'var(--loss)':'var(--profit)'};">${fmtQty(r.missingVolume)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </section>
+  `;
+  document.getElementById('lotFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.querySelectorAll('[data-open-lot]').forEach(el=>{
+    el.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(el.dataset.openLot); });
+  });
 }
 
 /// Modal quản lý Khách Hàng — thêm/sửa/xoá, mirror y hệt Nhà Cung Cấp.
