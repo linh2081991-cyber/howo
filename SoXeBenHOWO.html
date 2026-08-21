@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #72';
+const APP_BUILD = '2026-08-20 · #74';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1353,7 +1353,7 @@ async function loadAll(){
     }
     const vehicleData = vehicleSnap.exists ? vehicleSnap.data() : null;
     state.vehicles = vehicleData && Array.isArray(vehicleData.list) ? vehicleData.list : [];
-    ensureVehiclesMigrated();
+    await ensureVehiclesMigrated();
     await refreshAllVehiclesShiftsCache();
   } catch(e) {
     showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
@@ -1365,15 +1365,16 @@ async function loadAll(){
 /// chạy — KHÔNG đụng, KHÔNG copy, KHÔNG chuyển bất kỳ document Firestore
 /// nào (drivers/shifts/settings vẫn y nguyên đường dẫn cũ). Xe #1 chỉ là
 /// 1 "nhãn" trỏ vào đúng dữ liệu đang có sẵn — tuyệt đối 0 rủi ro mất số.
-function ensureVehiclesMigrated(){
+async function ensureVehiclesMigrated(){
   if(state.vehicles.length>0) return;
   const primary = { id: uid('vehicle'), plate:'29E-691.12', name:'29E-691.12', isPrimary:true, createdAt: todayLocalDateStr() };
   state.vehicles = [primary];
-  saveVehicles();
+  const ok = await saveVehicles();
+  if(!ok) console.error('Lưu xe khởi tạo lần đầu thất bại — sẽ thử lại lần load kế tiếp.');
 }
 async function saveVehicles(){
-  try { await sharedDataRef('vehicles').set({ list: state.vehicles }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu xe — kiểm tra mạng.'); }
+  try { await sharedDataRef('vehicles').set({ list: state.vehicles }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu xe — kiểm tra mạng.'); return false; }
 }
 /// Modal chọn phạm vi đang xem: LINH CHÍ THÀNH (Toàn Công Ty) hoặc 1 xe cụ thể.
 /// GHI CHÚ (Giai đoạn 1): bấm chọn xe hiện mới chỉ đổi NHÃN đang xem
@@ -1427,7 +1428,7 @@ function renderDeleteVehicleConfirmModal(vehicleId, vehicleName){
   document.getElementById('cancelDeleteVehicleBtn').addEventListener('click', renderVehiclePickerModal);
   document.getElementById('confirmDeleteVehicleBtn').addEventListener('click', async ()=>{
     state.vehicles = state.vehicles.filter(v=>v.id!==vehicleId);
-    await saveVehicles();
+    if(!(await saveVehicles())) return;
     if(state.currentVehicleId===vehicleId){
       await switchVehicle(null);
     } else {
@@ -1451,13 +1452,14 @@ function renderAddVehicleModal(){
     <button class="btn btn-accent btn-block" id="saveNewVehicleBtn" style="margin-top:10px;">Lưu Xe Mới</button>
   `);
   document.getElementById('backToVehicleListBtn').addEventListener('click', renderVehiclePickerModal);
-  document.getElementById('saveNewVehicleBtn').addEventListener('click', ()=>{
+  document.getElementById('saveNewVehicleBtn').addEventListener('click', async ()=>{
     const plate = (document.getElementById('newVehiclePlate').value||'').trim();
     if(!plate){ showToast('Nhập biển số xe trước đã.'); return; }
     const name = (document.getElementById('newVehicleName').value||'').trim() || plate;
     const v = { id: uid('vehicle'), plate, name, isPrimary:false, createdAt: todayLocalDateStr() };
     state.vehicles.push(v);
-    saveVehicles();
+    const ok = await saveVehicles();
+    if(!ok){ state.vehicles.pop(); showToast('LƯU THẤT BẠI — kiểm tra mạng rồi thử thêm xe lại.'); return; }
     showToast(`Đã thêm ${name}.`);
     switchVehicle(v.id);
   });
@@ -1582,52 +1584,53 @@ function activeVehicleIdForEditing(){
   return null;
 }
 async function saveDrivers(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'drivers').set({ list: state.drivers }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu tài xế — kiểm tra mạng.'); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'drivers').set({ list: state.drivers }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tài xế — kiểm tra mạng.'); return false; }
 }
 async function saveSuppliers(){
-  try { await sharedDataRef('suppliers').set({ list: state.suppliers }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp — kiểm tra mạng.'); }
+  try { await sharedDataRef('suppliers').set({ list: state.suppliers }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp — kiểm tra mạng.'); return false; }
 }
 async function saveInvoiceLots(){
-  try { await sharedDataRef('invoiceLots').set({ list: state.invoiceLots }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù — kiểm tra mạng.'); }
+  try { await sharedDataRef('invoiceLots').set({ list: state.invoiceLots }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù — kiểm tra mạng.'); return false; }
 }
 async function saveDriverAdvances(){
-  try { await sharedDataRef('driverAdvances').set({ list: state.driverAdvances }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu tạm ứng chi phí tài xế — kiểm tra mạng.'); }
+  try { await sharedDataRef('driverAdvances').set({ list: state.driverAdvances }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tạm ứng chi phí tài xế — kiểm tra mạng.'); return false; }
 }
 async function saveDriverExpenseReports(){
-  try { await sharedDataRef('driverExpenseReports').set({ list: state.driverExpenseReports }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu báo cáo chi phí tài xế — kiểm tra mạng.'); }
+  try { await sharedDataRef('driverExpenseReports').set({ list: state.driverExpenseReports }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu báo cáo chi phí tài xế — kiểm tra mạng.'); return false; }
 }
 async function saveCustomers(){
-  try { await sharedDataRef('customers').set({ list: state.customers }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu khách hàng — kiểm tra mạng.'); }
+  try { await sharedDataRef('customers').set({ list: state.customers }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu khách hàng — kiểm tra mạng.'); return false; }
 }
 async function saveSupplierPayments(){
-  try { await sharedDataRef('supplierPayments').set({ list: state.supplierPayments }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); }
+  try { await sharedDataRef('supplierPayments').set({ list: state.supplierPayments }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); return false; }
 }
 async function saveOwnerEquityEntries(){
-  try { await sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries }); }
-  catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu — kiểm tra mạng.'); }
+  try { await sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries }); return true; }
+  catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu — kiểm tra mạng.'); return false; }
 }
 async function saveEquityProjectInfo(){
-  try { await sharedDataRef('equityProjectInfo').set(state.equityProjectInfo); }
-  catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư — kiểm tra mạng.'); }
+  try { await sharedDataRef('equityProjectInfo').set(state.equityProjectInfo); return true; }
+  catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư — kiểm tra mạng.'); return false; }
 }
 async function saveBankBalanceCheckpoints(){
-  try { await sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints }); }
-  catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng — kiểm tra mạng.'); }
+  try { await sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints }); return true; }
+  catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng — kiểm tra mạng.'); return false; }
 }
 async function saveShifts(){
   try {
     const vid = activeVehicleIdForEditing();
     await vehicleDataRef(vid, 'shifts').set({ list: state.shifts });
     if(vid) state.allVehiclesShifts[vid] = state.shifts;
+    return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
+  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); return false; }
 }
 /// Lưu ĐÚNG danh sách ca của 1 XE CỤ THỂ (không nhất thiết là xe đang
 /// xem) — dùng cho các thao tác HÀNG LOẠT xuyên suốt TOÀN CÔNG TY (VD
@@ -1640,32 +1643,41 @@ async function saveShiftsForVehicleId(vid, shiftsList){
     await vehicleDataRef(vid, 'shifts').set({ list: shiftsList });
     state.allVehiclesShifts[vid] = shiftsList;
     if(vid === activeVehicleIdForEditing()) state.shifts = shiftsList;
+    return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); }
+  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); return false; }
 }
 /// Tick/bỏ tick hàng loạt "Đã nhận hóa đơn MUA" hoặc "Đã xuất hóa đơn
 /// BÁN" cho MỌI ca gắn đúng 1 đối tác (nhà cung cấp/khách hàng), trong 1
 /// khoảng ngày — GỘP TẤT CẢ XE (không chỉ xe đang xem), vì hoá đơn không
 /// theo lộ trình cố định, mỏ/khách có thể xuất gộp nhiều chuyến từ NHIỀU
-/// xe cùng lúc. Trả về số ca đã đổi.
+/// xe cùng lúc. Trả về {count, failedVehicleNames} — count CHỈ tính đúng
+/// số ca đã GHI THÀNH CÔNG thật (không tính ca của xe nào bị lỗi ghi),
+/// failedVehicleNames liệt kê tên xe nào ghi thất bại để Ông Chủ biết
+/// chính xác cần tick lại xe nào — sửa 2026-08-20 cùng đợt vá lỗi
+/// "báo lưu thành công giả" trên toàn app.
 async function bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId, tickField, setTo }){
   let count = 0;
+  const failedVehicleNames = [];
   for(const v of state.vehicles){
     const shiftsList = state.allVehiclesShifts[v.id] || [];
-    let changed = false;
+    let changedCount = 0;
     shiftsList.forEach(sh=>{
       if(sh.date<from || sh.date>to) return;
       (sh.siteLogs||[]).forEach(s=>{
         if(s.siteType==='commercial' && s[partyField]===partyId){
           s[tickField] = setTo;
-          count++;
-          changed = true;
+          changedCount++;
         }
       });
     });
-    if(changed) await saveShiftsForVehicleId(v.id, shiftsList);
+    if(changedCount>0){
+      const ok = await saveShiftsForVehicleId(v.id, shiftsList);
+      if(ok) count += changedCount;
+      else failedVehicleNames.push(v.name || v.id);
+    }
   }
-  return count;
+  return { count, failedVehicleNames };
 }
 /// Tải lại DỮ LIỆU CỦA TỪNG XE (mọi xe, không chỉ xe đang xem) vào bộ nhớ
 /// đệm — gọi 1 lần khi mở app; saveShifts()/saveRepairs()/
@@ -1898,16 +1910,18 @@ async function saveRepairs(){
     const vid = activeVehicleIdForEditing();
     await vehicleDataRef(vid, 'repairs').set({ list: state.repairs });
     if(vid) state.allVehiclesRepairs[vid] = state.repairs;
+    return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa — kiểm tra mạng.'); }
+  catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa — kiểm tra mạng.'); return false; }
 }
 async function saveRoadFeeByMonth(){
   try {
     const vid = activeVehicleIdForEditing();
     await vehicleDataRef(vid, 'roadFeeByMonth').set({ list: state.roadFeeByMonth });
     if(vid) state.allVehiclesRoadFee[vid] = state.roadFeeByMonth;
+    return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường — kiểm tra mạng.'); }
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường — kiểm tra mạng.'); return false; }
 }
 // "2026-07" -> "7/2026" để hiện nhãn gọn cho từng dòng trong danh sách.
 function monthLabelVN(ym){
@@ -1970,28 +1984,28 @@ function roadFeeForRange(from, to){
   }, from, to);
 }
 async function saveSitePayments(){
-  try { await sharedDataRef('sitePayments').set({ list: state.sitePayments }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu công nợ — kiểm tra mạng.'); }
+  try { await sharedDataRef('sitePayments').set({ list: state.sitePayments }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu công nợ — kiểm tra mạng.'); return false; }
 }
 async function saveDocuments(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'documents').set({ list: state.documents }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu giấy tờ — kiểm tra mạng.'); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'documents').set({ list: state.documents }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu giấy tờ — kiểm tra mạng.'); return false; }
 }
 async function saveMaintenanceSchedules(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'maintenanceSchedules').set({ list: state.maintenanceSchedules }); }
-  catch(e){ showToast('Lỗi lưu lịch bảo dưỡng — kiểm tra mạng.'); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'maintenanceSchedules').set({ list: state.maintenanceSchedules }); return true; }
+  catch(e){ showToast('Lỗi lưu lịch bảo dưỡng — kiểm tra mạng.'); return false; }
 }
 async function saveSiteContracts(){
-  try { await sharedDataRef('siteContracts').set({ list: state.siteContracts }); }
-  catch(e){ showToast('Lỗi lưu hợp đồng công trình — kiểm tra mạng.'); }
+  try { await sharedDataRef('siteContracts').set({ list: state.siteContracts }); return true; }
+  catch(e){ showToast('Lỗi lưu hợp đồng công trình — kiểm tra mạng.'); return false; }
 }
 async function saveSiteAppraisals(){
-  try { await sharedDataRef('siteAppraisals').set({ list: state.siteAppraisals }); }
-  catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình — kiểm tra mạng.'); }
+  try { await sharedDataRef('siteAppraisals').set({ list: state.siteAppraisals }); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình — kiểm tra mạng.'); return false; }
 }
 async function saveMonthlyBonuses(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'monthlyBonuses').set({ list: state.monthlyBonuses }); }
-  catch(e){ showToast('Lỗi lưu tiền tip/thưởng cuối tháng — kiểm tra mạng.'); }
+  try { await vehicleDataRef(activeVehicleIdForEditing(), 'monthlyBonuses').set({ list: state.monthlyBonuses }); return true; }
+  catch(e){ showToast('Lỗi lưu tiền tip/thưởng cuối tháng — kiểm tra mạng.'); return false; }
 }
 /// Lưu Cài Đặt — TÁCH LÀM 2: 4 field dùng chung (giá dầu/VAT/CIT/API key)
 /// ghi vào 1 document CHUNG cho cả công ty; mọi field còn lại (khấu hao,
@@ -2010,8 +2024,9 @@ async function saveSettings(){
     ]);
     const vid = activeVehicleIdForEditing();
     if(vid) state.allVehiclesSettings[vid] = state.settings;
+    return true;
   }
-  catch(e){ showToast('Lỗi lưu cài đặt — kiểm tra mạng.'); }
+  catch(e){ showToast('Lỗi lưu cài đặt — kiểm tra mạng.'); return false; }
 }
 
 async function startApp(){
@@ -2128,12 +2143,18 @@ async function handleRestoreFile(file){
     state.driverAdvances = Array.isArray(backup.driverAdvances) ? backup.driverAdvances : [];
     state.driverExpenseReports = Array.isArray(backup.driverExpenseReports) ? backup.driverExpenseReports : [];
     if(backup.settings) state.settings = Object.assign(state.settings, backup.settings);
-    await saveDrivers(); await saveShifts(); await saveRepairs(); await saveSitePayments();
-    await saveDocuments(); await saveMaintenanceSchedules(); await saveSiteContracts(); await saveSettings();
-    await saveMonthlyBonuses(); await saveRoadFeeByMonth();
-    await saveDriverAdvances(); await saveDriverExpenseReports();
+    const results = await Promise.all([
+      saveDrivers(), saveShifts(), saveRepairs(), saveSitePayments(),
+      saveDocuments(), saveMaintenanceSchedules(), saveSiteContracts(), saveSettings(),
+      saveMonthlyBonuses(), saveRoadFeeByMonth(),
+      saveDriverAdvances(), saveDriverExpenseReports()
+    ]);
     renderAll();
-    showToast('Đã phục hồi dữ liệu thành công.');
+    if(results.every(Boolean)){
+      showToast('Đã phục hồi dữ liệu thành công.');
+    } else {
+      showToast('PHỤC HỒI THẤT BẠI 1 PHẦN — 1 vài mục chưa ghi được lên Firestore (kiểm tra mạng). Thử "Khôi Phục Từ Backup" lại lần nữa để chắc chắn đủ toàn bộ.');
+    }
   }catch(e){
     showToast('Không đọc được file này. Kiểm tra lại đúng file sao lưu chưa.');
   }
@@ -2254,7 +2275,7 @@ function renderSupplierManagerModal(editingId, linkToSiteIdx){
   document.querySelectorAll('.supDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
     if(!confirm('Xoá nhà cung cấp này? Các công trình đang gắn sẽ về trạng thái "chưa gắn" (dùng mặc định chung ở Cài Đặt).')) return;
     state.suppliers = state.suppliers.filter(x=>x.id!==btn.dataset.id);
-    await saveSuppliers();
+    if(!(await saveSuppliers())) return;
     renderSupplierManagerModal(null, linkToSiteIdx);
   }));
   document.getElementById('saveSupplierBtn').addEventListener('click', async ()=>{
@@ -2270,7 +2291,7 @@ function renderSupplierManagerModal(editingId, linkToSiteIdx){
     let savedId;
     if(editing){ Object.assign(editing, data); savedId = editing.id; }
     else { savedId = uid('supplier'); state.suppliers.push({ id: savedId, ...data }); }
-    await saveSuppliers();
+    if(!(await saveSuppliers())) return;
     finishAndLink(savedId);
     showToast(canLink ? 'Đã lưu và gắn nhà cung cấp cho công trình này.' : 'Đã lưu nhà cung cấp.');
   });
@@ -2481,7 +2502,7 @@ function renderInvoiceLotManagerModal(editingId, opts){
   document.querySelectorAll('.lotDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
     if(!confirm('Xoá lô hoá đơn này? Các ca đã rút từ lô này sẽ tự tính lại, có thể phát sinh thiếu hụt.')) return;
     state.invoiceLots = state.invoiceLots.filter(x=>x.id!==btn.dataset.id);
-    await saveInvoiceLots();
+    if(!(await saveInvoiceLots())) return;
     renderInvoiceLotManagerModal(null);
     if(typeof renderInvoiceLotOverview==='function') renderInvoiceLotOverview();
   }));
@@ -2506,7 +2527,7 @@ function renderInvoiceLotManagerModal(editingId, opts){
     let savedId;
     if(editing){ Object.assign(editing, data); savedId = editing.id; }
     else { savedId = uid('lot'); state.invoiceLots.push({ id: savedId, ...data }); }
-    await saveInvoiceLots();
+    if(!(await saveInvoiceLots())) return;
     showToast('Đã lưu lô hoá đơn.');
     refreshGoodsTypesDatalist();
     renderInvoiceLotManagerModal(savedId, {showReport:true});
@@ -2773,7 +2794,7 @@ function renderCustomerManagerModal(editingId, linkToSiteIdx){
   document.querySelectorAll('.cusDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
     if(!confirm('Xoá khách hàng này? Các công trình đang gắn sẽ về trạng thái "chưa gắn".')) return;
     state.customers = state.customers.filter(x=>x.id!==btn.dataset.id);
-    await saveCustomers();
+    if(!(await saveCustomers())) return;
     renderCustomerManagerModal(null, linkToSiteIdx);
   }));
   document.getElementById('saveCustomerBtn').addEventListener('click', async ()=>{
@@ -2790,7 +2811,7 @@ function renderCustomerManagerModal(editingId, linkToSiteIdx){
     let savedId;
     if(editing){ Object.assign(editing, data); savedId = editing.id; }
     else { savedId = uid('customer'); state.customers.push({ id: savedId, ...data }); }
-    await saveCustomers();
+    if(!(await saveCustomers())) return;
     finishAndLink(savedId);
     showToast(canLink ? 'Đã lưu và gắn khách hàng cho công trình này.' : 'Đã lưu khách hàng.');
   });
@@ -3975,7 +3996,7 @@ function bindWarningsBanner(){
     const w = computeLoanDueWarning();
     if(!w) return;
     state.settings.bankLoan.lastPaidMonth = w.curYM;
-    await saveSettings();
+    if(!(await saveSettings())) return;
     showToast('Đã ghi nhận trả lãi ngân hàng tháng này.');
     renderAll();
   });
@@ -5215,10 +5236,12 @@ function bindFormEvents(){
   document.getElementById('saveShiftBtn').addEventListener('click', saveDraftShift);
 
   const delBtn=document.getElementById('deleteShiftBtn');
-  if(delBtn) delBtn.addEventListener('click', ()=>{
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá ca này? Không thể hoàn tác.')){
+      const backup = state.shifts.slice();
       state.shifts = state.shifts.filter(s=>s.id!==sh.id);
-      saveShifts();
+      const ok = await saveShifts();
+      if(!ok){ state.shifts = backup; showToast('XOÁ THẤT BẠI — kiểm tra mạng rồi thử lại.'); return; }
       state.view='list'; state.draftShift=null;
       renderAll();
       showToast('Đã xoá ca.');
@@ -5256,8 +5279,23 @@ async function saveDraftShift(){
   const idx = state.shifts.findIndex(s=>s.id===sh.id);
   const cleanShift = JSON.parse(JSON.stringify(sh));
   delete cleanShift.isNew;
+  const prevShiftsBackup = state.shifts.slice(); // phòng khi ghi thất bại, phục hồi lại đúng mảng cũ
   if(idx>=0) state.shifts[idx]=cleanShift; else state.shifts.push(cleanShift);
-  await saveShifts();
+  // SỬA 2026-08-20 (lỗi nghiêm trọng Ông Chủ báo — "Lưu" báo thành công
+  // nhưng F5 lại mất dữ liệu): saveShifts() giờ trả về true/false đúng
+  // kết quả GHI THẬT vào Firestore — PHẢI kiểm tra trước khi báo thành
+  // công và rời màn hình. Trước đây saveShifts() tự nuốt lỗi bên trong,
+  // hàm này không hề biết ghi thất bại, vẫn chạy tiếp và đè lên bằng
+  // thông báo "Đã lưu thành công" — khiến Ông Chủ tưởng đã lưu dù dữ
+  // liệu chưa hề tới Firestore. Nếu ghi thất bại, KHÔNG rời màn hình,
+  // KHÔNG xoá state.draftShift — giữ nguyên để Ông Chủ thử lưu lại,
+  // tránh mất trắng những gì vừa nhập.
+  const ok = await saveShifts();
+  if(!ok){
+    state.shifts = prevShiftsBackup; // hoan tac local, khop dung voi Firestore that (chua ghi duoc)
+    showToast('LƯU THẤT BẠI — dữ liệu ca CHƯA được ghi. Kiểm tra mạng rồi bấm Lưu lại (không rời màn hình).');
+    return;
+  }
   state.view='list'; state.draftShift=null;
   renderAll();
   showToast('Đã lưu ca thành công.');
@@ -5370,7 +5408,7 @@ function renderDrivers(){
   document.getElementById('saveWorkDaysBtn').addEventListener('click', async ()=>{
     s.standardWorkDaysPerMonth = Number(document.getElementById('wd_workDays').value)||28;
     s.extraDayBaseSalary = wdVals.extraDaySalary;
-    await saveSettings();
+    if(!(await saveSettings())) return;
     // Số ngày công chuẩn / mức lương ca vượt vừa đổi ảnh hưởng lương cứng
     // của MỌI tài xế, MỌI ca đã lưu (không riêng ca mới) — phải tính lại
     // hết, không chỉ áp dụng cho ca tạo sau thời điểm này. Dùng đúng hàm
@@ -5378,7 +5416,8 @@ function renderDrivers(){
     // đang làm khi đổi lương 1 người.
     try {
       state.drivers.forEach(d=>recalcDriverShiftAllocations(d.id));
-      await saveShifts();
+      const ok = await saveShifts();
+      if(!ok) showToast('Đã lưu Công Chuẩn nhưng LƯU LẠI CA CŨ THẤT BẠI — kiểm tra mạng rồi vào từng ca lưu lại, nếu không lương cứng cũ sẽ chưa cập nhật.');
     } catch(e) {
       showToast('Đã lưu Công Chuẩn nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
     }
@@ -5389,7 +5428,7 @@ function renderDrivers(){
   document.getElementById('saveTaxRatesBtn').addEventListener('click', async ()=>{
     s.vatRatePercent = Number(document.getElementById('tax_vatRate').value)||0;
     s.citRatePercent = Number(document.getElementById('tax_citRate').value)||0;
-    await saveSettings();
+    if(!(await saveSettings())) return;
     renderAll();
     showToast('Đã lưu Thuế Suất.');
   });
@@ -5410,7 +5449,7 @@ function renderDrivers(){
       isActive: true
     };
     state.drivers.push(driver);
-    await saveDrivers();
+    if(!(await saveDrivers())) return;
     renderAll();
     showToast(`Đã thêm tài xế "${name}".`);
   });
@@ -5435,7 +5474,7 @@ function renderDrivers(){
         if(!ok) return;
         driver.isActive = false;
       }
-      await saveDrivers();
+      if(!(await saveDrivers())) return;
       renderAll();
       showToast(driver.isActive ? `"${driver.name}" đã kích hoạt lại.` : `"${driver.name}" đã chuyển sang Ngừng Hoạt Động.`);
     });
@@ -5504,14 +5543,15 @@ function openEditDriver(id){
     d.cccdNumber = document.getElementById('ed_cccd').value.trim();
     d.licenseInfo = document.getElementById('ed_license').value.trim();
     d.healthStatus = document.getElementById('ed_health').value.trim();
-    await saveDrivers();
+    if(!(await saveDrivers())) return;
     // Luôn tính lại (không điều kiện) để không bao giờ lỡ bỏ sót việc áp
     // dụng số mới lên ca cũ — recalcDriverShiftAllocations() tự đọc đúng
     // 3 số vừa lưu ở trên, nên chạy lại vẫn an toàn/idempotent kể cả khi
     // Ông Chủ chỉ sửa CCCD/bằng lái mà không đổi số tiền nào.
     try {
       recalcDriverShiftAllocations(d.id);
-      await saveShifts();
+      const ok = await saveShifts();
+      if(!ok) showToast('Đã lưu tài xế nhưng LƯU LẠI CA CŨ THẤT BẠI — kiểm tra mạng, vào từng ca lưu lại nếu cần.');
     } catch(e) {
       showToast('Đã lưu tài xế nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
     }
@@ -5521,7 +5561,7 @@ function openEditDriver(id){
   document.getElementById('delDriverBtn').addEventListener('click', async ()=>{
     if(confirm(`Xoá tài xế "${d.name}"? Các ca đã ghi trước đó vẫn giữ nguyên số liệu.`)){
       state.drivers = state.drivers.filter(x=>x.id!==id);
-      await saveDrivers();
+      if(!(await saveDrivers())) return;
       renderAll(); showToast('Đã xoá tài xế.');
     }
   });
@@ -5772,7 +5812,7 @@ function openDriverAdvanceEditor(id, driverId){
     draft.note = document.getElementById('da_note').value.trim();
     const idx = state.driverAdvances.findIndex(a=>a.id===draft.id);
     if(idx>=0) state.driverAdvances[idx]=draft; else state.driverAdvances.push(draft);
-    await saveDriverAdvances();
+    if(!(await saveDriverAdvances())) return;
     showToast('Đã lưu khoản ứng.');
     goBack();
   });
@@ -5781,7 +5821,7 @@ function openDriverAdvanceEditor(id, driverId){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản ứng này?')){
       state.driverAdvances = state.driverAdvances.filter(a=>a.id!==draft.id);
-      await saveDriverAdvances();
+      if(!(await saveDriverAdvances())) return;
       showToast('Đã xoá.');
       goBack();
     }
@@ -5854,7 +5894,7 @@ function openDriverExpenseReportEditor(id, driverId){
     draft.note = document.getElementById('de_note').value.trim();
     const idx = state.driverExpenseReports.findIndex(r=>r.id===draft.id);
     if(idx>=0) state.driverExpenseReports[idx]=draft; else state.driverExpenseReports.push(draft);
-    await saveDriverExpenseReports();
+    if(!(await saveDriverExpenseReports())) return;
     showToast('Đã lưu báo cáo chi.');
     goBack();
   });
@@ -5863,7 +5903,7 @@ function openDriverExpenseReportEditor(id, driverId){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá báo cáo chi này?')){
       state.driverExpenseReports = state.driverExpenseReports.filter(r=>r.id!==draft.id);
-      await saveDriverExpenseReports();
+      if(!(await saveDriverExpenseReports())) return;
       showToast('Đã xoá.');
       goBack();
     }
@@ -6067,7 +6107,7 @@ function openDriverDetail(driverId){
     } else {
       state.monthlyBonuses.push({ id: uid('bonus'), driverId, yearMonth, amount: mbVals.amount });
     }
-    await saveMonthlyBonuses();
+    if(!(await saveMonthlyBonuses())) return;
     showToast(`Đã lưu tiền thưởng tháng ${yearMonth}.`);
     openDriverDetail(driverId);
   });
@@ -6085,7 +6125,7 @@ function openDriverDetail(driverId){
       e.stopPropagation();
       if(!confirm('Xoá khoản thưởng tháng này?')) return;
       state.monthlyBonuses = state.monthlyBonuses.filter(b=>b.id!==btn.dataset.id);
-      await saveMonthlyBonuses();
+      if(!(await saveMonthlyBonuses())) return;
       showToast('Đã xoá.');
       openDriverDetail(driverId);
     });
@@ -7340,7 +7380,7 @@ function renderProjectAppraisal(){
   document.getElementById('saveAppraisalParamsBtn').addEventListener('click', async ()=>{
     state.settings.currentFuelUnitPrice = apsFuelVal;
     state.settings.vatRatePercent = Number(document.getElementById('aps_vatRate').value)||0;
-    await saveSettings();
+    if(!(await saveSettings())) return;
     showToast('Đã lưu thông số mô phỏng.');
     renderProjectAppraisal();
   });
@@ -7391,7 +7431,7 @@ function renderAppraisalList(metricsById){
     e.stopPropagation();
     if(confirm('Xoá công trình dự kiến này khỏi bảng so sánh?')){
       state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==btn.dataset.id);
-      await saveSiteAppraisals();
+      if(!(await saveSiteAppraisals())) return;
       renderProjectAppraisal();
       showToast('Đã xoá.');
     }
@@ -7706,7 +7746,7 @@ function openProjectAppraisalEditor(id){
     if(!draft.name.trim()){ showToast('Nhập tên công trình dự kiến trước.'); return; }
     const idx = state.siteAppraisals.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.siteAppraisals[idx]=draft; else state.siteAppraisals.push(draft);
-    await saveSiteAppraisals();
+    if(!(await saveSiteAppraisals())) return;
     renderProjectAppraisal();
     showToast('Đã lưu công trình dự kiến.');
   });
@@ -7715,7 +7755,7 @@ function openProjectAppraisalEditor(id){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá công trình dự kiến này?')){
       state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==draft.id);
-      await saveSiteAppraisals();
+      if(!(await saveSiteAppraisals())) return;
       renderProjectAppraisal();
       showToast('Đã xoá.');
     }
@@ -9600,7 +9640,7 @@ function renderResults(){
   attachMoneyInput(document.getElementById('res_manualCit'), manualCitValue||0, async v=>{
     if(!state.settings.manualCitByPeriod) state.settings.manualCitByPeriod = {};
     state.settings.manualCitByPeriod[citPeriodKey] = v;
-    await saveSettings();
+    if(!(await saveSettings())) return;
   });
 
   renderRepairList(repairsHere);
@@ -9953,7 +9993,7 @@ function openCustomerPaymentEditor(id, customerId){
     draft.method = document.getElementById('cp_method').value;
     const idx = state.sitePayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.sitePayments[idx]=draft; else state.sitePayments.push(draft);
-    await saveSitePayments();
+    if(!(await saveSitePayments())) return;
     showToast('Đã lưu khoản thu.');
     goBack();
   });
@@ -9962,7 +10002,7 @@ function openCustomerPaymentEditor(id, customerId){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản thu này?')){
       state.sitePayments = state.sitePayments.filter(p=>p.id!==draft.id);
-      await saveSitePayments();
+      if(!(await saveSitePayments())) return;
       showToast('Đã xoá.');
       goBack();
     }
@@ -9999,9 +10039,13 @@ function openBulkInvoiceTickModal(partyId, kind){
     const from = document.getElementById('bulk_from').value;
     const to = document.getElementById('bulk_to').value;
     if(!from || !to){ showToast('Chọn đủ khoảng ngày.'); return; }
-    const count = await bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId, tickField, setTo });
+    const { count, failedVehicleNames } = await bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId, tickField, setTo });
     closeModal();
-    showToast(`Đã ${setTo?'tick':'bỏ tick'} ${count} công trình (gộp tất cả xe).`);
+    if(failedVehicleNames.length===0){
+      showToast(`Đã ${setTo?'tick':'bỏ tick'} ${count} công trình (gộp tất cả xe).`);
+    } else {
+      showToast(`Đã ${setTo?'tick':'bỏ tick'} ${count} công trình — NHƯNG LƯU THẤT BẠI cho xe: ${failedVehicleNames.join(', ')}. Kiểm tra mạng rồi thử tick lại đúng khoảng ngày này.`);
+    }
     if(isBuy) openSupplierDetail(partyId); else openCustomerDetail(partyId);
   };
   document.getElementById('bulkTickBtn').addEventListener('click', ()=>doBulk(true));
@@ -10162,7 +10206,7 @@ function openSupplierPaymentEditor(id, supplierId){
     draft.method = document.getElementById('sp2_method').value;
     const idx = state.supplierPayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.supplierPayments[idx]=draft; else state.supplierPayments.push(draft);
-    await saveSupplierPayments();
+    if(!(await saveSupplierPayments())) return;
     showToast('Đã lưu khoản đã trả mỏ.');
     goBack();
   });
@@ -10171,7 +10215,7 @@ function openSupplierPaymentEditor(id, supplierId){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản đã trả này?')){
       state.supplierPayments = state.supplierPayments.filter(p=>p.id!==draft.id);
-      await saveSupplierPayments();
+      if(!(await saveSupplierPayments())) return;
       showToast('Đã xoá.');
       goBack();
     }
@@ -10354,7 +10398,7 @@ function openSiteDetail(siteName, from, to){
     const idx = state.siteContracts.findIndex(c=>c.siteName===siteName);
     const record = { id: contract ? contract.id : uid('contract'), siteName, totalContractValue: contractDraftValue, notes: contract ? contract.notes : '' };
     if(idx>=0) state.siteContracts[idx]=record; else state.siteContracts.push(record);
-    await saveSiteContracts();
+    if(!(await saveSiteContracts())) return;
     saveMainScroll();
     openSiteDetail(siteName, from, to);
     restoreMainScroll();
@@ -10471,7 +10515,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     draft.method = document.getElementById('sp_method').value;
     const idx = state.sitePayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.sitePayments[idx]=draft; else state.sitePayments.push(draft);
-    await saveSitePayments();
+    if(!(await saveSitePayments())) return;
     showToast('Đã lưu khoản thu.');
     goBack();
   });
@@ -10480,7 +10524,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản thu này?')){
       state.sitePayments = state.sitePayments.filter(p=>p.id!==draft.id);
-      await saveSitePayments();
+      if(!(await saveSitePayments())) return;
       showToast('Đã xoá.');
       goBack();
     }
@@ -10582,7 +10626,7 @@ function openDocumentEditor(id){
     if(draft.scope==='driver' && !draft.driverId){ showToast('Hãy thêm tài xế trước ở tab "Tài Xế".'); return; }
     const idx = state.documents.findIndex(d=>d.id===draft.id);
     if(idx>=0) state.documents[idx]=draft; else state.documents.push(draft);
-    await saveDocuments();
+    if(!(await saveDocuments())) return;
     renderAll();
     showToast('Đã lưu giấy tờ.');
   });
@@ -10591,7 +10635,7 @@ function openDocumentEditor(id){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá giấy tờ này?')){
       state.documents = state.documents.filter(d=>d.id!==draft.id);
-      await saveDocuments();
+      if(!(await saveDocuments())) return;
       renderAll();
       showToast('Đã xoá.');
     }
@@ -10671,7 +10715,7 @@ function openMaintenanceEditor(id){
     if(!draft.name){ showToast('Nhập tên hạng mục trước.'); return; }
     const idx = state.maintenanceSchedules.findIndex(m=>m.id===draft.id);
     if(idx>=0) state.maintenanceSchedules[idx]=draft; else state.maintenanceSchedules.push(draft);
-    await saveMaintenanceSchedules();
+    if(!(await saveMaintenanceSchedules())) return;
     renderAll();
     showToast('Đã lưu lịch bảo dưỡng.');
   });
@@ -10680,7 +10724,7 @@ function openMaintenanceEditor(id){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá hạng mục bảo dưỡng này?')){
       state.maintenanceSchedules = state.maintenanceSchedules.filter(m=>m.id!==draft.id);
-      await saveMaintenanceSchedules();
+      if(!(await saveMaintenanceSchedules())) return;
       renderAll();
       showToast('Đã xoá.');
     }
@@ -10821,7 +10865,7 @@ function openRepairEditor(id){
     }
     const idx = state.repairs.findIndex(r=>r.id===draft.id);
     if(idx>=0) state.repairs[idx]=draft; else state.repairs.push(draft);
-    await saveRepairs();
+    if(!(await saveRepairs())) return;
     renderAll();
     showToast('Đã lưu khoản sửa chữa.');
   });
@@ -10830,7 +10874,7 @@ function openRepairEditor(id){
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản sửa chữa này?')){
       state.repairs = state.repairs.filter(r=>r.id!==draft.id);
-      await saveRepairs();
+      if(!(await saveRepairs())) return;
       renderAll();
       showToast('Đã xoá.');
     }
@@ -11233,7 +11277,7 @@ function renderCompanyDashboardPage(){
     state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
     state.equityProjectInfo.registeredCharterCapital = epiCharterCapitalVal;
     state.equityProjectInfo.charterCapitalDeadline = document.getElementById('epi_charterDeadline').value || null;
-    await saveEquityProjectInfo();
+    if(!(await saveEquityProjectInfo())) return;
     showToast('Đã lưu thông tin dự án.');
     saveMainScroll();
     renderCompanyDashboardPage();
@@ -11253,7 +11297,7 @@ function renderCompanyDashboardPage(){
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
     if(!oeAmountVal || oeAmountVal<=0){ showToast('Nhập số tiền trước đã.'); return; }
     state.ownerEquityEntries.push({ id: uid('equity'), date, type, amount: oeAmountVal, note, isCharterCapital, method });
-    await saveOwnerEquityEntries();
+    if(!(await saveOwnerEquityEntries())) return;
     showToast('Đã ghi khoản mới.');
     saveMainScroll();
     renderCompanyDashboardPage();
@@ -11262,7 +11306,7 @@ function renderCompanyDashboardPage(){
   document.querySelectorAll('[data-del-equity]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
-      await saveOwnerEquityEntries();
+      if(!(await saveOwnerEquityEntries())) return;
       showToast('Đã xoá.');
       saveMainScroll();
       renderCompanyDashboardPage();
@@ -11277,7 +11321,7 @@ function renderCompanyDashboardPage(){
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
     if(state.bankBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
     state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
-    await saveBankBalanceCheckpoints();
+    if(!(await saveBankBalanceCheckpoints())) return;
     showToast('Đã khai báo mốc chốt.');
     saveMainScroll();
     renderCompanyDashboardPage();
@@ -11286,7 +11330,7 @@ function renderCompanyDashboardPage(){
   document.querySelectorAll('[data-del-bankcheckpoint]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
-      await saveBankBalanceCheckpoints();
+      if(!(await saveBankBalanceCheckpoints())) return;
       showToast('Đã xoá mốc chốt.');
       saveMainScroll();
       renderCompanyDashboardPage();
@@ -11840,10 +11884,10 @@ function renderSettings(){
         bl.paidMonths = bl.paidMonths.filter(m=>m!==curYM);
         bl.lastPaidMonth = bl.paidMonths.length ? bl.paidMonths[bl.paidMonths.length-1] : null;
       }
-      showToast(paid ? `Đã ghi nhận trả kỳ này (tổng ${bl.paidMonths.length} kỳ đã trả).` : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.');
       if(state.currentTab==='settings') renderAll();
       else if(state.currentTab==='shifts') renderShiftList();
-      try { await saveSettings(); } catch(err){ console.error('Lưu trạng thái trả NH lỗi:', err); }
+      const ok = await saveSettings();
+      showToast(ok ? (paid ? `Đã ghi nhận trả kỳ này (tổng ${bl.paidMonths.length} kỳ đã trả).` : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.') : 'LƯU THẤT BẠI — kiểm tra mạng rồi thử lại.');
     });
   }
   // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
@@ -11950,7 +11994,7 @@ function renderSettings(){
     s.monthlyInsurance = sVals.insurance;
     s.monthlyRegistrationFee = sVals.registration;
     state.roadFeeByMonth.forEach(e=>{ if(rfVals[e.id]!==undefined) e.amount = rfVals[e.id]; });
-    await saveRoadFeeByMonth();
+    if(!(await saveRoadFeeByMonth())) return;
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
@@ -11968,7 +12012,7 @@ function renderSettings(){
       };
     });
     showGeminiKeyInput = false; // collapse back to the masked "🔒 Đã có mã API" state
-    await saveSettings();
+    if(!(await saveSettings())) return;
     renderAll();
     showToast('Đã lưu cài đặt.');
   });
@@ -11986,7 +12030,7 @@ function renderSettings(){
         monthlyFixedRoadFee: 25000000, geminiApiKey: state.settings.geminiApiKey,
         currentFuelUnitPrice: state.settings.currentFuelUnitPrice, vatRatePercent: 10, citRatePercent: 20,
         extraDayBaseSalary: 1000000 };
-      await saveSettings();
+      if(!(await saveSettings())) return;
       renderAll(); showToast('Đã khôi phục cài đặt gốc.');
     }
   });
