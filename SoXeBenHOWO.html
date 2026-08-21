@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #75';
+const APP_BUILD = '2026-08-20 · #76';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1278,6 +1278,23 @@ const SHARED_SPACE_ID = 'howo-29e-69112';
 function sharedDataRef(name){
   return db.collection('shared').doc(SHARED_SPACE_ID).collection('appdata').doc(name);
 }
+/// SỬA 2026-08-20 (Ông Chủ báo — trên điện thoại, nhập đủ dữ liệu, bấm
+/// Lưu nhưng KHÔNG BÁO GÌ CẢ, kể cả bản đã sửa lỗi "báo lưu giả" #73):
+/// đã kiểm chứng kỹ CODE hoàn toàn đúng (test bằng đúng file thật, dữ
+/// liệu thật, không lỗi) — nên nguyên nhân còn lại DUY NHẤT là: request
+/// ghi Firestore bị TREO VÔ THỜI HẠN do mạng điện thoại yếu/chập chờn
+/// (chuyển 4G↔wifi, mất sóng giữa chừng) — Promise KHÔNG BAO GIỜ resolve
+/// lẫn reject, nên .catch() ở saveXxx() cũng không có gì để bắt, màn hình
+/// "đứng" im lặng tuyệt đối, không phải do code sai. withTimeout() ép mọi
+/// lệnh ghi phải có kết quả (thành công HOẶC lỗi rõ ràng) trong tối đa 15
+/// giây — quá hạn thì coi như thất bại, để saveXxx() bắt được và báo rõ
+/// "LƯU THẤT BẠI" thay vì treo mãi không phản hồi.
+function withTimeout(promise, ms=15000){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error('Timeout: mạng quá chậm hoặc mất kết nối sau '+(ms/1000)+'s')), ms))
+  ]);
+}
 
 async function loadAll(){
   try {
@@ -1373,7 +1390,7 @@ async function ensureVehiclesMigrated(){
   if(!ok) console.error('Lưu xe khởi tạo lần đầu thất bại — sẽ thử lại lần load kế tiếp.');
 }
 async function saveVehicles(){
-  try { await sharedDataRef('vehicles').set({ list: state.vehicles }); return true; }
+  try { await withTimeout(sharedDataRef('vehicles').set({ list: state.vehicles })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu xe — kiểm tra mạng.'); return false; }
 }
 /// Modal chọn phạm vi đang xem: LINH CHÍ THÀNH (Toàn Công Ty) hoặc 1 xe cụ thể.
@@ -1588,45 +1605,45 @@ async function saveDrivers(){
   catch(e){ showToast('Lỗi lưu dữ liệu tài xế — kiểm tra mạng.'); return false; }
 }
 async function saveSuppliers(){
-  try { await sharedDataRef('suppliers').set({ list: state.suppliers }); return true; }
+  try { await withTimeout(sharedDataRef('suppliers').set({ list: state.suppliers })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp — kiểm tra mạng.'); return false; }
 }
 async function saveInvoiceLots(){
-  try { await sharedDataRef('invoiceLots').set({ list: state.invoiceLots }); return true; }
+  try { await withTimeout(sharedDataRef('invoiceLots').set({ list: state.invoiceLots })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù — kiểm tra mạng.'); return false; }
 }
 async function saveDriverAdvances(){
-  try { await sharedDataRef('driverAdvances').set({ list: state.driverAdvances }); return true; }
+  try { await withTimeout(sharedDataRef('driverAdvances').set({ list: state.driverAdvances })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu tạm ứng chi phí tài xế — kiểm tra mạng.'); return false; }
 }
 async function saveDriverExpenseReports(){
-  try { await sharedDataRef('driverExpenseReports').set({ list: state.driverExpenseReports }); return true; }
+  try { await withTimeout(sharedDataRef('driverExpenseReports').set({ list: state.driverExpenseReports })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu báo cáo chi phí tài xế — kiểm tra mạng.'); return false; }
 }
 async function saveCustomers(){
-  try { await sharedDataRef('customers').set({ list: state.customers }); return true; }
+  try { await withTimeout(sharedDataRef('customers').set({ list: state.customers })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu khách hàng — kiểm tra mạng.'); return false; }
 }
 async function saveSupplierPayments(){
-  try { await sharedDataRef('supplierPayments').set({ list: state.supplierPayments }); return true; }
+  try { await withTimeout(sharedDataRef('supplierPayments').set({ list: state.supplierPayments })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); return false; }
 }
 async function saveOwnerEquityEntries(){
-  try { await sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries }); return true; }
+  try { await withTimeout(sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries })); return true; }
   catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu — kiểm tra mạng.'); return false; }
 }
 async function saveEquityProjectInfo(){
-  try { await sharedDataRef('equityProjectInfo').set(state.equityProjectInfo); return true; }
+  try { await withTimeout(sharedDataRef('equityProjectInfo').set(state.equityProjectInfo)); return true; }
   catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư — kiểm tra mạng.'); return false; }
 }
 async function saveBankBalanceCheckpoints(){
-  try { await sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints }); return true; }
+  try { await withTimeout(sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints })); return true; }
   catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng — kiểm tra mạng.'); return false; }
 }
 async function saveShifts(){
   try {
     const vid = activeVehicleIdForEditing();
-    await vehicleDataRef(vid, 'shifts').set({ list: state.shifts });
+    await withTimeout(vehicleDataRef(vid, 'shifts').set({ list: state.shifts }));
     if(vid) state.allVehiclesShifts[vid] = state.shifts;
     return true;
   }
@@ -1640,7 +1657,7 @@ async function saveShifts(){
 /// liệu vừa lưu.
 async function saveShiftsForVehicleId(vid, shiftsList){
   try {
-    await vehicleDataRef(vid, 'shifts').set({ list: shiftsList });
+    await withTimeout(vehicleDataRef(vid, 'shifts').set({ list: shiftsList }));
     state.allVehiclesShifts[vid] = shiftsList;
     if(vid === activeVehicleIdForEditing()) state.shifts = shiftsList;
     return true;
@@ -1908,7 +1925,7 @@ function renderEquityTimelineChartSVG(timeline){
 async function saveRepairs(){
   try {
     const vid = activeVehicleIdForEditing();
-    await vehicleDataRef(vid, 'repairs').set({ list: state.repairs });
+    await withTimeout(vehicleDataRef(vid, 'repairs').set({ list: state.repairs }));
     if(vid) state.allVehiclesRepairs[vid] = state.repairs;
     return true;
   }
@@ -1917,7 +1934,7 @@ async function saveRepairs(){
 async function saveRoadFeeByMonth(){
   try {
     const vid = activeVehicleIdForEditing();
-    await vehicleDataRef(vid, 'roadFeeByMonth').set({ list: state.roadFeeByMonth });
+    await withTimeout(vehicleDataRef(vid, 'roadFeeByMonth').set({ list: state.roadFeeByMonth }));
     if(vid) state.allVehiclesRoadFee[vid] = state.roadFeeByMonth;
     return true;
   }
@@ -1984,7 +2001,7 @@ function roadFeeForRange(from, to){
   }, from, to);
 }
 async function saveSitePayments(){
-  try { await sharedDataRef('sitePayments').set({ list: state.sitePayments }); return true; }
+  try { await withTimeout(sharedDataRef('sitePayments').set({ list: state.sitePayments })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu công nợ — kiểm tra mạng.'); return false; }
 }
 async function saveDocuments(){
@@ -1996,11 +2013,11 @@ async function saveMaintenanceSchedules(){
   catch(e){ showToast('Lỗi lưu lịch bảo dưỡng — kiểm tra mạng.'); return false; }
 }
 async function saveSiteContracts(){
-  try { await sharedDataRef('siteContracts').set({ list: state.siteContracts }); return true; }
+  try { await withTimeout(sharedDataRef('siteContracts').set({ list: state.siteContracts })); return true; }
   catch(e){ showToast('Lỗi lưu hợp đồng công trình — kiểm tra mạng.'); return false; }
 }
 async function saveSiteAppraisals(){
-  try { await sharedDataRef('siteAppraisals').set({ list: state.siteAppraisals }); return true; }
+  try { await withTimeout(sharedDataRef('siteAppraisals').set({ list: state.siteAppraisals })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình — kiểm tra mạng.'); return false; }
 }
 async function saveMonthlyBonuses(){
@@ -2018,10 +2035,10 @@ async function saveSettings(){
   try {
     const shared = {};
     SHARED_SETTINGS_FIELDS.forEach(f=>{ shared[f]=state.settings[f]; });
-    await Promise.all([
+    await withTimeout(Promise.all([
       sharedDataRef('companySettings').set(shared),
       vehicleDataRef(activeVehicleIdForEditing(), 'settings').set(state.settings)
-    ]);
+    ]));
     const vid = activeVehicleIdForEditing();
     if(vid) state.allVehiclesSettings[vid] = state.settings;
     return true;
