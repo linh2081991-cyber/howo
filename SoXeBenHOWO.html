@@ -1264,6 +1264,16 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+// 2026-08-21 (Ông Chủ — nút "Thêm Lô" báo lỗi dù mạng khoẻ): Firestore
+// TỪ CHỐI ghi bất kỳ field nào có giá trị `undefined` — và parseVN() (dùng
+// ở 4 chỗ trong app: sửa Nhà Cung Cấp, Kho Hoá Đơn Bù, sửa Khách Hàng,
+// Thẩm Định Dự Án) CHỦ Ý trả về `undefined` khi Ông Chủ để trống 1 ô số
+// không bắt buộc (VD "VAT suất trên hoá đơn" bỏ trống) — Firestore lập
+// tức throw lỗi, saveXxx() bắt được và hiện nhầm thành "kiểm tra mạng"
+// dù mạng không hề liên quan. ignoreUndefinedProperties:true khiến
+// Firestore ÂM THẦM BỎ QUA field undefined thay vì throw — sửa đúng gốc
+// cho MỌI chỗ dùng parseVN() cùng lúc, không phải vá riêng từng form.
+db.settings({ ignoreUndefinedProperties: true });
 const auth = firebase.auth();
 try {
   db.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
