@@ -3443,112 +3443,28 @@ function siteGoodsTypeGroups(s){
 function siteMissingDocumentedVolume(s){
   return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingVolume, 0);
 }
-const _documentationLedgerCache = {}; // { [goodsType]: {key, data} }
-/// 2026-08-22 (yêu cầu Ông Chủ — "ca trước dùng trước, luôn ưu tiên HĐ mỏ
-/// trước, thiếu thì mới dùng trong kho"): TRƯỚC ĐÂY mỗi ca tự tính
-/// "đã có chứng từ" = buyVolume × 70% CỦA RIÊNG NÓ — hoàn toàn không quan
-/// tâm hoá đơn thật đã tồn tại ngày nào, khiến 1 ca ngày 28/7 có thể bị
-/// coi như đã được che bởi 1 hoá đơn thật xuất ngày 06/8 (SAU nó) — vô lý
-/// về mặt giấy tờ. Giờ chia lịch sử thành từng GIAI ĐOẠN đóng khung bởi
-/// NGÀY hoá đơn thật (Sổ Hoá Đơn Thật, sắp tăng dần):
-///   - Ca có ngày ≤ ngày hoá đơn thật gần nhất PHÍA SAU nó → nằm trong 1
-///     giai đoạn đã có hoá đơn thật che — hoá đơn đó (khối THẬT, không
-///     nhân %) được rút FIFO cho các ca TRONG GIAI ĐOẠN theo đúng thứ tự
-///     ngày (ca trước dùng trước) — y hệt cách buildInvoiceLotLedger() rút
-///     kho, chỉ khác nguồn cung là hoá đơn thật thay vì lô mua bù.
-///   - Ca có ngày SAU hoá đơn thật cuối cùng (giai đoạn hiện tại, CHƯA có
-///     gì che) → GIỮ NGUYÊN % lý thuyết cũ (g.missingVolume) — đúng yêu
-///     cầu Ông Chủ "vẫn giữ nguyên % lý thuyết 70% như hiện tại".
-///   - Chưa có hoá đơn thật nào (Sổ Hoá Đơn Thật rỗng) → TOÀN BỘ vẫn dùng
-///     % lý thuyết như cũ, không đổi gì (tương thích ngược hoàn toàn).
-/// CHỈ áp dụng cho ca ĐÃ tick "Đã nhận hóa đơn MUA" (buyIsDeductible) —
-/// ca chưa tick MUA đã có quy tắc riêng (100% ở siteGroupRealMissingVolume,
-/// không liên quan hoá đơn thật/giai đoạn).
-function buildDocumentationLedger(goodsType){
-  const gt = normGoodsType(goodsType);
-  if(!gt) return {};
-  const allSh = allShiftsForLedgerCompanyWide();
-  const mineInvSig = JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt));
-  const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).map(s=>{
-    if(s.siteType!=='commercial' || !buyIsDeductible(s)) return '0';
-    let sell=0;
-    (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt) sell+=Number(t.sellVolume)||0; });
-    return '1:'+sell;
-  }).join('|')).join(',');
-  const cacheKey = mineInvSig+'|'+shiftSig;
-  if(_documentationLedgerCache[gt] && _documentationLedgerCache[gt].key===cacheKey) return _documentationLedgerCache[gt].data;
-
-  const caGroups = [];
-  allSh.forEach(sh=>{
-    (sh.siteLogs||[]).forEach((s,idx)=>{
-      if(s.siteType!=='commercial' || !buyIsDeductible(s)) return;
-      siteGoodsTypeGroups(s).forEach(g=>{
-        if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
-        caGroups.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType,
-          sellVolume: g.sellVolume, theoreticalMissing: g.missingVolume });
-      });
-    });
-  });
-  caGroups.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
-
-  const realInvoices = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt)
-    .map(inv=>({ date: inv.invoiceDate||'', volume: mineInvoiceVolumeKhoi(inv) }))
-    .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-
-  const result = {};
-  if(realInvoices.length===0){
-    // Chưa có hoá đơn thật nào — tương thích ngược hoàn toàn, giữ % lý thuyết.
-    caGroups.forEach(cg=>{ result[cg.key] = cg.theoreticalMissing; });
-  } else {
-    let invPtr = 0;
-    let periodSupplyRemaining = realInvoices[0].volume;
-    let periodEndDate = realInvoices[0].date;
-    caGroups.forEach(cg=>{
-      while(invPtr < realInvoices.length-1 && cg.date > periodEndDate){
-        invPtr++;
-        periodSupplyRemaining = realInvoices[invPtr].volume;
-        periodEndDate = realInvoices[invPtr].date;
-      }
-      if(cg.date <= periodEndDate){
-        // Trong giai đoạn ĐÃ có hoá đơn thật che — rút FIFO đúng thứ tự ngày.
-        const take = Math.min(cg.sellVolume, periodSupplyRemaining);
-        periodSupplyRemaining -= take;
-        result[cg.key] = Math.max(0, cg.sellVolume - take);
-      } else {
-        // Sau hoá đơn thật cuối cùng — giai đoạn hiện tại, chưa có gì che.
-        result[cg.key] = cg.theoreticalMissing;
-      }
-    });
-  }
-  _documentationLedgerCache[gt] = { key: cacheKey, data: result };
-  return result;
-}
-/// 2026-08-22 (yêu cầu Ông Chủ — cơ chế "tick = SỰ THẬT xảy ra"): Kho hoá
+/// 2026-08-22 (yêu cầu Ông Chủ — cơ chế "tick = SỰ THẬT xảy ra", đã sửa lại
+/// đúng ý sau khi Ông Chủ chỉnh: "mỗi ca ĐỘC LẬP, luôn cố định 70% từ mỏ
+/// thật + 30% từ kho — không ca nào tranh phần của ca nào cả"): Kho hoá
 /// đơn bù (tiền + VAT THẬT, ảnh hưởng shiftTotalCost/commercialVatPayable)
-/// giờ CHỈ được rút cho 1 nhóm loại hàng khi Ông Chủ đã tick "Đã xuất hóa
-/// đơn BÁN" cho đúng ca đó — TRƯỚC khi tick, g.missingVolume (30% ước
-/// tính) vẫn hiện ra để xem tham khảo NHƯNG hoàn toàn KHÔNG suy chuyển kho
-/// (đúng nguyên văn: "chưa tick thì tất cả chỉ là con số lý thuyết").
+/// CHỈ được rút cho 1 nhóm loại hàng khi Ông Chủ đã tick "Đã xuất hóa đơn
+/// BÁN" cho đúng ca đó — TRƯỚC khi tick, g.missingVolume (30% ước tính)
+/// vẫn hiện ra để xem tham khảo NHƯNG hoàn toàn KHÔNG suy chuyển kho.
 /// Khi ĐÃ tick BÁN:
-///   - Đã tick "Đã nhận hóa đơn MUA" (buyIsDeductible) → PHẦN CÒN THIẾU
-///     giờ lấy từ buildDocumentationLedger() (ưu tiên hoá đơn THẬT theo
-///     đúng giai đoạn/ngày tháng, FIFO — yêu cầu Ông Chủ 2026-08-22) thay
-///     vì flat g.missingVolume (% lý thuyết cũ, vẫn dùng làm fallback cho
-///     giai đoạn CHƯA có hoá đơn thật che).
+///   - Đã tick "Đã nhận hóa đơn MUA" (buyIsDeductible) → mỏ coi như đã
+///     xuất đúng 70% cam kết CHO ĐÚNG CA NÀY (không gộp/chia sẻ với ca
+///     khác) → kho chỉ cần bù đúng PHẦN CÒN THIẾU của riêng ca này
+///     (g.missingVolume, công thức % cũ theo buyVolume của chính ca đó —
+///     KHÔNG đổi, không tính lại theo "giai đoạn" gì cả).
 ///   - CHƯA tick MUA (hãn hữu — trả hàng cho khách trước, mỏ xuất hoá đơn
 ///     bù sau) → hoàn toàn chưa có chứng từ mua nào → kho phải bù ĐỦ
-///     100% (g.sellVolume) — KHÔNG đụng, không liên quan hoá đơn thật.
+///     100% (g.sellVolume).
 /// Tick MUA giữ NGUYÊN vai trò cũ (chỉ quyết định khấu trừ VAT đầu vào
 /// phần mua thường ở commercialVatPayable) — không đụng, tách biệt hoàn
 /// toàn khỏi việc rút/nạp kho.
 function siteGroupRealMissingVolume(s, g){
   if(!s.sellHasInvoice) return 0; // chưa xuất hoá đơn BÁN thật — vẫn là lý thuyết, kho chưa suy chuyển
-  if(!buyIsDeductible(s)) return g.sellVolume;
-  const ctx = findSiteLogContext(s);
-  if(!ctx) return g.missingVolume; // không định vị được ca (hiếm) — an toàn lùi về % lý thuyết cũ
-  const ledger = buildDocumentationLedger(g.goodsType);
-  const key = siteLogGroupKey(ctx.sh, ctx.idx, g.goodsType);
-  return key in ledger ? ledger[key] : g.missingVolume;
+  return buyIsDeductible(s) ? g.missingVolume : g.sellVolume;
 }
 /// ==== KHO HOÁ ĐƠN BÙ (mua theo lô lớn, rút dần cho từng ca thiếu chứng
 /// từ) — khớp theo LOẠI HÀNG (VD Base A, Base B...), KHÔNG còn ràng buộc
@@ -3644,19 +3560,14 @@ const _invoiceLedgerCache = {}; // { [goodsType]: {key, data} } — 2026-08-22: 
 // cache của nhau (rất hay xen kẽ trong 1 lượt vẽ UI), khiến vòng quét
 // shiftSig (mới thêm, quét cả commercialTrips) phải chạy lại nhiều lần hơn
 // cần thiết → đây chính là nguyên nhân "lưu ca bị lâu hơn hẳn" Ông Chủ báo.
-/// Gộp 2 nguồn cung thành 1 KHO DUY NHẤT để rút FIFO (yêu cầu Ông Chủ
-/// 2026-08-22): Lô mua bù (invoiceLots, đơn vị khối sẵn) + Hoá đơn THẬT từ
-/// mỏ (mineInvoices, đơn vị tấn, quy đổi qua tỷ trọng nhà cung cấp gắn
-/// trên từng hoá đơn) — vì hoá đơn thật mỏ xuất SAU (Ông Chủ ví dụ: đã
-/// xuất trả khách bằng lô mua bù trước, mỏ xuất hoá đơn bù sau) phải nằm
-/// CHUNG 1 kho với lô mua bù để dùng bù cho đợt xuất khác, không tách
-/// riêng như trước (trước đây mineInvoices chỉ dùng hiển thị "Tồn Kho
-/// Tổng Hợp" tham khảo, không hề tham gia rút kho thật). Sắp theo ngày
-/// TĂNG DẦN (FIFO) — nguồn nào có trước dùng trước, không phân biệt là lô
-/// mua bù hay hoá đơn thật.
-function combinedWarehouseSupply(goodsType){
+/// Nguồn cung CHỈ từ Lô Mua Bù (invoiceLots) — dùng riêng cho phần 30%
+/// còn thiếu của ca ĐÃ tick "Đã nhận hóa đơn MUA" (2026-08-22, sửa lại
+/// theo đúng ý Ông Chủ: hoá đơn thật đã dùng để tính ra đúng 70% của
+/// CHÍNH ca đó rồi — không được rút thêm 1 lần nữa từ chính hoá đơn thật
+/// cho phần 30% còn lại, sẽ thành tính trùng/2 lần trên cùng 1 hoá đơn).
+function invoiceLotSupplyOnly(goodsType){
   const gt = normGoodsType(goodsType);
-  const fromLots = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt).map(l=>{
+  return state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt).map(l=>{
     const vat = Number(l.vatRatePercent)||0;
     const totalVol = Number(l.totalVolume)||0;
     const grossPerVol = totalVol>0 ? (Number(l.totalInvoiceValue)||0)/totalVol : 0;
@@ -3664,8 +3575,16 @@ function combinedWarehouseSupply(goodsType){
     return { id: l.id, date: l.purchaseDate||'', totalVolume: totalVol, remainingVolume: totalVol,
       _netCostPerVol: totalVol>0 ? netCostTotal/totalVol : 0,
       _vatPerVol: totalVol>0 ? grossPerVol*vat/(100+vat) : 0 }; // VAT tách từ giá hoá đơn gộp/khối
-  });
-  const fromMineInvoices = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt).map(inv=>{
+  }).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+}
+/// Nguồn cung CHỈ từ Hoá Đơn Thật Từ Mỏ (mineInvoices) — dùng riêng cho
+/// phần 100% của ca CHƯA tick "Đã nhận hóa đơn MUA" (trường hợp hãn hữu:
+/// trả hàng cho khách trước, mỏ xuất hoá đơn bù sau — hoá đơn đó lúc này
+/// CHƯA hề được dùng để tính 70% cho bất kỳ ca nào, nên dùng làm nguồn bù
+/// hoàn toàn hợp lệ, không trùng).
+function mineInvoiceSupplyOnly(goodsType){
+  const gt = normGoodsType(goodsType);
+  return state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt).map(inv=>{
     const volKhoi = mineInvoiceVolumeKhoi(inv); // 0 nếu chưa cấu hình tỷ trọng — không tự chế số
     const vat = Number(inv.vatRatePercent)||0;
     const unitPrice = Number(inv.unitPrice)||0; // đ/tấn, CHƯA VAT (khác lot: lot.totalInvoiceValue là GIÁ ĐÃ GỒM VAT)
@@ -3673,8 +3592,7 @@ function combinedWarehouseSupply(goodsType){
     return { id: inv.id, date: inv.invoiceDate||'', totalVolume: volKhoi, remainingVolume: volKhoi,
       _netCostPerVol: volKhoi>0 ? netCostTotal/volKhoi : 0,
       _vatPerVol: volKhoi>0 ? (netCostTotal*vat/100)/volKhoi : 0 }; // unitPrice đã net nên VAT = net×%, khác công thức tách VAT của lot
-  });
-  return [...fromLots, ...fromMineInvoices].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  }).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
 }
 /// Tra cứu 1 phần tử kho THEO ĐÚNG NGUỒN GỐC (lô mua bù hay hoá đơn thật)
 /// — dùng cho màn giải trình chi tiết cần hiện đúng cách tính của từng
@@ -3686,14 +3604,19 @@ function warehouseSourceById(id){
   if(inv) return { kind:'mineinv', obj: inv };
   return null;
 }
-/// Dựng sổ cái rút kho cho 1 LOẠI HÀNG: xếp toàn bộ NHU CẦU THẬT (mọi NHÓM
-/// loại hàng, trong bất kỳ công trình nào, đúng loại hàng này, ĐÃ tick
-/// "Đã xuất hóa đơn BÁN" — xem siteGroupRealMissingVolume — theo thời gian
-/// tăng dần) và toàn bộ NGUỒN CUNG (combinedWarehouseSupply — lô mua bù +
-/// hoá đơn thật, theo ngày tăng dần), rồi rút FIFO. 1 công trình có thể
-/// vừa là nguồn nhu cầu cho NHIỀU loại hàng khác nhau cùng lúc (mỗi nhóm
-/// loại hàng trong đó tính riêng, độc lập). Cache trong 1 chu kỳ vẽ UI
-/// (khoá cache đổi ngay khi dữ liệu ca/lô/hoá đơn thật/tick đổi).
+/// Dựng sổ cái rút kho cho 1 LOẠI HÀNG (2026-08-22, sửa lại theo đúng ý
+/// Ông Chủ — "mỗi ca độc lập, luôn cố định 70/30, hoá đơn thật KHÔNG được
+/// dùng 2 lần"). CHIA 2 LUỒNG NHU CẦU RIÊNG BIỆT, không lẫn nguồn cung:
+///   - Ca ĐÃ tick "Đã nhận hóa đơn MUA" → cần bù phần 30% (g.missingVolume,
+///     % lý thuyết theo ĐÚNG buyVolume của ca đó, không đổi) → CHỈ được
+///     rút từ Lô Mua Bù (invoiceLotSupplyOnly) — không bao giờ đụng tới
+///     Hoá Đơn Thật (đã dùng để tính ra 70% của chính ca này rồi).
+///   - Ca CHƯA tick MUA → cần bù ĐỦ 100% (g.sellVolume, hãn hữu) → được
+///     rút từ CẢ Lô Mua Bù VÀ Hoá Đơn Thật, ưu tiên nguồn nào có NGÀY sớm
+///     hơn (đúng ví dụ Ông Chủ: trả trước bằng lô mua bù, mỏ xuất hoá đơn
+///     bù sau thì hoá đơn đó tự động thành nguồn cho đợt sau).
+/// Cả 2 luồng dùng CHUNG 1 con trỏ theo dõi Lô Mua Bù (lotsPtr) — để không
+/// bao giờ 1 đồng vốn của cùng 1 lô bị rút trùng cho cả 2 loại nhu cầu.
 function buildInvoiceLotLedger(goodsType){
   const gt = normGoodsType(goodsType);
   if(!gt) return { bySiteLog:{}, byLot:{} };
@@ -3717,34 +3640,53 @@ function buildInvoiceLotLedger(goodsType){
         if(normGoodsType(g.goodsType)!==gt) return;
         const real = siteGroupRealMissingVolume(s, g);
         if(real<=0) return; // chưa tick BÁN → vẫn là lý thuyết, không tạo nhu cầu rút kho
-        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType, volume: real });
+        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType,
+          volume: real, usesCombinedPool: !buyIsDeductible(s) });
       });
     });
   });
   demand.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
 
-  const lots = combinedWarehouseSupply(gt);
+  const lotsSupply = invoiceLotSupplyOnly(gt);
+  const mineInvSupply = mineInvoiceSupplyOnly(gt);
+  let lotsPtr = 0, mineInvPtr = 0;
 
   const bySiteLog = {};
-  let lotPtr = 0;
   demand.forEach(d=>{
     let need = d.volume;
     const allocations = [];
-    while(need>0.0001 && lotPtr<lots.length){
-      const lot = lots[lotPtr];
-      if(lot.remainingVolume<=0.0001){ lotPtr++; continue; }
-      const take = Math.min(need, lot.remainingVolume);
-      allocations.push({ lotId: lot.id, purchaseDate: lot.date, volume: take,
-        cost: take*lot._netCostPerVol, vat: take*lot._vatPerVol });
-      lot.remainingVolume -= take;
-      need -= take;
-      if(lot.remainingVolume<=0.0001) lotPtr++;
+    if(!d.usesCombinedPool){
+      // Đã tick MUA — CHỈ rút Lô Mua Bù, tuyệt đối không đụng Hoá Đơn Thật.
+      while(need>0.0001 && lotsPtr<lotsSupply.length){
+        const lot = lotsSupply[lotsPtr];
+        if(lot.remainingVolume<=0.0001){ lotsPtr++; continue; }
+        const take = Math.min(need, lot.remainingVolume);
+        allocations.push({ lotId: lot.id, purchaseDate: lot.date, volume: take,
+          cost: take*lot._netCostPerVol, vat: take*lot._vatPerVol });
+        lot.remainingVolume -= take; need -= take;
+        if(lot.remainingVolume<=0.0001) lotsPtr++;
+      }
+    } else {
+      // Chưa tick MUA (hãn hữu) — rút CẢ 2 nguồn, ưu tiên ngày sớm hơn.
+      while(need>0.0001 && (lotsPtr<lotsSupply.length || mineInvPtr<mineInvSupply.length)){
+        while(lotsPtr<lotsSupply.length && lotsSupply[lotsPtr].remainingVolume<=0.0001) lotsPtr++;
+        while(mineInvPtr<mineInvSupply.length && mineInvSupply[mineInvPtr].remainingVolume<=0.0001) mineInvPtr++;
+        const lotAvail = lotsPtr<lotsSupply.length, invAvail = mineInvPtr<mineInvSupply.length;
+        if(!lotAvail && !invAvail) break;
+        const useLot = lotAvail && (!invAvail || (lotsSupply[lotsPtr].date||'') <= (mineInvSupply[mineInvPtr].date||''));
+        const src = useLot ? lotsSupply[lotsPtr] : mineInvSupply[mineInvPtr];
+        const take = Math.min(need, src.remainingVolume);
+        allocations.push({ lotId: src.id, purchaseDate: src.date, volume: take,
+          cost: take*src._netCostPerVol, vat: take*src._vatPerVol });
+        src.remainingVolume -= take; need -= take;
+        if(src.remainingVolume<=0.0001){ if(useLot) lotsPtr++; else mineInvPtr++; }
+      }
     }
     bySiteLog[d.key] = { allocations, shortfall: Math.max(0, need) };
   });
 
   const byLot = {};
-  lots.forEach(l=>{ byLot[l.id] = { total: l.totalVolume, remaining: Math.max(0,l.remainingVolume), used: l.totalVolume-Math.max(0,l.remainingVolume) }; });
+  [...lotsSupply, ...mineInvSupply].forEach(l=>{ byLot[l.id] = { total: l.totalVolume, remaining: Math.max(0,l.remainingVolume), used: l.totalVolume-Math.max(0,l.remainingVolume) }; });
 
   const data = { bySiteLog, byLot };
   _invoiceLedgerCache[gt] = { key: cacheKey, data };
