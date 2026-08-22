@@ -2781,24 +2781,27 @@ function renderInvoiceLotOverview(){
     })()}
     <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;">📋 Xem Chi Tiết Đầy Đủ (Từng Lô + Lịch Sử Rút Kho + Từng Ngày)</button>
     <div class="formula-divider" style="margin:10px 0;"></div>
-    <div style="font-weight:700; margin-bottom:6px;">💰 VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
-    ${vatByShift.rows.length===0 ? `<div class="hint" style="margin-bottom:14px;">Không có ca nào hưởng VAT khấu trừ từ Kho Hoá Đơn Bù trong khoảng ngày này.</div>` : `
+    <div style="font-weight:700; margin-bottom:6px;">💰 Chi Phí &amp; VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
+    ${vatByShift.rows.length===0 ? `<div class="hint" style="margin-bottom:14px;">Không có ca nào rút Kho Hoá Đơn Bù trong khoảng ngày này.</div>` : `
     <div class="card dash-wrap" style="padding:0; margin-bottom:6px;">
       <table class="dash">
-        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>VAT Hưởng</th></tr></thead>
+        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Chi Phí</th><th>VAT Hưởng</th></tr></thead>
         <tbody>
           ${vatByShift.rows.map(r=>`<tr>
             <td>${formatDateVN(r.date)}</td>
             <td>${shiftTypeLabel(r.shiftType)}</td>
             <td>${escapeHtml(r.driverName)}</td>
-            <td style="font-weight:700; color:var(--profit);">${fmtVND(r.vatCredit)}</td>
+            <td style="font-weight:700; color:var(--loss);">${fmtVND(r.cost)}</td>
+            <td style="font-weight:700; color:${r.vatCredit>0.5?'var(--profit)':'var(--ink-soft)'};">${fmtVND(r.vatCredit)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
-    <div class="card" style="background:var(--profit-soft); margin-bottom:14px;">
+    <div class="card" style="background:var(--profit-soft); margin-bottom:6px;">
+      <div class="summary-row" style="border:none;"><span style="font-weight:800;">TỔNG CHI PHÍ KHO CẢ KỲ</span><span class="val" style="font-weight:800; color:var(--loss); font-size:16px;">${fmtVND(vatByShift.totalCost)}</span></div>
       <div class="summary-row" style="border:none;"><span style="font-weight:800;">TỔNG VAT HƯỞNG CẢ KỲ</span><span class="val" style="font-weight:800; color:var(--profit); font-size:16px;">${fmtVND(vatByShift.totalVatCredit)}</span></div>
     </div>
+    ${vatByShift.totalCost>0.5 && vatByShift.totalVatCredit<=0.5 ? `<div class="hint" style="margin-bottom:14px;">Có chi phí kho phát sinh nhưng VAT hưởng = 0đ — kiểm tra lại (các) lô đã rút trong kỳ này ở mục "Sổ Hoá Đơn Thật Từ Mỏ"/"Kho Hoá Đơn Bù" xem ô "VAT suất trên hoá đơn (%)" có đang để trống (= 0%) không.</div>` : ''}
     `}
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">Tổng quan tất cả Loại hàng</div>
@@ -2952,6 +2955,13 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
     });
   });
   drawHistory.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  // 2026-08-22 (yêu cầu Ông Chủ — "bỏ chữ mọi thời điểm, phải cập nhật số
+  // chuẩn theo khoảng thời gian tao chọn xem"): tính riêng phần ĐÃ DÙNG
+  // THẬT (rút từ kho, không phải ước tính %) CHỈ trong đúng khoảng ngày
+  // đang lọc — lọc lại từ CHÍNH drawHistory ở trên, không tính công thức
+  // khác, nên luôn khớp tuyệt đối với "Lịch Sử Rút Kho Theo Ca" bên dưới.
+  const totalDrawnInRange = drawHistory.filter(d=>d.date>=from && d.date<=to)
+    .reduce((s,d)=>s+d.totalDrawn+d.shortfall, 0);
 
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -2965,10 +2975,11 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
       <div class="card" style="border:1.5px solid ${enough?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📊 Tổng Quan Kho — Phần Mua Bù (tính từ trước tới nay)</div>
         <div class="summary-row"><span>Tổng đã mua (mọi lô)</span><span class="val">${fmtQty(totalBought)} khối</span></div>
-        <div class="summary-row"><span>Tổng đã dùng (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${fmtQty(totalDemandAllTime)} khối</span></div>
+        <div class="summary-row"><span>Tổng đã dùng (cộng dồn từ trước tới nay)</span><span class="val" style="color:var(--loss);">${fmtQty(totalDemandAllTime)} khối</span></div>
         <div class="summary-row total"><span>Tồn phần mua bù</span><span class="val" style="color:${totalRemaining>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtQty(totalRemaining)} khối</span></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
-        <div class="summary-row"><span>Nhu cầu riêng khoảng ngày đang xem</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(demand.totalMissing)} khối</span></div>
+        <div class="summary-row"><span>Đã dùng THẬT trong khoảng ${formatDateVN(from)} → ${formatDateVN(to)}</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(totalDrawnInRange)} khối</span></div>
+        <div class="summary-row"><span>Nhu cầu riêng khoảng ngày đang xem (lý thuyết)</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(demand.totalMissing)} khối</span></div>
         <div class="summary-row" style="border:none; padding-top:8px;">
           <span style="font-weight:800;">${enough?'✅ Đủ hàng cho khoảng ngày này':'⚠️ THIẾU cho khoảng ngày này'}</span>
           <span class="val" style="font-weight:800; color:${enough?'var(--profit)':'var(--loss)'};">${enough?fmtQty(totalRemaining-demand.totalMissing)+' khối dư':fmtQty(demand.totalMissing-totalRemaining)+' khối thiếu'}</span>
@@ -3053,7 +3064,8 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
   document.getElementById('lotFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('lotFullDetailMineInvBtn').addEventListener('click', ()=>renderMineInvoiceManagerModal(null, goodsType));
   document.getElementById('lotFullDetailScrollToLotsBtn').addEventListener('click', ()=>{
-    document.getElementById('lotFullDetail_lots').scrollIntoView({behavior:'smooth', block:'start'});
+    saveMainScroll();
+    renderWarehouseDrawHistoryPage(goodsType, from, to);
   });
   document.getElementById('lotFullDetailCombinedDetailBtn').addEventListener('click', ()=>{
     saveMainScroll();
@@ -3115,6 +3127,26 @@ function renderCombinedStockDetailPage(goodsType, from, to){
     return row ? { customerName: c.name, trips: row.trips, vol: row.vol, cash: row.cash } : null;
   }).filter(Boolean).sort((a,b)=>b.vol-a.vol);
   const customerRowsTotal = customerRows.reduce((s,r)=>s+r.vol,0);
+
+  // 2026-08-22 (yêu cầu Ông Chủ — "cho tao bảng chi tiết từng ngày ngay
+  // dưới số tổng để tao biết dữ liệu đúng"): liệt kê TỪNG dòng bán ra thật
+  // (ngày, ca, khách, số chuyến, khối) — cùng nguồn dữ liệu với
+  // totalSoldVolumeAllTime() nên cộng lại phải khớp tuyệt đối 845,88-kiểu
+  // con số ở trên, không tính lại theo công thức khác.
+  const dailySaleRows = [];
+  allShiftsForLedgerCompanyWide().forEach(sh=>{
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
+        const customer = s.customerId ? customerById(s.customerId) : null;
+        const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
+        dailySaleRows.push({ date: sh.date, shiftType: sh.shiftType,
+          customerName: customer ? customer.name : '(chưa gắn khách hàng)', trips: tripsCount, vol: g.sellVolume });
+      });
+    });
+  });
+  dailySaleRows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
 
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -3194,6 +3226,30 @@ function renderCombinedStockDetailPage(goodsType, from, to){
       </div>`}
       ${Math.abs(customerRowsTotal-combined.soldVolKhoi)>0.01 ? `<div class="hint" style="color:var(--loss); margin-top:8px;">⚠️ Lệch nhỏ ${fmtQty(Math.abs(customerRowsTotal-combined.soldVolKhoi))} khối so với số trên thẻ tổng — có thể do khách hàng đã bị xoá khỏi danh sách nhưng ca cũ còn gắn ID cũ.</div>` : ''}
     </section>
+
+    <section class="group">
+      <h3>📅 Chi Tiết Từng Ngày Đã Bán (${dailySaleRows.length} ngày) — kiểm chứng đúng ${fmtQty(customerRowsTotal)} khối ở trên</h3>
+      ${dailySaleRows.length===0 ? '<div class="hint">Chưa có dữ liệu bán ra cho loại hàng này.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Ca</th><th>Khách Hàng</th><th>Số Chuyến</th><th>Khối Lượng</th></tr></thead>
+          <tbody>
+            ${dailySaleRows.map(r=>`<tr>
+              <td>${formatDateVN(r.date)}</td>
+              <td>${shiftTypeLabel(r.shiftType)}</td>
+              <td>${escapeHtml(r.customerName)}</td>
+              <td class="num">${r.trips} chuyến</td>
+              <td class="num">${fmtQty(r.vol)} khối</td>
+            </tr>`).join('')}
+            <tr class="grid-total-row">
+              <td colspan="3">TỔNG CỘNG</td>
+              <td class="num">${dailySaleRows.reduce((s,r)=>s+r.trips,0)} chuyến</td>
+              <td class="num">${fmtQty(dailySaleRows.reduce((s,r)=>s+r.vol,0))} khối</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`}
+    </section>
   `;
   document.getElementById('combinedDetailBackBtn').addEventListener('click', ()=>{ renderInvoiceLotFullDetailPage(goodsType, from, to); });
   document.querySelectorAll('[data-open-lot]').forEach(el=>{
@@ -3202,6 +3258,99 @@ function renderCombinedStockDetailPage(goodsType, from, to){
   document.querySelectorAll('[data-open-mineinv]').forEach(el=>{
     el.addEventListener('click', ()=>{ renderMineInvoiceManagerModal(el.dataset.openMineinv, goodsType); });
   });
+}
+
+/// Trang "Lịch Sử Rút Kho Theo Ca" (2026-08-22, yêu cầu Ông Chủ — thay cho
+/// việc chỉ cuộn xuống danh sách cũ vốn KHÔNG lọc theo khoảng ngày đang
+/// xem): mỗi dòng đúng 1 ca có phát sinh loại hàng này TRONG ĐÚNG khoảng
+/// [from,to] — hiện rõ số chuyến chạy, khối lượng thực đã bán, cần bù bao
+/// nhiêu (SỰ THẬT theo tick — siteGroupRealMissingVolume, không phải %
+/// lý thuyết), và bù lấy từ đâu (đúng allocations trong buildInvoiceLotLedger,
+/// không tính lại công thức khác). Dòng TỔNG in đậm, tô nền riêng.
+function renderWarehouseDrawHistoryPage(goodsType, from, to){
+  const gt = normGoodsType(goodsType);
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const ledger = buildInvoiceLotLedger(goodsType);
+
+  const rows = [];
+  allShiftsForLedgerCompanyWide().forEach(sh=>{
+    if(sh.date<from || sh.date>to) return;
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      if(s.siteType!=='commercial') return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
+        const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
+        const realNeeded = siteGroupRealMissingVolume(s, g);
+        const key = siteLogGroupKey(sh, idx, g.goodsType);
+        const rec = ledger.bySiteLog[key] || { allocations:[], shortfall: realNeeded };
+        const customer = s.customerId ? customerById(s.customerId) : null;
+        rows.push({
+          date: sh.date, shiftType: sh.shiftType,
+          customerName: customer ? customer.name : '(chưa gắn khách hàng)',
+          trips: tripsCount, sellVolume: g.sellVolume, theoreticalMissing: g.missingVolume,
+          realNeeded, allocations: rec.allocations, shortfall: rec.shortfall,
+          sellTicked: !!s.sellHasInvoice, buyTicked: buyIsDeductible(s)
+        });
+      });
+    });
+  });
+  rows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+
+  const totalTrips = rows.reduce((s,r)=>s+r.trips,0);
+  const totalSell = rows.reduce((s,r)=>s+r.sellVolume,0);
+  const totalNeeded = rows.reduce((s,r)=>s+r.realNeeded,0);
+  const totalDrawn = rows.reduce((s,r)=>s+r.allocations.reduce((a,x)=>a+x.volume,0),0);
+  const totalShortfall = rows.reduce((s,r)=>s+r.shortfall,0);
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="drawHistoryBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📜 Lịch Sử Rút Kho Theo Ca — ${escapeHtml(goodsType)}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Khoảng ngày đang xem: ${formatDateVN(from)} → ${formatDateVN(to)} — đổi khoảng ngày ở trang trước, mọi số ở đây tự cập nhật đúng theo đó.</div>
+      ${rows.length===0 ? '<div class="hint">Không có ca nào phát sinh loại hàng này trong khoảng ngày đã chọn.</div>' : `
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${rows.map(r=>{
+          const sourceLines = r.allocations.length>0
+            ? r.allocations.map(a=>`↳ ${formatDateVN(a.purchaseDate)}: ${fmtQty(a.volume)} khối`).join('<br>')
+            : (r.realNeeded<=0.001 ? '<span class="hint">Không cần bù (đủ chứng từ hoặc chưa xuất HĐ bán — vẫn lý thuyết)</span>' : '');
+          const shortLine = r.shortfall>0.001 ? `<br><span style="color:var(--loss); font-weight:700;">⚠️ Kho không đủ, còn thiếu ${fmtQty(r.shortfall)} khối</span>` : '';
+          const stateNote = !r.sellTicked ? '<span class="hint">(chưa tick BÁN — lý thuyết, kho chưa rút)</span>'
+            : (r.buyTicked ? '<span class="hint">(đã tick MUA — cần bù 30%)</span>' : '<span class="hint">(chưa tick MUA — cần bù 100%)</span>');
+          return `
+          <div style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+              <div style="font-weight:700;">${formatDateVN(r.date)} · ${shiftTypeLabel(r.shiftType)}</div>
+              <span class="hint">${escapeHtml(r.customerName)}</span>
+            </div>
+            <div class="grid-table-wrap" style="margin-top:8px;">
+              <table class="dash" style="width:100%;">
+                <tbody>
+                  <tr><td>Số chuyến chạy</td><td class="num">${r.trips} chuyến</td></tr>
+                  <tr><td>Khối lượng thực đã bán</td><td class="num" style="font-weight:700;">${fmtQty(r.sellVolume)} khối</td></tr>
+                  <tr><td>Cần bù ${stateNote}</td><td class="num" style="color:var(--loss); font-weight:700;">${fmtQty(r.realNeeded)} khối</td></tr>
+                  ${sourceLines ? `<tr><td colspan="2" style="padding-top:2px;">Bù từ kho:<br>${sourceLines}${shortLine}</td></tr>` : (shortLine ? `<tr><td colspan="2">${shortLine}</td></tr>` : '')}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </section>
+    <section class="group">
+      <div class="card" style="background:var(--accent-soft); border:1.5px solid var(--accent);">
+        <div style="font-weight:800; font-size:14px; margin-bottom:8px;">📊 TỔNG CỘNG (${rows.length} ca, ${formatDateVN(from)} → ${formatDateVN(to)})</div>
+        <div class="summary-row"><span>Tổng số chuyến</span><span class="val" style="font-weight:800;">${totalTrips} chuyến</span></div>
+        <div class="summary-row"><span>Tổng khối lượng thực đã bán</span><span class="val" style="font-weight:800;">${fmtQty(totalSell)} khối</span></div>
+        <div class="summary-row"><span>Tổng cần bù (sự thật theo tick)</span><span class="val" style="color:var(--loss); font-weight:800;">${fmtQty(totalNeeded)} khối</span></div>
+        <div class="summary-row"><span>Tổng đã rút được từ kho</span><span class="val" style="font-weight:800;">${fmtQty(totalDrawn)} khối</span></div>
+        <div class="summary-row total"><span>${totalShortfall>0.001?'⚠️ Còn thiếu (kho không đủ)':'✅ Đủ kho che hết'}</span><span class="val" style="font-weight:800; color:${totalShortfall>0.001?'var(--loss)':'var(--profit)'};">${fmtQty(totalShortfall)} khối</span></div>
+      </div>
+    </section>
+  `;
+  document.getElementById('drawHistoryBackBtn').addEventListener('click', ()=>{ renderInvoiceLotFullDetailPage(goodsType, from, to); });
 }
 
 /// Modal quản lý Khách Hàng — thêm/sửa/xoá, mirror y hệt Nhà Cung Cấp.
@@ -3743,28 +3892,32 @@ function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)
 /// (thay vì chi phí) — dùng để dựng bảng "VAT Hưởng Theo Ca" ở mục Kho Hoá
 /// Đơn Bù (yêu cầu Ông Chủ 2026-08-16).
 function shiftInvoiceSupplementVatCredit(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementVatCredit(s),0); }
-/// Bảng "mỗi CA được hưởng bao nhiêu VAT từ Kho Hoá Đơn Bù" trong khoảng
-/// [from,to] — GỘP QUA MỌI LOẠI HÀNG của ca đó (không lọc riêng 1 loại
-/// hàng như bộ lọc phía trên), vì 1 ca có thể có nhiều công trình/loại
-/// hàng khác nhau cùng rút kho — Ông Chủ cần biết TỔNG VAT ca đó hưởng,
-/// không phải chỉ phần của 1 loại hàng. Chỉ liệt kê ca có VAT hưởng > 0,
-/// sắp mới nhất trước; totalVatCredit LUÔN khớp tuyệt đối tổng cộng dồn
-/// siteInvoiceSupplementVatCredit() ở cấp công trình — không có đường
-/// tính nào khác.
+/// Bảng "mỗi CA được hưởng bao nhiêu VAT + tốn bao nhiêu chi phí từ Kho
+/// Hoá Đơn Bù" trong khoảng [from,to] — GỘP QUA MỌI LOẠI HÀNG của ca đó
+/// (không lọc riêng 1 loại hàng như bộ lọc phía trên), vì 1 ca có thể có
+/// nhiều công trình/loại hàng khác nhau cùng rút kho. Liệt kê ca có CHI
+/// PHÍ HOẶC VAT > 0 (2026-08-22, sửa lại — trước đây chỉ lọc theo VAT>0
+/// khiến 1 ca THẬT SỰ có rút kho nhưng rơi đúng vào lô 0% VAT bị biến mất
+/// khỏi bảng hoàn toàn, trông như "không có gì xảy ra" dù thực ra có tốn
+/// chi phí thật). Sắp mới nhất trước; totalVatCredit/totalCost LUÔN khớp
+/// tuyệt đối tổng cộng dồn siteInvoiceSupplementVatCredit/Cost() ở cấp
+/// công trình — không có đường tính nào khác.
 function computeInvoiceLotVatCreditByShift(from, to){
   const excludedShiftIds = getRevenueExcludedShiftIds();
   const shifts = allShiftsCompanyWide().filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
   const rows = [];
-  let totalVatCredit = 0;
+  let totalVatCredit = 0, totalCost = 0;
   for(const sh of shifts){
     const vatCredit = shiftInvoiceSupplementVatCredit(sh);
-    if(vatCredit <= 0.5) continue; // bỏ ca không hưởng VAT nào từ kho, tránh bảng dài vô ích
+    const cost = shiftInvoiceSupplementCost(sh);
+    if(vatCredit <= 0.5 && cost <= 0.5) continue; // bỏ ca hoàn toàn không đụng tới kho, tránh bảng dài vô ích
     const driver = driverById(sh.driverId);
-    rows.push({ date: sh.date, shiftType: sh.shiftType, driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'), vatCredit });
+    rows.push({ date: sh.date, shiftType: sh.shiftType, driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'), vatCredit, cost });
     totalVatCredit += vatCredit;
+    totalCost += cost;
   }
   rows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
-  return { rows, totalVatCredit };
+  return { rows, totalVatCredit, totalCost };
 }
 
 /// Bảng đối soát theo khoảng ngày cho 1 loại hàng — mỗi dòng đúng 1 NHÓM
@@ -12543,6 +12696,12 @@ function renderSettings(){
       }
       if(state.currentTab==='settings') renderAll();
       else if(state.currentTab==='shifts') renderShiftList();
+      // 2026-08-22 (Ông Chủ báo — số liệu liên quan ngân hàng không cập
+      // nhật realtime): 2 nhánh trên chỉ phủ đúng 2 tab, còn Kết Quả Kinh
+      // Doanh (Gốc+lãi vay hàng tháng là 1 phần chi phí cố định) và các
+      // tab khác không được vẽ lại — gọi thêm renderAll() KHÔNG ĐIỀU KIỆN
+      // để chắc chắn tab đang mở (bất kỳ tab nào) luôn phản ánh đúng ngay.
+      else renderAll();
       const ok = await saveSettings();
       showToast(ok ? (paid ? `Đã ghi nhận trả kỳ này (tổng ${bl.paidMonths.length} kỳ đã trả).` : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.') : 'LƯU THẤT BẠI — kiểm tra mạng rồi thử lại.');
     });
