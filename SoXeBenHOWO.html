@@ -2470,7 +2470,13 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
     if(!ok){ btn.disabled = false; btn.textContent = originalLabel; return; }
     showToast('Đã lưu hoá đơn thật.');
     refreshGoodsTypesDatalist();
-    renderMineInvoiceManagerModal(savedId, goodsType);
+    // 2026-08-22 (Ông Chủ phát hiện): KHÔNG mở lại ở chế độ Sửa hoá đơn vừa
+    // lưu — khác Kho Hoá Đơn Bù (cố ý mở lại để hiện báo cáo đã che ca
+    // nào), ở đây không có báo cáo gì để hiện, mở lại chế độ Sửa chỉ gây
+    // bẫy: Ông Chủ gõ tiếp hoá đơn #2 tưởng đang thêm mới, thực ra đang ghi
+    // đè lên hoá đơn #1 vừa lưu. Luôn quay về form "Thêm Hoá Đơn Thật"
+    // trống, sẵn sàng cho hoá đơn tiếp theo.
+    renderMineInvoiceManagerModal(null, goodsType);
     if(typeof renderInvoiceLotOverview==='function') renderInvoiceLotOverview();
   });
 }
