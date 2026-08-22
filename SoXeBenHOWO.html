@@ -819,6 +819,13 @@ let state = {
   // trước (FIFO), tính lại toàn bộ từ lịch sử mỗi lần cần (không lưu số
   // tồn kho chạy sẵn để không bao giờ bị lệch khi Ông Chủ sửa ca cũ/lô).
   invoiceLots: [], // {id, goodsType, sourceName, purchaseDate, totalVolume, totalInvoiceValue, vatRatePercent, cashReturned, note}
+  // Sổ Hoá Đơn Thật Từ Mỏ (2026-08-22, yêu cầu Ông Chủ) — hoá đơn THẬT do
+  // đúng nhà cung cấp đã đăng ký xuất (VD Hoàng Phong Hà Nam), nhập tay từ
+  // ảnh/PDF hoá đơn thật. KHÁC invoiceLots ở chỗ: không có "tiền mặt nhận
+  // lại" (đây là hoá đơn thật 1:1, không phải mua bù ăn chênh ngoài). Dùng
+  // để tính "Tồn Kho Tổng Hợp" đối chiếu với KT Thuế — KHÔNG đụng gì tới
+  // công thức missingVolume/shiftTotalCost/commercialVatPayable (frozen).
+  mineInvoices: [], // {id, supplierId, goodsType, invoiceNumber, invoiceDate, totalVolume, unitPrice, vatRatePercent, note}
   maintenanceSchedules: [], // {id, name, intervalKm, lastDoneOdo, lastDoneDate, notes}
   siteContracts: [], // {id, siteName, totalContractValue, notes}
   siteAppraisals: [], // {id, name, kmOneWay, kmReturn, loadPerTrip, priceIncludesVat, cargoUnitPrice,
@@ -1308,7 +1315,7 @@ function withTimeout(promise, ms=15000){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1324,6 +1331,7 @@ async function loadAll(){
       sharedDataRef('customers').get(),
       sharedDataRef('supplierPayments').get(),
       sharedDataRef('invoiceLots').get(),
+      sharedDataRef('mineInvoices').get(),
       sharedDataRef('driverAdvances').get(),
       sharedDataRef('driverExpenseReports').get(),
       sharedDataRef('vehicles').get(),
@@ -1369,6 +1377,8 @@ async function loadAll(){
     state.bankBalanceCheckpoints = bankBalanceData && Array.isArray(bankBalanceData.list) ? bankBalanceData.list : [];
     const invoiceLotData = invoiceLotSnap.exists ? invoiceLotSnap.data() : null;
     state.invoiceLots = invoiceLotData && Array.isArray(invoiceLotData.list) ? invoiceLotData.list : [];
+    const mineInvoiceData = mineInvoiceSnap.exists ? mineInvoiceSnap.data() : null;
+    state.mineInvoices = mineInvoiceData && Array.isArray(mineInvoiceData.list) ? mineInvoiceData.list : [];
     const driverAdvanceData = driverAdvanceSnap.exists ? driverAdvanceSnap.data() : null;
     state.driverAdvances = driverAdvanceData && Array.isArray(driverAdvanceData.list) ? driverAdvanceData.list : [];
     const driverExpenseReportData = driverExpenseReportSnap.exists ? driverExpenseReportSnap.data() : null;
@@ -1621,6 +1631,10 @@ async function saveSuppliers(){
 async function saveInvoiceLots(){
   try { await withTimeout(sharedDataRef('invoiceLots').set({ list: state.invoiceLots })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù — kiểm tra mạng.'); return false; }
+}
+async function saveMineInvoices(){
+  try { await withTimeout(sharedDataRef('mineInvoices').set({ list: state.mineInvoices })); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu sổ hoá đơn thật từ mỏ — kiểm tra mạng.'); return false; }
 }
 async function saveDriverAdvances(){
   try { await withTimeout(sharedDataRef('driverAdvances').set({ list: state.driverAdvances })); return true; }
@@ -2324,6 +2338,142 @@ function renderSupplierManagerModal(editingId, linkToSiteIdx){
   });
 }
 function invoiceLotById(id){ return state.invoiceLots.find(x=>x.id===id); }
+function mineInvoiceById(id){ return state.mineInvoices.find(x=>x.id===id); }
+
+/// Modal quản lý Sổ Hoá Đơn Thật Từ Mỏ (2026-08-22, yêu cầu Ông Chủ) —
+/// nhập tay từng hoá đơn THẬT (đơn vị TẤN, đúng như file PDF mỏ xuất),
+/// gắn đúng nhà cung cấp đã đăng ký (để lấy đúng tỷ trọng quy đổi tấn→
+/// khối của mỏ đó). KHÁC Kho Hoá Đơn Bù: không có "tiền mặt nhận lại" —
+/// đây là hoá đơn thật 1:1, không phải mua bù ăn chênh ngoài. Chỉ dùng để
+/// tính "Tồn Kho Tổng Hợp" (combinedStockOverview) đối chiếu KT Thuế —
+/// KHÔNG đụng gì tới missingVolume/shiftTotalCost/commercialVatPayable.
+function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
+  const editing = editingId ? mineInvoiceById(editingId) : null;
+  const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const listHtml = state.mineInvoices.length ? [...state.mineInvoices]
+    .sort((a,b)=>(b.invoiceDate||'').localeCompare(a.invoiceDate||''))
+    .map(inv=>{
+      const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
+      const khoi = mineInvoiceVolumeKhoi(inv);
+      return `
+    <div class="summary-row" style="align-items:center;">
+      <span><strong>${escapeHtml(inv.goodsType||'(chưa khai loại hàng)')}</strong> — ${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?` — Số ${escapeHtml(inv.invoiceNumber)}`:''}<br>
+        <span class="hint">${sup?escapeHtml(sup.name):'(chưa gắn nhà cung cấp)'} · ${fmtQty(inv.totalVolume)} tấn${sup&&Number(sup.densityRatio)>0?` ≈ ${fmtQty(khoi)} khối`:' (chưa cấu hình tỷ trọng để quy đổi)'}</span></span>
+      <span>
+        <button class="btn btn-ghost btn-sm mineInvEditBtn" data-id="${inv.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
+        <button class="btn btn-ghost btn-sm mineInvDelBtn" data-id="${inv.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
+      </span>
+    </div>`;}).join('') : '<div class="hint">Chưa nhập hoá đơn thật nào.</div>';
+
+  const supplierOptions = state.suppliers.map(s=>`<option value="${s.id}" ${val(editing,'supplierId')===s.id?'selected':''}>${escapeHtml(s.name)}${Number(s.densityRatio)>0?'':' (chưa có tỷ trọng)'}</option>`).join('');
+
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>📄 Sổ Hoá Đơn Thật Từ Mỏ</h3>
+    <div class="hint" style="margin-bottom:12px;">Nhập đúng số liệu trên hoá đơn thật (PDF/ảnh) mỏ đã xuất — dùng để tính "Tồn Kho Tổng Hợp" đối chiếu với KT Thuế. Không ảnh hưởng công thức lãi/thuế đang chạy.</div>
+    <div style="margin-bottom:14px;">${listHtml}</div>
+    <div class="formula-divider" style="margin:10px 0;"></div>
+    <h3>${editing?'Sửa Hoá Đơn':'Thêm Hoá Đơn Thật'}</h3>
+    <div class="field">
+      <label>Nhà cung cấp (mỏ đã đăng ký)</label>
+      <select id="mi_supplierId">
+        <option value="">— Chọn nhà cung cấp —</option>
+        ${supplierOptions}
+      </select>
+    </div>
+    <div class="field">
+      <label>Loại hàng (VD Base A, Base B...)</label>
+      <input type="text" id="mi_goodsType" list="goodsTypesList" value="${escapeHtml(val(editing,'goodsType')||defaultGoodsType||'')}">
+    </div>
+    <div class="two-col">
+      <div class="field">
+        <label>Số hoá đơn (không bắt buộc)</label>
+        <input type="text" id="mi_invoiceNumber" placeholder="VD 244" value="${escapeHtml(val(editing,'invoiceNumber'))}">
+      </div>
+      <div class="field">
+        <label>Ngày hoá đơn</label>
+        <input type="date" id="mi_invoiceDate" value="${val(editing,'invoiceDate')}">
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="field">
+        <label>Tổng khối lượng trên hoá đơn (TẤN — đúng đơn vị mỏ ghi)</label>
+        <input type="text" inputmode="decimal" id="mi_volume" placeholder="VD 141,65" value="${val(editing,'totalVolume')}">
+      </div>
+      <div class="field">
+        <label>Đơn giá (đ/tấn, chưa VAT — không bắt buộc)</label>
+        <input type="text" inputmode="decimal" id="mi_unitPrice" placeholder="đ/tấn" value="${val(editing,'unitPrice')}">
+      </div>
+    </div>
+    <div class="field">
+      <label>VAT suất trên hoá đơn (%)</label>
+      <input type="text" inputmode="decimal" id="mi_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
+    </div>
+    <div class="hint" id="mi_conversionHint" style="margin-bottom:10px;"></div>
+    <div class="field">
+      <label>Ghi chú</label>
+      <input type="text" id="mi_note" value="${escapeHtml(val(editing,'note'))}">
+    </div>
+    <button class="btn btn-accent" id="saveMineInvBtn">${editing?'💾 Lưu Thay Đổi':'+ Thêm Hoá Đơn Thật'}</button>
+  `);
+
+  const supplierSelEl = document.getElementById('mi_supplierId');
+  const volumeInputEl = document.getElementById('mi_volume');
+  const conversionHintEl = document.getElementById('mi_conversionHint');
+  const refreshConversionHint = () => {
+    const sup = supplierSelEl.value ? supplierById(supplierSelEl.value) : null;
+    const vol = parseFloat((volumeInputEl.value||'').replace(',','.'))||0;
+    if(!sup){ conversionHintEl.textContent = 'Chọn nhà cung cấp để app tự quy đổi tấn → khối theo đúng tỷ trọng của mỏ đó.'; return; }
+    const density = Number(sup.densityRatio)||0;
+    if(density<=0){ conversionHintEl.textContent = `"${sup.name}" chưa cấu hình tỷ trọng (ở mục Nhà Cung Cấp) — chưa quy đổi được sang khối, sẽ tính là 0 khối trong Tồn Kho Tổng Hợp cho tới khi cấu hình.`; return; }
+    conversionHintEl.textContent = vol>0 ? `= ${(vol/density).toLocaleString('vi-VN',{maximumFractionDigits:2})} khối (÷ ${density} theo tỷ trọng "${sup.name}")` : `Tỷ trọng "${sup.name}": ${density} — gõ số tấn để xem quy đổi.`;
+  };
+  supplierSelEl.addEventListener('change', refreshConversionHint);
+  volumeInputEl.addEventListener('input', refreshConversionHint);
+  refreshConversionHint();
+
+  document.querySelectorAll('.mineInvEditBtn').forEach(btn=>btn.addEventListener('click', ()=>renderMineInvoiceManagerModal(btn.dataset.id)));
+  document.querySelectorAll('.mineInvDelBtn').forEach(btn=>btn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá hoá đơn thật này? "Tồn Kho Tổng Hợp" sẽ tự tính lại ngay.')) return;
+    state.mineInvoices = state.mineInvoices.filter(x=>x.id!==btn.dataset.id);
+    if(!(await saveMineInvoices())) return;
+    renderMineInvoiceManagerModal(null, defaultGoodsType);
+    if(typeof renderInvoiceLotOverview==='function') renderInvoiceLotOverview();
+  }));
+  document.getElementById('saveMineInvBtn').addEventListener('click', async (ev)=>{
+    const btn = ev.currentTarget;
+    if(btn.disabled) return; // chặn bấm đúp khi đang lưu
+    const supplierId = supplierSelEl.value;
+    const goodsType = document.getElementById('mi_goodsType').value.trim();
+    const invoiceDate = document.getElementById('mi_invoiceDate').value;
+    const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
+    const totalVolume = parseVN(volumeInputEl.value);
+    if(!supplierId){ showToast('Chọn nhà cung cấp (mỏ).'); return; }
+    if(!goodsType){ showToast('Nhập loại hàng (VD Base A).'); return; }
+    if(!invoiceDate){ showToast('Nhập ngày hoá đơn.'); return; }
+    if(!totalVolume || totalVolume<=0){ showToast('Nhập tổng khối lượng trên hoá đơn (tấn).'); return; }
+    const data = {
+      supplierId, goodsType, invoiceDate, totalVolume,
+      invoiceNumber: document.getElementById('mi_invoiceNumber').value.trim(),
+      unitPrice: parseVN(document.getElementById('mi_unitPrice').value),
+      vatRatePercent: parseVN(document.getElementById('mi_vat').value),
+      note: document.getElementById('mi_note').value.trim()
+    };
+    let savedId;
+    if(editing){ Object.assign(editing, data); savedId = editing.id; }
+    else { savedId = uid('mineinv'); state.mineInvoices.push({ id: savedId, ...data }); }
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang lưu...';
+    const ok = await saveMineInvoices();
+    if(!ok){ btn.disabled = false; btn.textContent = originalLabel; return; }
+    showToast('Đã lưu hoá đơn thật.');
+    refreshGoodsTypesDatalist();
+    renderMineInvoiceManagerModal(savedId, goodsType);
+    if(typeof renderInvoiceLotOverview==='function') renderInvoiceLotOverview();
+  });
+}
 
 /// Sau khi lưu 1 lô, liệt kê CHÍNH XÁC lô đó đang che cho những ca/khách
 /// hàng/ngày nào — để Ông Chủ đối soát trực tiếp, không phải tin số tổng.
@@ -2606,8 +2756,23 @@ function renderInvoiceLotOverview(){
     </div>
     <div class="card" style="margin-bottom:10px;">
       <div class="summary-row"><span>Tổng cần rút từ kho trong kỳ</span><span class="val" style="color:var(--loss); font-weight:700;">${demand.totalMissing.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <div class="summary-row"><span>Đang có trong kho (${escapeHtml(goodsType)})</span><span class="val" style="color:${enough?'var(--profit)':'var(--loss)'}; font-weight:700;">${inStock.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${enough?'':' ⚠️ không đủ'}</span></div>
+      <div class="summary-row"><span>Đang có trong kho — phần MUA BÙ (${escapeHtml(goodsType)})</span><span class="val" style="color:${enough?'var(--profit)':'var(--loss)'}; font-weight:700;">${inStock.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${enough?'':' ⚠️ không đủ'}</span></div>
     </div>
+    ${(()=>{
+      // "Tồn Kho Tổng Hợp" (2026-08-22, yêu cầu Ông Chủ) — CỘNG THÊM số
+      // liệu hoá đơn thật từ mỏ vào phần mua bù ở trên, để so trực tiếp
+      // với KT Thuế. Thẻ MỚI, không thay thế thẻ "phần mua bù" phía trên.
+      const combined = combinedStockOverview(goodsType);
+      return `
+    <div class="card" style="margin-bottom:10px; border:1.5px solid var(--accent);">
+      <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp (${escapeHtml(goodsType)}) — đối chiếu KT Thuế</div>
+      <div class="summary-row"><span>Hoá đơn THẬT từ mỏ (÷ tỷ trọng)</span><span class="val">${combined.mineVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="summary-row"><span>+ Lô mua bù đã mua</span><span class="val">${combined.lotVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="summary-row"><span>− Đã bán cho khách (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${combined.soldVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="summary-row total"><span>= Tồn Kho Tổng Hợp</span><span class="val" style="font-weight:800; color:${combined.combinedRemaining>=0?'var(--profit)':'var(--loss)'};">${combined.combinedRemaining<0?'−':''}${Math.abs(combined.combinedRemaining).toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <button class="btn btn-ghost btn-sm" id="mineInvoiceOpenBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
+    </div>`;
+    })()}
     <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;">📋 Xem Chi Tiết Đầy Đủ (Từng Lô + Lịch Sử Rút Kho + Từng Ngày)</button>
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">💰 VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
@@ -2666,6 +2831,7 @@ function renderInvoiceLotOverview(){
   document.getElementById('lotFilterFrom').addEventListener('change', e=>{ state.invoiceLotFilter.from = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterTo').addEventListener('change', e=>{ state.invoiceLotFilter.to = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotFullDetailPage(goodsType, from, to); });
+  document.getElementById('mineInvoiceOpenBtn').addEventListener('click', ()=>renderMineInvoiceManagerModal(null, goodsType));
 }
 
 /// Bảng "🔒 Đối Soát Hoá Đơn Theo Tháng" trong tab Kết Quả — 6 tháng gần
@@ -2791,10 +2957,10 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Khoảng ngày đang xem: ${formatDateVN(from)} → ${formatDateVN(to)}</div>
 
       <div class="card" style="border:1.5px solid ${enough?'var(--profit)':'var(--loss)'};">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📊 Tổng Quan Kho (tính từ trước tới nay)</div>
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📊 Tổng Quan Kho — Phần Mua Bù (tính từ trước tới nay)</div>
         <div class="summary-row"><span>Tổng đã mua (mọi lô)</span><span class="val">${fmtQty(totalBought)} khối</span></div>
         <div class="summary-row"><span>Tổng đã dùng (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${fmtQty(totalDemandAllTime)} khối</span></div>
-        <div class="summary-row total"><span>Còn tồn kho THẬT hiện nay</span><span class="val" style="color:${totalRemaining>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtQty(totalRemaining)} khối</span></div>
+        <div class="summary-row total"><span>Tồn phần mua bù</span><span class="val" style="color:${totalRemaining>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtQty(totalRemaining)} khối</span></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div class="summary-row"><span>Nhu cầu riêng khoảng ngày đang xem</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(demand.totalMissing)} khối</span></div>
         <div class="summary-row" style="border:none; padding-top:8px;">
@@ -2802,6 +2968,18 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
           <span class="val" style="font-weight:800; color:${enough?'var(--profit)':'var(--loss)'};">${enough?fmtQty(totalRemaining-demand.totalMissing)+' khối dư':fmtQty(demand.totalMissing-totalRemaining)+' khối thiếu'}</span>
         </div>
       </div>
+      ${(()=>{
+        const combined = combinedStockOverview(goodsType);
+        return `
+      <div class="card" style="border:1.5px solid var(--accent); margin-top:10px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp — đối chiếu KT Thuế</div>
+        <div class="summary-row"><span>Hoá đơn THẬT từ mỏ (÷ tỷ trọng)</span><span class="val">${fmtQty(combined.mineVolKhoi)} khối</span></div>
+        <div class="summary-row"><span>+ Lô mua bù đã mua</span><span class="val">${fmtQty(combined.lotVolKhoi)} khối</span></div>
+        <div class="summary-row"><span>− Đã bán cho khách (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${fmtQty(combined.soldVolKhoi)} khối</span></div>
+        <div class="summary-row total"><span>= Tồn Kho Tổng Hợp</span><span class="val" style="font-weight:800; color:${combined.combinedRemaining>=0?'var(--profit)':'var(--loss)'};">${combined.combinedRemaining<0?'−':''}${fmtQty(Math.abs(combined.combinedRemaining))} khối</span></div>
+        <button class="btn btn-ghost btn-sm" id="lotFullDetailMineInvBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
+      </div>`;
+      })()}
     </section>
 
     <section class="group">
@@ -2865,6 +3043,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
     </section>
   `;
   document.getElementById('lotFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('lotFullDetailMineInvBtn').addEventListener('click', ()=>renderMineInvoiceManagerModal(null, goodsType));
   document.querySelectorAll('[data-open-lot]').forEach(el=>{
     el.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(el.dataset.openLot); });
   });
@@ -3122,6 +3301,55 @@ function siteMissingDocumentedVolume(s){
 // Chuẩn hoá tên loại hàng để so khớp không phân biệt hoa/thường, khoảng
 // trắng thừa (VD "Base A" và "base a " phải được coi là cùng 1 loại).
 function normGoodsType(v){ return String(v||'').trim().toLowerCase(); }
+
+/// ==== SỔ HOÁ ĐƠN THẬT TỪ MỎ (2026-08-22, yêu cầu Ông Chủ) ====
+/// Quy đổi 1 hoá đơn thật (đơn vị TẤN, đúng như mỏ xuất) sang KHỐI, dùng
+/// ĐÚNG tỷ trọng của nhà cung cấp gắn trên hoá đơn đó (không dùng tỷ trọng
+/// mặc định chung — mỗi mỏ có thể có tỷ trọng khác nhau).
+function mineInvoiceVolumeKhoi(inv){
+  const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
+  const density = sup ? Number(sup.densityRatio)||0 : 0;
+  if(density<=0) return 0; // chưa cấu hình tỷ trọng cho mỏ này — không tự chế số quy đổi
+  return (Number(inv.totalVolume)||0) / density;
+}
+/// Tổng khối (đã quy đổi) từ TOÀN BỘ hoá đơn thật đã nhập, đúng 1 loại hàng.
+function totalMineInvoiceVolumeKhoi(goodsType){
+  const gt = normGoodsType(goodsType);
+  return state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt)
+    .reduce((sum,inv)=>sum+mineInvoiceVolumeKhoi(inv), 0);
+}
+/// Tổng khối lượng ĐÃ BÁN cho khách (mọi khách, mọi công trình, TỪ TRƯỚC
+/// TỚI NAY — không giới hạn theo kỳ), đúng 1 loại hàng — dùng làm số trừ
+/// trong "Tồn Kho Tổng Hợp". Đọc trực tiếp g.sellVolume của
+/// siteGoodsTypeGroups() (frozen, không tính lại kiểu khác).
+function totalSoldVolumeAllTime(goodsType){
+  const gt = normGoodsType(goodsType);
+  let sum = 0;
+  allShiftsForLedgerCompanyWide().forEach(sh=>{
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)===gt) sum += g.sellVolume;
+      });
+    });
+  });
+  return sum;
+}
+/// "Tồn Kho Tổng Hợp" — ĐÚNG công thức Ông Chủ yêu cầu 2026-08-22:
+/// (Tổng khối hoá đơn THẬT từ mỏ) + (Tổng khối lô mua bù đã mua) − (Tổng
+/// khối đã bán cho khách, mọi thời điểm). Đây là số MỚI, THÊM VÀO — hoàn
+/// toàn KHÔNG thay thế "Còn tồn kho THẬT hiện nay" (tồn riêng phần mua bù)
+/// đã có sẵn, cũng KHÔNG đụng gì tới missingVolume/shiftTotalCost/
+/// commercialVatPayable (frozen, dùng cho P&L thật).
+function combinedStockOverview(goodsType){
+  const gt = normGoodsType(goodsType);
+  const mineVolKhoi = totalMineInvoiceVolumeKhoi(gt);
+  const lotVolKhoi = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt)
+    .reduce((sum,l)=>sum+(Number(l.totalVolume)||0), 0);
+  const soldVolKhoi = totalSoldVolumeAllTime(gt);
+  const combinedRemaining = mineVolKhoi + lotVolKhoi - soldVolKhoi;
+  return { mineVolKhoi, lotVolKhoi, soldVolKhoi, combinedRemaining };
+}
 
 // 1 site log giờ có thể gồm NHIỀU nhóm loại hàng (mỗi chuyến 1 loại) —
 // khoá rút kho phải xuống tới cấp NHÓM (site log + loại hàng), không còn
@@ -13240,6 +13468,7 @@ function allGoodsTypes(){
   const set = new Set();
   state.shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>(s.commercialTrips||[]).forEach(t=>{ const n=(t.goodsType||'').trim(); if(n) set.add(n); })));
   state.invoiceLots.forEach(l=>{ const n=(l.goodsType||'').trim(); if(n) set.add(n); });
+  state.mineInvoices.forEach(inv=>{ const n=(inv.goodsType||'').trim(); if(n) set.add(n); });
   return [...set].sort();
 }
 function refreshGoodsTypesDatalist(){
