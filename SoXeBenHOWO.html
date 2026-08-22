@@ -3443,6 +3443,86 @@ function siteGoodsTypeGroups(s){
 function siteMissingDocumentedVolume(s){
   return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingVolume, 0);
 }
+const _documentationLedgerCache = {}; // { [goodsType]: {key, data} }
+/// 2026-08-22 (yêu cầu Ông Chủ — "ca trước dùng trước, luôn ưu tiên HĐ mỏ
+/// trước, thiếu thì mới dùng trong kho"): TRƯỚC ĐÂY mỗi ca tự tính
+/// "đã có chứng từ" = buyVolume × 70% CỦA RIÊNG NÓ — hoàn toàn không quan
+/// tâm hoá đơn thật đã tồn tại ngày nào, khiến 1 ca ngày 28/7 có thể bị
+/// coi như đã được che bởi 1 hoá đơn thật xuất ngày 06/8 (SAU nó) — vô lý
+/// về mặt giấy tờ. Giờ chia lịch sử thành từng GIAI ĐOẠN đóng khung bởi
+/// NGÀY hoá đơn thật (Sổ Hoá Đơn Thật, sắp tăng dần):
+///   - Ca có ngày ≤ ngày hoá đơn thật gần nhất PHÍA SAU nó → nằm trong 1
+///     giai đoạn đã có hoá đơn thật che — hoá đơn đó (khối THẬT, không
+///     nhân %) được rút FIFO cho các ca TRONG GIAI ĐOẠN theo đúng thứ tự
+///     ngày (ca trước dùng trước) — y hệt cách buildInvoiceLotLedger() rút
+///     kho, chỉ khác nguồn cung là hoá đơn thật thay vì lô mua bù.
+///   - Ca có ngày SAU hoá đơn thật cuối cùng (giai đoạn hiện tại, CHƯA có
+///     gì che) → GIỮ NGUYÊN % lý thuyết cũ (g.missingVolume) — đúng yêu
+///     cầu Ông Chủ "vẫn giữ nguyên % lý thuyết 70% như hiện tại".
+///   - Chưa có hoá đơn thật nào (Sổ Hoá Đơn Thật rỗng) → TOÀN BỘ vẫn dùng
+///     % lý thuyết như cũ, không đổi gì (tương thích ngược hoàn toàn).
+/// CHỈ áp dụng cho ca ĐÃ tick "Đã nhận hóa đơn MUA" (buyIsDeductible) —
+/// ca chưa tick MUA đã có quy tắc riêng (100% ở siteGroupRealMissingVolume,
+/// không liên quan hoá đơn thật/giai đoạn).
+function buildDocumentationLedger(goodsType){
+  const gt = normGoodsType(goodsType);
+  if(!gt) return {};
+  const allSh = allShiftsForLedgerCompanyWide();
+  const mineInvSig = JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt));
+  const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).map(s=>{
+    if(s.siteType!=='commercial' || !buyIsDeductible(s)) return '0';
+    let sell=0;
+    (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt) sell+=Number(t.sellVolume)||0; });
+    return '1:'+sell;
+  }).join('|')).join(',');
+  const cacheKey = mineInvSig+'|'+shiftSig;
+  if(_documentationLedgerCache[gt] && _documentationLedgerCache[gt].key===cacheKey) return _documentationLedgerCache[gt].data;
+
+  const caGroups = [];
+  allSh.forEach(sh=>{
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      if(s.siteType!=='commercial' || !buyIsDeductible(s)) return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
+        caGroups.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType,
+          sellVolume: g.sellVolume, theoreticalMissing: g.missingVolume });
+      });
+    });
+  });
+  caGroups.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
+
+  const realInvoices = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt)
+    .map(inv=>({ date: inv.invoiceDate||'', volume: mineInvoiceVolumeKhoi(inv) }))
+    .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+
+  const result = {};
+  if(realInvoices.length===0){
+    // Chưa có hoá đơn thật nào — tương thích ngược hoàn toàn, giữ % lý thuyết.
+    caGroups.forEach(cg=>{ result[cg.key] = cg.theoreticalMissing; });
+  } else {
+    let invPtr = 0;
+    let periodSupplyRemaining = realInvoices[0].volume;
+    let periodEndDate = realInvoices[0].date;
+    caGroups.forEach(cg=>{
+      while(invPtr < realInvoices.length-1 && cg.date > periodEndDate){
+        invPtr++;
+        periodSupplyRemaining = realInvoices[invPtr].volume;
+        periodEndDate = realInvoices[invPtr].date;
+      }
+      if(cg.date <= periodEndDate){
+        // Trong giai đoạn ĐÃ có hoá đơn thật che — rút FIFO đúng thứ tự ngày.
+        const take = Math.min(cg.sellVolume, periodSupplyRemaining);
+        periodSupplyRemaining -= take;
+        result[cg.key] = Math.max(0, cg.sellVolume - take);
+      } else {
+        // Sau hoá đơn thật cuối cùng — giai đoạn hiện tại, chưa có gì che.
+        result[cg.key] = cg.theoreticalMissing;
+      }
+    });
+  }
+  _documentationLedgerCache[gt] = { key: cacheKey, data: result };
+  return result;
+}
 /// 2026-08-22 (yêu cầu Ông Chủ — cơ chế "tick = SỰ THẬT xảy ra"): Kho hoá
 /// đơn bù (tiền + VAT THẬT, ảnh hưởng shiftTotalCost/commercialVatPayable)
 /// giờ CHỈ được rút cho 1 nhóm loại hàng khi Ông Chủ đã tick "Đã xuất hóa
@@ -3450,18 +3530,25 @@ function siteMissingDocumentedVolume(s){
 /// tính) vẫn hiện ra để xem tham khảo NHƯNG hoàn toàn KHÔNG suy chuyển kho
 /// (đúng nguyên văn: "chưa tick thì tất cả chỉ là con số lý thuyết").
 /// Khi ĐÃ tick BÁN:
-///   - Đã tick "Đã nhận hóa đơn MUA" (buyIsDeductible) → mỏ coi như đã
-///     xuất đúng % cam kết → kho chỉ cần bù đúng PHẦN CÒN THIẾU
-///     (g.missingVolume, công thức % cũ, không đổi).
+///   - Đã tick "Đã nhận hóa đơn MUA" (buyIsDeductible) → PHẦN CÒN THIẾU
+///     giờ lấy từ buildDocumentationLedger() (ưu tiên hoá đơn THẬT theo
+///     đúng giai đoạn/ngày tháng, FIFO — yêu cầu Ông Chủ 2026-08-22) thay
+///     vì flat g.missingVolume (% lý thuyết cũ, vẫn dùng làm fallback cho
+///     giai đoạn CHƯA có hoá đơn thật che).
 ///   - CHƯA tick MUA (hãn hữu — trả hàng cho khách trước, mỏ xuất hoá đơn
 ///     bù sau) → hoàn toàn chưa có chứng từ mua nào → kho phải bù ĐỦ
-///     100% (g.sellVolume).
+///     100% (g.sellVolume) — KHÔNG đụng, không liên quan hoá đơn thật.
 /// Tick MUA giữ NGUYÊN vai trò cũ (chỉ quyết định khấu trừ VAT đầu vào
 /// phần mua thường ở commercialVatPayable) — không đụng, tách biệt hoàn
 /// toàn khỏi việc rút/nạp kho.
 function siteGroupRealMissingVolume(s, g){
   if(!s.sellHasInvoice) return 0; // chưa xuất hoá đơn BÁN thật — vẫn là lý thuyết, kho chưa suy chuyển
-  return buyIsDeductible(s) ? g.missingVolume : g.sellVolume;
+  if(!buyIsDeductible(s)) return g.sellVolume;
+  const ctx = findSiteLogContext(s);
+  if(!ctx) return g.missingVolume; // không định vị được ca (hiếm) — an toàn lùi về % lý thuyết cũ
+  const ledger = buildDocumentationLedger(g.goodsType);
+  const key = siteLogGroupKey(ctx.sh, ctx.idx, g.goodsType);
+  return key in ledger ? ledger[key] : g.missingVolume;
 }
 /// ==== KHO HOÁ ĐƠN BÙ (mua theo lô lớn, rút dần cho từng ca thiếu chứng
 /// từ) — khớp theo LOẠI HÀNG (VD Base A, Base B...), KHÔNG còn ràng buộc
