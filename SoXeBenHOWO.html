@@ -3294,6 +3294,26 @@ function siteGoodsTypeGroups(s){
 function siteMissingDocumentedVolume(s){
   return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingVolume, 0);
 }
+/// 2026-08-22 (yêu cầu Ông Chủ — cơ chế "tick = SỰ THẬT xảy ra"): Kho hoá
+/// đơn bù (tiền + VAT THẬT, ảnh hưởng shiftTotalCost/commercialVatPayable)
+/// giờ CHỈ được rút cho 1 nhóm loại hàng khi Ông Chủ đã tick "Đã xuất hóa
+/// đơn BÁN" cho đúng ca đó — TRƯỚC khi tick, g.missingVolume (30% ước
+/// tính) vẫn hiện ra để xem tham khảo NHƯNG hoàn toàn KHÔNG suy chuyển kho
+/// (đúng nguyên văn: "chưa tick thì tất cả chỉ là con số lý thuyết").
+/// Khi ĐÃ tick BÁN:
+///   - Đã tick "Đã nhận hóa đơn MUA" (buyIsDeductible) → mỏ coi như đã
+///     xuất đúng % cam kết → kho chỉ cần bù đúng PHẦN CÒN THIẾU
+///     (g.missingVolume, công thức % cũ, không đổi).
+///   - CHƯA tick MUA (hãn hữu — trả hàng cho khách trước, mỏ xuất hoá đơn
+///     bù sau) → hoàn toàn chưa có chứng từ mua nào → kho phải bù ĐỦ
+///     100% (g.sellVolume).
+/// Tick MUA giữ NGUYÊN vai trò cũ (chỉ quyết định khấu trừ VAT đầu vào
+/// phần mua thường ở commercialVatPayable) — không đụng, tách biệt hoàn
+/// toàn khỏi việc rút/nạp kho.
+function siteGroupRealMissingVolume(s, g){
+  if(!s.sellHasInvoice) return 0; // chưa xuất hoá đơn BÁN thật — vẫn là lý thuyết, kho chưa suy chuyển
+  return buyIsDeductible(s) ? g.missingVolume : g.sellVolume;
+}
 /// ==== KHO HOÁ ĐƠN BÙ (mua theo lô lớn, rút dần cho từng ca thiếu chứng
 /// từ) — khớp theo LOẠI HÀNG (VD Base A, Base B...), KHÔNG còn ràng buộc
 /// theo mỏ/nhà cung cấp — 1 lô có thể bù cho bất kỳ công trình nào cùng
@@ -3384,19 +3404,69 @@ function findSiteLogContext(s){
 }
 
 const _invoiceLedgerCache = { key:null, data:null };
-/// Dựng sổ cái rút kho cho 1 LOẠI HÀNG: xếp toàn bộ NHU CẦU (mọi NHÓM loại
-/// hàng, trong bất kỳ công trình nào, đúng loại hàng này và có thiếu chứng
-/// từ, theo thời gian tăng dần) và toàn bộ NGUỒN CUNG (mọi lô đã mua đúng
-/// loại hàng này, theo ngày mua tăng dần), rồi rút FIFO. 1 công trình có
-/// thể vừa là nguồn nhu cầu cho NHIỀU loại hàng khác nhau cùng lúc (mỗi
-/// nhóm loại hàng trong đó tính riêng, độc lập). Cache trong 1 chu kỳ vẽ
-/// UI (khoá cache đổi ngay khi dữ liệu ca/lô đổi).
+/// Gộp 2 nguồn cung thành 1 KHO DUY NHẤT để rút FIFO (yêu cầu Ông Chủ
+/// 2026-08-22): Lô mua bù (invoiceLots, đơn vị khối sẵn) + Hoá đơn THẬT từ
+/// mỏ (mineInvoices, đơn vị tấn, quy đổi qua tỷ trọng nhà cung cấp gắn
+/// trên từng hoá đơn) — vì hoá đơn thật mỏ xuất SAU (Ông Chủ ví dụ: đã
+/// xuất trả khách bằng lô mua bù trước, mỏ xuất hoá đơn bù sau) phải nằm
+/// CHUNG 1 kho với lô mua bù để dùng bù cho đợt xuất khác, không tách
+/// riêng như trước (trước đây mineInvoices chỉ dùng hiển thị "Tồn Kho
+/// Tổng Hợp" tham khảo, không hề tham gia rút kho thật). Sắp theo ngày
+/// TĂNG DẦN (FIFO) — nguồn nào có trước dùng trước, không phân biệt là lô
+/// mua bù hay hoá đơn thật.
+function combinedWarehouseSupply(goodsType){
+  const gt = normGoodsType(goodsType);
+  const fromLots = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt).map(l=>{
+    const vat = Number(l.vatRatePercent)||0;
+    const totalVol = Number(l.totalVolume)||0;
+    const grossPerVol = totalVol>0 ? (Number(l.totalInvoiceValue)||0)/totalVol : 0;
+    const netCostTotal = (Number(l.totalInvoiceValue)||0) - (Number(l.cashReturned)||0); // chi phí THẬT của cả lô
+    return { id: l.id, date: l.purchaseDate||'', totalVolume: totalVol, remainingVolume: totalVol,
+      _netCostPerVol: totalVol>0 ? netCostTotal/totalVol : 0,
+      _vatPerVol: totalVol>0 ? grossPerVol*vat/(100+vat) : 0 }; // VAT tách từ giá hoá đơn gộp/khối
+  });
+  const fromMineInvoices = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt).map(inv=>{
+    const volKhoi = mineInvoiceVolumeKhoi(inv); // 0 nếu chưa cấu hình tỷ trọng — không tự chế số
+    const vat = Number(inv.vatRatePercent)||0;
+    const unitPrice = Number(inv.unitPrice)||0; // đ/tấn, CHƯA VAT (khác lot: lot.totalInvoiceValue là GIÁ ĐÃ GỒM VAT)
+    const netCostTotal = unitPrice>0 ? unitPrice*(Number(inv.totalVolume)||0) : 0; // chưa nhập đơn giá thì không bịa chi phí
+    return { id: inv.id, date: inv.invoiceDate||'', totalVolume: volKhoi, remainingVolume: volKhoi,
+      _netCostPerVol: volKhoi>0 ? netCostTotal/volKhoi : 0,
+      _vatPerVol: volKhoi>0 ? (netCostTotal*vat/100)/volKhoi : 0 }; // unitPrice đã net nên VAT = net×%, khác công thức tách VAT của lot
+  });
+  return [...fromLots, ...fromMineInvoices].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+}
+/// Tra cứu 1 phần tử kho THEO ĐÚNG NGUỒN GỐC (lô mua bù hay hoá đơn thật)
+/// — dùng cho màn giải trình chi tiết cần hiện đúng cách tính của từng
+/// loại nguồn (lô mua bù có "tiền mặt nhận lại", hoá đơn thật thì không).
+function warehouseSourceById(id){
+  const lot = invoiceLotById(id);
+  if(lot) return { kind:'lot', obj: lot };
+  const inv = mineInvoiceById(id);
+  if(inv) return { kind:'mineinv', obj: inv };
+  return null;
+}
+/// Dựng sổ cái rút kho cho 1 LOẠI HÀNG: xếp toàn bộ NHU CẦU THẬT (mọi NHÓM
+/// loại hàng, trong bất kỳ công trình nào, đúng loại hàng này, ĐÃ tick
+/// "Đã xuất hóa đơn BÁN" — xem siteGroupRealMissingVolume — theo thời gian
+/// tăng dần) và toàn bộ NGUỒN CUNG (combinedWarehouseSupply — lô mua bù +
+/// hoá đơn thật, theo ngày tăng dần), rồi rút FIFO. 1 công trình có thể
+/// vừa là nguồn nhu cầu cho NHIỀU loại hàng khác nhau cùng lúc (mỗi nhóm
+/// loại hàng trong đó tính riêng, độc lập). Cache trong 1 chu kỳ vẽ UI
+/// (khoá cache đổi ngay khi dữ liệu ca/lô/hoá đơn thật/tick đổi).
 function buildInvoiceLotLedger(goodsType){
   const gt = normGoodsType(goodsType);
   if(!gt) return { bySiteLog:{}, byLot:{} };
   const allSh = allShiftsForLedgerCompanyWide();
+  const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).map(s=>{
+    if(s.siteType!=='commercial') return '0';
+    let buy=0, sell=0;
+    (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt){ buy+=Number(t.buyVolume)||0; sell+=Number(t.sellVolume)||0; } });
+    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+sell;
+  }).join('|')).join(',');
   const cacheKey = gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
-    +'|'+allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).length).join(',');
+    +'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
+    +'|'+shiftSig;
   if(_invoiceLedgerCache.key===cacheKey) return _invoiceLedgerCache.data;
 
   const demand = [];
@@ -3404,24 +3474,16 @@ function buildInvoiceLotLedger(goodsType){
     (sh.siteLogs||[]).forEach((s,idx)=>{
       if(s.siteType!=='commercial') return;
       siteGoodsTypeGroups(s).forEach(g=>{
-        if(normGoodsType(g.goodsType)!==gt || g.missingVolume<=0) return;
-        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType, volume: g.missingVolume });
+        if(normGoodsType(g.goodsType)!==gt) return;
+        const real = siteGroupRealMissingVolume(s, g);
+        if(real<=0) return; // chưa tick BÁN → vẫn là lý thuyết, không tạo nhu cầu rút kho
+        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType, volume: real });
       });
     });
   });
   demand.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
 
-  const lots = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt)
-    .map(l=>({ ...l, remainingVolume: Number(l.totalVolume)||0 }))
-    .sort((a,b)=> (a.purchaseDate||'').localeCompare(b.purchaseDate||''));
-  lots.forEach(l=>{
-    const vat = Number(l.vatRatePercent)||0;
-    const totalVol = Number(l.totalVolume)||0;
-    const grossPerVol = totalVol>0 ? (Number(l.totalInvoiceValue)||0)/totalVol : 0;
-    const netCostTotal = (Number(l.totalInvoiceValue)||0) - (Number(l.cashReturned)||0); // chi phí THẬT của cả lô
-    l._netCostPerVol = totalVol>0 ? netCostTotal/totalVol : 0;
-    l._vatPerVol = totalVol>0 ? grossPerVol*vat/(100+vat) : 0; // VAT tách từ giá hoá đơn/khối
-  });
+  const lots = combinedWarehouseSupply(gt);
 
   const bySiteLog = {};
   let lotPtr = 0;
@@ -3432,7 +3494,7 @@ function buildInvoiceLotLedger(goodsType){
       const lot = lots[lotPtr];
       if(lot.remainingVolume<=0.0001){ lotPtr++; continue; }
       const take = Math.min(need, lot.remainingVolume);
-      allocations.push({ lotId: lot.id, purchaseDate: lot.purchaseDate, volume: take,
+      allocations.push({ lotId: lot.id, purchaseDate: lot.date, volume: take,
         cost: take*lot._netCostPerVol, vat: take*lot._vatPerVol });
       lot.remainingVolume -= take;
       need -= take;
@@ -3442,7 +3504,7 @@ function buildInvoiceLotLedger(goodsType){
   });
 
   const byLot = {};
-  lots.forEach(l=>{ byLot[l.id] = { total: Number(l.totalVolume)||0, remaining: Math.max(0,l.remainingVolume), used: (Number(l.totalVolume)||0)-Math.max(0,l.remainingVolume) }; });
+  lots.forEach(l=>{ byLot[l.id] = { total: l.totalVolume, remaining: Math.max(0,l.remainingVolume), used: l.totalVolume-Math.max(0,l.remainingVolume) }; });
 
   const data = { bySiteLog, byLot };
   _invoiceLedgerCache.key = cacheKey;
@@ -3450,24 +3512,30 @@ function buildInvoiceLotLedger(goodsType){
   return data;
 }
 
+
 /// Chi tiết rút kho của đúng 1 NHÓM loại hàng bên trong 1 site log —
-/// shortfallVolume > 0 nghĩa là kho không đủ cho riêng nhóm này.
+/// shortfallVolume > 0 nghĩa là kho không đủ cho riêng nhóm này. Dùng
+/// siteGroupRealMissingVolume (SỰ THẬT theo tick) làm căn cứ, KHÔNG dùng
+/// thẳng g.missingVolume (chỉ là ước tính lý thuyết hiển thị tham khảo).
 function siteInvoiceGroupBreakdown(s, goodsType){
   const groups = siteGoodsTypeGroups(s);
   const g = groups.find(x=>normGoodsType(x.goodsType)===normGoodsType(goodsType));
-  if(!g || g.missingVolume<=0) return { allocations:[], shortfallVolume:0 };
+  if(!g) return { allocations:[], shortfallVolume:0 };
+  const real = siteGroupRealMissingVolume(s, g);
+  if(real<=0) return { allocations:[], shortfallVolume:0 };
   const ctx = findSiteLogContext(s);
-  if(!ctx || !normGoodsType(goodsType)) return { allocations:[], shortfallVolume: g.missingVolume };
+  if(!ctx || !normGoodsType(goodsType)) return { allocations:[], shortfallVolume: real };
   const ledger = buildInvoiceLotLedger(goodsType);
   const rec = ledger.bySiteLog[siteLogGroupKey(ctx.sh, ctx.idx, goodsType)];
-  return rec ? { allocations: rec.allocations, shortfallVolume: rec.shortfall } : { allocations:[], shortfallVolume: g.missingVolume };
+  return rec ? { allocations: rec.allocations, shortfallVolume: rec.shortfall } : { allocations:[], shortfallVolume: real };
 }
 
 /// Chi tiết rút kho GỘP CẢ CÔNG TRÌNH — cộng dồn qua mọi nhóm loại hàng
-/// đang thiếu chứng từ trong site log này, mỗi dòng allocation có gắn kèm
-/// đúng loại hàng để hiển thị modal không lẫn lộn giữa các loại.
+/// ĐANG CẦN THẬT SỰ (siteGroupRealMissingVolume>0, tức đã tick BÁN) trong
+/// site log này, mỗi dòng allocation có gắn kèm đúng loại hàng để hiển thị
+/// modal không lẫn lộn giữa các loại.
 function siteInvoiceLotBreakdown(s){
-  const groups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0);
+  const groups = siteGoodsTypeGroups(s).filter(g=>siteGroupRealMissingVolume(s,g)>0);
   const perGroup = groups.map(g=>({ goodsType: g.goodsType, ...siteInvoiceGroupBreakdown(s, g.goodsType) }));
   const allocations = perGroup.flatMap(pg=>pg.allocations.map(a=>({ ...a, goodsType: pg.goodsType })));
   const shortfallVolume = perGroup.reduce((sum,pg)=>sum+pg.shortfallVolume, 0);
@@ -5147,15 +5215,22 @@ function updateSiteCalc(idx){
     const groupBlocks = missingGroups.map(g=>{
       const allocs = lotInfo.allocations.filter(a=>normGoodsType(a.goodsType)===normGoodsType(g.goodsType));
       const groupInfo = (lotInfo.byGroup||[]).find(pg=>normGoodsType(pg.goodsType)===normGoodsType(g.goodsType));
-      const groupShortfall = groupInfo ? groupInfo.shortfallVolume : g.missingVolume;
+      // 2026-08-22: chưa tick "Đã xuất hóa đơn BÁN" → chưa hề THỬ rút kho
+      // cho nhóm này (siteGroupRealMissingVolume=0) → groupInfo không tồn
+      // tại. Trước đây fallback về g.missingVolume khiến hiện nhầm "⚠️ Kho
+      // không đủ" dù chưa hề rút gì — giờ đúng phải là 0 (chưa thiếu, chỉ
+      // là CHƯA CẦN).
+      const groupShortfall = groupInfo ? groupInfo.shortfallVolume : 0;
       const allocLines = allocs.map(a=>
         `<div class="cb-line cb-sub"><span class="cb-lbl">↳ Rút lô ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'}</span><span class="cb-val">${a.volume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối — ${fmtVND(a.cost)}</span></div>`
       ).join('');
       const shortLine = groupShortfall>0.001 ? `
           <div class="cb-line" style="color:var(--loss); font-weight:700;"><span class="cb-lbl">⚠️ Kho "${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}" không đủ, còn thiếu</span><span class="cb-val">${groupShortfall.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>` : '';
+      const theoryNote = !s.sellHasInvoice ? `
+          <div class="cb-line cb-sub"><span class="cb-lbl">↳ (lý thuyết — chưa tick "Đã xuất hóa đơn BÁN" nên kho chưa rút gì)</span></div>` : '';
       return `
           <div class="cb-line"><span class="cb-lbl"><strong>${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}</strong> — thiếu</span><span class="cb-val cb-out">${g.missingVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-          ${allocLines}${shortLine}`;
+          ${allocLines}${shortLine}${theoryNote}`;
     }).join('<div class="formula-divider" style="margin:6px 0;"></div>');
     const missingBlock = missingVol>0 ? `
         <div class="cb-sec" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
@@ -5332,9 +5407,29 @@ KL mua = ${fmtQty(g.buyVolume)} tấn · KL bán = ${fmtQty(g.sellVolume)} khố
 KL có chứng từ = ${documentedVol!==null ? `(${fmtQty(g.buyVolume)} × ${rInv.val}%) ÷ ${rDen.val} = ${fmtQty(documentedVol)} khối` : 'không quy đổi được (thiếu % hoá đơn hoặc hệ số quy đổi)'}
 KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(documentedVol):'—'}) = ${fmtQty(g.missingVolume)} khối</div>`;
       }).join('')}
-      ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — lô mua trước dùng trước)</b>
+      ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — nguồn nào có trước dùng trước, gộp cả lô mua bù + hoá đơn thật từ mỏ)</b>
 ${lotInfo.allocations.map(a=>{
-  const lot = invoiceLotById(a.lotId) || {};
+  const src = warehouseSourceById(a.lotId);
+  if(src && src.kind==='mineinv'){
+    // Nguồn = Sổ Hoá Đơn Thật Từ Mỏ (2026-08-22) — đơn vị gốc là TẤN, quy
+    // đổi qua tỷ trọng nhà cung cấp; đơn giá (nếu có) đã là NET/chưa VAT,
+    // khác lot (giá lot là GỘP đã có VAT) nên công thức tách VAT khác đi.
+    const inv = src.obj;
+    const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
+    const density = sup ? Number(sup.densityRatio)||0 : 0;
+    const volKhoi = mineInvoiceVolumeKhoi(inv);
+    const unitPrice = Number(inv.unitPrice)||0;
+    const vat = Number(inv.vatRatePercent)||0;
+    const netCostPerVol = volKhoi>0 && unitPrice>0 ? (unitPrice*(Number(inv.totalVolume)||0))/volKhoi : 0;
+    const vatPerVol = netCostPerVol*vat/100;
+    return `↳ Hoá đơn thật ${a.purchaseDate?formatDateVN(a.purchaseDate):'—'}${inv.invoiceNumber?` (Số ${escapeHtml(inv.invoiceNumber)})`:''} (${escapeHtml(a.goodsType||'')}) — rút ${fmtQty(a.volume)} khối
+   Quy đổi = ${fmtQty(inv.totalVolume)} tấn ÷ ${density||'?'} (tỷ trọng "${sup?escapeHtml(sup.name):'chưa gắn NCC'}") = ${fmtQty(volKhoi)} khối
+   Chi phí THẬT/khối = ${unitPrice>0 ? `${fmtVND(unitPrice)}/tấn × ${fmtQty(inv.totalVolume)} tấn ÷ ${fmtQty(volKhoi)} khối = ${fmtVND(netCostPerVol)}/khối` : 'chưa nhập đơn giá — tạm 0đ/khối (không bịa số)'}
+   → Chi phí lô này = ${fmtQty(a.volume)} khối × ${fmtVND(netCostPerVol)}/khối = ${fmtVND(a.cost)}
+   VAT khấu trừ/khối = ${unitPrice>0 ? `${fmtVND(netCostPerVol)}/khối × ${vat}% = ${fmtVND(vatPerVol)}/khối` : '0đ/khối (chưa có đơn giá)'}
+   → VAT khấu trừ lô này = ${fmtQty(a.volume)} khối × ${fmtVND(vatPerVol)}/khối = ${fmtVND(a.vat)}`;
+  }
+  const lot = (src && src.kind==='lot') ? src.obj : {};
   const lotVol = Number(lot.totalVolume)||0;
   const lotValue = Number(lot.totalInvoiceValue)||0;
   const lotReturned = Number(lot.cashReturned)||0;
@@ -5356,7 +5451,7 @@ ${lotInfo.allocations.map(a=>{
 Tổng chi phí mua hoá đơn bù (tiền mặt thật) = ${fmtVND(supplementCost)}
 Tổng VAT khấu trừ từ hoá đơn bù = ${fmtVND(supplementVatCredit)}
 = CHI PHÍ RÒNG hoá đơn bù (đã trừ lợi thuế) = ${fmtVND(supplementCost)} − ${fmtVND(supplementVatCredit)} = ${fmtVND(supplementCost-supplementVatCredit)}</div>
-<div class="hint">VAT khấu trừ tính theo ĐÚNG giá ghi trên hoá đơn gốc (chưa trừ tiền mặt nhận lại) — vì trên giấy tờ, hoá đơn vẫn ghi đúng giá gốc, tiền mặt nhận lại là thoả thuận ngầm ngoài hoá đơn, không làm thay đổi số VAT được pháp luật công nhận khấu trừ. "Chi phí RÒNG" mới là số tiền THẬT SỰ tốn cho việc bù chứng từ, sau khi đã cộng lại phần lợi thuế (nộp Nhà Nước ít đi) mà chính lô hoá đơn bù này mang lại.</div>` : (missingVol>0.001 ? `<div class="hint">Kho hoá đơn bù chưa rút được lô nào cho ca này — chi phí bổ sung chứng từ tạm = 0đ (không bịa số khi chưa thật sự mua lô mới).</div>` : `<div class="hint">Không thiếu chứng từ — không phát sinh chi phí bổ sung.</div>`)}
+<div class="hint">VAT khấu trừ tính theo ĐÚNG giá ghi trên hoá đơn gốc (chưa trừ tiền mặt nhận lại) — vì trên giấy tờ, hoá đơn vẫn ghi đúng giá gốc, tiền mặt nhận lại là thoả thuận ngầm ngoài hoá đơn, không làm thay đổi số VAT được pháp luật công nhận khấu trừ. "Chi phí RÒNG" mới là số tiền THẬT SỰ tốn cho việc bù chứng từ, sau khi đã cộng lại phần lợi thuế (nộp Nhà Nước ít đi) mà chính lô hoá đơn bù này mang lại.</div>` : (!s.sellHasInvoice && missingVol>0.001 ? `<div class="hint">Chưa tick "Đã xuất hóa đơn BÁN" — số thiếu ở trên vẫn là LÝ THUYẾT để xem trước, kho hoá đơn bù CHƯA rút gì cho ca này, chi phí bổ sung chứng từ tạm = 0đ.</div>` : (missingVol>0.001 ? `<div class="hint">Đã tick "Đã xuất hóa đơn BÁN" nhưng kho hoá đơn bù chưa rút được (hết lô) cho ca này — chi phí bổ sung chứng từ tạm = 0đ (không bịa số khi chưa thật sự mua/nhập lô mới).</div>` : `<div class="hint">Không thiếu chứng từ — không phát sinh chi phí bổ sung.</div>`))}
     </div>
 
     <div class="modal-step">
