@@ -3403,7 +3403,11 @@ function findSiteLogContext(s){
   return null;
 }
 
-const _invoiceLedgerCache = { key:null, data:null };
+const _invoiceLedgerCache = {}; // { [goodsType]: {key, data} } — 2026-08-22: đổi từ 1 ô nhớ DUY NHẤT
+// sang 1 ô nhớ RIÊNG cho từng loại hàng — trước đó Base A/Base B liên tục đá
+// cache của nhau (rất hay xen kẽ trong 1 lượt vẽ UI), khiến vòng quét
+// shiftSig (mới thêm, quét cả commercialTrips) phải chạy lại nhiều lần hơn
+// cần thiết → đây chính là nguyên nhân "lưu ca bị lâu hơn hẳn" Ông Chủ báo.
 /// Gộp 2 nguồn cung thành 1 KHO DUY NHẤT để rút FIFO (yêu cầu Ông Chủ
 /// 2026-08-22): Lô mua bù (invoiceLots, đơn vị khối sẵn) + Hoá đơn THẬT từ
 /// mỏ (mineInvoices, đơn vị tấn, quy đổi qua tỷ trọng nhà cung cấp gắn
@@ -3467,7 +3471,7 @@ function buildInvoiceLotLedger(goodsType){
   const cacheKey = gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
     +'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
     +'|'+shiftSig;
-  if(_invoiceLedgerCache.key===cacheKey) return _invoiceLedgerCache.data;
+  if(_invoiceLedgerCache[gt] && _invoiceLedgerCache[gt].key===cacheKey) return _invoiceLedgerCache[gt].data;
 
   const demand = [];
   allSh.forEach(sh=>{
@@ -3507,8 +3511,7 @@ function buildInvoiceLotLedger(goodsType){
   lots.forEach(l=>{ byLot[l.id] = { total: l.totalVolume, remaining: Math.max(0,l.remainingVolume), used: l.totalVolume-Math.max(0,l.remainingVolume) }; });
 
   const data = { bySiteLog, byLot };
-  _invoiceLedgerCache.key = cacheKey;
-  _invoiceLedgerCache.data = data;
+  _invoiceLedgerCache[gt] = { key: cacheKey, data };
   return data;
 }
 
