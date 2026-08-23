@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #82';
+const APP_BUILD = '2026-08-23 · #83';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2815,6 +2815,35 @@ function renderInvoiceLotOverview(){
       </table>
     </div>
     ${vatByShift.totalCost>0.5 && vatByShift.totalVatCredit<=0.5 ? `<div class="hint" style="margin-bottom:14px;">Có chi phí kho phát sinh nhưng VAT hưởng = 0đ — kiểm tra lại (các) lô đã rút trong kỳ này ở mục "Sổ Hoá Đơn Thật Từ Mỏ"/"Kho Hoá Đơn Bù" xem ô "VAT suất trên hoá đơn (%)" có đang để trống (= 0%) không.</div>` : ''}
+    ${(()=>{
+      // CHẨN ĐOÁN (2026-08-23, yêu cầu Ông Chủ): TỰ HIỆN ngay khi bảng trên
+      // ra 0đ — liệt kê CHÍNH XÁC từng ca/nhóm loại hàng đang dừng ở bước
+      // nào, đọc thẳng dữ liệu thật đang có trên máy Ông Chủ, không đoán.
+      if(vatByShift.totalCost>0.5 || vatByShift.totalVatCredit>0.5) return ''; // đã có số rồi thì không cần chẩn đoán
+      const diag = diagnoseInvoiceLotShiftGaps(from, to);
+      const excludedBlock = diag.excludedInRange.length ? `
+        <div style="padding:8px 0; border-top:2px solid var(--loss);">
+          <div style="font-weight:700; color:var(--loss);">⚠️ ${diag.excludedInRange.length} ca trong khoảng ngày này đang bị loại KHỎI MỌI báo cáo doanh thu (kể cả bảng này) vì còn thiếu dữ liệu bắt buộc:</div>
+          ${diag.excludedInRange.map(e=>`<div class="hint" style="margin:4px 0 0;">${formatDateVN(e.date)} — ${shiftTypeLabel(e.shiftType)}: ${e.issues.map(escapeHtml).join('; ')} — vào tab Ca Làm Việc bấm nút [⚠️ Cảnh Báo Hành Động] để bổ sung, ca sẽ tự quay lại báo cáo.</div>`).join('')}
+        </div>` : '';
+      if(diag.rows.length===0 && !excludedBlock){
+        return `<div class="card" style="border:1.5px dashed var(--border); margin-bottom:14px;">
+          <div style="font-weight:800; margin-bottom:6px;">🔍 Vì sao bảng trên trống?</div>
+          <div class="hint" style="margin:0;">Trong khoảng ${formatDateVN(from)} → ${formatDateVN(to)}, KHÔNG có ca nào có chuyến công trình thương mại (mua/bán vật liệu) cả — nên đúng là chưa có gì để rút kho. Nếu Ông Chủ chắc chắn có ca thương mại trong kỳ này, kiểm tra lại "Loại hàng" đã gõ đúng ở từng chuyến chưa.</div>
+        </div>`;
+      }
+      return `<div class="card" style="border:1.5px dashed var(--border); margin-bottom:14px;">
+        <div style="font-weight:800; margin-bottom:8px;">🔍 Vì sao bảng trên trống? ${diag.rows.length?`(${diag.rows.length} nhóm loại hàng tìm thấy trong kỳ)`:''}</div>
+        ${diag.rows.map(d=>`
+          <div style="padding:8px 0; border-top:1px solid var(--border);">
+            <div style="font-weight:700;">${formatDateVN(d.date)} — ${shiftTypeLabel(d.shiftType)} — ${escapeHtml(d.goodsType)}</div>
+            <div class="hint" style="margin:2px 0;">Mua ${d.buyVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} · Bán ${d.sellVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} · Tick BÁN: ${d.sellHasInvoice?'✅':'❌'} · Tick MUA: ${d.buyIsDeductible?'✅':'❌'} · % mỏ xuất: ${d.invoicedPct}% · Tỷ trọng: ${d.density||'(chưa khai)'}</div>
+            <div style="color:${d.reason.startsWith('Có rút kho')?'var(--profit)':'var(--loss)'}; font-weight:600;">${d.reason}</div>
+          </div>
+        `).join('')}
+        ${excludedBlock}
+      </div>`;
+    })()}
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">Tổng quan tất cả Loại hàng (phát sinh trong kỳ ${formatDateVN(from)} → ${formatDateVN(to)})</div>
     <div class="card dash-wrap" style="padding:0;">
@@ -3970,6 +3999,61 @@ function computeInvoiceLotVatCreditByShift(from, to){
   }
   rows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
   return { rows, totalVatCredit, totalCost };
+}
+/// CÔNG CỤ CHẨN ĐOÁN (2026-08-23, yêu cầu Ông Chủ — bảng "Chi Phí & VAT
+/// Hưởng Theo Ca" báo trống nhiều lần, cần xử lý triệt để thay vì đoán tiếp
+/// mà không có bằng chứng): duyệt lại ĐÚNG con đường computeInvoiceLotVatCreditByShift
+/// đi qua (allShiftsCompanyWide → siteGoodsTypeGroups → siteGroupRealMissingVolume
+/// → buildInvoiceLotLedger), nhưng thay vì chỉ trả về số CUỐI CÙNG, ghi lại
+/// rõ ràng DỪNG Ở BƯỚC NÀO với TỪNG nhóm loại hàng của TỪNG ca — để thấy
+/// đúng nguyên nhân THẬT trên dữ liệu thật, không đoán chung chung nữa.
+/// Đọc y hệt state (state.suppliers, state.invoiceLots, state.mineInvoices)
+/// mà buildInvoiceLotLedger đang dùng — không tính lại theo công thức khác.
+function diagnoseInvoiceLotShiftGaps(from, to){
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const shifts = allShiftsCompanyWide().filter(sh=>sh.date>=from && sh.date<=to && !excludedShiftIds.has(sh.id));
+  // Bản thân sh (company-wide) không phải state.shifts nên phải quét riêng
+  // để biết chính xác ca nào trong khoảng ngày này bị getRevenueExcludedShiftIds()
+  // loại (chỉ áp dụng cho ĐÚNG 2 ca gần nhất trên toàn hệ thống theo
+  // chronoKey — nếu 1 trong 2 ca đó vừa hay rơi vào khoảng ngày đang xem
+  // và còn thiếu dữ liệu, nó sẽ bị loại HẲN khỏi bảng trên mà không có
+  // dòng nào giải thích — đây là điểm dễ gây hiểu lầm "trống vô cớ" nhất).
+  const excludedInRange = allShiftsCompanyWide()
+    .filter(sh=>sh.date>=from && sh.date<=to && excludedShiftIds.has(sh.id))
+    .map(sh=>({ date: sh.date, shiftType: sh.shiftType, issues: computeShiftIssues(sh).filter(msg=>!FUEL_ODO_ISSUE_MESSAGES.has(msg)) }));
+  const rows = [];
+  shifts.forEach(sh=>{
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      const groups = siteGoodsTypeGroups(s);
+      groups.forEach(g=>{
+        const sup = s.supplierId ? supplierById(s.supplierId) : null;
+        const rawPct = sup && sup.invoicedBuyPercent!==undefined && sup.invoicedBuyPercent!==null && sup.invoicedBuyPercent!=='' ? sup.invoicedBuyPercent : s.invoicedBuyPercent;
+        const rawDensity = sup && sup.densityRatio!==undefined && sup.densityRatio!==null && sup.densityRatio!=='' ? sup.densityRatio : s.densityRatio;
+        const invoicedPct = (rawPct===undefined||rawPct===null||rawPct==='') ? 100 : Number(rawPct);
+        const density = Number(rawDensity)||0;
+        const configOk = !(invoicedPct>=100 || density<=0);
+        const real = siteGroupRealMissingVolume(s, g);
+        const gt = normGoodsType(g.goodsType);
+        const lotsAvailVol = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt).reduce((sum,l)=>sum+(Number(l.totalVolume)||0),0);
+        const mineInvCount = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt).length;
+        let reason;
+        if(!s.sellHasInvoice) reason = 'Chưa tick "Đã xuất hoá đơn BÁN" cho ca này';
+        else if(g.buyVolume<=0) reason = 'Chuyến này không có khối lượng MUA (buyVolume = 0)';
+        else if(!configOk) reason = sup ? `Nhà cung cấp "${escapeHtml(sup.name||'')}" chưa khai đủ % hoá đơn mỏ xuất (đang để trống/=100%) hoặc chưa khai Tỷ trọng quy đổi` : 'Ca này chưa khai % hoá đơn mỏ xuất hoặc Tỷ trọng quy đổi (ở Nhà Cung Cấp, hoặc ngay trên ca nếu không gắn Nhà Cung Cấp)';
+        else if(g.missingVolume<=0.0001) reason = 'Khối lượng mua đã đủ chứng từ ≥ khối lượng bán — không thiếu gì để bù';
+        else if(real<=0.0001) reason = '(không xác định được — báo lại cho Claude kèm ảnh dòng này)';
+        else if(lotsAvailVol<=0.0001 && mineInvCount===0) reason = `Đã xác định THIẾU ${real.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối "${escapeHtml(g.goodsType)}" nhưng CHƯA có Lô Mua Bù hoặc Hoá Đơn Thật Từ Mỏ nào của loại hàng này trong Kho để rút`;
+        else reason = 'Có rút kho — xem đúng cột Chi Phí/VAT Hưởng ở dòng ca này trong bảng trên';
+        rows.push({ date: sh.date, shiftType: sh.shiftType, goodsType: g.goodsType,
+          sellHasInvoice: !!s.sellHasInvoice, buyIsDeductible: buyIsDeductible(s),
+          invoicedPct, density, buyVolume: g.buyVolume, sellVolume: g.sellVolume,
+          missingVolumeTheory: g.missingVolume, realMissing: real, lotsAvailVol, mineInvCount, reason });
+      });
+    });
+  });
+  rows.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  return { rows, excludedInRange };
 }
 
 /// Bảng đối soát theo khoảng ngày cho 1 loại hàng — mỗi dòng đúng 1 NHÓM
