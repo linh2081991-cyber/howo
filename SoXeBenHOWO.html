@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #81';
+const APP_BUILD = '2026-08-23 · #82';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4380,6 +4380,33 @@ function findPreviousShift(dateStr, shiftType, excludeId){
   }
   return best;
 }
+/// CƠ CHẾ "2 TÀI XẾ THAY PHIÊN THEO NGÀY" (2026-08-23, yêu cầu Ông Chủ: hiện
+/// có đúng 2 tài xế, mỗi người chạy thông 1 NGÀY cả Ca Ngày lẫn Ca Đêm, hôm
+/// sau đổi người). Dùng lại ĐÚNG findPreviousShift() đã có sẵn (đang dùng
+/// suy Odo/Dầu đầu ca) — không quét dữ liệu kiểu khác, không tính theo công
+/// thức ngày chẵn/lẻ cứng nhắc (dễ vỡ nếu có hôm nghỉ/đổi ca đột xuất) mà
+/// bám sát đúng lịch sử ca ĐÃ GHI THẬT:
+///   - Ca liền trước CÙNG NGÀY (VD đang thêm Ca Đêm, ngày đó đã có Ca Ngày)
+///     → LẤY ĐÚNG tài xế của ca đó — chạy thông cả ngày, không đổi giữa chừng.
+///   - Ca liền trước KHÁC NGÀY → đảo sang tài xế CÒN LẠI, CHỈ khi đang có
+///     ĐÚNG 2 tài xế hoạt động (đủ căn cứ chắc chắn để đảo). Có 1, 3 tài xế
+///     trở lên → không đủ căn cứ để đoán, giữ nguyên tài xế của ca trước
+///     (an toàn hơn đoán bừa, Ông Chủ tự chọn lại tay nếu cần).
+///   - Không có ca nào trước đó (ca đầu tiên của cả hệ thống) → tài xế hoạt
+///     động đầu tiên, y hệt hành vi cũ.
+/// LUÔN chỉ là GỢI Ý điền sẵn vào ô chọn — Ông Chủ đổi tay bình thường bất
+/// cứ lúc nào, không khoá hay ép buộc gì cả.
+function suggestDriverIdForNewShift(dateStr, shiftType, excludeId){
+  const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
+  const prev = findPreviousShift(dateStr, shiftType, excludeId);
+  if(!prev) return (activeDrivers[0]||state.drivers[0]||{}).id;
+  if(prev.date===dateStr) return prev.driverId;
+  if(activeDrivers.length===2){
+    const other = activeDrivers.find(d=>d.id!==prev.driverId);
+    if(other) return other.id;
+  }
+  return prev.driverId;
+}
 
 /// Gợi ý tên công trình khi gõ — CHỈ những công trình còn hoạt động (lần
 /// gần nhất được chọn cách đây DƯỚI 10 ngày). Công trình quá 10 ngày
@@ -4953,7 +4980,12 @@ function startNewShift(){
   const dateStr=todayLocalDateStr();
   const shiftType='day';
   const prev = findPreviousShift(dateStr, shiftType, null);
-  const driver = state.drivers[0];
+  // SỬA 2026-08-23 (yêu cầu Ông Chủ — cơ chế 2 tài xế thay phiên theo
+  // ngày): trước đây LUÔN mặc định tài xế ĐẦU TIÊN trong danh sách, nên
+  // ngày nào tới phiên tài xế thứ 2 cũng phải tự tay đổi lại. Giờ suy luận
+  // đúng theo phiên trực thật.
+  const suggestedDriverId = suggestDriverIdForNewShift(dateStr, shiftType, null);
+  const driver = driverById(suggestedDriverId) || state.drivers[0];
   const policy = state.settings.costPolicies.active;
   const draft = {
     id: uid('shift'),
@@ -5035,6 +5067,23 @@ function reapplyOdoFuelInheritance(){
   sh.odoEnd = 0;
   sh.fuelStart = inheritedFuel;
 }
+/// SỬA 2026-08-23 (yêu cầu Ông Chủ — cơ chế 2 tài xế thay phiên theo ngày):
+/// y hệt cách reapplyOdoFuelInheritance() ở trên tự suy Odo/Dầu đầu ca mỗi
+/// khi đổi Ngày/Ca trên 1 ca MỚI (isNew, chưa lưu) — giờ tài xế cũng tự suy
+/// lại theo đúng phiên trực thật của NGÀY/CA vừa đổi tới, không còn giữ
+/// nguyên tài xế của ngày cũ đã chọn nhầm lúc trước đó. Ca đã lưu (không
+/// phải isNew) thì không đụng — đổi ngày 1 ca lịch sử KHÔNG được tự ý đổi
+/// luôn cả tài xế.
+function reapplyDriverInheritance(){
+  const sh = state.draftShift;
+  if(!sh.isNew) return;
+  const suggestedId = suggestDriverIdForNewShift(sh.date, sh.shiftType, sh.id);
+  const driver = driverById(suggestedId);
+  if(!driver) return;
+  sh.driverId = driver.id;
+  sh.driverNameSnapshot = driver.name;
+  reapplyCostPolicyToDraft();
+}
 
 /// Refreshes the on-screen Odo/Fuel Start/End inputs to match the current
 /// draft shift values (used right after reapplyOdoFuelInheritance()).
@@ -5044,6 +5093,14 @@ function refreshOdoFuelInputs(){
   if(os) os.value = blankIfZero(sh.odoStart);
   if(oe) oe.value = blankIfZero(sh.odoEnd);
   if(fs) fs.value = blankIfZero(sh.fuelStart);
+}
+/// Y HỆT refreshOdoFuelInputs() ở trên nhưng cho ô chọn Tài Xế — dùng ngay
+/// sau reapplyDriverInheritance() để ô <select> trên màn hình hiện đúng
+/// tài xế vừa được tự suy lại, không cần vẽ lại cả form (tránh mất vị trí
+/// cuộn/focus đang gõ dở ở ô khác).
+function refreshDriverSelectInput(){
+  const sel = document.getElementById('f_driver');
+  if(sel) sel.value = state.draftShift.driverId;
 }
 
 // ========================= SHIFT FORM =========================
@@ -6027,8 +6084,10 @@ function bindFormEvents(){
     sh.date=e.target.value;
     reapplyCostPolicyToDraft();
     reapplyOdoFuelInheritance();
+    reapplyDriverInheritance();
     refreshFixedCostInputs();
     refreshOdoFuelInputs();
+    refreshDriverSelectInput();
     updateSummary();
   });
 
@@ -6037,7 +6096,9 @@ function bindFormEvents(){
       sh.shiftType = btn.dataset.val;
       document.querySelectorAll('#f_shiftType button').forEach(b=>b.classList.toggle('active', b===btn));
       reapplyOdoFuelInheritance();
+      reapplyDriverInheritance();
       refreshOdoFuelInputs();
+      refreshDriverSelectInput();
       updateSummary();
     });
   });
@@ -12646,7 +12707,7 @@ function renderSettings(){
 
     <section class="group">
       <h3>🏦 Công Cụ Tính Gốc + Lãi Vay Ngân Hàng Tự Động (Dư Nợ Giảm Dần)</h3>
-      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Nhập đủ các ô dưới đây, app tự tính số tháng đã vay từ Ngày Giải Ngân đến hôm nay và ra đúng số Gốc+Lãi phải trả THÁNG NÀY — số này tự động dùng làm chi phí cố định cho toàn bộ app (Điểm Hoà Vốn, Lợi Nhuận Thực Tế, Thẩm Định Công Trình...), Ông Chủ không cần gõ tay ở bất kỳ đâu khác nữa.</div>
+      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định.</div>
       <div class="card">
         <div class="two-col">
           <div class="field">
@@ -12800,7 +12861,6 @@ function renderSettings(){
           ${r.isPaidOff ? '' : `
           <div class="formula-divider" style="margin:10px 0;"></div>
           <div style="font-weight:700; font-size:13px; margin-bottom:2px;">✅ Xác Nhận Đã Trả Từng Kỳ</div>
-          <div class="hint" style="margin-top:0; margin-bottom:8px;">Tick đúng (các) kỳ Ông Chủ đã thực đóng tiền ngân hàng — tick/bỏ tick bất cứ lúc nào, kể cả kỳ CŨ lỡ quên tick trước đây. Kỳ TIẾP THEO cũng hiện sẵn ở đây dù chưa tới hạn, để tick ngay được nếu Ông Chủ đóng tiền sớm. "Số kỳ đã trả"/"Dư nợ còn lại" ở trên luôn tự khớp đúng theo các kỳ đang tick dưới đây.</div>
           <div id="loanPaidChecklistWrap">
             ${(()=>{
               const todayD = new Date(todayLocalDateStr()+'T00:00:00');
