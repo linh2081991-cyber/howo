@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #83';
+const APP_BUILD = '2026-08-23 · #84';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6931,6 +6931,15 @@ function openDriverDetail(driverId){
   const inRange = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
   const activeShifts = inRange.filter(sh=>sh.status==='active');
   const activeDates = new Set(activeShifts.map(sh=>sh.date));
+  // SỬA 2026-08-23 (Ông Chủ hỏi vì sao Số Ca Hoạt Động ≠ Số Ngày Có Ca Hoạt
+  // Động): 2 số này ĐÚNG LÀ 2 phép đếm khác nhau (số bản ghi vs số ngày
+  // khác nhau) — lệch nhau nghĩa là có ngày bị nhập CẢ 2 CA đều "Hoạt
+  // Động" thay vì đúng khuôn mẫu 1 Hoạt Động + 1 Nằm Bãi. Không phải lỗi
+  // công thức — chỉ thêm gợi ý chỉ đúng ngày nào để Ông Chủ dò lại cho
+  // nhanh, không đụng cách tính 2 số trên.
+  const activeDateCounts = {};
+  activeShifts.forEach(sh=>{ activeDateCounts[sh.date] = (activeDateCounts[sh.date]||0)+1; });
+  const duplicateActiveDates = Object.keys(activeDateCounts).filter(d=>activeDateCounts[d]>1).sort();
   // Tính đúng số chuyến + lương chuyến cho ĐÚNG tài xế này, tôn trọng
   // field "Tài xế lấy hàng" riêng của từng chuyến (mặc định = tài xế ca,
   // không đổi hành vi cũ) — GỘP TẤT CẢ ca của XE NÀY trong kỳ (không chỉ
@@ -7018,6 +7027,7 @@ function openDriverDetail(driverId){
         <div class="driver-cv-grid">
           <div class="driver-cv-item"><span class="k">Số Ca Hoạt Động</span><span class="v">${activeShifts.length} ca</span></div>
           <div class="driver-cv-item"><span class="k">Số Ngày Có Ca Hoạt Động</span><span class="v">${activeDates.size} ngày</span></div>
+          ${duplicateActiveDates.length ? `<div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k" style="color:var(--loss);">⚠️ Ngày bị nhập cả 2 ca đều "Hoạt Động"</span><span class="v" style="color:var(--loss);">${duplicateActiveDates.map(formatDateVN).join(', ')}</span></div>` : ''}
           <div class="driver-cv-item"><span class="k">Tổng Số Chuyến</span><span class="v">${totalTrips} chuyến</span></div>
           <div class="driver-cv-item"><span class="k">Tổng Km Đã Chạy</span><span class="v">${Math.round(totalKm).toLocaleString('vi-VN')} km</span></div>
           <div class="driver-cv-item"><span class="k">Doanh Thu Tạo Ra Trong Kỳ</span><span class="v">${fmtVND(totalRevenue)}</span></div>
