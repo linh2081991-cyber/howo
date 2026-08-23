@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-22 · #77';
+const APP_BUILD = '2026-08-23 · #78';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1097,6 +1097,28 @@ function computeLoanDueWarning(){
   if(daysLeft>3) return null; // chưa tới mốc cảnh báo (ngày 17 nếu hạn là 20)
   const dueDateStr = `${dueDate.getFullYear()}-${String(dueDate.getMonth()+1).padStart(2,'0')}-${String(dueDate.getDate()).padStart(2,'0')}`;
   return { curYM, dueDateStr, amount: Math.round(amort.totalPaymentCurrent), urgency: urgencyFromDays(daysLeft, 3, 0) };
+}
+/// SỬA LỖI 2026-08-23 (Ông Chủ báo: bấm "Đã Trả Tiền Ngân Hàng" cho kỳ 2
+/// tháng 8/2026 nhưng "Số kỳ đã trả ngân hàng" ở Cài Đặt không nhích) —
+/// NGUỒN GỐC: có 2 nút "Đã Trả Tiền Ngân Hàng" riêng biệt (1 ở thẻ cảnh báo
+/// trên danh sách Ca, 1 ở Cài Đặt) từng tự viết logic RIÊNG — nút cảnh báo
+/// CHỈ set lastPaidMonth, không hề đẩy vào mảng paidMonths (nguồn DUY NHẤT
+/// mà loanPaidPeriodsCount() dùng để đếm số kỳ), nên bấm nút đó không làm
+/// tăng "Số kỳ đã trả". Từ nay CẢ 2 nút dùng chung đúng 1 hàm này — không
+/// bao giờ lệch nhau nữa. KHÔNG đụng gì tới computeBankLoanAmortization
+/// (công thức Gốc+Lãi thật, tính theo lịch — frozen, không đổi).
+function setLoanPeriodPaid(ym, paid){
+  if(!state.settings.bankLoan) state.settings.bankLoan = {};
+  const bl = state.settings.bankLoan;
+  // Tương thích ngược: bản cũ chỉ có lastPaidMonth (1 kỳ) → gộp vào mảng.
+  if(!Array.isArray(bl.paidMonths)) bl.paidMonths = bl.lastPaidMonth ? [bl.lastPaidMonth] : [];
+  if(paid){
+    if(!bl.paidMonths.includes(ym)) bl.paidMonths.push(ym);
+    bl.lastPaidMonth = ym;
+  } else {
+    bl.paidMonths = bl.paidMonths.filter(m=>m!==ym);
+    bl.lastPaidMonth = bl.paidMonths.length ? bl.paidMonths[bl.paidMonths.length-1] : null;
+  }
 }
 
 // ========================= PER-SHIFT ACTION-NEEDED VALIDATION =========================
@@ -4793,9 +4815,12 @@ function bindWarningsBanner(){
   if(loanBtn) loanBtn.addEventListener('click', async ()=>{
     const w = computeLoanDueWarning();
     if(!w) return;
-    state.settings.bankLoan.lastPaidMonth = w.curYM;
+    // SỬA 2026-08-23: trước đây chỉ set lastPaidMonth, không cộng vào
+    // paidMonths — khiến "Số kỳ đã trả ngân hàng" ở Cài Đặt bị kẹt dù đã
+    // bấm trả. Giờ dùng chung đúng 1 hàm với nút bên Cài Đặt.
+    setLoanPeriodPaid(w.curYM, true);
     if(!(await saveSettings())) return;
-    showToast('Đã ghi nhận trả lãi ngân hàng tháng này.');
+    showToast(`Đã ghi nhận trả kỳ này (tổng ${state.settings.bankLoan.paidMonths.length} kỳ đã trả).`);
     renderAll();
   });
 }
@@ -12780,18 +12805,11 @@ function renderSettings(){
       const unpaid = e.target.closest && e.target.closest('#loanUnpaidBtn');
       if(!paid && !unpaid) return;
       const curYM = todayLocalDateStr().slice(0,7);
-      if(!state.settings.bankLoan) state.settings.bankLoan = {};
+      // SỬA 2026-08-23: dùng chung đúng 1 hàm với nút cảnh báo nhanh ở
+      // danh sách Ca (setLoanPeriodPaid) — trước đây 2 nút viết logic
+      // riêng, dễ lệch nhau (đúng lỗi Ông Chủ báo).
+      setLoanPeriodPaid(curYM, !!paid);
       const bl = state.settings.bankLoan;
-      // Danh sách các kỳ (tháng) đã thực trả — số kỳ = độ dài mảng này.
-      // Tương thích ngược: nếu trước đây chỉ có lastPaidMonth thì gộp vào mảng.
-      if(!Array.isArray(bl.paidMonths)) bl.paidMonths = bl.lastPaidMonth ? [bl.lastPaidMonth] : [];
-      if(paid){
-        if(!bl.paidMonths.includes(curYM)) bl.paidMonths.push(curYM);
-        bl.lastPaidMonth = curYM;
-      } else {
-        bl.paidMonths = bl.paidMonths.filter(m=>m!==curYM);
-        bl.lastPaidMonth = bl.paidMonths.length ? bl.paidMonths[bl.paidMonths.length-1] : null;
-      }
       if(state.currentTab==='settings') renderAll();
       else if(state.currentTab==='shifts') renderShiftList();
       // 2026-08-22 (Ông Chủ báo — số liệu liên quan ngân hàng không cập
@@ -12901,9 +12919,19 @@ function renderSettings(){
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
     s.monthlyVehicleDepreciation = sVals.depreciation;
+    // SỬA 2026-08-23 (Ông Chủ báo — trả kỳ 2 tháng 8/2026 rồi mà "Số kỳ đã
+    // trả ngân hàng" không lên): loanDraft (bản nháp form) KHÔNG có field
+    // paidMonths — trước đây dựng lại s.bankLoan hoàn toàn từ loanDraft ở
+    // đây khiến paidMonths bị XOÁ MẤT mỗi lần bấm "Lưu Cài Đặt", dù chỉ
+    // sửa 1 ô bất kỳ (VD tiền bảo hiểm) không liên quan gì tới khoản vay.
+    // Giữ nguyên đúng paidMonths hiện có (nguồn thật là state.settings.bankLoan,
+    // luôn được setLoanPeriodPaid() cập nhật real-time) — không lấy từ loanDraft.
+    const existingPaidMonths = (s.bankLoan && Array.isArray(s.bankLoan.paidMonths)) ? s.bankLoan.paidMonths
+      : (s.bankLoan && s.bankLoan.lastPaidMonth ? [s.bankLoan.lastPaidMonth] : []);
     s.bankLoan = { principal: loanDraft.principal, termMonths: loanDraft.termMonths,
                    disbursementDate: loanDraft.disbursementDate, dueDayOfMonth: loanDraft.dueDayOfMonth,
-                   lastPaidMonth: loanDraft.lastPaidMonth, rateSchedule: loanDraft.rateSchedule };
+                   lastPaidMonth: loanDraft.lastPaidMonth, rateSchedule: loanDraft.rateSchedule,
+                   paidMonths: existingPaidMonths };
     recomputeBankLoanMonthlyPayment(); // ghi lại state.settings.monthlyLoanPayment từ bankLoan vừa nhập, đúng ngày hôm nay
     s.monthlyInsurance = sVals.insurance;
     s.monthlyRegistrationFee = sVals.registration;
