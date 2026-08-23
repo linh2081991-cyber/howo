@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-20 · #76';
+const APP_BUILD = '2026-08-22 · #77';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9695,7 +9695,7 @@ function computeAllSiteBilledEvents(){
       const rev = siteBilledAmount(s);
       if(rev<=0) continue;
       if(!map[name]) map[name] = [];
-      map[name].push({ date: sh.date, amount: rev });
+      map[name].push({ date: sh.date, amount: rev, trips: Number(s.trips)||0 });
     }
   }
   return map;
@@ -9761,7 +9761,7 @@ function computePartnersOverview(){
     const lastPaymentDate = payments.length ? payments.map(p=>p.date).sort().slice(-1)[0] : null;
 
     if(!partners[partnerName]) partners[partnerName] = {
-      name: partnerName, sites: [], totalBilled:0, totalCollected:0, totalOwed:0,
+      name: partnerName, sites: [], totalBilled:0, totalCollected:0, totalOwed:0, totalTrips: 0,
       oldestUnpaidDate: null, paymentCount: 0, lastPaymentDate: null, lastActivityDate: null
     };
     const P = partners[partnerName];
@@ -9769,6 +9769,7 @@ function computePartnersOverview(){
     P.totalBilled += billedTotal;
     P.totalCollected += collectedTotal;
     P.totalOwed += aging.totalOwed;
+    P.totalTrips += siteBilled[siteName].reduce((s,e)=>s+(Number(e.trips)||0),0);
     P.paymentCount += payments.length;
     if(aging.oldestUnpaidDate && (!P.oldestUnpaidDate || aging.oldestUnpaidDate < P.oldestUnpaidDate)) P.oldestUnpaidDate = aging.oldestUnpaidDate;
     if(lastPaymentDate && (!P.lastPaymentDate || lastPaymentDate > P.lastPaymentDate)) P.lastPaymentDate = lastPaymentDate;
@@ -11065,51 +11066,73 @@ function renderPartnersOverview(){
     wrap.innerHTML = '<div class="hint">Chưa có khoản thu nào được ghi nhận từ đối tác nào.</div>';
     return;
   }
-  // 2026-08-22 (yêu cầu Ông Chủ — "mục này lâu tao không chạy thì mày
-  // hiện ... còn ở dưới"): đối tác không có chuyến nào trong 60 ngày gần
-  // đây bị gom xuống mục riêng, thu gọn, để không chiếm chỗ ngang hàng với
-  // đối tác đang thực sự hoạt động.
+  // 2026-08-22 (yêu cầu Ông Chủ — bản trước vẫn còn hiện nguyên bảng full
+  // ra ngoài, chiếm chỗ thừa: "mục này để hiện toàn bộ bên ngoài thừa
+  // chiếm chỗ hiển thị mà không cần thiết"): CHỈ hiện đúng 1-2 dòng tóm
+  // tắt ở màn chính + 1 nút Chi Tiết duy nhất — toàn bộ bảng đầy đủ
+  // (số chuyến, dòng tiền từng đối tác) chuyển hẳn sang trang riêng.
+  const totalOwedAll = partners.reduce((s,p)=>s+p.totalOwed,0);
+  const owingCount = partners.filter(p=>p.totalOwed>0).length;
+  wrap.innerHTML = `
+    <div class="card">
+      <div class="summary-row"><span>Tổng số đối tác đang theo dõi</span><span class="val" style="font-weight:700;">${partners.length} đối tác</span></div>
+      <div class="summary-row total"><span>Tổng còn nợ (${owingCount} đối tác đang nợ)</span><span class="val" style="font-weight:800; color:${totalOwedAll>0?'var(--loss)':'var(--profit)'};">${fmtVND(totalOwedAll)}</span></div>
+      <button class="btn btn-ghost btn-sm" id="partnersFullDetailBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🔍 Chi Tiết (đầy đủ số chuyến, dòng tiền từng đối tác)</button>
+    </div>
+  `;
+  document.getElementById('partnersFullDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderPartnersFullDetailPage(); });
+}
+
+/// Trang riêng (2026-08-22, yêu cầu Ông Chủ) — bảng ĐẦY ĐỦ mọi đối tác chở
+/// cước: số chuyến, đã chở (billed), đã thu, còn nợ, xếp hạng — tách 2
+/// khu ĐANG CHẠY / LÂU KHÔNG CHẠY (quá 60 ngày không có chuyến nào) để
+/// không lẫn lộn đối tác còn hoạt động với đối tác đã ngưng từ lâu.
+function renderPartnersFullDetailPage(){
+  const partners = computePartnersOverview();
   const INACTIVE_DAYS = 60;
   const active = partners.filter(p=>p.daysSinceActivity===null || p.daysSinceActivity<=INACTIVE_DAYS);
   const inactive = partners.filter(p=>p.daysSinceActivity!==null && p.daysSinceActivity>INACTIVE_DAYS);
   const rowHtml = p => `
     <tr class="partner-detail-row" data-partner="${escapeHtml(p.name)}">
-      <td>${escapeHtml(p.name)}</td>
-      <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
+      <td>${escapeHtml(p.name)}${p.daysSinceActivity!==null && p.daysSinceActivity>INACTIVE_DAYS ? `<div class="hint" style="margin-top:2px;">Chạy gần nhất ${p.daysSinceActivity} ngày trước</div>` : ''}</td>
+      <td class="num">${p.totalTrips} chuyến</td>
+      <td class="num">${fmtVND(p.totalBilled)}</td>
+      <td class="num">${fmtVND(p.totalCollected)}</td>
+      <td class="num" style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
       <td><span class="rating-badge ${p.rating.className}">${p.rating.label}</span></td>
       <td><button class="link-btn partner-chitiet-btn" data-partner="${escapeHtml(p.name)}">Chi Tiết</button></td>
     </tr>`;
-  wrap.innerHTML = `
-    <div class="card dash-wrap" style="padding:0;">
-      <table class="dash">
-        <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th>Xếp Hạng</th><th></th></tr></thead>
-        <tbody>
-          ${active.map(rowHtml).join('')}
-        </tbody>
-      </table>
-    </div>
-    <div class="hint" style="margin-top:8px;">Bấm dòng hoặc nút "Chi Tiết" để xem đầy đủ công trình, lịch sử thu tiền, và khoản nợ quá hạn bao lâu.</div>
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="partnersFullDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🤝 Đối Tác &amp; Công Nợ — Chở Cước (Đầy Đủ)</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Toàn bộ, không theo kỳ — bấm dòng hoặc "Chi Tiết" để xem công trình, lịch sử thu tiền, khoản nợ quá hạn bao lâu.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Đối Tác</th><th>Số Chuyến</th><th>Đã Chở</th><th>Đã Thu</th><th>Còn Nợ</th><th>Xếp Hạng</th><th></th></tr></thead>
+          <tbody>${active.map(rowHtml).join('')}</tbody>
+        </table>
+      </div>
+    </section>
     ${inactive.length>0 ? `
-    <div class="formula-divider" style="margin:14px 0 10px;"></div>
-    <div style="font-weight:700; margin-bottom:6px; color:var(--ink-soft);">🕘 Lâu không chạy (quá ${INACTIVE_DAYS} ngày) — ${inactive.length} đối tác</div>
-    <div class="card dash-wrap" style="padding:0;">
-      <table class="dash">
-        <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th></th></tr></thead>
-        <tbody>
-          ${inactive.map(p=>`
-            <tr class="partner-detail-row" data-partner="${escapeHtml(p.name)}">
-              <td>${escapeHtml(p.name)}<div class="hint" style="margin-top:2px;">Chạy gần nhất ${p.daysSinceActivity} ngày trước</div></td>
-              <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
-              <td><button class="link-btn partner-chitiet-btn" data-partner="${escapeHtml(p.name)}">Chi Tiết</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>` : ''}
+    <section class="group">
+      <h3 style="color:var(--ink-soft);">🕘 Lâu Không Chạy (quá ${INACTIVE_DAYS} ngày) — ${inactive.length} đối tác</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Đối Tác</th><th>Số Chuyến</th><th>Đã Chở</th><th>Đã Thu</th><th>Còn Nợ</th><th>Xếp Hạng</th><th></th></tr></thead>
+          <tbody>${inactive.map(rowHtml).join('')}</tbody>
+        </table>
+      </div>
+    </section>` : ''}
   `;
-  wrap.querySelectorAll('.partner-detail-row').forEach(row=>{
+  document.getElementById('partnersFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.querySelectorAll('.partner-detail-row').forEach(row=>{
     row.addEventListener('click', (e)=>{ if(e.target.closest('.partner-chitiet-btn')) return; saveMainScroll(); openPartnerDetail(row.dataset.partner); });
   });
-  wrap.querySelectorAll('.partner-chitiet-btn').forEach(btn=>{
+  document.querySelectorAll('.partner-chitiet-btn').forEach(btn=>{
     btn.addEventListener('click', (e)=>{ e.stopPropagation(); saveMainScroll(); openPartnerDetail(btn.dataset.partner); });
   });
 }
