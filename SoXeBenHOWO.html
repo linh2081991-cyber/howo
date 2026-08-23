@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #85';
+const APP_BUILD = '2026-08-23 · #86';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -8939,6 +8939,35 @@ function currentMonthRange(){
   return { from: toLocalISO(first), to: toLocalISO(last) };
 }
 
+/// Bóc tách "Chi phí vận hành" thành đúng 6 khoản cộng nên nó (xem
+/// shiftOperatingCashCost) — thêm 2026-08-23 vì Ông Chủ hỏi số này sao ra
+/// nhiều, cần thấy rõ khoản nào chiếm nhiều nhất thay vì đoán. KHÔNG tính
+/// lại theo công thức khác — chỉ hiện lại đúng 6 số đã cộng thành tổng đó.
+function renderOperatingCostBreakdownModal(gTotal){
+  const items = [
+    { label:'Tiền dầu tiêu hao', value: gTotal.fuelCost },
+    { label:'Lương chuyến (theo số chuyến)', value: gTotal.tripWageCost },
+    { label:'Lương cứng', value: gTotal.baseSalaryCost },
+    { label:'Tiền ăn', value: gTotal.foodCost },
+    { label:'Tiền nhà/điện nước', value: gTotal.housingCost },
+    { label:'Chi phí phát sinh (linh tinh/ca)', value: gTotal.incidentalCost },
+    { label:'Luật đường phát sinh/chuyến', value: gTotal.roadFeeIncidentalCost },
+  ];
+  const maxVal = Math.max(1, ...items.map(i=>i.value));
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🔍 Chi Phí Vận Hành — Chi Tiết Từng Khoản</h3>
+    <div class="hint" style="margin-bottom:10px;">Đúng 6 khoản dưới đây cộng lại ra khớp tuyệt đối số "Chi phí vận hành" ở trên — không có khoản nào khác, không tính lại kiểu nào khác.</div>
+    ${items.map(i=>`
+      <div style="margin-bottom:10px;">
+        <div class="summary-row" style="padding:2px 0;"><span>${i.label}</span><span class="val" style="font-weight:700;">${fmtVND(i.value)}</span></div>
+        <div style="height:8px; background:var(--bg); border-radius:4px; overflow:hidden;"><div style="height:100%; width:${Math.max(2,i.value/maxVal*100)}%; background:var(--accent);"></div></div>
+      </div>
+    `).join('')}
+    <div class="summary-row total" style="margin-top:4px;"><span>TỔNG (khớp đúng Chi phí vận hành)</span><span class="val">${fmtVND(items.reduce((s,i)=>s+i.value,0))}</span></div>
+  `);
+}
+
 function computeResultsGroup(shifts){
   const revenue = shifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
   const opCost = shifts.reduce((s,sh)=>s+shiftTotalCost(sh),0);
@@ -8959,9 +8988,20 @@ function computeResultsGroup(shifts){
   const materialCost = shifts.reduce((s,sh)=>s+shiftMaterialCost(sh),0);
   const supplementCost = shifts.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
   const operatingCashCost = shifts.reduce((s,sh)=>s+shiftOperatingCashCost(sh),0);
+  // SỬA 2026-08-23 (Ông Chủ hỏi vì sao "Chi phí vận hành" ra nhiều — cần
+  // tách rõ từng khoản để xem, không đoán): operatingCashCost vốn đã là
+  // tổng của đúng 6 khoản này (xem shiftOperatingCashCost) — giờ tính thêm
+  // riêng từng khoản để hiện trong modal Chi Tiết, KHÔNG đổi cách cộng gốc.
+  const tripWageCost = shifts.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
+  const baseSalaryCost = shifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0),0);
+  const foodCost = shifts.reduce((s,sh)=>s+(Number(sh.foodAllowance)||0),0);
+  const housingCost = shifts.reduce((s,sh)=>s+(Number(sh.housingAllocation)||0),0);
+  const incidentalCost = shifts.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
+  const roadFeeIncidentalCost = shifts.reduce((s,sh)=>s+(Number(sh.roadFeeIncidental)||0),0);
   const takeHomeTotal = revenue - materialCost - supplementCost;
   return { revenue, opCost, grossProfit, margin, totalKm, totalTrips, fuelLiters, fuelCost, fuelPerKm, revenuePerKm, profitPerTrip,
-    materialCost, supplementCost, operatingCashCost, takeHomeTotal };
+    materialCost, supplementCost, operatingCashCost, takeHomeTotal,
+    tripWageCost, baseSalaryCost, foodCost, housingCost, incidentalCost, roadFeeIncidentalCost };
 }
 
 function fmtShortVND(n){
@@ -10420,6 +10460,7 @@ function renderResults(){
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
         <div class="summary-row total" style="font-size:16px;"><span style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
         <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(gTotal.operatingCashCost)}</span></div>
+        <button class="btn btn-ghost btn-sm" id="operatingCostDetailBtn" style="width:auto; padding:6px 12px; margin:0 0 6px;">🔍 Chi Tiết Từng Khoản</button>
         <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span>= Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
         <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
         <div class="summary-row"><span>− Chi phí luật đường (kỳ này)</span><span class="val">${fmtVND(roadFee)}</span></div>
@@ -10704,6 +10745,8 @@ function renderResults(){
   });
   const goCompleteBtn = document.getElementById('goCompletePendingShiftsBtn');
   if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
+  const opCostDetailBtn = document.getElementById('operatingCostDetailBtn');
+  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>renderOperatingCostBreakdownModal(gTotal));
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
