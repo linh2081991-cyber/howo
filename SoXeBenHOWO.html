@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #78';
+const APP_BUILD = '2026-08-23 · #79';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12784,31 +12784,47 @@ function renderSettings(){
           <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
           ${r.isPaidOff ? '' : `
           <div class="formula-divider" style="margin:10px 0;"></div>
-          ${((state.settings.bankLoan&&state.settings.bankLoan.lastPaidMonth)===todayLocalDateStr().slice(0,7))
-            ? `<div class="summary-row" style="color:var(--profit); font-weight:700;"><span>✅ Đã ghi nhận trả ngân hàng tháng ${todayLocalDateStr().slice(5,7)}/${todayLocalDateStr().slice(0,4)}</span><span class="val"></span></div>
-               <button class="btn btn-ghost btn-sm btn-block" id="loanUnpaidBtn" style="margin-top:8px;">↩︎ Bỏ ghi nhận (chưa trả)</button>`
-            : `<button class="btn btn-primary btn-block" id="loanMarkPaidBtn" style="margin-top:4px;">✅ Đã Trả Tiền Ngân Hàng Tháng Này</button>
-               <div class="hint" style="margin-top:6px;">Bấm để ghi nhận đã đóng tiền ngân hàng cho tháng hiện tại — tắt cảnh báo nhắc đóng. Bấm được bất cứ lúc nào, không cần chờ tới gần hạn.</div>`}
+          <div style="font-weight:700; font-size:13px; margin-bottom:2px;">✅ Xác Nhận Đã Trả Từng Kỳ</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Tick đúng (các) kỳ Ông Chủ đã thực đóng tiền ngân hàng — tick/bỏ tick bất cứ lúc nào, kể cả kỳ CŨ lỡ quên tick trước đây. (SỬA 2026-08-23: bản trước chỉ ghi nhận được ĐÚNG tháng hiện tại — lỡ quên 1 kỳ là mất luôn, không sửa lại được, đúng lỗi Ông Chủ báo "trả kỳ 2 rồi mà số vẫn 1/60"). "Số kỳ đã trả"/"Dư nợ còn lại" ở trên luôn tự khớp đúng theo các kỳ đang tick dưới đây.</div>
+          <div id="loanPaidChecklistWrap">
+            ${(()=>{
+              const todayD = new Date(todayLocalDateStr()+'T00:00:00');
+              const duePeriods = schedule.filter(row=>row.dueDate<=todayD);
+              if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
+              const paidSet = new Set((state.settings.bankLoan&&Array.isArray(state.settings.bankLoan.paidMonths))?state.settings.bankLoan.paidMonths:[]);
+              return duePeriods.map(row=>{
+                const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+                const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+                const checked = paidSet.has(ym);
+                return `
+                <label class="summary-row" style="cursor:pointer; align-items:center;">
+                  <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
+                  <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px; margin-left:10px;">
+                </label>`;
+              }).join('');
+            })()}
+          </div>
           `}
         `;
       }
     }
     renderLoanFullSchedule();
   }
-  // Ghi nhận / bỏ ghi nhận trả ngân hàng — dùng event delegation gắn 1 LẦN
-  // trên document (không gắn lại mỗi lần render) để nút luôn bấm được dù
-  // được vẽ lại bất cứ lúc nào, tránh lỗi timing khiến bấm không phản hồi.
+  // Ghi nhận / bỏ ghi nhận trả ngân hàng THEO TỪNG KỲ — dùng event
+  // delegation gắn 1 LẦN trên document (không gắn lại mỗi lần render) để
+  // luôn bấm được dù được vẽ lại bất cứ lúc nào, tránh lỗi timing khiến
+  // bấm không phản hồi. SỬA 2026-08-23: đổi từ "1 nút = tháng hiện tại"
+  // sang "tick từng ô = đúng kỳ đó" (data-ym lấy từ NGÀY ĐẾN HẠN thật của
+  // kỳ, không phải ngày hôm nay) — cho phép sửa lại bất kỳ kỳ cũ nào đã lỡ
+  // quên tick, đúng lỗi Ông Chủ báo "trả kỳ 2 rồi mà số vẫn ở 1/60".
   if(!window.__loanPaidDelegationBound){
     window.__loanPaidDelegationBound = true;
-    document.addEventListener('click', async (e)=>{
-      const paid = e.target.closest && e.target.closest('#loanMarkPaidBtn');
-      const unpaid = e.target.closest && e.target.closest('#loanUnpaidBtn');
-      if(!paid && !unpaid) return;
-      const curYM = todayLocalDateStr().slice(0,7);
-      // SỬA 2026-08-23: dùng chung đúng 1 hàm với nút cảnh báo nhanh ở
-      // danh sách Ca (setLoanPeriodPaid) — trước đây 2 nút viết logic
-      // riêng, dễ lệch nhau (đúng lỗi Ông Chủ báo).
-      setLoanPeriodPaid(curYM, !!paid);
+    document.addEventListener('change', async (e)=>{
+      const chk = e.target.closest && e.target.closest('.loan-period-paid-chk');
+      if(!chk) return;
+      const ym = chk.dataset.ym;
+      const paid = chk.checked;
+      setLoanPeriodPaid(ym, paid);
       const bl = state.settings.bankLoan;
       if(state.currentTab==='settings') renderAll();
       else if(state.currentTab==='shifts') renderShiftList();
@@ -12819,7 +12835,7 @@ function renderSettings(){
       // để chắc chắn tab đang mở (bất kỳ tab nào) luôn phản ánh đúng ngay.
       else renderAll();
       const ok = await saveSettings();
-      showToast(ok ? (paid ? `Đã ghi nhận trả kỳ này (tổng ${bl.paidMonths.length} kỳ đã trả).` : 'Đã bỏ ghi nhận — sẽ nhắc đóng lại.') : 'LƯU THẤT BẠI — kiểm tra mạng rồi thử lại.');
+      showToast(ok ? (paid ? `Đã ghi nhận trả kỳ hạn tháng ${monthLabelVN(ym)} (tổng ${bl.paidMonths.length} kỳ đã trả).` : `Đã bỏ ghi nhận kỳ hạn tháng ${monthLabelVN(ym)}.`) : 'LƯU THẤT BẠI — kiểm tra mạng rồi thử lại.');
     });
   }
   // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
