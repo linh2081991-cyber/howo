@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #79';
+const APP_BUILD = '2026-08-23 · #81';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3814,10 +3814,22 @@ function buildInvoiceLotLedger(goodsType){
     if(s.siteType!=='commercial') return '0';
     let buy=0, sell=0;
     (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt){ buy+=Number(t.buyVolume)||0; sell+=Number(t.sellVolume)||0; } });
-    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+sell;
+    // SỬA 2026-08-23 (Ông Chủ báo: "Chi Phí & VAT Hưởng Theo Ca" lúc hiện
+    // lúc không) — chữ ký này TRƯỚC ĐÂY thiếu supplierId/invoicedBuyPercent/
+    // densityRatio của CHÍNH ca, nên sửa % hoá đơn mỏ xuất hoặc tỷ trọng
+    // quy đổi ngay trên ca (khác nguồn với sửa ở Nhà Cung Cấp, xem thêm ở
+    // cacheKey bên dưới) KHÔNG làm app biết đường tính lại — vẫn trả về
+    // kết quả CŨ cho tới khi có 1 thay đổi KHÁC vô tình làm chữ ký đổi.
+    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+sell+':'+(s.supplierId||'')+':'+(s.invoicedBuyPercent??'')+':'+(s.densityRatio??'');
   }).join('|')).join(',');
+  // SỬA 2026-08-23: thêm cấu hình Nhà Cung Cấp (% hoá đơn mỏ xuất + tỷ
+  // trọng quy đổi) vào cacheKey — đây là nguồn ĐƯỢC ƯU TIÊN trước site log
+  // (xem siteGoodsTypeGroups) nên sửa ở đây (rất hay gặp: khai bổ sung %
+  // sau khi đã có sẵn ca) phải làm cache biết đường tính lại NGAY, không
+  // chờ tính cờ có thay đổi khác.
   const cacheKey = gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
     +'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
+    +'|'+JSON.stringify((state.suppliers||[]).map(sp=>[sp.id, sp.invoicedBuyPercent, sp.densityRatio]))
     +'|'+shiftSig;
   if(_invoiceLedgerCache[gt] && _invoiceLedgerCache[gt].key===cacheKey) return _invoiceLedgerCache[gt].data;
 
@@ -6217,7 +6229,10 @@ function renderDrivers(){
     <section class="group">
       <h3>Danh Sách Tài Xế</h3>
       ${state.drivers.length===0 ? '<div class="empty"><div class="big">👤</div>Chưa có tài xế nào.</div>' :
-        state.drivers.map(d=>`
+        // SỬA 2026-08-23 (yêu cầu Ông Chủ): tài xế còn hoạt động lên trên,
+        // tài xế ngừng hoạt động xuống dưới — chỉ đổi THỨ TỰ HIỂN THỊ ở
+        // đây, không đụng gì tới state.drivers hay bất kỳ tính lương nào.
+        [...state.drivers].sort((a,b)=>(a.isActive===false?1:0)-(b.isActive===false?1:0)).map(d=>`
         <div class="card driver-cv-card" data-id="${d.id}">
           <div class="driver-cv-head">
             <div class="driver-cv-avatar">${escapeHtml((d.name||'?').trim().charAt(0).toUpperCase())}</div>
@@ -12785,20 +12800,28 @@ function renderSettings(){
           ${r.isPaidOff ? '' : `
           <div class="formula-divider" style="margin:10px 0;"></div>
           <div style="font-weight:700; font-size:13px; margin-bottom:2px;">✅ Xác Nhận Đã Trả Từng Kỳ</div>
-          <div class="hint" style="margin-top:0; margin-bottom:8px;">Tick đúng (các) kỳ Ông Chủ đã thực đóng tiền ngân hàng — tick/bỏ tick bất cứ lúc nào, kể cả kỳ CŨ lỡ quên tick trước đây. (SỬA 2026-08-23: bản trước chỉ ghi nhận được ĐÚNG tháng hiện tại — lỡ quên 1 kỳ là mất luôn, không sửa lại được, đúng lỗi Ông Chủ báo "trả kỳ 2 rồi mà số vẫn 1/60"). "Số kỳ đã trả"/"Dư nợ còn lại" ở trên luôn tự khớp đúng theo các kỳ đang tick dưới đây.</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Tick đúng (các) kỳ Ông Chủ đã thực đóng tiền ngân hàng — tick/bỏ tick bất cứ lúc nào, kể cả kỳ CŨ lỡ quên tick trước đây. Kỳ TIẾP THEO cũng hiện sẵn ở đây dù chưa tới hạn, để tick ngay được nếu Ông Chủ đóng tiền sớm. "Số kỳ đã trả"/"Dư nợ còn lại" ở trên luôn tự khớp đúng theo các kỳ đang tick dưới đây.</div>
           <div id="loanPaidChecklistWrap">
             ${(()=>{
               const todayD = new Date(todayLocalDateStr()+'T00:00:00');
-              const duePeriods = schedule.filter(row=>row.dueDate<=todayD);
+              const nextUnpaidIdx = loanPaidPeriodsCount();
+              // SỬA 2026-08-23 (Ông Chủ hỏi: "kỳ 3 phải xử lý thế nào để app
+              // hiểu là đã đóng") — trước đây CHỈ hiện kỳ đã QUA hạn
+              // (dueDate<=hôm nay), nên nếu đóng tiền sớm trước ngày đến
+              // hạn thì chưa tick được. Giờ luôn hiện thêm đúng 1 kỳ TIẾP
+              // THEO (ngay sau kỳ cuối đã tick) dù chưa tới hạn, để tick
+              // sớm được bất cứ lúc nào.
+              const duePeriods = schedule.filter(row=>row.dueDate<=todayD || row.periodIndex===nextUnpaidIdx);
               if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
               const paidSet = new Set((state.settings.bankLoan&&Array.isArray(state.settings.bankLoan.paidMonths))?state.settings.bankLoan.paidMonths:[]);
               return duePeriods.map(row=>{
                 const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
                 const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
                 const checked = paidSet.has(ym);
+                const notYetDue = row.dueDate>todayD;
                 return `
                 <label class="summary-row" style="cursor:pointer; align-items:center;">
-                  <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
+                  <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)}${notYetDue?' <span style="color:var(--ink-soft); font-weight:400;">(chưa tới hạn)</span>':''} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
                   <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px; margin-left:10px;">
                 </label>`;
               }).join('');
@@ -12840,21 +12863,25 @@ function renderSettings(){
   }
   // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
   // computeFullLoanSchedule() (cùng công thức, không tính lại kiểu khác) để
-  // không bao giờ lệch với số "kỳ này" ở trên. Kỳ trùng với hôm nay được tô
-  // đậm cho dễ tìm.
+  // không bao giờ lệch với số "kỳ này" ở trên. SỬA 2026-08-23 (Ông Chủ báo:
+  // tick trả kỳ 2 rồi mà dòng tô đậm vẫn đứng ở kỳ 2, không nhảy sang kỳ
+  // 3): trước đây tô đậm theo THÁNG DƯƠNG LỊCH hôm nay (còn nguyên cả
+  // tháng 8 dù đã tick xong) — giờ đổi sang tô đậm đúng KỲ TIẾP THEO CẦN
+  // ĐÓNG, bám theo số kỳ đã tick (loanPaidPeriodsCount()), tick xong kỳ nào
+  // là dòng tô đậm nhảy ngay sang kỳ sau, không cần chờ qua tháng.
   function renderLoanFullSchedule(){
     const wrap = document.getElementById('loanFullScheduleWrap');
     if(!wrap) return;
     const rows = computeFullLoanSchedule(loanDraft);
     if(rows.length===0){ wrap.innerHTML = ''; return; }
-    const todayYM = todayLocalDateStr().slice(0,7);
+    const nextUnpaidIndex = loanPaidPeriodsCount(); // kỳ đã tick 0..N-1 → kỳ tiếp theo cần đóng là đúng index này
     wrap.innerHTML = `
       <h3 style="margin-top:0;">📅 Lịch Trả Nợ Chi Tiết Từng Tháng</h3>
-      <div class="hint" style="margin-bottom:10px;">Đủ ${rows.length} kỳ suốt vòng đời khoản vay — dòng tô đậm là kỳ của tháng hiện tại.</div>
+      <div class="hint" style="margin-bottom:10px;">Đủ ${rows.length} kỳ suốt vòng đời khoản vay — dòng tô đậm là kỳ TIẾP THEO cần đóng (theo đúng các kỳ đã tick ở khối "Xác Nhận Đã Trả Từng Kỳ" phía trên).</div>
       <div style="max-height:340px; overflow-y:auto;">
         ${rows.map(row=>{
           const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-          const isCurrent = dueStr.slice(0,7)===todayYM;
+          const isCurrent = row.periodIndex===nextUnpaidIndex;
           return `
           <div class="kv" style="padding:6px 0; ${isCurrent?'font-weight:800; color:var(--accent);':''}">
             <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} (${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm)</span>
