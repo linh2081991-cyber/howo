@@ -2744,7 +2744,13 @@ function renderInvoiceLotOverview(){
   const { goodsType, from, to } = state.invoiceLotFilter;
   const demand = invoiceDemandByDateRange(goodsType, from, to);
   const ledger = buildInvoiceLotLedger(goodsType);
-  const lotsForType = Object.values(ledger.byLot);
+  // 2026-08-22 (cùng lỗi Ông Chủ phát hiện ở trang Chi Tiết): ledger.byLot
+  // gộp CẢ lô mua bù VÀ hoá đơn thật (2 nguồn khác nhau) — "phần MUA BÙ"
+  // ở đây CHỈ được tính từ đúng state.invoiceLots, không được lẫn hoá đơn
+  // thật vào, nếu không sẽ báo "còn trong kho" nhiều hơn thực tế phần mua
+  // bù thật sự có.
+  const lotsForType = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===normGoodsType(goodsType))
+    .map(l=>ledger.byLot[l.id]).filter(Boolean);
   const inStock = lotsForType.reduce((sum,l)=>sum+l.remaining,0);
   const enough = inStock >= demand.totalMissing - 0.001;
 
@@ -2811,20 +2817,24 @@ function renderInvoiceLotOverview(){
         <tbody>
           ${goodsTypes.map(g=>{
             const led = buildInvoiceLotLedger(g);
-            const lots = Object.values(led.byLot);
+            const gt2 = normGoodsType(g);
+            // 2026-08-22 (cùng lỗi Ông Chủ phát hiện): led.byLot gộp CẢ lô
+            // mua bù VÀ hoá đơn thật — bảng "Phần Mua Bù" này CHỈ được
+            // tính từ đúng state.invoiceLots của loại hàng g, không được
+            // lẫn hoá đơn thật, nếu không "Đã mua"/"Đã dùng"/"Còn lại" sẽ
+            // sai lệch giống lỗi đã sửa ở trang Chi Tiết.
+            const lots = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt2)
+              .map(l=>led.byLot[l.id]).filter(Boolean);
             // Hiện dòng này nếu CÓ lô đã mua HOẶC có ca nào từng cần loại
             // hàng này (kể cả chưa mua lô nào, để lộ rõ thiếu ngay từ đầu
             // thay vì ẩn mất khi Đã Mua = 0).
             if(!lots.length && Object.keys(led.bySiteLog).length===0) return '';
-            const total = lots.reduce((sum,l)=>sum+l.total,0); // Đã mua
-            // "Đã dùng" = TỔNG NHU CẦU THẬT mọi thời điểm (cộng dồn đúng
-            // allocations + shortfall đã có sẵn trong ledger.bySiteLog —
-            // không tính lại theo cách khác), KHÁC với l.used (bị chặn
-            // không vượt quá số lô hiện có) — dùng cách này để "Còn lại"
-            // = Đã mua − Đã dùng phản ánh đúng thực tế, có thể ÂM khi
-            // thiếu thật (yêu cầu Ông Chủ 2026-08-13: tồn kho real-time,
-            // âm là đỏ, không cần badge "sắp hết" nữa).
-            const totalDemand = Object.values(led.bySiteLog).reduce((sum,rec)=>sum+rec.allocations.reduce((s,a)=>s+a.volume,0)+rec.shortfall,0);
+            const total = lots.reduce((sum,l)=>sum+l.total,0); // Đã mua (CHỈ lô mua bù)
+            // "Đã dùng" = TỔNG THẬT SỰ RÚT TỪ LÔ MUA BÙ (CHỈ lots, không
+            // lẫn hoá đơn thật/shortfall) — để "Còn lại" = Đã mua − Đã
+            // dùng luôn đúng 1:1 đơn vị, có thể ÂM khi lô thật sự không đủ
+            // (yêu cầu Ông Chủ 2026-08-13: tồn kho real-time, âm là đỏ).
+            const totalDemand = lots.reduce((sum,l)=>sum+l.used,0);
             const remaining = total - totalDemand;
             return `<tr>
               <td>${escapeHtml(g)}</td>
@@ -2933,8 +2943,15 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
   const lotsRaw = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===normGoodsType(goodsType))
     .sort((a,b)=>(a.purchaseDate||'').localeCompare(b.purchaseDate||''));
   const totalBought = lotsRaw.reduce((s,l)=>s+(Number(l.totalVolume)||0),0);
-  const totalDemandAllTime = Object.values(ledger.bySiteLog).reduce((sum,rec)=>sum+rec.allocations.reduce((s,a)=>s+a.volume,0)+rec.shortfall,0);
-  const totalRemaining = totalBought - totalDemandAllTime;
+  // 2026-08-22 (Ông Chủ phát hiện lỗi): "Tổng đã dùng" TRƯỚC ĐÂY cộng lẫn
+  // cả phần rút từ HOÁ ĐƠN THẬT (trường hợp chưa tick MUA, cần bù 100% —
+  // xem buildInvoiceLotLedger) VÀ cả phần THIẾU CHƯA RÚT ĐƯỢC (shortfall)
+  // vào chung 1 số, rồi đem trừ thẳng cho "Tổng đã mua" (CHỈ tính lô mua
+  // bù) — phép trừ sai vì 2 vế không cùng 1 "rổ". Giờ CHỈ cộng đúng phần
+  // THẬT SỰ rút TỪ LÔ MUA BÙ (ledger.byLot đã tách used riêng theo từng
+  // id — lọc đúng id thuộc lotsRaw), khớp 1:1 đơn vị với "Tổng đã mua".
+  const totalUsedFromLots = lotsRaw.reduce((s,l)=> s + ((ledger.byLot[l.id]&&ledger.byLot[l.id].used)||0), 0);
+  const totalRemaining = totalBought - totalUsedFromLots;
   const enough = totalRemaining >= demand.totalMissing - 0.001;
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
 
@@ -2946,10 +2963,14 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
     const sh = allSh.find(s=>s.id===shiftId);
     if(!sh) return;
     const driver = driverById(sh.driverId);
+    // lotDrawn = CHỈ phần rút từ lô mua bù (loại bỏ phần rút từ hoá đơn
+    // thật) — dùng để tính "Đã dùng THẬT trong khoảng" khớp đúng thẻ
+    // Phần Mua Bù ở trên, không lẫn nguồn.
+    const lotDrawn = rec.allocations.filter(a=>invoiceLotById(a.lotId)).reduce((s,a)=>s+a.volume,0);
     drawHistory.push({
       date: sh.date, shiftType: sh.shiftType, driverName: driver?driver.name:'(chưa gắn)',
       vehicleName: vehicleNameById(sh._vehicleId),
-      totalDrawn: rec.allocations.reduce((s,a)=>s+a.volume,0),
+      totalDrawn: rec.allocations.reduce((s,a)=>s+a.volume,0), lotDrawn,
       shortfall: rec.shortfall,
       lotDatesLabel: rec.allocations.map(a=>formatDateVN(a.purchaseDate)).join(', ')
     });
@@ -2957,11 +2978,10 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
   drawHistory.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
   // 2026-08-22 (yêu cầu Ông Chủ — "bỏ chữ mọi thời điểm, phải cập nhật số
   // chuẩn theo khoảng thời gian tao chọn xem"): tính riêng phần ĐÃ DÙNG
-  // THẬT (rút từ kho, không phải ước tính %) CHỈ trong đúng khoảng ngày
-  // đang lọc — lọc lại từ CHÍNH drawHistory ở trên, không tính công thức
-  // khác, nên luôn khớp tuyệt đối với "Lịch Sử Rút Kho Theo Ca" bên dưới.
+  // THẬT TỪ LÔ MUA BÙ (không lẫn hoá đơn thật/shortfall) CHỈ trong đúng
+  // khoảng ngày đang lọc.
   const totalDrawnInRange = drawHistory.filter(d=>d.date>=from && d.date<=to)
-    .reduce((s,d)=>s+d.totalDrawn+d.shortfall, 0);
+    .reduce((s,d)=>s+d.lotDrawn, 0);
 
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -2975,7 +2995,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
       <div class="card" style="border:1.5px solid ${enough?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📊 Tổng Quan Kho — Phần Mua Bù (tính từ trước tới nay)</div>
         <div class="summary-row"><span>Tổng đã mua (mọi lô)</span><span class="val">${fmtQty(totalBought)} khối</span></div>
-        <div class="summary-row"><span>Tổng đã dùng (cộng dồn từ trước tới nay)</span><span class="val" style="color:var(--loss);">${fmtQty(totalDemandAllTime)} khối</span></div>
+        <div class="summary-row"><span>Tổng đã dùng (cộng dồn từ trước tới nay)</span><span class="val" style="color:var(--loss);">${fmtQty(totalUsedFromLots)} khối</span></div>
         <div class="summary-row total"><span>Tồn phần mua bù</span><span class="val" style="color:${totalRemaining>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtQty(totalRemaining)} khối</span></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div class="summary-row"><span>Đã dùng THẬT trong khoảng ${formatDateVN(from)} → ${formatDateVN(to)}</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(totalDrawnInRange)} khối</span></div>
@@ -13068,7 +13088,10 @@ function buildInvoiceLotOverviewRows(){
   let anyType = false;
   goodsTypes.forEach(g=>{
     const led = buildInvoiceLotLedger(g);
-    const lots = Object.values(led.byLot);
+    // 2026-08-22 (cùng lỗi Ông Chủ phát hiện): CHỈ tính lô mua bù thật của
+    // đúng loại hàng g, không lẫn hoá đơn thật (led.byLot gộp cả 2 nguồn).
+    const lots = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===normGoodsType(g))
+      .map(l=>led.byLot[l.id]).filter(Boolean);
     if(!lots.length) return;
     anyType = true;
     const total = lots.reduce((s,l)=>s+l.total,0);
