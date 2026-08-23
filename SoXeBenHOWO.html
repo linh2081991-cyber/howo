@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #86';
+const APP_BUILD = '2026-08-23 · #87';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1813,12 +1813,42 @@ function repairsInRangeCompanyWide(from, to){
   });
   return combined;
 }
-/// Y HỆT roadFeeForRange() nhưng gộp Luật Đường của TẤT CẢ xe, cũng phân
-/// bổ đúng theo số ngày thật nếu [from,to] không trọn tháng.
+/// SỬA 2026-08-23 (Ông Chủ báo: luật đường "tao thường mất rất chẵn tiền
+/// sao mày lại ra lẻ thế" — xác nhận qua Q1/Q4: luật đường/vay/bảo hiểm/
+/// đăng kiểm ĐỀU là tiền ngân hàng thật, trả theo THÁNG TRÒN, không phải
+/// khoản tính dồn tích chia nhỏ theo ngày): thay proratedMonthlyCost()
+/// bằng hàm này cho các khoản CHI TIỀN MẶT THẬT — lấy ĐỦ NGUYÊN số tiền
+/// của bất kỳ tháng nào [from,to] có chạm tới (không chia theo số ngày),
+/// vì Ông Chủ trả 1 lần trọn tháng, không trả nhỏ giọt từng ngày. CHỈ
+/// dùng cho khoản CHI TIỀN THẬT — khấu hao (không phải giao dịch ngân
+/// hàng) vẫn giữ nguyên proratedMonthlyCost() ở chỗ khác, không đổi.
+function fullMonthlyCostIfTouched(monthlyAmountFn, from, to){
+  let total = 0;
+  monthsBetween(from, to).forEach(ym=>{ total += monthlyAmountFn(ym); });
+  return total;
+}
+/// Tiền Gốc+Lãi vay ngân hàng THẬT phải trả trong [from,to] — lấy ĐÚNG
+/// từng kỳ trong lịch trả nợ thật (computeFullLoanSchedule, y hệt số hiện
+/// ở "Xác Nhận Đã Trả Từng Kỳ") có hạn trả rơi vào khoảng ngày đang xem,
+/// cộng lại — KHÔNG dùng monthlyLoanPayment (chỉ là 1 con số snapshot của
+/// ĐÚNG kỳ hiện tại, sai cho các kỳ trước vì lãi giảm dần theo dư nợ) và
+/// KHÔNG chia nhỏ theo ngày (Ông Chủ trả tròn từng kỳ, không trả rải).
+function bankLoanRealCostForRange(bankLoan, from, to){
+  const schedule = computeFullLoanSchedule(bankLoan);
+  let sum = 0;
+  schedule.forEach(row=>{
+    const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+    if(dueStr>=from && dueStr<=to) sum += row.total;
+  });
+  return sum;
+}
+/// Y HỆT roadFeeForRange() nhưng gộp Luật Đường của TẤT CẢ xe. SỬA
+/// 2026-08-23: đổi từ phân bổ theo ngày sang lấy ĐỦ NGUYÊN số tiền từng
+/// tháng có chạm tới (xem fullMonthlyCostIfTouched).
 function roadFeeForRangeCompanyWide(from, to){
   let sum = 0;
   Object.values(state.allVehiclesRoadFee).forEach(list=>{
-    sum += proratedMonthlyCost(ym=>{
+    sum += fullMonthlyCostIfTouched(ym=>{
       const e = list.find(x=>x.month===ym);
       return e ? (Number(e.amount)||0) : 0;
     }, from, to);
@@ -1838,16 +1868,18 @@ function companyWideOperatingCashCost(from, to){
   return sum;
 }
 /// Gộp Gốc+Lãi vay ngân hàng + Bảo hiểm + Đăng kiểm (ĐỦ cả, vì đều là
-/// tiền mặt thật) của TẤT CẢ xe trong khoảng [from,to] — mỗi xe có khoản
-/// vay/bảo hiểm/đăng kiểm riêng, công ty phải trả đủ cho từng xe nên cộng
-/// dồn lại. PHÂN BỔ đúng theo số ngày thật (proratedMonthlyCost) để xem
-/// bất kỳ khoảng ngày nào cũng ra số chính xác (yêu cầu Ông Chủ 2026-08-18:
-/// "chuẩn xác tuyệt đối" mọi khoảng thời gian).
+/// tiền mặt thật) của TẤT CẢ xe trong khoảng [from,to]. SỬA 2026-08-23
+/// (Ông Chủ xác nhận Q1/Q4 — đều là tiền ngân hàng, trả tròn tháng):
+/// Gốc+Lãi vay giờ lấy ĐÚNG từng kỳ thật trong lịch trả nợ
+/// (bankLoanRealCostForRange, khớp tuyệt đối "Xác Nhận Đã Trả Từng Kỳ") —
+/// chính xác hơn hẳn con số snapshot cũ. Bảo hiểm + Đăng kiểm lấy đủ
+/// nguyên tháng (fullMonthlyCostIfTouched) — không chia nhỏ theo ngày nữa.
 function companyWideCashFlowFixedMonthly(from, to){
   let sum = 0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
-    const monthlyAmt = (Number(s.monthlyLoanPayment)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
-    sum += proratedMonthlyCost(()=>monthlyAmt, from, to);
+    sum += bankLoanRealCostForRange(s.bankLoan, from, to);
+    const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+    sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, from, to);
   });
   return sum;
 }
@@ -1864,7 +1896,7 @@ function companyWideCashFlowFixedMonthly(from, to){
 /// ngân hàng thật Ông Chủ đã khai báo.
 function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   const allShifts = allShiftsCompanyWide();
-  const empty = { from:null, to:null, cashIn:0, cashOutToSuppliers:0, operatingCashCost:0, repairTotal:0, roadFee:0, fixedMonthly:0, total:0 };
+  const empty = { from:null, to:null, cashIn:0, cashOutToSuppliers:0, operatingCashCost:0, repairTotal:0, roadFee:0, fixedMonthly:0, invoiceLotCashOut:0, advanceCashOut:0, total:0 };
   const to = toOverride || todayLocalDateStr();
   let from;
   if(fromOverride){
@@ -1881,8 +1913,27 @@ function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   const repairTotal = repairsInRangeCompanyWide(from, to).reduce((s,r)=>s+(Number(r.amount)||0),0);
   const roadFee = roadFeeForRangeCompanyWide(from, to);
   const fixedMonthly = companyWideCashFlowFixedMonthly(from, to);
-  const total = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - fixedMonthly;
-  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, fixedMonthly, total };
+  // SỬA 2026-08-23 (Ông Chủ báo thiếu — xác nhận Q2/Q3/Q4/Q5: đều là tiền
+  // ngân hàng thật, đã ghi đủ trong app, chỉ chưa được cộng vào đây):
+  //  - invoiceLotCashOut: tiền THẬT đã chuyển cho đối tác để mua Lô Hoá
+  //    Đơn Bù = totalInvoiceValue − cashReturned (đúng số "Số Tiền Thật
+  //    Phải Trả Đối Tác" hiện ở mỗi lô), tính theo purchaseDate — ĐỘC LẬP
+  //    với shiftInvoiceSupplementCost() (khoản đó là chi phí PHÂN BỔ dần
+  //    theo từng ca bán hàng cho mục đích LỢI NHUẬN P&L, không phải ngày
+  //    tiền rời ngân hàng — 2 khái niệm khác nhau, không được trộn).
+  //  - advanceCashOut: tiền tạm ứng lương đã đưa THẬT cho tài xế
+  //    (sh.advanceAmount, Ông Chủ tự ghi ngay trên ca làm việc của tài xế
+  //    đó — Q3), tính theo ngày ca. Không phải chi phí (sẽ trừ lại vào
+  //    lương thật khi quyết toán) nhưng LÀ tiền mặt rời ngân hàng ngay lúc
+  //    đưa, nên phải trừ ở đây để khớp đúng số dư ngân hàng thật.
+  const invoiceLotCashOut = state.invoiceLots
+    .filter(l=>l.purchaseDate>=from && l.purchaseDate<=to)
+    .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
+  const advanceCashOut = allShifts
+    .filter(sh=>sh.date>=from && sh.date<=to)
+    .reduce((s,sh)=>s+(Number(sh.advanceAmount)||0),0);
+  const total = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - fixedMonthly - invoiceLotCashOut - advanceCashOut;
+  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, fixedMonthly, invoiceLotCashOut, advanceCashOut, total };
 }
 function computeCumulativeCompanyProfit(toOverride){
   return computeCumulativeCashFlowBreakdown(toOverride).total;
@@ -2037,11 +2088,14 @@ function addDaysToDateStr(dateStr, days){
 }
 // Tổng tiền luật đường thực đóng trong khoảng [from,to] — cộng dồn từng
 // khoản THÁNG đã ghi trong state.roadFeeByMonth (mỗi tháng 1 số duy
-// nhất, do Ông Chủ tự cộng các lần đóng lẻ trong tháng đó rồi gõ vào),
-// PHÂN BỔ đúng theo số ngày thật nếu [from,to] không trọn tháng. Tháng
-// nào chưa ghi số thì tính là 0, không suy đoán/kế thừa từ tháng khác.
+// nhất, do Ông Chủ tự cộng các lần đóng lẻ trong tháng đó rồi gõ vào).
+// SỬA 2026-08-23 (Ông Chủ: "luật đường tao thường mất rất chẵn tiền sao
+// mày lại ra lẻ thế" — xác nhận đây là tiền ngân hàng trả tròn tháng,
+// không chia nhỏ theo ngày): lấy ĐỦ NGUYÊN số tiền của tháng nào [from,to]
+// có chạm tới, không còn phân bổ theo số ngày như trước. Tháng nào chưa
+// ghi số thì tính là 0, không suy đoán/kế thừa từ tháng khác.
 function roadFeeForRange(from, to){
-  return proratedMonthlyCost(ym=>{
+  return fullMonthlyCostIfTouched(ym=>{
     const e = state.roadFeeByMonth.find(x=>x.month===ym);
     return e ? (Number(e.amount)||0) : 0;
   }, from, to);
@@ -2764,7 +2818,7 @@ function renderInvoiceLotOverview(){
   if(!state.invoiceLotFilter) state.invoiceLotFilter = { goodsType: goodsTypes[0], ...currentMonthRange() };
   if(!goodsTypes.includes(state.invoiceLotFilter.goodsType)) state.invoiceLotFilter.goodsType = goodsTypes[0];
   const { goodsType, from, to } = state.invoiceLotFilter;
-  const vatByShift = computeInvoiceLotVatCreditByShift(from, to);
+  const vatByShift = withLedgerReportMode(()=>computeInvoiceLotVatCreditByShift(from, to));
   wrap.innerHTML = `
     <div class="field">
       <label>Loại hàng</label>
@@ -2781,7 +2835,7 @@ function renderInvoiceLotOverview(){
       // DUY NHẤT ở màn này (đã bỏ hẳn thẻ "Tổng Quan Kho — Phần Mua Bù"
       // theo yêu cầu, chỉ giữ lại đúng thẻ này). Số PHÁT SINH TRONG KỲ —
       // luôn cập nhật theo đúng khoảng ngày đang chọn ở trên.
-      const combined = combinedStockOverview(goodsType, from, to);
+      const combined = withLedgerReportMode(()=>combinedStockOverview(goodsType, from, to));
       return `
     <div class="card" style="margin-bottom:10px; border:1.5px solid var(--accent);">
       <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp (${escapeHtml(goodsType)}) — đối chiếu KT Thuế</div>
@@ -2820,7 +2874,7 @@ function renderInvoiceLotOverview(){
       // ra 0đ — liệt kê CHÍNH XÁC từng ca/nhóm loại hàng đang dừng ở bước
       // nào, đọc thẳng dữ liệu thật đang có trên máy Ông Chủ, không đoán.
       if(vatByShift.totalCost>0.5 || vatByShift.totalVatCredit>0.5) return ''; // đã có số rồi thì không cần chẩn đoán
-      const diag = diagnoseInvoiceLotShiftGaps(from, to);
+      const diag = withLedgerReportMode(()=>diagnoseInvoiceLotShiftGaps(from, to));
       const excludedBlock = diag.excludedInRange.length ? `
         <div style="padding:8px 0; border-top:2px solid var(--loss);">
           <div style="font-weight:700; color:var(--loss);">⚠️ ${diag.excludedInRange.length} ca trong khoảng ngày này đang bị loại KHỎI MỌI báo cáo doanh thu (kể cả bảng này) vì còn thiếu dữ liệu bắt buộc:</div>
@@ -2855,7 +2909,7 @@ function renderInvoiceLotOverview(){
             // "Tồn Kho Tổng Hợp" thay cho "Phần Mua Bù" cũ đã bỏ, và LỌC
             // THEO ĐÚNG KỲ đang xem cho nhất quán với mọi nơi khác): dùng
             // CHUNG combinedStockOverview() — không tính lại công thức khác.
-            const c2 = combinedStockOverview(g, from, to);
+            const c2 = withLedgerReportMode(()=>combinedStockOverview(g, from, to));
             // Ẩn dòng nếu cả 3 nguồn đều = 0 trong kỳ này (đỡ rối bảng).
             if(c2.mineVolKhoi<=0.001 && c2.lotVolKhoi<=0.001 && c2.soldVolKhoi<=0.001) return '';
             return `<tr>
@@ -3037,7 +3091,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
         <button class="btn btn-ghost btn-sm" id="lotFullDetailScrollToLotsBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🔍 Chi Tiết (từng lô đã mua + từng lần rút)</button>
       </div>
       ${(()=>{
-        const combined = combinedStockOverview(goodsType, from, to);
+        const combined = withLedgerReportMode(()=>combinedStockOverview(goodsType, from, to));
         return `
       <div class="card" style="border:1.5px solid var(--accent); margin-top:10px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp — đối chiếu KT Thuế</div>
@@ -3137,8 +3191,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
 function renderCombinedStockDetailPage(goodsType, from, to){
   const gt = normGoodsType(goodsType);
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
-  const combined = combinedStockOverview(goodsType, from, to);
-  // 2026-08-22 (yêu cầu Ông Chủ — "các số liên quan kho sẽ luôn cập nhật
+  const combined = withLedgerReportMode(()=>combinedStockOverview(goodsType, from, to));
   // theo" khoảng ngày đang chọn): LỌC CẢ 4 NGUỒN theo đúng [from,to], dùng
   // CHUNG hàm dateRangeLabel() để hiện rõ khoảng ngày thật của dữ liệu ĐÃ
   // LỌC (không còn "toàn bộ dữ liệu" như trước).
@@ -3835,10 +3888,31 @@ function warehouseSourceById(id){
 ///     bù sau thì hoá đơn đó tự động thành nguồn cho đợt sau).
 /// Cả 2 luồng dùng CHUNG 1 con trỏ theo dõi Lô Mua Bù (lotsPtr) — để không
 /// bao giờ 1 đồng vốn của cùng 1 lô bị rút trùng cho cả 2 loại nhu cầu.
+/// SỬA 2026-08-23 (Ông Chủ báo: bảng "Chi Phí & VAT Hưởng Theo Ca" lúc
+/// hiện lúc không, dù không đụng gì) — TÌM RA NGUYÊN NHÂN THẬT: buildInvoiceLotLedger()
+/// dùng allShiftsForLedgerCompanyWide(), hàm này LUÔN thay ca đang mở sửa
+/// dở (state.draftShift, CHƯA LƯU) vào danh sách — đúng và cần thiết khi
+/// xem TRƯỚC ngay trong form đang sửa 1 ca. NHƯNG các báo cáo tổng hợp
+/// (Kết Quả Kinh Doanh, Tồn Kho Tổng Hợp...) cũng đi qua ĐÚNG hàm này, nên
+/// hễ Ông Chủ đang mở sửa BẤT KỲ ca nào (dù đang ở tab khác) thì y hệt lô
+/// hàng đó bị tính lẫn dữ liệu CHƯA LƯU — kết quả đổi khác tuỳ lúc đó có
+/// đang mở sửa ca hay không, dù không hề đụng vào đúng mục "Kết Quả".
+/// Cache (_invoiceLedgerCache) càng khiến việc này "đứng lại" theo đúng
+/// trạng thái mở/đóng ca lúc tính lần đầu, trông như ngẫu nhiên.
+/// Cách sửa: thêm 1 "chế độ báo cáo" toàn cục — bật lên đúng lúc tính các
+/// báo cáo tổng hợp để LUÔN dùng dữ liệu ĐÃ LƯU (ổn định, không phụ thuộc
+/// có đang mở sửa ca nào không), tắt đi ngay sau đó để chỗ xem trước trong
+/// form Sửa Ca vẫn thấy đúng ca đang gõ dở như trước — không đổi hành vi.
+let _ledgerReportMode = false;
+function withLedgerReportMode(fn){
+  const prev = _ledgerReportMode;
+  _ledgerReportMode = true;
+  try { return fn(); } finally { _ledgerReportMode = prev; }
+}
 function buildInvoiceLotLedger(goodsType){
   const gt = normGoodsType(goodsType);
   if(!gt) return { bySiteLog:{}, byLot:{} };
-  const allSh = allShiftsForLedgerCompanyWide();
+  const allSh = _ledgerReportMode ? allShiftsCompanyWide() : allShiftsForLedgerCompanyWide();
   const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).map(s=>{
     if(s.siteType!=='commercial') return '0';
     let buy=0, sell=0;
@@ -3856,7 +3930,7 @@ function buildInvoiceLotLedger(goodsType){
   // (xem siteGoodsTypeGroups) nên sửa ở đây (rất hay gặp: khai bổ sung %
   // sau khi đã có sẵn ca) phải làm cache biết đường tính lại NGAY, không
   // chờ tính cờ có thay đổi khác.
-  const cacheKey = gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
+  const cacheKey = (_ledgerReportMode?'R':'L')+'|'+gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
     +'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
     +'|'+JSON.stringify((state.suppliers||[]).map(sp=>[sp.id, sp.invoicedBuyPercent, sp.densityRatio]))
     +'|'+shiftSig;
@@ -5335,15 +5409,15 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>💳 Phương Thức Tiền Dầu Đổ Thêm + Ứng Lương</h3>
+      <h3>💳 Phương Thức Tiền Dầu Đổ Thêm</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
-          <label>Tiền dầu đổ thêm (theo lít đổ) + Tiền ứng lương của CA NÀY trả bằng</label>
+          <label>Tiền dầu đổ thêm (theo lít đổ) của CA NÀY trả bằng</label>
           <select id="f_operatingCostMethod">
             <option value="cash" ${(sh.operatingCostMethod||'cash')==='cash'?'selected':''}>💵 Tiền mặt (mặc định)</option>
             <option value="bank" ${sh.operatingCostMethod==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
           </select>
-          <div class="hint">CHỈ tính đúng 2 khoản tiền mặt THẬT phát sinh đúng ngày này: Tiền dầu đổ thêm (theo số lít ĐỔ, không phải lít tiêu hao) + Tiền ứng lương (ô "Số tiền ứng" bên dưới). Lương chuyến/lương cứng/tiền ăn là khoản PHÂN BỔ kế toán, không phải tiền mặt trả đúng ngày này, nên KHÔNG tính vào đây. Chỉ ảnh hưởng tới "Khớp Số Dư Ngân Hàng" ở trang LINH CHÍ THÀNH — không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
+          <div class="hint">CHỈ ảnh hưởng đúng khoản tiền dầu đổ thêm (theo số lít ĐỔ, không phải lít tiêu hao) — quyết định có tính vào "Khớp Số Dư Ngân Hàng" hay không. SỬA 2026-08-23: Tiền ứng lương (ô "Số tiền ứng" bên dưới) giờ LUÔN tính là tiền ngân hàng, không còn phụ thuộc ô chọn này nữa — vì Ông Chủ xác nhận tạm ứng luôn chi từ tài khoản công ty. Lương chuyến/lương cứng/tiền ăn là khoản PHÂN BỔ kế toán, không phải tiền mặt trả đúng ngày này, nên không tính vào đây. Không ảnh hưởng tới Lợi Nhuận/Dòng Tiền Thuần (vẫn tính đủ như cũ).</div>
         </div>
       </div>
     </section>
@@ -9561,20 +9635,19 @@ function computeAllPartnersDebtSummary(){
 /// gộp lại —
 ///  (1) Góp/Rút Vốn Chủ Sở Hữu ghi CÙNG NGÀY mốc chốt trước đây bị so
 ///      sánh bằng dấu > (chặt) nên bị loại nhầm — đã sửa dùng >=.
-///  (2) QUAN TRỌNG HƠN: trước đây dùng thẳng computeCumulativeCashFlowBreakdown()
-///      — gồm CẢ chi phí vận hành (dầu/lương/ăn/nhà/phát sinh), sửa chữa,
-///      luật đường, vay/bảo hiểm/đăng kiểm — những khoản này ở thực tế
-///      Ông Chủ THƯỜNG TRẢ BẰNG TIỀN MẶT, không hề chảy qua tài khoản
-///      ngân hàng, nên KHÔNG được phép trừ vào số dư ngân hàng (VD: 70tr
-///      trả mỏ HÔM NAY là tiền mặt, không phải chuyển khoản — nếu vẫn trừ
-///      vào số dư ngân hàng thì SAI hoàn toàn thực tế). Nay CHỈ tính đúng
-///      2 sổ có gắn "Phương thức" rõ ràng (Sổ Tiền Khách Bank Vào + Sổ
-///      Tiền Bank Cho Mỏ + Góp/Rút Vốn Chủ Sở Hữu) VÀ lọc đúng
-///      method!=='cash' (khoản Tiền Mặt bị loại hẳn). Chi phí vận hành/
-///      sửa chữa/luật đường/vay/bảo hiểm/đăng kiểm KHÔNG có trường
-///      "Phương thức" riêng (không phải sổ giao dịch rời rạc), nên TẠM
-///      THỜI không tính vào đây — vẫn tính đủ ở "Lợi Nhuận Luỹ Kế" (đó là
-///      tổng LỢI NHUẬN công ty, đúng và khác hẳn "Khớp Số Dư Ngân Hàng").
+///  (2) trước đây dùng thẳng computeCumulativeCashFlowBreakdown() — gồm
+///      CẢ chi phí vận hành, sửa chữa, luật đường, vay/bảo hiểm/đăng kiểm
+///      — những khoản này CÓ THỂ trả bằng tiền mặt hoặc ngân hàng tuỳ
+///      trường hợp, không được cộng thẳng vào đây.
+/// SỬA 2026-08-23 (Ông Chủ xác nhận Q1-Q5, sau khi rà soát kỹ): 6 khoản
+/// Sửa chữa/Luật đường/Vay ngân hàng/Bảo hiểm+Đăng kiểm/Mua Lô Hoá Đơn
+/// Bù/Tạm ứng tài xế ĐỀU LÀ tiền từ tài khoản công ty (ngân hàng) chi ra
+/// — KHÔNG PHẢI tiền mặt như giả định trước đây. Giờ cộng đủ cả 6 khoản
+/// này vào đây (roadFee/fixedMonthly dùng đúng số THẬT không chia nhỏ
+/// theo ngày — xem fullMonthlyCostIfTouched/bankLoanRealCostForRange;
+/// invoiceLot dùng đúng "Số Tiền Thật Phải Trả Đối Tác" theo purchaseDate;
+/// tạm ứng KHÔNG còn phụ thuộc "Phương Thức Chi Phí Vận Hành" của ca đó
+/// nữa — luôn tính là tiền ngân hàng, đúng theo Q4).
 function computeBankBalanceReconciliation(){
   const today = todayLocalDateStr();
   const sorted = [...state.bankBalanceCheckpoints].filter(c=>c.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
@@ -9583,22 +9656,31 @@ function computeBankBalanceReconciliation(){
   const from = addDaysToDateStr(latest.date, 1);
   const cashInBank = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutBank = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
-  // SỬA 2026-08-20 (lỗi thật — Ông Chủ báo đổ dầu chuyển khoản ngân hàng
-  // thật, nhưng "Khớp Số Dư Ngân Hàng" không hề trừ): chi phí vận hành
-  // (dầu/lương/ăn/nhà/phát sinh/luật phát sinh) của CA nào đã đánh dấu
-  // "Phương Thức Chi Phí Vận Hành = Ngân hàng" giờ trừ đúng vào đây —
-  // trước đây LUÔN loại hẳn khỏi tính toán (mặc định coi là tiền mặt),
-  // dù thực tế có ca trả qua chuyển khoản thật. Mặc định vẫn là tiền mặt
-  // (operatingCostMethod chưa khai = 'cash'), không đổi hành vi cũ cho
-  // các ca chưa từng đụng tới ô mới này.
-  const operatingCostBank = allShiftsCompanyWide()
+  // Tiền dầu đổ thêm — CHỈ tính khi ca đó tự đánh dấu "Phương Thức Chi Phí
+  // Vận Hành = Ngân hàng" (dầu có thể đổ tiền mặt HOẶC chuyển khoản tuỳ
+  // lần, không cố định như 6 khoản dưới đây).
+  const fuelBank = allShiftsCompanyWide()
     .filter(sh=>sh.date>=from && sh.date<=today && sh.operatingCostMethod==='bank')
-    .reduce((s,sh)=>s+shiftBankableOperatingCost(sanitizeShiftForRevenue(sh)), 0);
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank;
+    .reduce((s,sh)=>s+shiftFuelRefillCost(sanitizeShiftForRevenue(sh)), 0);
+  // Tạm ứng tài xế — LUÔN là tiền ngân hàng (Q4), không còn gán theo
+  // operatingCostMethod của ca (SỬA lỗi 2026-08-23: trước đây bị buộc
+  // chung 1 điều kiện với tiền dầu, dẫn tới bỏ sót tạm ứng nếu ca đó lỡ
+  // chưa đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng").
+  const advanceBank = allShiftsCompanyWide()
+    .filter(sh=>sh.date>=from && sh.date<=today)
+    .reduce((s,sh)=>s+(Number(sh.advanceAmount)||0), 0);
+  const repairBank = repairsInRangeCompanyWide(from, today).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const roadFeeBank = roadFeeForRangeCompanyWide(from, today);
+  const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today);
+  const invoiceLotBank = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today)
+    .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
+  const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - fixedMonthlyBank - invoiceLotBank;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
-  return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance, operatingCostBank };
+  return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
+    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, fixedMonthlyBank, invoiceLotBank };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -9880,19 +9962,25 @@ function computePeriodSummary(from, to){
   //    Báo Tài Chính): CHỈ trừ LÃI VAY (không trừ GỐC vay — gốc là trả
   //    bớt nợ, làm giảm số dư nợ vay trên bảng cân đối kế toán, KHÔNG
   //    phải chi phí làm giảm lợi nhuận) + khấu hao (chi phí phân bổ chuẩn
-  //    kế toán, dù không phải tiền mặt) + bảo hiểm + đăng kiểm.
+  //    kế toán, dù không phải tiền mặt) + bảo hiểm + đăng kiểm. Đây là số
+  //    DỒN TÍCH (accrual) cho mục đích LỢI NHUẬN, không phải tiền mặt thật
+  //    rời ngân hàng đúng ngày nào — nên vẫn PHÂN BỔ theo ngày qua
+  //    proratedMonthlyCost() như cũ, không đổi.
   //  - otherFixedMonthlyForCashFlow (dùng RIÊNG cho DÒNG TIỀN THUẦN): trừ
-  //    ĐỦ Gốc+Lãi vay (cả 2 đều là tiền mặt thật rời túi ngày 20 hàng
-  //    tháng) + bảo hiểm + đăng kiểm — KHÔNG trừ khấu hao (không phải
-  //    tiền mặt, không có giao dịch ngân hàng nào cho riêng khoản này).
-  // CẢ 2 đều PHÂN BỔ đúng theo số ngày thật trong [from,to] qua
-  // proratedMonthlyCost() (yêu cầu Ông Chủ 2026-08-18: "chuẩn xác tuyệt
-  // đối" cho bất kỳ khoảng thời gian nào) — trước đây là số CỐ ĐỊNH của
-  // đúng 1 tháng, áp dụng y nguyên bất kể [from,to] dài/ngắn bao nhiêu.
+  //    ĐỦ Gốc+Lãi vay + bảo hiểm + đăng kiểm — KHÔNG trừ khấu hao (không
+  //    phải tiền mặt, không có giao dịch ngân hàng nào cho riêng khoản
+  //    này). SỬA 2026-08-23 (Ông Chủ xác nhận Q1/Q4 — luật đường/vay/bảo
+  //    hiểm/đăng kiểm ĐỀU là tiền ngân hàng thật, trả TRÒN từng kỳ/tháng,
+  //    không nhỏ giọt theo ngày): Gốc+Lãi vay giờ lấy ĐÚNG từng kỳ thật
+  //    trong lịch trả nợ (bankLoanRealCostForRange, khớp "Xác Nhận Đã Trả
+  //    Từng Kỳ") thay vì con số snapshot monthlyLoanPayment (chỉ đúng cho
+  //    kỳ hiện tại). Bảo hiểm + đăng kiểm lấy đủ nguyên tháng
+  //    (fullMonthlyCostIfTouched), không chia nhỏ theo ngày nữa.
   const insuranceAndRegistrationMonthly = (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const depreciationAndInterestMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0);
   const otherFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
-  const otherFixedMonthlyForCashFlow = proratedMonthlyCost(()=>(Number(state.settings.monthlyLoanPayment)||0)+insuranceAndRegistrationMonthly, from, to);
+  const otherFixedMonthlyForCashFlow = bankLoanRealCostForRange(state.settings.bankLoan, from, to)
+    + fullMonthlyCostIfTouched(()=>insuranceAndRegistrationMonthly, from, to);
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - otherFixedMonthly;
   const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
   const citPeriodKey = `${from}_${to}`;
@@ -12275,6 +12363,8 @@ function renderCompanyDashboardPage(){
         <div class="summary-row"><span>− Sửa chữa</span><span class="val">−${fmtVND(breakdown.repairTotal)}</span></div>
         <div class="summary-row"><span>− Luật đường</span><span class="val">−${fmtVND(breakdown.roadFee)}</span></div>
         <div class="summary-row"><span>− Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</span><span class="val">−${fmtVND(breakdown.fixedMonthly)}</span></div>
+        <div class="summary-row"><span>− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)</span><span class="val">−${fmtVND(breakdown.invoiceLotCashOut)}</span></div>
+        <div class="summary-row"><span>− Tạm ứng lương tài xế</span><span class="val">−${fmtVND(breakdown.advanceCashOut)}</span></div>
         <div class="summary-row total"><span>= Lợi Nhuận Luỹ Kế</span><span class="val" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</span></div>
         <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế</button>
       </div>
@@ -12292,6 +12382,7 @@ function renderCompanyDashboardPage(){
         ${bankRecon ? `
         <div class="summary-row"><span>Mốc chốt gần nhất (${formatDateVN(bankRecon.checkpoint.date)})</span><span class="val">${fmtVND(bankRecon.checkpoint.balance)}</span></div>
         <div class="summary-row"><span>+ Thu/Chi QUA NGÂN HÀNG phát sinh sau đó</span><span class="val" style="color:${bankRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${bankRecon.cashFlowSince>=0?'+':''}${fmtVND(bankRecon.cashFlowSince)}</span></div>
+        <div class="hint" style="margin:2px 0 8px;">Đã gồm đủ: tiền khách/mỏ (có gắn Phương thức Ngân hàng) + dầu (ca đánh dấu Ngân hàng) + tạm ứng tài xế + sửa chữa + luật đường + Gốc/Lãi vay + bảo hiểm/đăng kiểm + mua Lô Hoá Đơn Bù — 6 khoản sau LUÔN tính là ngân hàng theo đúng xác nhận của Ông Chủ.</div>
         <div class="summary-row"><span>+ Đã góp thêm sau đó</span><span class="val" style="color:var(--profit);">+${fmtVND(bankRecon.contributedSince)}</span></div>
         <div class="summary-row"><span>− Đã rút ra sau đó</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.withdrawnSince)}</span></div>
         <div class="summary-row total"><span>= Số dư app tính</span><span class="val" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</span></div>
@@ -12615,6 +12706,11 @@ function renderCashFlowBreakdownDetailPage(){
   const supplierPaymentsInRange = from ? state.supplierPayments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const shiftsInRange = from ? allShiftsCompanyWide().filter(sh=>sh.date>=from && sh.date<=to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const repairsInRangeList = from ? repairsInRangeCompanyWide(from, to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  // SỬA 2026-08-23 (Ông Chủ báo thiếu — Q2/Q3): thêm danh sách chi tiết
+  // từng lô hoá đơn bù đã mua + từng lần tạm ứng lương, khớp đúng 2 khoản
+  // mới thêm vào computeCumulativeCashFlowBreakdown().
+  const invoiceLotsInRange = from ? state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=to).sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)) : [];
+  const advancesInRange = from ? shiftsInRange.filter(sh=>(Number(sh.advanceAmount)||0)>0) : [];
 
   const row = (dateStr, label, amount, sign) => `
     <div class="driver-row" style="padding:10px 14px; border-bottom:1px solid var(--border);">
@@ -12638,6 +12734,12 @@ function renderCashFlowBreakdownDetailPage(){
     return row(sh.date, vName?`🚛 ${vName}`:'', cost, -1);
   }).join('');
   const repairRows = repairsInRangeList.map(r=>row(r.date, r.item||'', r.amount, -1)).join('');
+  const invoiceLotRows = invoiceLotsInRange.map(l=>row(l.purchaseDate, `${l.sourceName||''} — ${l.goodsType||''}`.trim().replace(/^—\s*/,''), Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)), -1)).join('');
+  const advanceRows = advancesInRange.map(sh=>{
+    const driver = driverById(sh.driverId);
+    const vName = sh._vehicleId ? vehicleNameById(sh._vehicleId) : '';
+    return row(sh.date, `${driver?driver.name:(sh.driverNameSnapshot||'')}${vName?' · 🚛 '+vName:''}${sh.advanceRecipientName?' ('+escapeHtml(sh.advanceRecipientName)+')':''}`, sh.advanceAmount, -1);
+  }).join('');
 
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -12651,11 +12753,13 @@ function renderCashFlowBreakdownDetailPage(){
       ${section('− Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, supplierPaymentRows)}
       ${section('− Chi phí vận hành (theo từng ca)', -breakdown.operatingCashCost, operatingRows)}
       ${section('− Sửa chữa', -breakdown.repairTotal, repairRows)}
+      ${section('− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, invoiceLotRows)}
+      ${section('− Tạm ứng lương tài xế', -breakdown.advanceCashOut, advanceRows)}
       <h3 style="margin-top:16px;">− Luật đường + Gốc/Lãi vay + Bảo hiểm + Đăng kiểm</h3>
       <div class="card">
-        <div class="summary-row"><span>Luật đường (phân bổ theo đúng số ngày)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.roadFee)}</span></div>
-        <div class="summary-row"><span>Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe, phân bổ theo ngày)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</span></div>
-        <div class="hint" style="margin-top:6px;">2 khoản này lấy từ Cài Đặt của từng xe (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở Cài Đặt → từng xe.</div>
+        <div class="summary-row"><span>Luật đường (đủ nguyên tháng nào có chạm tới)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.roadFee)}</span></div>
+        <div class="summary-row"><span>Gốc+Lãi vay (đúng từng kỳ thật đã/đang tới hạn) + Bảo hiểm + Đăng kiểm (đủ nguyên tháng, tất cả xe)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</span></div>
+        <div class="hint" style="margin-top:6px;">2 khoản này lấy từ Cài Đặt/Lịch Trả Nợ của từng xe (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở Cài Đặt → từng xe.</div>
       </div>
     </section>
   `;
@@ -12677,13 +12781,23 @@ function renderBankReconDetailPage(){
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
     return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
   }) : [];
-  // Ca nào đã đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng" trong
-  // đúng khoảng sau mốc chốt — hiện riêng để Ông Chủ tự đối chiếu, khớp
-  // đúng với operatingCostBank trong computeBankBalanceReconciliation().
-  const bankOperatingShifts = bankRecon ? allShiftsCompanyWide()
+  // SỬA 2026-08-23 (Ông Chủ xác nhận Q1-Q5 — 6 khoản này ĐỀU là tiền ngân
+  // hàng): tách riêng Tiền dầu (chỉ tính ca đánh dấu Ngân hàng) khỏi Tạm
+  // ứng (LUÔN tính, không cần đánh dấu) — trước đây bị gộp chung 1 điều
+  // kiện sai. Thêm mới: Sửa chữa / Luật đường / Gốc+Lãi vay+Bảo hiểm+Đăng
+  // kiểm / Mua Lô Hoá Đơn Bù — đều hiện ra đây để Ông Chủ tự đối chiếu,
+  // khớp đúng với computeBankBalanceReconciliation().
+  const bankFuelShifts = bankRecon ? allShiftsCompanyWide()
     .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr() && sh.operatingCostMethod==='bank')
-    .map(sh=>({ date: sh.date, vehicleName: vehicleNameById(sh._vehicleId), cost: shiftBankableOperatingCost(sanitizeShiftForRevenue(sh)) }))
+    .map(sh=>({ date: sh.date, vehicleName: vehicleNameById(sh._vehicleId), cost: shiftFuelRefillCost(sanitizeShiftForRevenue(sh)) }))
+    .filter(r=>r.cost>0)
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  const bankAdvanceShifts = bankRecon ? allShiftsCompanyWide()
+    .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr() && (Number(sh.advanceAmount)||0)>0)
+    .map(sh=>{ const driver = driverById(sh.driverId); return { date: sh.date, name: driver?driver.name:(sh.driverNameSnapshot||''), cost: sh.advanceAmount }; })
+    .sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  const bankRepairs = bankRecon ? repairsInRangeCompanyWide(addDaysToDateStr(bankRecon.checkpoint.date,1), todayLocalDateStr()).sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  const bankInvoiceLots = bankRecon ? state.invoiceLots.filter(l=>l.purchaseDate>bankRecon.checkpoint.date && l.purchaseDate<=todayLocalDateStr()).sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)) : [];
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -12702,17 +12816,50 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>
-      ${bankOperatingShifts.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tiền Dầu Đổ Thêm + Ứng Lương Đã Đánh Dấu Ngân Hàng</div>
+      ${bankFuelShifts.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tiền Dầu Đổ Thêm (ca đánh dấu Ngân hàng)</div>
       <div class="card" style="padding:0; overflow:hidden;">
-        ${bankOperatingShifts.map(r=>`
+        ${bankFuelShifts.map(r=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div>
-              <div style="font-weight:700;">⬇️ Tiền dầu đổ thêm + Ứng lương ca — ${formatDateVN(r.date)}</div>
+              <div style="font-weight:700;">⬇️ Tiền dầu đổ thêm — ${formatDateVN(r.date)}</div>
               ${r.vehicleName ? `<div class="hint" style="margin-top:2px;">🚛 ${escapeHtml(r.vehicleName)}</div>` : ''}
             </div>
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
           </div>`).join('')}
+      </div>` : ''}
+      ${bankAdvanceShifts.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tạm Ứng Lương Tài Xế</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankAdvanceShifts.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ Tạm ứng — ${escapeHtml(r.name)} — ${formatDateVN(r.date)}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankRepairs.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Sửa Chữa</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankRepairs.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${escapeHtml(r.item||'Sửa chữa')} — ${formatDateVN(r.date)}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankInvoiceLots.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Mua Lô Hoá Đơn Bù</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankInvoiceLots.map(l=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${escapeHtml(l.sourceName||l.goodsType||'Lô hoá đơn bù')} — ${formatDateVN(l.purchaseDate)}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)))}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankRecon && (bankRecon.roadFeeBank>0 || bankRecon.fixedMonthlyBank>0) ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Luật Đường + Gốc/Lãi Vay + Bảo Hiểm/Đăng Kiểm</div>
+      <div class="card">
+        <div class="summary-row"><span>Luật đường</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.roadFeeBank)}</span></div>
+        <div class="summary-row"><span>Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.fixedMonthlyBank)}</span></div>
       </div>` : ''}
       ${cashEntries.length>0 ? `
       <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">💵 Giao dịch Tiền Mặt cùng khoảng thời gian (KHÔNG tính vào số dư ngân hàng)</div>
@@ -13481,13 +13628,17 @@ function buildInvoiceLotDrawdownRows(){
   const header = ['Ngày','Ca','Tài Xế','Khách Hàng','Công Trình / Điểm Múc-Điểm Đổ','Loại Hàng','Khối Lượng Rút (khối)','Từ Lô Ngày','Chi Phí'];
   const rows = [header];
   const entries = [];
-  state.shifts.forEach(sh=>{
-    (sh.siteLogs||[]).forEach(s=>{
-      if(s.siteType!=='commercial') return;
-      const missingGroups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0.001);
-      missingGroups.forEach(g=>{
-        const gb = siteInvoiceGroupBreakdown(s, g.goodsType);
-        gb.allocations.forEach(a=>entries.push({ sh, s, a, goodsType: a.goodsType||g.goodsType||'' }));
+  // SỬA 2026-08-23: xuất Excel cho KT Thuế PHẢI luôn dùng dữ liệu ĐÃ LƯU,
+  // không phụ thuộc có đang mở sửa dở ca nào không — bọc report mode.
+  withLedgerReportMode(()=>{
+    state.shifts.forEach(sh=>{
+      (sh.siteLogs||[]).forEach(s=>{
+        if(s.siteType!=='commercial') return;
+        const missingGroups = siteGoodsTypeGroups(s).filter(g=>g.missingVolume>0.001);
+        missingGroups.forEach(g=>{
+          const gb = siteInvoiceGroupBreakdown(s, g.goodsType);
+          gb.allocations.forEach(a=>entries.push({ sh, s, a, goodsType: a.goodsType||g.goodsType||'' }));
+        });
       });
     });
   });
