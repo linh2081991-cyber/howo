@@ -2773,27 +2773,26 @@ function renderInvoiceLotOverview(){
     })()}
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">💰 Chi Phí &amp; VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
-    ${vatByShift.rows.length===0 ? `<div class="hint" style="margin-bottom:14px;">Không có ca nào rút Kho Hoá Đơn Bù trong khoảng ngày này.</div>` : `
-    <div class="card dash-wrap" style="padding:0; margin-bottom:6px;">
-      <table class="dash">
+    <div class="grid-table-wrap" style="margin-bottom:6px;">
+      <table class="grid-table">
         <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Chi Phí</th><th>VAT Hưởng</th></tr></thead>
         <tbody>
-          ${vatByShift.rows.map(r=>`<tr>
+          ${vatByShift.rows.length===0 ? `<tr><td colspan="5" class="hint" style="text-align:center;">Không có ca nào rút Kho Hoá Đơn Bù trong khoảng ngày này.</td></tr>` : vatByShift.rows.map(r=>`<tr>
             <td>${formatDateVN(r.date)}</td>
             <td>${shiftTypeLabel(r.shiftType)}</td>
             <td>${escapeHtml(r.driverName)}</td>
-            <td style="font-weight:700; color:var(--loss);">${fmtVND(r.cost)}</td>
-            <td style="font-weight:700; color:${r.vatCredit>0.5?'var(--profit)':'var(--ink-soft)'};">${fmtVND(r.vatCredit)}</td>
+            <td class="num" style="color:var(--loss);">${fmtVND(r.cost)}</td>
+            <td class="num" style="color:${r.vatCredit>0.5?'var(--profit)':'var(--ink-soft)'};">${fmtVND(r.vatCredit)}</td>
           </tr>`).join('')}
+          <tr class="grid-total-row">
+            <td colspan="3">TỔNG CỘNG</td>
+            <td class="num" style="color:var(--loss);">${fmtVND(vatByShift.totalCost)}</td>
+            <td class="num" style="color:var(--profit);">${fmtVND(vatByShift.totalVatCredit)}</td>
+          </tr>
         </tbody>
       </table>
     </div>
-    <div class="card" style="background:var(--profit-soft); margin-bottom:6px;">
-      <div class="summary-row" style="border:none;"><span style="font-weight:800;">TỔNG CHI PHÍ KHO CẢ KỲ</span><span class="val" style="font-weight:800; color:var(--loss); font-size:16px;">${fmtVND(vatByShift.totalCost)}</span></div>
-      <div class="summary-row" style="border:none;"><span style="font-weight:800;">TỔNG VAT HƯỞNG CẢ KỲ</span><span class="val" style="font-weight:800; color:var(--profit); font-size:16px;">${fmtVND(vatByShift.totalVatCredit)}</span></div>
-    </div>
     ${vatByShift.totalCost>0.5 && vatByShift.totalVatCredit<=0.5 ? `<div class="hint" style="margin-bottom:14px;">Có chi phí kho phát sinh nhưng VAT hưởng = 0đ — kiểm tra lại (các) lô đã rút trong kỳ này ở mục "Sổ Hoá Đơn Thật Từ Mỏ"/"Kho Hoá Đơn Bù" xem ô "VAT suất trên hoá đơn (%)" có đang để trống (= 0%) không.</div>` : ''}
-    `}
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">Tổng quan tất cả Loại hàng (phát sinh trong kỳ ${formatDateVN(from)} → ${formatDateVN(to)})</div>
     <div class="card dash-wrap" style="padding:0;">
@@ -9763,7 +9762,7 @@ function computePartnersOverview(){
 
     if(!partners[partnerName]) partners[partnerName] = {
       name: partnerName, sites: [], totalBilled:0, totalCollected:0, totalOwed:0,
-      oldestUnpaidDate: null, paymentCount: 0, lastPaymentDate: null
+      oldestUnpaidDate: null, paymentCount: 0, lastPaymentDate: null, lastActivityDate: null
     };
     const P = partners[partnerName];
     P.sites.push({ siteName, billed: billedTotal, collected: collectedTotal, owed: aging.totalOwed, daysOutstanding: aging.daysOutstanding });
@@ -9773,12 +9772,19 @@ function computePartnersOverview(){
     P.paymentCount += payments.length;
     if(aging.oldestUnpaidDate && (!P.oldestUnpaidDate || aging.oldestUnpaidDate < P.oldestUnpaidDate)) P.oldestUnpaidDate = aging.oldestUnpaidDate;
     if(lastPaymentDate && (!P.lastPaymentDate || lastPaymentDate > P.lastPaymentDate)) P.lastPaymentDate = lastPaymentDate;
+    // 2026-08-22 (yêu cầu Ông Chủ): ngày CHỞ CƯỚC gần nhất — lấy từ chính
+    // sự kiện billed (ngày ghi ca), không phải ngày thu tiền — dùng để gom
+    // đối tác LÂU KHÔNG CHẠY xuống dưới, tránh 7 dòng "0đ — Không nợ" làm
+    // rối màn hình dù phần lớn đã ngưng hoạt động từ lâu.
+    const siteLastDate = siteBilled[siteName].map(e=>e.date).sort().slice(-1)[0];
+    if(siteLastDate && (!P.lastActivityDate || siteLastDate > P.lastActivityDate)) P.lastActivityDate = siteLastDate;
   }
 
   const today = todayLocalDateStr();
   return Object.values(partners).map(P=>{
     const daysOutstanding = P.oldestUnpaidDate ? Math.floor((new Date(today)-new Date(P.oldestUnpaidDate))/86400000) : 0;
-    return { ...P, daysOutstanding, rating: partnerReliabilityRating(daysOutstanding, P.totalOwed) };
+    const daysSinceActivity = P.lastActivityDate ? Math.floor((new Date(today)-new Date(P.lastActivityDate))/86400000) : null;
+    return { ...P, daysOutstanding, daysSinceActivity, rating: partnerReliabilityRating(daysOutstanding, P.totalOwed) };
   }).sort((a,b)=>b.totalOwed-a.totalOwed);
 }
 
@@ -11059,25 +11065,52 @@ function renderPartnersOverview(){
     wrap.innerHTML = '<div class="hint">Chưa có khoản thu nào được ghi nhận từ đối tác nào.</div>';
     return;
   }
+  // 2026-08-22 (yêu cầu Ông Chủ — "mục này lâu tao không chạy thì mày
+  // hiện ... còn ở dưới"): đối tác không có chuyến nào trong 60 ngày gần
+  // đây bị gom xuống mục riêng, thu gọn, để không chiếm chỗ ngang hàng với
+  // đối tác đang thực sự hoạt động.
+  const INACTIVE_DAYS = 60;
+  const active = partners.filter(p=>p.daysSinceActivity===null || p.daysSinceActivity<=INACTIVE_DAYS);
+  const inactive = partners.filter(p=>p.daysSinceActivity!==null && p.daysSinceActivity>INACTIVE_DAYS);
+  const rowHtml = p => `
+    <tr class="partner-detail-row" data-partner="${escapeHtml(p.name)}">
+      <td>${escapeHtml(p.name)}</td>
+      <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
+      <td><span class="rating-badge ${p.rating.className}">${p.rating.label}</span></td>
+      <td><button class="link-btn partner-chitiet-btn" data-partner="${escapeHtml(p.name)}">Chi Tiết</button></td>
+    </tr>`;
   wrap.innerHTML = `
     <div class="card dash-wrap" style="padding:0;">
       <table class="dash">
-        <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th>Xếp Hạng</th></tr></thead>
+        <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th>Xếp Hạng</th><th></th></tr></thead>
         <tbody>
-          ${partners.map(p=>`
-            <tr class="partner-detail-row" data-partner="${escapeHtml(p.name)}">
-              <td>${escapeHtml(p.name)}</td>
-              <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
-              <td><span class="rating-badge ${p.rating.className}">${p.rating.label}</span></td>
-            </tr>
-          `).join('')}
+          ${active.map(rowHtml).join('')}
         </tbody>
       </table>
     </div>
-    <div class="hint" style="margin-top:8px;">Bấm vào 1 đối tác để xem chi tiết công trình, lịch sử thu tiền, và khoản nợ quá hạn bao lâu.</div>
+    <div class="hint" style="margin-top:8px;">Bấm dòng hoặc nút "Chi Tiết" để xem đầy đủ công trình, lịch sử thu tiền, và khoản nợ quá hạn bao lâu.</div>
+    ${inactive.length>0 ? `
+    <div class="formula-divider" style="margin:14px 0 10px;"></div>
+    <div style="font-weight:700; margin-bottom:6px; color:var(--ink-soft);">🕘 Lâu không chạy (quá ${INACTIVE_DAYS} ngày) — ${inactive.length} đối tác</div>
+    <div class="card dash-wrap" style="padding:0;">
+      <table class="dash">
+        <thead><tr><th>Đối Tác</th><th>Còn Nợ</th><th></th></tr></thead>
+        <tbody>
+          ${inactive.map(p=>`
+            <tr class="partner-detail-row" data-partner="${escapeHtml(p.name)}">
+              <td>${escapeHtml(p.name)}<div class="hint" style="margin-top:2px;">Chạy gần nhất ${p.daysSinceActivity} ngày trước</div></td>
+              <td style="color:${p.totalOwed>0?'var(--loss)':'var(--profit)'}; font-weight:700;">${fmtVND(p.totalOwed)}</td>
+              <td><button class="link-btn partner-chitiet-btn" data-partner="${escapeHtml(p.name)}">Chi Tiết</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
   `;
   wrap.querySelectorAll('.partner-detail-row').forEach(row=>{
-    row.addEventListener('click', ()=>{ saveMainScroll(); openPartnerDetail(row.dataset.partner); });
+    row.addEventListener('click', (e)=>{ if(e.target.closest('.partner-chitiet-btn')) return; saveMainScroll(); openPartnerDetail(row.dataset.partner); });
+  });
+  wrap.querySelectorAll('.partner-chitiet-btn').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); saveMainScroll(); openPartnerDetail(btn.dataset.partner); });
   });
 }
 
@@ -11490,6 +11523,7 @@ function renderMaintenanceList(){
       <div class="hint">Chu kỳ ${m.intervalKm.toLocaleString('vi-VN')}km · Làm gần nhất ở Km ${Number(m.lastDoneOdo).toLocaleString('vi-VN')} (${formatDateVN(m.lastDoneDate)}) · <span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span></div>
       ${m.predictedDueDate ? `<div class="hint">📅 Dự kiến đến hạn: <strong>${formatDateVN(m.predictedDueDate)}</strong> (bình quân xe chạy thực tế ~${m.avgKmPerDay.toLocaleString('vi-VN')} km/ngày)</div>` : ''}
       ${m.notes ? `<div class="hint">${escapeHtml(m.notes)}</div>` : ''}
+      ${(m.history&&m.history.length>0) ? `<div class="hint">🕘 Đã làm ${m.history.length} lần trước đó — xem trong "Sửa"</div>` : ''}
     </div>
   `).join('');
   wrap.querySelectorAll('.editMaintenanceBtn').forEach(btn=>{
@@ -11499,7 +11533,8 @@ function renderMaintenanceList(){
 
 function openMaintenanceEditor(id){
   const existing = id ? state.maintenanceSchedules.find(m=>m.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid('maint'), name:'', intervalKm:5000, lastDoneOdo: currentOdometer(), lastDoneDate: todayLocalDateStr(), notes:'' };
+  const draft = existing ? {...existing} : { id: uid('maint'), name:'', intervalKm:5000, lastDoneOdo: currentOdometer(), lastDoneDate: todayLocalDateStr(), notes:'', history:[] };
+  const history = [...(draft.history||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -11514,7 +11549,7 @@ function openMaintenanceEditor(id){
           <input type="number" inputmode="numeric" id="maint_interval" value="${draft.intervalKm}">
         </div>
         <div class="field">
-          <label>Đã làm ở Km số</label>
+          <label>Đã làm ở Km số${existing?' (đổi số này = ghi nhận LẦN LÀM MỚI, số cũ tự lưu vào lịch sử bên dưới)':''}</label>
           <input type="number" inputmode="numeric" id="maint_lastOdo" value="${draft.lastDoneOdo}">
         </div>
         <div class="field">
@@ -11527,6 +11562,11 @@ function openMaintenanceEditor(id){
         </div>
       </div>
       <div class="stat-highlight" style="margin-top:8px;"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>
+      ${history.length>0 ? `
+      <div class="card" style="margin-top:10px;">
+        <div style="font-weight:700; margin-bottom:6px;">🕘 Lịch Sử Đã Làm (${history.length} lần)</div>
+        ${history.map(h=>`<div class="hint">Km ${Number(h.odo).toLocaleString('vi-VN')} — ${formatDateVN(h.date)}</div>`).join('')}
+      </div>` : ''}
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing ? '<button class="btn btn-danger" id="delMaintenanceBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelMaintenanceBtn">Huỷ</button>
@@ -11536,12 +11576,28 @@ function openMaintenanceEditor(id){
   `;
 
   document.getElementById('saveMaintenanceBtn').addEventListener('click', async ()=>{
-    draft.name = document.getElementById('maint_name').value.trim();
-    draft.intervalKm = Number(document.getElementById('maint_interval').value)||0;
-    draft.lastDoneOdo = Number(document.getElementById('maint_lastOdo').value)||0;
-    draft.lastDoneDate = document.getElementById('maint_lastDate').value || draft.lastDoneDate;
-    draft.notes = document.getElementById('maint_notes').value.trim();
-    if(!draft.name){ showToast('Nhập tên hạng mục trước.'); return; }
+    const newName = document.getElementById('maint_name').value.trim();
+    const newInterval = Number(document.getElementById('maint_interval').value)||0;
+    const newOdo = Number(document.getElementById('maint_lastOdo').value)||0;
+    const newDate = document.getElementById('maint_lastDate').value || draft.lastDoneDate;
+    const newNotes = document.getElementById('maint_notes').value.trim();
+    if(!newName){ showToast('Nhập tên hạng mục trước.'); return; }
+    // 2026-08-22 (yêu cầu Ông Chủ — "tao không muốn sửa lần 1 vì muốn coi
+    // được lịch sử sửa chữa thay dầu"): nếu Km/ngày làm gần nhất ĐỔI so
+    // với bản đang lưu (tức đây là 1 LẦN BẢO DƯỠNG MỚI, không phải sửa lỗi
+    // gõ nhầm) → tự động lưu giá trị CŨ vào lịch sử TRƯỚC khi ghi đè, để
+    // không mất dấu vết những lần đã làm trước — không cần tạo hạng mục
+    // trùng tên nữa, sửa ngay trên đúng 1 hạng mục là đủ.
+    let newHistory = existing ? [...(existing.history||[])] : [];
+    if(existing && (Number(existing.lastDoneOdo)!==newOdo || existing.lastDoneDate!==newDate)){
+      newHistory = [...newHistory, { odo: Number(existing.lastDoneOdo)||0, date: existing.lastDoneDate }];
+    }
+    draft.name = newName;
+    draft.intervalKm = newInterval;
+    draft.lastDoneOdo = newOdo;
+    draft.lastDoneDate = newDate;
+    draft.notes = newNotes;
+    draft.history = newHistory;
     const idx = state.maintenanceSchedules.findIndex(m=>m.id===draft.id);
     if(idx>=0) state.maintenanceSchedules[idx]=draft; else state.maintenanceSchedules.push(draft);
     if(!(await saveMaintenanceSchedules())) return;
