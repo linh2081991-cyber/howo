@@ -2780,7 +2780,7 @@ function renderInvoiceLotOverview(){
       <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp (${escapeHtml(goodsType)}) — đối chiếu KT Thuế</div>
       <div class="summary-row"><span>Hoá đơn THẬT từ mỏ (÷ tỷ trọng)</span><span class="val">${combined.mineVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
       <div class="summary-row"><span>+ Lô mua bù đã mua</span><span class="val">${combined.lotVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <div class="summary-row"><span>− Đã bán cho khách (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${combined.soldVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
+      <div class="summary-row"><span>− Đã bán cho khách (${combined.soldDateRange})</span><span class="val" style="color:var(--loss);">${combined.soldVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
       <div class="summary-row total"><span>= Tồn Kho Tổng Hợp</span><span class="val" style="font-weight:800; color:${combined.combinedRemaining>=0?'var(--profit)':'var(--loss)'};">${combined.combinedRemaining<0?'−':''}${Math.abs(combined.combinedRemaining).toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
       <button class="btn btn-ghost btn-sm" id="mineInvoiceOpenBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
     </div>`;
@@ -2976,6 +2976,13 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
     });
   });
   drawHistory.sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType));
+  // 2026-08-22 (yêu cầu Ông Chủ — bỏ chữ chung chung, hiện đúng khoảng
+  // ngày thật đã có phát sinh rút lô mua bù): dò ngày SỚM NHẤT/MUỘN NHẤT
+  // trong CHÍNH các lần rút CÓ lotDrawn>0 — khớp đúng nguồn totalUsedFromLots.
+  const lotUsageDates = drawHistory.filter(d=>d.lotDrawn>0.001).map(d=>d.date);
+  const usedDateRange = lotUsageDates.length ? dateRangeLabel(
+    lotUsageDates.reduce((a,b)=>a<b?a:b), lotUsageDates.reduce((a,b)=>a>b?a:b)
+  ) : 'chưa có lần rút nào';
   // 2026-08-22 (yêu cầu Ông Chủ — "bỏ chữ mọi thời điểm, phải cập nhật số
   // chuẩn theo khoảng thời gian tao chọn xem"): tính riêng phần ĐÃ DÙNG
   // THẬT TỪ LÔ MUA BÙ (không lẫn hoá đơn thật/shortfall) CHỈ trong đúng
@@ -2995,7 +3002,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
       <div class="card" style="border:1.5px solid ${enough?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📊 Tổng Quan Kho — Phần Mua Bù (tính từ trước tới nay)</div>
         <div class="summary-row"><span>Tổng đã mua (mọi lô)</span><span class="val">${fmtQty(totalBought)} khối</span></div>
-        <div class="summary-row"><span>Tổng đã dùng (cộng dồn từ trước tới nay)</span><span class="val" style="color:var(--loss);">${fmtQty(totalUsedFromLots)} khối</span></div>
+        <div class="summary-row"><span>Tổng đã dùng (${usedDateRange})</span><span class="val" style="color:var(--loss);">${fmtQty(totalUsedFromLots)} khối</span></div>
         <div class="summary-row total"><span>Tồn phần mua bù</span><span class="val" style="color:${totalRemaining>=0?'var(--profit)':'var(--loss)'}; font-weight:800;">${fmtQty(totalRemaining)} khối</span></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
         <div class="summary-row"><span>Đã dùng THẬT trong khoảng ${formatDateVN(from)} → ${formatDateVN(to)}</span><span class="val" style="color:var(--loss); font-weight:700;">${fmtQty(totalDrawnInRange)} khối</span></div>
@@ -3013,7 +3020,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp — đối chiếu KT Thuế</div>
         <div class="summary-row"><span>Hoá đơn THẬT từ mỏ (÷ tỷ trọng)</span><span class="val">${fmtQty(combined.mineVolKhoi)} khối</span></div>
         <div class="summary-row"><span>+ Lô mua bù đã mua</span><span class="val">${fmtQty(combined.lotVolKhoi)} khối</span></div>
-        <div class="summary-row"><span>− Đã bán cho khách (mọi thời điểm)</span><span class="val" style="color:var(--loss);">${fmtQty(combined.soldVolKhoi)} khối</span></div>
+        <div class="summary-row"><span>− Đã bán cho khách (${combined.soldDateRange})</span><span class="val" style="color:var(--loss);">${fmtQty(combined.soldVolKhoi)} khối</span></div>
         <div class="summary-row total"><span>= Tồn Kho Tổng Hợp</span><span class="val" style="font-weight:800; color:${combined.combinedRemaining>=0?'var(--profit)':'var(--loss)'};">${combined.combinedRemaining<0?'−':''}${fmtQty(Math.abs(combined.combinedRemaining))} khối</span></div>
         <button class="btn btn-ghost btn-sm" id="lotFullDetailCombinedDetailBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🔍 Chi Tiết (từng hoá đơn thật + từng khoản đã bán)</button>
         <button class="btn btn-ghost btn-sm" id="lotFullDetailMineInvBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
@@ -3109,13 +3116,10 @@ function renderCombinedStockDetailPage(goodsType, from, to){
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const combined = combinedStockOverview(goodsType);
   // 2026-08-22 (yêu cầu Ông Chủ — "mọi thời điểm" quá chung chung, cần rõ
-  // đúng khoảng ngày thật): dò ngày SỚM NHẤT và MUỘN NHẤT thực sự đứng sau
-  // từng con số, không chỉ ghi chữ suông.
-  const dateRangeLabel = (minD, maxD) => {
-    if(!minD || !maxD) return 'chưa có dữ liệu';
-    return minD===maxD ? `ngày ${formatDateVN(minD)}` : `từ ${formatDateVN(minD)} đến ${formatDateVN(maxD)}`;
-  };
-
+  // đúng khoảng ngày thật): dùng CHUNG hàm dateRangeLabel() + soldDateRange
+  // đã có sẵn trong combinedStockOverview() (khớp tuyệt đối với thẻ tổng
+  // quan) — không tính lại riêng ở đây để tránh 2 nơi ra 2 công thức khác
+  // nhau như trước.
   const mineInvRows = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt)
     .sort((a,b)=>(a.invoiceDate||'').localeCompare(b.invoiceDate||''));
   const mineInvRange = dateRangeLabel(mineInvRows[0]?.invoiceDate, mineInvRows[mineInvRows.length-1]?.invoiceDate);
@@ -3124,22 +3128,7 @@ function renderCombinedStockDetailPage(goodsType, from, to){
     .sort((a,b)=>(a.purchaseDate||'').localeCompare(b.purchaseDate||''));
   const lotsRange = dateRangeLabel(lotsRaw[0]?.purchaseDate, lotsRaw[lotsRaw.length-1]?.purchaseDate);
 
-  // Khoảng ngày thật của "Đã bán cho khách" — quét toàn bộ ca có bán đúng
-  // loại hàng này (khớp chính xác nguồn totalSoldVolumeAllTime() đang dùng
-  // để ra 845,88 khối), lấy ngày ca SỚM NHẤT/MUỘN NHẤT có phát sinh bán.
-  let saleDateMin=null, saleDateMax=null;
-  allShiftsForLedgerCompanyWide().forEach(sh=>{
-    (sh.siteLogs||[]).forEach(s=>{
-      if(s.siteType!=='commercial') return;
-      siteGoodsTypeGroups(s).forEach(g=>{
-        if(normGoodsType(g.goodsType)===gt && g.sellVolume>0){
-          if(!saleDateMin || sh.date<saleDateMin) saleDateMin = sh.date;
-          if(!saleDateMax || sh.date>saleDateMax) saleDateMax = sh.date;
-        }
-      });
-    });
-  });
-  const saleRange = dateRangeLabel(saleDateMin, saleDateMax);
+  const saleRange = combined.soldDateRange;
 
   const customerRows = state.customers.map(c=>{
     const b = customerGoodsBreakdown(c.id); // không truyền from/to — TỪ TRƯỚC TỚI NAY, khớp đúng soldVolKhoi
@@ -3682,12 +3671,21 @@ function totalSoldVolumeAllTime(goodsType){
   });
   return sum;
 }
+/// Định dạng khoảng ngày THẬT (không phải chữ chung chung như "mọi thời
+/// điểm") — dùng chung cho mọi nơi cần hiện rõ dữ liệu trải từ ngày nào
+/// đến ngày nào (yêu cầu Ông Chủ 2026-08-22).
+function dateRangeLabel(minD, maxD){
+  if(!minD || !maxD) return 'chưa có dữ liệu';
+  return minD===maxD ? `ngày ${formatDateVN(minD)}` : `từ ${formatDateVN(minD)} đến ${formatDateVN(maxD)}`;
+}
 /// "Tồn Kho Tổng Hợp" — ĐÚNG công thức Ông Chủ yêu cầu 2026-08-22:
 /// (Tổng khối hoá đơn THẬT từ mỏ) + (Tổng khối lô mua bù đã mua) − (Tổng
-/// khối đã bán cho khách, mọi thời điểm). Đây là số MỚI, THÊM VÀO — hoàn
-/// toàn KHÔNG thay thế "Còn tồn kho THẬT hiện nay" (tồn riêng phần mua bù)
-/// đã có sẵn, cũng KHÔNG đụng gì tới missingVolume/shiftTotalCost/
-/// commercialVatPayable (frozen, dùng cho P&L thật).
+/// khối đã bán cho khách, TỪ TRƯỚC TỚI NAY). Đây là số MỚI, THÊM VÀO —
+/// hoàn toàn KHÔNG thay thế "Còn tồn kho THẬT hiện nay" (tồn riêng phần
+/// mua bù) đã có sẵn, cũng KHÔNG đụng gì tới missingVolume/shiftTotalCost/
+/// commercialVatPayable (frozen, dùng cho P&L thật). soldDateRange = ngày
+/// thật (sớm nhất→muộn nhất) đứng sau soldVolKhoi — thay cho chữ "mọi
+/// thời điểm" mơ hồ ở mọi nơi hiển thị con số này.
 function combinedStockOverview(goodsType){
   const gt = normGoodsType(goodsType);
   const mineVolKhoi = totalMineInvoiceVolumeKhoi(gt);
@@ -3695,7 +3693,20 @@ function combinedStockOverview(goodsType){
     .reduce((sum,l)=>sum+(Number(l.totalVolume)||0), 0);
   const soldVolKhoi = totalSoldVolumeAllTime(gt);
   const combinedRemaining = mineVolKhoi + lotVolKhoi - soldVolKhoi;
-  return { mineVolKhoi, lotVolKhoi, soldVolKhoi, combinedRemaining };
+  let saleDateMin=null, saleDateMax=null;
+  allShiftsForLedgerCompanyWide().forEach(sh=>{
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      siteGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)===gt && g.sellVolume>0){
+          if(!saleDateMin || sh.date<saleDateMin) saleDateMin = sh.date;
+          if(!saleDateMax || sh.date>saleDateMax) saleDateMax = sh.date;
+        }
+      });
+    });
+  });
+  const soldDateRange = dateRangeLabel(saleDateMin, saleDateMax);
+  return { mineVolKhoi, lotVolKhoi, soldVolKhoi, combinedRemaining, soldDateRange };
 }
 
 // 1 site log giờ có thể gồm NHIỀU nhóm loại hàng (mỗi chuyến 1 loại) —
