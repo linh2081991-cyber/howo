@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #87';
+const APP_BUILD = '2026-08-23 · #88';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7021,14 +7021,24 @@ function openDriverDetail(driverId){
   // xế khác — trường hợp lấy hàng hôm nay, hôm sau người khác đổ hộ).
   const driverStats = driverTripWageStatsInRange(driverId, from, to, state.shifts);
   const totalTrips = driverStats.tripCount;
-  const totalKm = activeShifts.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
-  const totalRevenue = activeShifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
+  // SỬA 2026-08-23 (Ông Chủ: "tính tất cả cho tao, tất cả các con số
+  // trong app phải đồng nhất" — sau khi phát hiện Lợi Nhuận Ròng ở đây bị
+  // thổi phồng vì bỏ sót chi phí ca Nằm Bãi): đổi CẢ 3 số Km/Doanh Thu/Lợi
+  // Nhuận Ròng từ activeShifts sang inRange (TẤT CẢ ca trong kỳ, không
+  // riêng "Hoạt Động") — khớp đúng cách "Kết Quả Kinh Doanh" đang tính
+  // (allShiftsCompanyWide, không lọc status). Ca Nằm Bãi/Nghỉ Phép tự
+  // nhiên đã có Km=0, Doanh Thu=0 (không có siteLogs/trips) nên Km/Doanh
+  // Thu KHÔNG đổi số — chỉ riêng Lợi Nhuận Ròng đổi, vì đây là chỗ DUY
+  // NHẤT có chi phí (lương cứng/ăn/nhà) bị bỏ sót trước đây.
+  const totalKm = inRange.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
+  const totalRevenue = inRange.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
   // Lợi nhuận RÒNG mà tài xế này tạo ra trong kỳ — cộng dồn đúng
-  // shiftNetProfit() (hàm lãi/lỗ gốc, không đụng vào) của từng ca hoạt
-  // động, để Ông Chủ so sánh thẳng "tài xế nào đang kiếm tiền tốt hơn"
-  // ngay cạnh doanh thu, thay vì chỉ nhìn doanh thu (số to nhưng chưa
-  // trừ chi phí).
-  const totalNetProfit = activeShifts.reduce((s,sh)=>s+shiftNetProfit(sh),0);
+  // shiftNetProfit() (hàm lãi/lỗ gốc, không đụng vào) của TẤT CẢ ca trong
+  // kỳ (không riêng ca Hoạt Động) — để khớp đúng "Kết Quả Kinh Doanh"
+  // cùng khoảng ngày, có cộng cả chi phí lương cứng/ăn/nhà của ca Nằm
+  // Bãi/Nghỉ Phép (những ca này vẫn được tính các khoản đó theo đúng
+  // Chính Sách Chi Phí Theo Trạng Thái).
+  const totalNetProfit = inRange.reduce((s,sh)=>s+shiftNetProfit(sh),0);
 
   // Only real statuses the app actually has (STATUS_OPTIONS) — no invented
   // categories like "Nghỉ Lễ" that don't exist elsewhere in the app.
