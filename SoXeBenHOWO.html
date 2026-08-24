@@ -597,7 +597,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #88';
+const APP_BUILD = '2026-08-23 · #89';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1770,9 +1770,48 @@ async function refreshAllVehiclesShiftsCache(){
     state.allVehiclesSettings[vid]=settingsObj;
   });
 }
-/// Gộp CA CỦA TẤT CẢ XE thành 1 mảng — dùng cho những phần THẬT SỰ dùng
-/// chung toàn công ty (Công Nợ Khách Hàng/Nhà Cung Cấp, nhu cầu rút Kho
-/// Hoá Đơn Bù), KHÁC với state.shifts (chỉ xe đang xem/sửa).
+/// SỬA 2026-08-23 (Ông Chủ báo LẦN NỮA: bảng "Chi Phí & VAT Hưởng Theo
+/// Ca" lúc hiện lúc không dù không đụng gì tới ca — đã sửa 1 lỗi thật ở
+/// bản #86 (ca đang mở sửa dở làm lệch báo cáo), nhưng có thể còn NGUYÊN
+/// NHÂN KHÁC: app đang bật `db.enablePersistence()` (Firestore cache
+/// ngoại tuyến trên máy) và mọi lệnh đọc dữ liệu (.get()) KHÔNG ép buộc
+/// lấy từ máy chủ — trên mạng điện thoại chập chờn (đổi qua lại 4G/wifi/
+/// 5G), Firestore CÓ THỂ trả về bản cache CŨ trên máy thay vì bản mới
+/// nhất, đặc biệt nếu vừa tick "Đã xuất hoá đơn BÁN" ở 1 thiết bị/phiên
+/// khác. Hàm này ép đọc THẲNG từ máy chủ (source:'server', bỏ qua hoàn
+/// toàn cache), xoá sạch _invoiceLedgerCache, rồi vẽ lại — cho Ông Chủ 1
+/// cách CHẮC CHẮN lấy được đúng số mới nhất bất cứ lúc nào nghi ngờ,
+/// không cần đợi tự nhiên đồng bộ.
+async function forceRefreshInvoiceLedgerData(){
+  showToast('Đang lấy dữ liệu mới nhất từ máy chủ...');
+  try {
+    const [invoiceLotSnap, mineInvoiceSnap, supplierSnap] = await withTimeout(Promise.all([
+      sharedDataRef('invoiceLots').get({source:'server'}),
+      sharedDataRef('mineInvoices').get({source:'server'}),
+      sharedDataRef('suppliers').get({source:'server'})
+    ]));
+    state.invoiceLots = invoiceLotSnap.exists && Array.isArray(invoiceLotSnap.data().list) ? invoiceLotSnap.data().list : [];
+    state.mineInvoices = mineInvoiceSnap.exists && Array.isArray(mineInvoiceSnap.data().list) ? mineInvoiceSnap.data().list : [];
+    state.suppliers = supplierSnap.exists && Array.isArray(supplierSnap.data().list) ? supplierSnap.data().list : [];
+    const entries = await withTimeout(Promise.all(state.vehicles.map(async v=>{
+      const sSnap = await vehicleDataRef(v.id, 'shifts').get({source:'server'});
+      const shiftsList = sSnap.exists && Array.isArray(sSnap.data().list) ? sSnap.data().list : [];
+      return [v.id, shiftsList];
+    })));
+    entries.forEach(([vid, shiftsList])=>{
+      state.allVehiclesShifts[vid] = shiftsList;
+      // Đồng bộ luôn state.shifts nếu đây đúng là xe đang xem/sửa — tránh
+      // để 2 nơi trỏ tới 2 mảng KHÁC NHAU (dù cùng nội dung) làm sai lệch
+      // các chỗ so khớp theo THAM CHIẾU object (VD findSiteLogContext()).
+      if(vid===activeVehicleIdForEditing()) state.shifts = shiftsList;
+    });
+    for(const key of Object.keys(_invoiceLedgerCache)) delete _invoiceLedgerCache[key];
+    showToast('Đã lấy xong dữ liệu mới nhất — số liệu dưới đây chắc chắn mới nhất.');
+    renderAll();
+  } catch(e){
+    showToast('LẤY DỮ LIỆU THẤT BẠI — kiểm tra mạng rồi thử lại: '+(e.message||''));
+  }
+}
 function allShiftsCompanyWide(){
   const combined = [];
   Object.entries(state.allVehiclesShifts).forEach(([vid,list])=>{
@@ -2869,6 +2908,10 @@ function renderInvoiceLotOverview(){
       </table>
     </div>
     ${vatByShift.totalCost>0.5 && vatByShift.totalVatCredit<=0.5 ? `<div class="hint" style="margin-bottom:14px;">Có chi phí kho phát sinh nhưng VAT hưởng = 0đ — kiểm tra lại (các) lô đã rút trong kỳ này ở mục "Sổ Hoá Đơn Thật Từ Mỏ"/"Kho Hoá Đơn Bù" xem ô "VAT suất trên hoá đơn (%)" có đang để trống (= 0%) không.</div>` : ''}
+    ${vatByShift.totalCost<=0.5 && vatByShift.totalVatCredit<=0.5 ? `
+    <button class="btn btn-primary btn-block" id="forceRefreshLedgerBtn" style="margin-bottom:10px;">🔄 Lấy Lại Dữ Liệu Mới Nhất Từ Máy Chủ</button>
+    <div class="hint" style="margin-top:-4px; margin-bottom:14px;">SỬA 2026-08-23: bảng trống có thể do máy đang đọc phải bản lưu tạm cũ trên máy (do mạng chập chờn), chưa chắc là do chưa tick hoá đơn thật. Bấm nút này để ép lấy đúng bản mới nhất từ máy chủ trước khi tin vào phần chẩn đoán dưới đây.</div>
+    ` : ''}
     ${(()=>{
       // CHẨN ĐOÁN (2026-08-23, yêu cầu Ông Chủ): TỰ HIỆN ngay khi bảng trên
       // ra 0đ — liệt kê CHÍNH XÁC từng ca/nhóm loại hàng đang dừng ở bước
@@ -2928,6 +2971,8 @@ function renderInvoiceLotOverview(){
   document.getElementById('lotFilterTo').addEventListener('change', e=>{ state.invoiceLotFilter.to = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCombinedStockDetailPage(goodsType, from, to); });
   document.getElementById('mineInvoiceOpenBtn').addEventListener('click', ()=>renderMineInvoiceManagerModal(null, goodsType));
+  const forceRefreshBtn = document.getElementById('forceRefreshLedgerBtn');
+  if(forceRefreshBtn) forceRefreshBtn.addEventListener('click', forceRefreshInvoiceLedgerData);
 }
 
 /// Bảng "🔒 Đối Soát Hoá Đơn Theo Tháng" trong tab Kết Quả — 6 tháng gần
