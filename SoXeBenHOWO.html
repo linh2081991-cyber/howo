@@ -627,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #93';
+const APP_BUILD = '2026-08-25 · #94';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13815,6 +13815,15 @@ function sanitizeExcelSheetName(name, usedNames){
 function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
   const rows = [];
   const sorted = [...shiftsForDriver].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
+  // SỬA 2026-08-25 (lần 2 — Ông Chủ chỉ ra qua ví dụ thật): tiền chuyến lấy
+  // hộ TRƯỚC ĐÓ đã cộng đúng cho tài xế lấy hàng, nhưng lại hiện thành 1
+  // DÒNG RIÊNG gắn NGÀY của người đổ hộ (vd 16/8) — trong khi đúng ra phải
+  // cộng dồn vào đúng DÒNG NGÀY tài xế đó thực sự đi lấy hàng (vd 15/8),
+  // để "Số Chuyến" của đúng ngày đó hiện đủ (6 thay vì 5 + 1 dòng lạc chỗ).
+  // rowsBySiteKey ghi nhớ dòng vừa tạo cho mỗi (ngày ca, công trình) của
+  // CHÍNH driverId, để vòng 2 bên dưới tìm đúng dòng mà cộng dồn vào.
+  const rowsBySiteKey = new Map();
+  const siteKeyOf = (dateStr, shiftType, siteName)=>`${dateStr}__${shiftType}__${(siteName||'').trim().toLowerCase()}`;
 
   sorted.forEach(sh=>{
     const sortKey = chronoKey(sh.date, sh.shiftType);
@@ -13846,11 +13855,13 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
       const trips = s.commercialTrips || [];
       const hasOverride = trips.some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId);
       if(!hasOverride){
-        rows.push({ ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
+        const r = { ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
           siteLabel:s.siteName||'', typeLabel:'Thương Mại',
           volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
           tripCount:siteTripCount(s), wagePerTrip:s.driverWagePerTrip||0,
-          effectiveTrips:siteEffectiveWageTrips(s), wageAmount:siteWageTotal(s) });
+          effectiveTrips:siteEffectiveWageTrips(s), wageAmount:siteWageTotal(s) };
+        rows.push(r);
+        rowsBySiteKey.set(siteKeyOf(sh.date, sh.shiftType, s.siteName), r);
         return;
       }
       // Site log này có ít nhất 1 chuyến bị đổi người lấy hàng — tách
@@ -13860,11 +13871,13 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
         (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
         (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
       const mineCount = completeTrips.filter(t=>(t.pickupDriverId||sh.driverId)===sh.driverId).length;
-      rows.push({ ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
+      const r2 = { ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
         siteLabel:s.siteName||'', typeLabel:'Thương Mại',
         volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
         tripCount:mineCount, wagePerTrip, effectiveTrips:mineCount,
-        wageAmount:mineCount*wagePerTrip });
+        wageAmount:mineCount*wagePerTrip };
+      rows.push(r2);
+      rowsBySiteKey.set(siteKeyOf(sh.date, sh.shiftType, s.siteName), r2);
       // Dòng phụ chú thích cho từng chuyến bị lấy hộ bởi người KHÁC —
       // KHÔNG cộng thêm tiền ở đây (tiền đã ghi nhận đúng bên phiếu của
       // người lấy hàng, ở vòng thứ 2 bên dưới).
@@ -13881,11 +13894,13 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
   // Bổ sung các chuyến mà driverId là người LẤY HÀNG nhưng nằm trong ca
   // của tài xế KHÁC (site log đó không thuộc shiftsForDriver nên không
   // được duyệt ở vòng trên) — dùng đúng điều kiện lọc như
-  // driverTripWageStatsInRange để tổng luôn khớp tuyệt đối.
+  // driverTripWageStatsInRange để TỔNG luôn khớp tuyệt đối. Ưu tiên CỘNG
+  // DỒN vào đúng dòng ngày tài xế đã đi lấy (ca gần nhất của driverId,
+  // tại ĐÚNG công trình đó, vào ngày hoặc trước ngày đổ hộ) — chỉ tạo
+  // dòng riêng khi không tìm được ca nào khớp để gộp vào.
   (state.shifts||[]).forEach(sh=>{
     if(sh.date<from || sh.date>to || sh.status!=='active') return;
     if(sh.driverId===driverId) return;
-    const sortKey = chronoKey(sh.date, sh.shiftType);
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
       const trips = s.commercialTrips||[];
@@ -13896,11 +13911,41 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
       if(mine.length===0) return;
       const wagePerTrip = Number(s.driverWagePerTrip)||0;
       const owner = driverById(sh.driverId);
-      rows.push({ date:formatDateVN(sh.date), shiftType:shiftTypeLabel(sh.shiftType),
-        intensity:(Number(sh.intensity)||1)===1.5?'1,5 ca':'1 ca', status:statusLabel(sh.status),
+      const deliverySortKey = chronoKey(sh.date, sh.shiftType);
+
+      // Ca gần nhất (cùng ngày hoặc trước ngày đổ hộ) của CHÍNH driverId —
+      // đây là ngày driverId thực sự đi lấy hàng.
+      const priorShift = shiftsForDriver
+        .filter(psh=>psh.status==='active' && chronoKey(psh.date,psh.shiftType) <= deliverySortKey)
+        .sort((a,b)=>chronoKey(b.date,b.shiftType)-chronoKey(a.date,a.shiftType))[0] || null;
+
+      const targetRow = priorShift ? rowsBySiteKey.get(siteKeyOf(priorShift.date, priorShift.shiftType, s.siteName)) : null;
+
+      if(targetRow && Number(targetRow.wagePerTrip)===wagePerTrip){
+        // Đúng công trình, đúng mức lương/chuyến — cộng dồn thẳng vào
+        // dòng ngày đó, "Số Chuyến" hiện đủ trên cùng 1 dòng.
+        targetRow.tripCount = (targetRow.tripCount||0) + mine.length;
+        targetRow.effectiveTrips = (targetRow.effectiveTrips||0) + mine.length;
+        targetRow.wageAmount = (targetRow.wageAmount||0) + mine.length*wagePerTrip;
+        targetRow.notes = (targetRow.notes ? targetRow.notes+' · ' : '') +
+          `📌 Gồm ${mine.length} chuyến lấy hộ (${owner?owner.name:'tài xế khác'} đổ hộ ngày ${formatDateVN(sh.date)})`;
+        return;
+      }
+
+      // Không tìm được dòng khớp để gộp (khác công trình/mức lương, hoặc
+      // driverId không có ca nào trước ngày đổ hộ trong kỳ) — vẫn phải
+      // hiện đủ tiền, tạo dòng riêng. Ưu tiên gắn NGÀY CA GẦN NHẤT của
+      // driverId (ngày thực đi lấy) nếu tìm được; chỉ dùng ngày ca đổ hộ
+      // khi không còn lựa chọn nào khác.
+      const dispDate = priorShift ? priorShift.date : sh.date;
+      const dispShiftType = priorShift ? priorShift.shiftType : sh.shiftType;
+      const dispIntensity = priorShift ? priorShift.intensity : sh.intensity;
+      const dispStatus = priorShift ? priorShift.status : sh.status;
+      rows.push({ date:formatDateVN(dispDate), shiftType:shiftTypeLabel(dispShiftType),
+        intensity:(Number(dispIntensity)||1)===1.5?'1,5 ca':'1 ca', status:statusLabel(dispStatus),
         isShiftHead:true, baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0,
-        notes:`📌 Tự đi lấy hàng, ${owner?owner.name:'tài xế khác'} đổ hộ ngày ${formatDateVN(sh.date)}`,
-        _sortKey:sortKey, siteLabel:s.siteName||'', typeLabel:'Thương Mại (lấy hộ)',
+        notes:`📌 Tự đi lấy hàng tại ${s.siteName||'công trình này'}, ${owner?owner.name:'tài xế khác'} đổ hộ ngày ${formatDateVN(sh.date)}`,
+        _sortKey:chronoKey(dispDate, dispShiftType), siteLabel:s.siteName||'', typeLabel:'Thương Mại (lấy hộ)',
         volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
         tripCount:mine.length, wagePerTrip, effectiveTrips:mine.length,
         wageAmount:mine.length*wagePerTrip });
