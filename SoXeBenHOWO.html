@@ -287,14 +287,28 @@
   /// chọn (tab-indicator, định vị bằng JS trong positionTabIndicator()) +
   /// icon nảy lên khi bấm (tab-pop, thêm/xoá class qua JS trong click
   /// handler) — không đụng gì tới cấu trúc 5 nút hay logic chuyển tab cũ.
+  /// SỬA 2026-08-25 (lỗi Ông Chủ báo — chụp ảnh thấy 1 dải màu cam/hồng
+  /// trong suốt phủ dọc gần hết chiều cao màn hình, đè lên cả các khối
+  /// không liên quan như tiêu đề, ô tìm ngày, thẻ tài xế): nguyên nhân là
+  /// ".tab-indicator" (viên pill mới thêm ở trên) trong 1 số tình huống bị
+  /// tính sai "khung chứa" định vị (containing block) trên Safari/iOS PWA,
+  /// khiến height:calc(100% - 12px) không còn tính theo chiều cao thật của
+  /// thanh tab (~50-60px) mà tính theo chiều cao TOÀN MÀN HÌNH — biến viên
+  /// pill nhỏ xíu ở đáy màn hình thành 1 dải phủ gần hết màn hình. Thêm
+  /// overflow:hidden vào nav.tabbar để CHẶN CỨNG bất kể lý do gì khiến
+  /// tab-indicator tính sai kích thước — nó không bao giờ có thể hiện ra
+  /// ngoài đúng khung chữ nhật của thanh tab nữa. Không đổi bất kỳ hành vi
+  /// hiển thị bình thường nào (khi tính đúng, pill vốn đã nằm gọn trong
+  /// khung này, overflow:hidden không cắt mất gì cả).
   nav.tabbar{
     position:fixed; bottom:0; left:0; right:0; z-index:20;
     background:var(--surface); border-top:1px solid var(--border);
     display:flex; max-width:520px; margin:0 auto;
     padding-bottom:env(safe-area-inset-bottom);
+    overflow:hidden;
   }
   .tab-indicator{
-    position:absolute; top:6px; height:calc(100% - 12px);
+    position:absolute; top:6px; height:calc(100% - 12px); max-height:64px;
     background:var(--accent); opacity:0.14;
     border-radius:14px; pointer-events:none;
     transition:left 0.32s cubic-bezier(.34,1.56,.64,1), width 0.32s cubic-bezier(.34,1.56,.64,1);
