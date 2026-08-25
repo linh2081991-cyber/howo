@@ -282,19 +282,44 @@
   .summary-row.total{ border-top:1px solid var(--border); margin-top:6px; padding-top:12px; font-weight:800; font-size:17.5px; }
   .summary-row .val{ font-variant-numeric:tabular-nums; }
 
+  /// SỬA 2026-08-24 (yêu cầu Ông Chủ — thêm hiệu ứng sinh động nổi bật khi
+  /// bấm tab dưới cùng): thêm 1 "viên pill" trượt mượt theo đúng tab đang
+  /// chọn (tab-indicator, định vị bằng JS trong positionTabIndicator()) +
+  /// icon nảy lên khi bấm (tab-pop, thêm/xoá class qua JS trong click
+  /// handler) — không đụng gì tới cấu trúc 5 nút hay logic chuyển tab cũ.
   nav.tabbar{
     position:fixed; bottom:0; left:0; right:0; z-index:20;
     background:var(--surface); border-top:1px solid var(--border);
     display:flex; max-width:520px; margin:0 auto;
     padding-bottom:env(safe-area-inset-bottom);
   }
+  .tab-indicator{
+    position:absolute; top:6px; height:calc(100% - 12px);
+    background:var(--accent); opacity:0.14;
+    border-radius:14px; pointer-events:none;
+    transition:left 0.32s cubic-bezier(.34,1.56,.64,1), width 0.32s cubic-bezier(.34,1.56,.64,1);
+    z-index:0;
+  }
   nav.tabbar button{
+    position:relative; z-index:1;
     flex:1; border:none; background:none; padding:10px 0 8px 0;
     display:flex; flex-direction:column; align-items:center; gap:2px;
     font-size:11px; color:var(--ink-soft); font-weight:600;
+    transition:color 0.25s ease;
   }
-  nav.tabbar button .ic{ font-size:20px; }
+  nav.tabbar button .ic{
+    font-size:20px; display:inline-block;
+    transition:transform 0.25s cubic-bezier(.34,1.56,.64,1);
+  }
+  nav.tabbar button.active .ic{ transform:scale(1.15) translateY(-1px); }
   nav.tabbar button.active{ color:var(--accent); }
+  nav.tabbar button .ic.tab-pop{ animation:tabIconPop 0.42s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes tabIconPop{
+    0%{ transform:scale(1); }
+    35%{ transform:scale(1.45) rotate(-8deg); }
+    60%{ transform:scale(0.92) rotate(4deg); }
+    100%{ transform:scale(1.15) translateY(-1px); }
+  }
 
   .toast{
     position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
@@ -581,6 +606,7 @@
   <main id="app"></main>
   <div class="toast" id="toast"></div>
   <nav class="tabbar">
+    <span class="tab-indicator" id="tabIndicator"></span>
     <button data-tab="shifts" class="active"><span class="ic">📋</span>Ca Làm Việc</button>
     <button data-tab="strategy"><span class="ic">🧭</span>Trợ Lý</button>
     <button data-tab="drivers"><span class="ic">👤</span>Tài Xế</button>
@@ -597,7 +623,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-23 · #89';
+const APP_BUILD = '2026-08-23 · #90';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2193,6 +2219,7 @@ async function startApp(){
   document.getElementById('dataLoadingScreen').style.display = 'none';
   document.getElementById('shell').style.display = 'block';
   renderAll();
+  positionTabIndicator();
 }
 
 // ========================= ĐĂNG NHẬP =========================
@@ -13769,6 +13796,118 @@ function sanitizeExcelSheetName(name, usedNames){
 /// driverMonthlyBonusTotalInRange), nên LƯƠNG THỰC NHẬN ở đây LUÔN khớp
 /// tuyệt đối với sheet tổng hợp "Lương Tài Xế". Không hiện dầu/lợi nhuận
 /// ca (thuộc nội bộ chủ xe, không liên quan tới lương tài xế).
+/// SỬA 2026-08-25: bảng "CHI TIẾT TỪNG CA" trong PHIẾU LƯƠNG (cả sheet
+/// SheetJS lẫn file ExcelJS "In Phiếu Lương") trước đây cộng NGUYÊN site
+/// log vào đúng dòng của ca đang duyệt, KHÔNG kiểm tra chuyến nào bị đổi
+/// "Tài xế lấy hàng" (t.pickupDriverId) — trong khi mục TỔNG KẾT phía
+/// trên (dùng driverTripWageStatsInRange) đã tôn trọng đúng field này từ
+/// bản sửa 2026-08-20. Hậu quả: dòng chi tiết của ca người ĐỔ HỘ vẫn hiện
+/// đủ tiền chuyến bị đổi, trong khi phiếu của người MÚC HÀNG lại không có
+/// dòng nào cho chuyến đó — nhìn như bị tính nhầm cho người đổ hộ, dù số
+/// TỔNG cuối phiếu thực ra đã đúng.
+/// Hàm này CHỈ tổ chức lại cách hiển thị — KHÔNG đụng bất kỳ công thức
+/// tính lương lõi nào (siteWageTotal, siteEffectiveWageTrips,
+/// driverTripWageStatsInRange giữ nguyên, frozen). Tổng wageAmount trả về
+/// LUÔN khớp tuyệt đối với driverTripWageStatsInRange(driverId,...).tripWage.
+function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
+  const rows = [];
+  const sorted = [...shiftsForDriver].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
+
+  sorted.forEach(sh=>{
+    const sortKey = chronoKey(sh.date, sh.shiftType);
+    const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
+    const dateInfo = { date: formatDateVN(sh.date), shiftType: shiftTypeLabel(sh.shiftType), intensity: intensityLabel, status: statusLabel(sh.status) };
+    const blankDateInfo = { date:'', shiftType:'', intensity:'', status:'' };
+    const sites = sh.siteLogs || [];
+    if(sites.length===0){
+      rows.push({ ...dateInfo, isEmptyShift:true, isShiftHead:true, _sortKey:sortKey,
+        baseSalaryAllocation:sh.baseSalaryAllocation||0, foodAllowance:sh.foodAllowance||0,
+        advanceAmount:sh.advanceAmount||0, notes:sh.notes||'' });
+      return;
+    }
+    sites.forEach((s, idx)=>{
+      const head = idx===0 ? dateInfo : blankDateInfo;
+      const isShiftHead = idx===0;
+      const trailingFields = isShiftHead
+        ? { baseSalaryAllocation:sh.baseSalaryAllocation||0, foodAllowance:sh.foodAllowance||0, advanceAmount:sh.advanceAmount||0, notes:sh.notes||'' }
+        : { baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0, notes:'' };
+      const isC = s.siteType==='commercial';
+      if(!isC){
+        rows.push({ ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
+          siteLabel:s.siteName||'', typeLabel:'Chở Cước',
+          volumePerTrip:'', unitPrice:'', tripCount:siteTripCount(s),
+          wagePerTrip:s.driverWagePerTrip||0, effectiveTrips:siteEffectiveWageTrips(s),
+          wageAmount:siteWageTotal(s) });
+        return;
+      }
+      const trips = s.commercialTrips || [];
+      const hasOverride = trips.some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId);
+      if(!hasOverride){
+        rows.push({ ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
+          siteLabel:s.siteName||'', typeLabel:'Thương Mại',
+          volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
+          tripCount:siteTripCount(s), wagePerTrip:s.driverWagePerTrip||0,
+          effectiveTrips:siteEffectiveWageTrips(s), wageAmount:siteWageTotal(s) });
+        return;
+      }
+      // Site log này có ít nhất 1 chuyến bị đổi người lấy hàng — tách
+      // riêng đúng theo CÙNG điều kiện với driverTripWageStatsInRange().
+      const wagePerTrip = Number(s.driverWagePerTrip)||0;
+      const completeTrips = trips.filter(t=>
+        (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+        (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
+      const mineCount = completeTrips.filter(t=>(t.pickupDriverId||sh.driverId)===sh.driverId).length;
+      rows.push({ ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
+        siteLabel:s.siteName||'', typeLabel:'Thương Mại',
+        volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
+        tripCount:mineCount, wagePerTrip, effectiveTrips:mineCount,
+        wageAmount:mineCount*wagePerTrip });
+      // Dòng phụ chú thích cho từng chuyến bị lấy hộ bởi người KHÁC —
+      // KHÔNG cộng thêm tiền ở đây (tiền đã ghi nhận đúng bên phiếu của
+      // người lấy hàng, ở vòng thứ 2 bên dưới).
+      completeTrips.filter(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId).forEach(t=>{
+        const pd = driverById(t.pickupDriverId);
+        rows.push({ ...blankDateInfo, isShiftHead:false, _sortKey:sortKey,
+          baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0, notes:'',
+          siteLabel:`📌 1 chuyến tại ${s.siteName||'công trình này'} do ${pd?pd.name:'tài xế khác'} lấy hàng — lương tính bên phiếu của ${pd?pd.name:'người đó'}`,
+          typeLabel:'Ghi chú', volumePerTrip:'', unitPrice:'', tripCount:0, wagePerTrip:0, effectiveTrips:0, wageAmount:0 });
+      });
+    });
+  });
+
+  // Bổ sung các chuyến mà driverId là người LẤY HÀNG nhưng nằm trong ca
+  // của tài xế KHÁC (site log đó không thuộc shiftsForDriver nên không
+  // được duyệt ở vòng trên) — dùng đúng điều kiện lọc như
+  // driverTripWageStatsInRange để tổng luôn khớp tuyệt đối.
+  (state.shifts||[]).forEach(sh=>{
+    if(sh.date<from || sh.date>to || sh.status!=='active') return;
+    if(sh.driverId===driverId) return;
+    const sortKey = chronoKey(sh.date, sh.shiftType);
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      const trips = s.commercialTrips||[];
+      const completeTrips = trips.filter(t=>
+        (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+        (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
+      const mine = completeTrips.filter(t=>t.pickupDriverId===driverId);
+      if(mine.length===0) return;
+      const wagePerTrip = Number(s.driverWagePerTrip)||0;
+      const owner = driverById(sh.driverId);
+      rows.push({ date:formatDateVN(sh.date), shiftType:shiftTypeLabel(sh.shiftType),
+        intensity:(Number(sh.intensity)||1)===1.5?'1,5 ca':'1 ca', status:statusLabel(sh.status),
+        isShiftHead:true, baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0,
+        notes:`📌 Tự đi lấy hàng, ${owner?owner.name:'tài xế khác'} đổ hộ ngày ${formatDateVN(sh.date)}`,
+        _sortKey:sortKey, siteLabel:s.siteName||'', typeLabel:'Thương Mại (lấy hộ)',
+        volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
+        tripCount:mine.length, wagePerTrip, effectiveTrips:mine.length,
+        wageAmount:mine.length*wagePerTrip });
+    });
+  });
+
+  rows.sort((a,b)=>a._sortKey-b._sortKey);
+  return rows;
+}
+
 function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from, to){
   const rows = [];
   rows.push([`PHIẾU LƯƠNG — ${driverName}`]);
@@ -13809,27 +13948,24 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   const detailHeader = ['Ngày','Ca','Cường Độ','Trạng Thái','Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại','Khối Lượng/Chuyến','Đơn Giá','Số Chuyến',
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến (Ca Này)','Lương Cứng (Ca Này)','Tiền Ăn (Ca Này)','Ứng Lương (Ca Này)','Ghi Chú Ca'];
   rows.push(detailHeader);
-  const emptySiteFields = ['','','','','','','','',''];
-  const sorted = [...shiftsForDriver].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
-  for(const sh of sorted){
-    const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
-    const shared = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), intensityLabel, statusLabel(sh.status)];
-    const trailing = [sh.baseSalaryAllocation||0, sh.foodAllowance||0, sh.advanceAmount||0, sh.notes||''];
-    if((sh.siteLogs||[]).length===0){
-      rows.push([...shared, ...emptySiteFields, ...trailing]);
-    } else {
-      sh.siteLogs.forEach((s,idx)=>{
-        const isC = s.siteType==='commercial';
-        const siteFields = [isC?'':(s.siteName||''), isC?(s.siteName||''):'', isC?'Thương Mại':'Chở Cước',
-          isC?'':(s.volumePerTrip||0), isC?'':(s.materialUnitPrice||0), siteTripCount(s),
-          s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)];
-        // Lương Cứng/Tiền Ăn/Ứng Lương chỉ hiện ở DÒNG ĐẦU của ca — tránh
-        // hiểu nhầm là cộng dồn theo từng công trình khi 1 ca có nhiều
-        // công trình (số đó là của CẢ CA, không phải từng công trình).
-        rows.push([...shared, ...siteFields, ...(idx===0 ? trailing : ['','','',''])]);
-      });
-    }
-  }
+  // SỬA 2026-08-25: dùng buildDriverPayslipTripRows() để bảng chi tiết
+  // tôn trọng đúng "Tài xế lấy hàng" của từng chuyến — không còn cộng
+  // nhầm lương chuyến lấy-hộ vào ca của người đổ hộ. Tổng cột "Lương
+  // Chuyến (Ca Này)" của bảng này LUÔN cộng khớp tuyệt đối với dòng
+  // "Tổng Lương Chuyến" ở mục TỔNG KẾT phía trên.
+  const tripRows = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver);
+  tripRows.forEach(r=>{
+    const isC = !!r.typeLabel && r.typeLabel !== 'Chở Cước';
+    const siteFields = r.isEmptyShift
+      ? ['','','','','','','','','']
+      : [isC?'':(r.siteLabel||''), isC?(r.siteLabel||''):'', r.typeLabel||'',
+         r.volumePerTrip===undefined?'':r.volumePerTrip, r.unitPrice===undefined?'':r.unitPrice,
+         r.tripCount||0, r.wagePerTrip||0, r.effectiveTrips||0, r.wageAmount||0];
+    const trailing = r.isShiftHead
+      ? [r.baseSalaryAllocation||0, r.foodAllowance||0, r.advanceAmount||0, r.notes||'']
+      : ['','','',''];
+    rows.push([r.date||'', r.shiftType||'', r.intensity||'', r.status||'', ...siteFields, ...trailing]);
+  });
 
   const repairRows = repairsInRange(from, to).filter(r=>r.responsibleDriverId===driverId && repairDriverResponsibleAmount(r)>0);
   if(repairRows.length>0){
@@ -14284,23 +14420,22 @@ async function exportDriverPayslipXLSX(driverId){
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
   nextRow(32);
 
-  for(const sh of shiftsForDriver){
-    const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
-    const sites = sh.siteLogs||[];
-    if(sites.length===0){
-      const vals = [formatDateVN(sh.date), shiftTypeLabel(sh.shiftType), intensityLabel, statusLabel(sh.status), '', '', '', ''];
-      vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5?'right':'left') }));
-      nextRow();
-    } else {
-      sites.forEach((s,idx)=>{
-        const vals = [ idx===0?formatDateVN(sh.date):'', idx===0?shiftTypeLabel(sh.shiftType):'',
-          idx===0?intensityLabel:'', idx===0?statusLabel(sh.status):'',
-          s.siteName||'', siteEffectiveWageTrips(s), Number(s.driverWagePerTrip)||0, siteWageTotal(s) ];
-        vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined }));
-        nextRow();
-      });
-    }
-  }
+  // SỬA 2026-08-25: dùng chung buildDriverPayslipTripRows() với sheet
+  // "Phiếu Lương" trong file KT Thuế — tôn trọng đúng "Tài xế lấy hàng"
+  // của từng chuyến, không còn cộng nhầm lương chuyến lấy-hộ vào ca của
+  // người đổ hộ. "Số chuyến" ở đây vẫn là số chuyến TÍNH LƯƠNG (khớp
+  // đúng ý nghĩa siteEffectiveWageTrips cũ), không phải tổng số chuyến.
+  const tripRowsXlsx = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver);
+  tripRowsXlsx.forEach(rw=>{
+    const siteLabel = rw.isEmptyShift ? '' : (rw.siteLabel||'');
+    const vals = [ rw.date||'', rw.shiftType||'', rw.intensity||'', rw.status||'',
+      siteLabel,
+      rw.isEmptyShift?'':(rw.effectiveTrips||0),
+      rw.isEmptyShift?'':(rw.wagePerTrip||0),
+      rw.isEmptyShift?'':(rw.wageAmount||0) ];
+    vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined }));
+    nextRow();
+  });
   nextRow(12);
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'TỔNG KẾT LƯƠNG', { size:14, bold:true }); nextRow(24);
@@ -14501,14 +14636,37 @@ function refreshGoodsTypesDatalist(){
   dl.innerHTML = allGoodsTypes().map(n=>`<option value="${escapeHtml(n)}">`).join('');
 }
 
+/// Định vị viên "pill" trượt (tab-indicator) đúng vào vị trí nút đang
+/// active — gọi lại mỗi khi renderAll() xong (đề phòng đổi tab qua code,
+/// không chỉ qua bấm tay) VÀ ngay khi bấm tab (để trượt mượt tức thì,
+/// không đợi render xong). offsetLeft/offsetWidth đọc trực tiếp từ layout
+/// thật nên luôn đúng dù màn hình rộng/hẹp khác nhau.
+function positionTabIndicator(){
+  const bar = document.querySelector('nav.tabbar');
+  const indicator = document.getElementById('tabIndicator');
+  const activeBtn = bar && bar.querySelector('button.active');
+  if(!bar || !indicator || !activeBtn) return;
+  indicator.style.left = activeBtn.offsetLeft + 'px';
+  indicator.style.width = activeBtn.offsetWidth + 'px';
+}
 document.querySelectorAll('nav.tabbar button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     state.currentTab = btn.dataset.tab;
     state.view='list'; state.draftShift=null;
     state.showCompanyDashboard = false;
     renderAll();
+    positionTabIndicator();
+    // Icon nảy lên ngay lúc bấm — xoá class cũ trước (đề phòng bấm liên
+    // tục cùng 1 tab) rồi thêm lại để trigger animation từ đầu mỗi lần.
+    const icon = btn.querySelector('.ic');
+    if(icon){
+      icon.classList.remove('tab-pop');
+      void icon.offsetWidth; // ép trình duyệt tính lại style, cho phép chạy lại animation dù vừa mới chạy xong
+      icon.classList.add('tab-pop');
+    }
   });
 });
+window.addEventListener('resize', positionTabIndicator);
 
 document.getElementById('restoreFileInput').addEventListener('change', e=>{
   const file = e.target.files && e.target.files[0];
