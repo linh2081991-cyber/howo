@@ -282,17 +282,23 @@
   .summary-row.total{ border-top:1px solid var(--border); margin-top:6px; padding-top:12px; font-weight:800; font-size:17.5px; }
   .summary-row .val{ font-variant-numeric:tabular-nums; }
 
-  /// SỬA 2026-08-24: từng thêm 1 "viên pill" trượt mượt theo tab đang
-  /// chọn (tab-indicator) + icon nảy lên khi bấm (tab-pop) cho thanh tab
-  /// dưới cùng sinh động hơn.
-  /// SỬA 2026-08-25 — GỠ BỎ HẲN "viên pill" (tab-indicator): sau 2 lần vá
-  /// (đổi cách tính chiều cao, rồi đổi sang đo bằng JS) mà Ông Chủ vẫn
-  /// chụp được đúng 1 dải màu cam/hồng trong suốt phủ dọc gần hết màn
-  /// hình trên máy thật, quyết định AN TOÀN NHẤT là bỏ hẳn phần tử này
-  /// khỏi code — không còn phần tử màu nào để lỗi tái diễn được nữa dưới
-  /// bất kỳ hình thức nào. Icon vẫn nảy lên khi bấm tab (tab-pop, giữ
-  /// nguyên, không liên quan tới lỗi này) — chỉ mất đúng hiệu ứng viên
-  /// pill trượt nền, không đổi cấu trúc 5 nút hay logic chuyển tab.
+  /* SỬA 2026-08-24: từng thêm 1 "viên pill" trượt mượt theo tab đang
+     chọn (tab-indicator) + icon nảy lên khi bấm (tab-pop) cho thanh tab
+     dưới cùng sinh động hơn.
+     SỬA 2026-08-25 — GỠ BỎ HẲN "viên pill" (tab-indicator): sau nhiều lần
+     vá mà Ông Chủ vẫn báo lỗi hiển thị, quyết định AN TOÀN NHẤT là bỏ
+     hẳn phần tử này khỏi code. Icon vẫn nảy lên khi bấm tab (tab-pop,
+     giữ nguyên) — chỉ mất đúng hiệu ứng viên pill trượt nền, không đổi
+     cấu trúc 5 nút hay logic chuyển tab.
+     SỬA 2026-08-25 (LỖI GỐC THẬT SỰ — đã tìm ra): toàn bộ khối CSS
+     nav.tabbar phía dưới từng bị VÔ HIỆU HOÁ hoàn toàn vì đoạn chú thích
+     này trước đó dùng nhầm 3 dấu gạch chéo liền nhau kiểu comment
+     JavaScript, thay vì đúng cú pháp comment của CSS. Trình duyệt không
+     hiểu kiểu comment đó trong CSS, nó nuốt luôn cả đoạn chữ dính vào
+     "nav.tabbar" phía sau thành 1 selector rác — khiến style
+     position:fixed/display:flex của thanh tab KHÔNG ĐƯỢC ÁP DỤNG, thanh
+     tab trôi xuống cuối trang thay vì dính đáy màn hình. Đã đổi đúng lại
+     cú pháp comment CSS ở đây. */
   nav.tabbar{
     position:fixed; bottom:0; left:0; right:0; z-index:20;
     background:var(--surface); border-top:1px solid var(--border);
@@ -621,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #92';
+const APP_BUILD = '2026-08-25 · #93';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
