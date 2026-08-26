@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #103';
+const APP_BUILD = '2026-08-25 · #104';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14234,13 +14234,14 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
       completeTrips.filter(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId).forEach(t=>{
         const pd = driverById(t.pickupDriverId);
         const pdName = pd?pd.name:'tài xế khác';
-        const dateNote = t.pickupDate ? ` ngày ${formatDateVN(t.pickupDate)}` : '';
+        const dateNote = t.pickupDate ? ` ngày ${formatDateVN(t.pickupDate)}` : ' (chưa rõ ngày)';
         rows.push({ ...blankDateInfo, isShiftHead:false, _sortKey:sortKey,
           baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0, notes:'',
-          // SỬA 2026-08-25 (Ông Chủ yêu cầu — ghi thật rõ vì nhận thức tài
-          // xế còn hạn chế): dẫn thẳng bằng câu "ĐỔ GIÚP CHO [tên] MÚC",
-          // không nói vòng vo, kèm đủ công trình + ngày để đối chiếu.
-          siteLabel:`📌 ĐỔ GIÚP CHO ${pdName.toUpperCase()} MÚC — 1 chuyến tại ${s.siteName||'công trình này'}${dateNote}, tiền công của chuyến này tính bên phiếu lương của ${pdName}`,
+          // SỬA 2026-08-25 (Ông Chủ yêu cầu — rút GỌN, bỏ tên công trình lặp
+          // lại vì đã có ở cột bên trái, tối ưu đọc trên điện thoại):
+          // "Đổ giúp chuyến hàng cho (tên) lấy ngày (ngày)" — đúng nguyên
+          // văn mẫu Ông Chủ đưa, không thêm bớt.
+          siteLabel:`📌 Đổ giúp chuyến hàng cho ${pdName} lấy${dateNote}`,
           typeLabel:'Ghi chú', volumePerTrip:'', unitPrice:'', tripCount:0, wagePerTrip:0, effectiveTrips:0, wageAmount:0 });
       });
     });
@@ -14310,11 +14311,12 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
           targetRow.tripCount = (targetRow.tripCount||0) + count;
           targetRow.effectiveTrips = (targetRow.effectiveTrips||0) + count;
           targetRow.wageAmount = (targetRow.wageAmount||0) + count*wagePerTrip;
-          // SỬA 2026-08-25 (Ông Chủ yêu cầu — ghi thật rõ vì nhận thức tài
-          // xế còn hạn chế): dẫn thẳng bằng câu "MÚC HỘ CHO [tên] ĐI ĐỔ".
+          // SỬA 2026-08-25 (Ông Chủ yêu cầu — rút GỌN, tối ưu đọc trên điện
+          // thoại): "Múc chuyến hàng cho (tên) đi đổ ngày (ngày)" — đối
+          // xứng đúng mẫu "Đổ giúp chuyến hàng cho..." bên phiếu người đổ.
           const ownerName = owner?owner.name:'tài xế khác';
           targetRow.notes = (targetRow.notes ? targetRow.notes+' · ' : '') +
-            `📌 MÚC HỘ CHO ${ownerName.toUpperCase()} ĐI ĐỔ — ${count} chuyến${guessNote}, ${ownerName} đổ ngày ${formatDateVN(sh.date)}`;
+            `📌 Múc chuyến hàng cho ${ownerName} đi đổ ngày ${formatDateVN(sh.date)}${guessNote}`;
           return;
         }
 
@@ -14328,13 +14330,13 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
         const dispShiftType = targetShift ? targetShift.shiftType : sh.shiftType;
         const dispIntensity = targetShift ? targetShift.intensity : sh.intensity;
         const dispStatus = targetShift ? targetShift.status : sh.status;
-        // SỬA 2026-08-25 (Ông Chủ yêu cầu — ghi thật rõ): dẫn thẳng bằng
-        // câu "MÚC HỘ CHO [tên] ĐI ĐỔ", không nói vòng vo.
+        // SỬA 2026-08-25 (Ông Chủ yêu cầu — rút GỌN, tối ưu đọc trên điện
+        // thoại): "Múc chuyến hàng cho (tên) đi đổ ngày (ngày)".
         const ownerName2 = owner?owner.name:'tài xế khác';
         rows.push({ date:formatDateVN(dispDate), shiftType:shiftTypeLabel(dispShiftType),
           intensity:(Number(dispIntensity)||1)===1.5?'1,5 ca':'1 ca', status:statusLabel(dispStatus),
           isShiftHead:true, baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0,
-          notes:`📌 MÚC HỘ CHO ${ownerName2.toUpperCase()} ĐI ĐỔ — chuyến hàng tại ${s.siteName||'công trình này'}${guessNote}, ${ownerName2} đổ ngày ${formatDateVN(sh.date)}`,
+          notes:`📌 Múc chuyến hàng cho ${ownerName2} đi đổ ngày ${formatDateVN(sh.date)}${guessNote}`,
           _sortKey:chronoKey(dispDate, dispShiftType), siteLabel:s.siteName||'', typeLabel:'Thương Mại (lấy hộ)',
           volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
           tripCount:count, wagePerTrip, effectiveTrips:count,
@@ -14857,7 +14859,7 @@ async function exportDriverPayslipXLSX(driverId){
   // SỬA 2026-08-25 (Ông Chủ yêu cầu — "minh bạch để ai cũng hiểu"): giải
   // nghĩa ngay tại đây ý nghĩa của dòng tô vàng / "— GHI CHÚ —", để đọc
   // file không cần ai giải thích thêm.
-  merge(r,'A',lastColLetter); setCell(`A${r}`, '📌 Dòng tô vàng = có liên quan chuyến múc-hộ/đổ-hộ giữa 2 tài xế — đọc cột "Ghi Chú" bên phải để biết chi tiết. "— GHI CHÚ —" ở cột Trạng thái = dòng chỉ để giải thích, không phải 1 ca thật.', { size:11.5, color:'FF8A6D00', fill:'FFFFF3CD', border:true, wrap:true }); nextRow(30);
+  merge(r,'A',lastColLetter); setCell(`A${r}`, '📌 Dòng tô vàng là liên quan chuyến 2 tài xế Múc hộ/Đổ hộ nhau.', { size:11.5, color:'FF8A6D00', fill:'FFFFF3CD', border:true, wrap:true }); nextRow(24);
   const headRow = r;
   const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến','Thành tiền chuyến','Ghi Chú'];
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
@@ -14877,7 +14879,13 @@ async function exportDriverPayslipXLSX(driverId){
   // đủ, không mất chữ.
   const tripRowsXlsx = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver);
   tripRowsXlsx.forEach(rw=>{
-    const siteLabel = rw.isEmptyShift ? '' : (rw.siteLabel||'');
+    // SỬA 2026-08-25 (Ông Chủ yêu cầu — cột Công trình đang nối nhiều điểm
+    // múc-đổ khác nhau bằng dấu phẩy trên CÙNG 1 dòng, khó đọc): tách lại
+    // thành TỪNG DÒNG RIÊNG cho mỗi điểm múc-đổ khác nhau — CHỈ đổi cách
+    // HIỂN THỊ trong đúng file xuất này, không đụng s.siteName gốc lưu
+    // trong app (vẫn nối bằng dấu phẩy như cũ ở mọi chỗ khác, tránh vỡ
+    // hiển thị nơi khác đang phụ thuộc định dạng đó).
+    const siteLabel = rw.isEmptyShift ? '' : (rw.siteLabel||'').split(', ').join('\n');
     // SỬA 2026-08-25 (Ông Chủ yêu cầu — "file Excel xuất ra phải đủ thông
     // tin và minh bạch để ai cũng hiểu"): dòng "Ghi chú" (chỉ có chữ giải
     // thích, không có số liệu) trước đây hiện ra như 1 dòng trống bất
@@ -14898,7 +14906,11 @@ async function exportDriverPayslipXLSX(driverId){
       rw.isEmptyShift?'':(rw.wageAmount||0),
       rw.notes||'' ];
     vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5&&i<=7?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined, wrap:(i===4||i===8), fill:highlightFill, bold:isNoteRow&&i===4 }));
-    const siteLines = Math.max(1, Math.ceil((siteLabel||'').length / 50));
+    // SỬA 2026-08-25: tính chiều cao dòng theo TỪNG DÒNG THẬT (đã tách
+    // bằng \n ở trên) — mỗi dòng con vẫn có thể dài hơn bề rộng cột nên
+    // vẫn cần cộng thêm số dòng do tự xuống dòng (wrap) của chính nó,
+    // không chỉ đếm số dòng đã tách bằng \n.
+    const siteLines = siteLabel ? siteLabel.split('\n').reduce((sum,line)=>sum+Math.max(1,Math.ceil(line.length/28)), 0) : 1;
     const noteLines = Math.max(1, Math.ceil((rw.notes||'').length / 42));
     const estimatedLines = Math.max(siteLines, noteLines);
     nextRow(Math.max(ROW_H, 16*estimatedLines + 10));
