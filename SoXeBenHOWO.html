@@ -627,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #97';
+const APP_BUILD = '2026-08-25 · #98';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2284,6 +2284,36 @@ async function startApp(){
   document.getElementById('dataLoadingScreen').style.display = 'none';
   document.getElementById('shell').style.display = 'block';
   renderAll();
+}
+
+/// SỬA 2026-08-25 (lưới an toàn CUỐI CÙNG — Ông Chủ báo lỗi trắng trang
+/// nghiêm trọng ở bản #97, không tái hiện được bằng dữ liệu giả lập dù đã
+/// bọc try-catch quanh renderAll()): phòng trường hợp lỗi xảy ra ở MỘT
+/// chỗ nào đó hoàn toàn khác (vd trong lúc tải dữ liệu ban đầu, hoặc
+/// trong 1 hàm async không đi qua renderAll()), bắt TOÀN BỘ lỗi chưa ai
+/// xử lý ở cấp cao nhất của cả trang, hiện thẳng ra màn hình — không bao
+/// giờ để trắng trang mà không rõ lý do nữa.
+window.addEventListener('error', function(ev){
+  showFatalErrorBanner(ev.error || ev.message);
+});
+window.addEventListener('unhandledrejection', function(ev){
+  showFatalErrorBanner(ev.reason);
+});
+function showFatalErrorBanner(err){
+  try {
+    const shell = document.getElementById('shell');
+    if(!shell || shell.style.display==='none') return; // chưa đăng nhập xong thì thôi, khỏi làm rối màn đăng nhập
+    let box = document.getElementById('fatalErrorBanner');
+    if(!box){
+      box = document.createElement('div');
+      box.id = 'fatalErrorBanner';
+      box.style.cssText = 'position:fixed; left:10px; right:10px; bottom:80px; z-index:999; background:#FDECEC; border:2px solid #B23A2E; border-radius:12px; padding:12px; max-height:45vh; overflow:auto; font-family:monospace; font-size:11.5px; color:#7A1F1F; white-space:pre-wrap; word-break:break-word;';
+      document.body.appendChild(box);
+    }
+    const msg = (err && err.message) || String(err||'');
+    const stack = (err && err.stack) || '';
+    box.innerHTML = `<div style="font-weight:800; margin-bottom:6px; font-family:-apple-system,sans-serif; font-size:13px;">⚠️ Lỗi hệ thống — chụp màn hình khung này gửi đội kỹ thuật</div>${escapeHtml(msg)}\n${escapeHtml(stack)}`;
+  } catch(e2){ /* không để lưới an toàn tự gây lỗi thêm */ }
 }
 
 // ========================= ĐĂNG NHẬP =========================
@@ -14938,18 +14968,41 @@ function renderAll(){
     document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.remove('active'));
     return;
   }
-  if(state.currentTab==='shifts'){
-    if(state.view==='form') renderShiftForm();
-    else if(state.shiftArchiveMonth) renderShiftMonthArchive();
-    else renderShiftList();
-  } else if(state.currentTab==='drivers'){
-    renderDrivers();
-  } else if(state.currentTab==='strategy'){
-    renderStrategyHub();
-  } else if(state.currentTab==='results'){
-    renderResults();
-  } else {
-    renderSettings();
+  // SỬA 2026-08-25 (Ông Chủ báo — bản #97 vẫn bị trắng trang "Ca Làm
+  // Việc", đã kiểm chứng bằng nhiều kịch bản dữ liệu giả lập kể cả cố
+  // tình làm hỏng nhưng KHÔNG tái hiện được lỗi — nghĩa là đúng dữ liệu
+  // thật trên máy Ông Chủ có 1 tình huống cụ thể em chưa đoán trúng):
+  // bọc try-catch quanh TOÀN BỘ phần vẽ nội dung tab, và nếu có lỗi thật
+  // xảy ra, HIỆN THẲNG dòng lỗi + stack trace ra ngay trên màn hình thay
+  // vì để trắng trơn không biết đường nào mà lần. Ông Chủ chỉ cần chụp
+  // màn hình đúng nội dung hiện ra là em có ngay bằng chứng chính xác để
+  // sửa dứt điểm, không cần máy tính hay công cụ gì thêm.
+  try {
+    if(state.currentTab==='shifts'){
+      if(state.view==='form') renderShiftForm();
+      else if(state.shiftArchiveMonth) renderShiftMonthArchive();
+      else renderShiftList();
+    } else if(state.currentTab==='drivers'){
+      renderDrivers();
+    } else if(state.currentTab==='strategy'){
+      renderStrategyHub();
+    } else if(state.currentTab==='results'){
+      renderResults();
+    } else {
+      renderSettings();
+    }
+  } catch(e){
+    console.error('renderAll() lỗi khi vẽ tab', state.currentTab, ':', e);
+    const app = document.getElementById('app');
+    if(app){
+      app.innerHTML = `
+        <div class="card" style="border:2px solid var(--loss); margin:14px; padding:16px;">
+          <div style="font-weight:800; color:var(--loss); font-size:16px; margin-bottom:8px;">⚠️ Có lỗi khi hiện màn "${escapeHtml(state.currentTab||'')}"</div>
+          <div class="hint" style="margin-bottom:10px;">Chụp lại TOÀN BỘ khung đỏ này gửi cho đội kỹ thuật — đây là bằng chứng chính xác để tìm và sửa lỗi, không cần làm gì thêm.</div>
+          <div style="background:#FDECEC; border-radius:10px; padding:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; color:#7A1F1F; max-height:340px; overflow:auto;">${escapeHtml((e && e.message) || String(e))}
+${escapeHtml((e && e.stack) || '')}</div>
+        </div>`;
+    }
   }
   document.querySelectorAll('nav.tabbar button').forEach(b=>{
     b.classList.toggle('active', b.dataset.tab===state.currentTab);
