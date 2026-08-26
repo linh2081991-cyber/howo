@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #102';
+const APP_BUILD = '2026-08-25 · #103';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -5137,9 +5137,13 @@ function renderShiftCard(sh){
   const fuel = shiftFuelConsumed(sh);
   const revenue = shiftTotalRevenue(sh);
   const crossInfo = shiftCrossDriverInfo(sh);
-  const crossTag = crossInfo.isDeliveringForOthers
-    ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Đổ hộ</span>'
-    : (crossInfo.isPickingUpForOthers ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Múc hộ</span>' : '');
+  // SỬA 2026-08-25 (Ông Chủ yêu cầu — ca có thể vừa "đổ hộ" người khác,
+  // vừa là ngày chính mình "múc hộ" cho 1 chuyến khác, như ví dụ ngày 16/8
+  // Lộc vừa vừa đổ giúp Thắng vừa tự múc cho Thắng đổ hôm sau): TRƯỚC ĐÂY
+  // dùng if/else nên chỉ hiện được 1 trong 2 ghim, ưu tiên "Đổ hộ" và ẩn
+  // mất "Múc hộ". Giờ hiện ĐỦ CẢ HAI khi cả hai đều đúng, không còn ẩn.
+  const crossTag = (crossInfo.isDeliveringForOthers ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Đổ hộ</span>' : '')
+    + (crossInfo.isPickingUpForOthers ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Múc hộ</span>' : '');
   return `
     <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
       <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
@@ -14850,6 +14854,10 @@ async function exportDriverPayslipXLSX(driverId){
   nextRow(12);
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); nextRow(24);
+  // SỬA 2026-08-25 (Ông Chủ yêu cầu — "minh bạch để ai cũng hiểu"): giải
+  // nghĩa ngay tại đây ý nghĩa của dòng tô vàng / "— GHI CHÚ —", để đọc
+  // file không cần ai giải thích thêm.
+  merge(r,'A',lastColLetter); setCell(`A${r}`, '📌 Dòng tô vàng = có liên quan chuyến múc-hộ/đổ-hộ giữa 2 tài xế — đọc cột "Ghi Chú" bên phải để biết chi tiết. "— GHI CHÚ —" ở cột Trạng thái = dòng chỉ để giải thích, không phải 1 ca thật.', { size:11.5, color:'FF8A6D00', fill:'FFFFF3CD', border:true, wrap:true }); nextRow(30);
   const headRow = r;
   const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến','Thành tiền chuyến','Ghi Chú'];
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
@@ -14870,13 +14878,26 @@ async function exportDriverPayslipXLSX(driverId){
   const tripRowsXlsx = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver);
   tripRowsXlsx.forEach(rw=>{
     const siteLabel = rw.isEmptyShift ? '' : (rw.siteLabel||'');
-    const vals = [ rw.date||'', rw.shiftType||'', rw.intensity||'', rw.status||'',
+    // SỬA 2026-08-25 (Ông Chủ yêu cầu — "file Excel xuất ra phải đủ thông
+    // tin và minh bạch để ai cũng hiểu"): dòng "Ghi chú" (chỉ có chữ giải
+    // thích, không có số liệu) trước đây hiện ra như 1 dòng trống bất
+    // thường, dễ gây hiểu nhầm là lỗi/thiếu dữ liệu. Giờ:
+    //  - Cột "Trạng thái" ghi rõ "— GHI CHÚ —" thay vì để trống, để không
+    //    ai tưởng nhầm đây là 1 ca thật bị thiếu dữ liệu.
+    //  - Mọi dòng có dính múc-hộ/đổ-hộ (kể cả dòng Ghi chú lẫn dòng chính
+    //    có notes) được TÔ NỀN VÀNG NHẠT để nổi bật ngay khi lướt mắt qua
+    //    cả bảng, không cần đọc từng dòng mới biết ca nào có liên quan.
+    const isNoteRow = rw.typeLabel==='Ghi chú';
+    const hasCrossNote = isNoteRow || !!(rw.notes && rw.notes.trim());
+    const statusText = isNoteRow ? '— GHI CHÚ —' : (rw.status||'');
+    const highlightFill = hasCrossNote ? 'FFFFF3CD' : undefined;
+    const vals = [ rw.date||'', rw.shiftType||'', rw.intensity||'', statusText,
       siteLabel,
       rw.isEmptyShift?'':(rw.effectiveTrips||0),
       rw.isEmptyShift?'':(rw.wagePerTrip||0),
       rw.isEmptyShift?'':(rw.wageAmount||0),
       rw.notes||'' ];
-    vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5&&i<=7?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined, wrap:(i===4||i===8) }));
+    vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5&&i<=7?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined, wrap:(i===4||i===8), fill:highlightFill, bold:isNoteRow&&i===4 }));
     const siteLines = Math.max(1, Math.ceil((siteLabel||'').length / 50));
     const noteLines = Math.max(1, Math.ceil((rw.notes||'').length / 42));
     const estimatedLines = Math.max(siteLines, noteLines);
