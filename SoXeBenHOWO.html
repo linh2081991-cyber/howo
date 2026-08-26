@@ -627,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #98';
+const APP_BUILD = '2026-08-25 · #99';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4572,6 +4572,19 @@ function driverTripWageStatsInRange(driverId, from, to, shiftsList){
   });
   return { tripCount, tripWage };
 }
+
+/// SỬA 2026-08-25 (KHÔI PHỤC — lỗi nghiêm trọng do em gây ra): hàm
+/// shiftOdoDriven() bị XOÁ NHẦM hoàn toàn khỏi code khi em thêm
+/// driverPersonalRevenueCostStatsInRange() ở bản #96 — lúc sửa, em dùng
+/// đúng dòng "function shiftOdoDriven(...)" làm mốc neo str_replace nhưng
+/// quên chèn lại nó trong nội dung mới. Hậu quả: MỌI nơi gọi tới km chạy
+/// (14 chỗ khắp app — thẻ ca, phiếu lương, cảnh báo bảo dưỡng, hòa
+/// vốn...) đều ném lỗi "Can't find variable: shiftOdoDriven", làm hỏng
+/// cả renderShiftList() vì computeMaintenanceWarnings() gọi hàm này qua
+/// fleetAvgKmPerDayRecent(). Đây chính là nguyên nhân gốc của lỗi "trắng
+/// trang Ca Làm Việc" mà Ông Chủ báo — không phải do dữ liệu, mà do code
+/// em xoá nhầm. Khôi phục lại NGUYÊN VĂN đúng công thức gốc.
+function shiftOdoDriven(sh){ return Math.max(0, (Number(sh.odoEnd)||0) - (Number(sh.odoStart)||0)); }
 
 /// SỬA 2026-08-25 (Ông Chủ yêu cầu — mục B): "Doanh Thu Tạo Ra" và "Lợi
 /// Nhuận Ròng Tạo Ra" ở màn CHI TIẾT TÀI XẾ (KPI cá nhân để so sánh/xây
