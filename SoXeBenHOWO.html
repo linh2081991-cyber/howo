@@ -627,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #95';
+const APP_BUILD = '2026-08-25 · #96';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1059,7 +1059,29 @@ function computeAllWarnings(){
   const maint = computeMaintenanceWarnings();
   const loan = computeLoanDueWarning();
   const invoices = computeInvoiceWarnings();
-  return { docs, maint, loan, invoices, total: docs.length + maint.length + (loan?1:0) + invoices.length };
+  const missingPickupDates = computeMissingPickupDateWarnings();
+  return { docs, maint, loan, invoices, missingPickupDates, total: docs.length + maint.length + (loan?1:0) + invoices.length + missingPickupDates.length };
+}
+/// SỬA 2026-08-25 (Ông Chủ yêu cầu — mục C2): quét mọi chuyến thương mại
+/// đã chọn "Tài xế lấy hàng" khác tài xế ca (pickupDriverId) NHƯNG CHƯA
+/// chọn "Múc ngày nào?" (pickupDate còn trống) — đây là các chuyến còn
+/// đang phải ĐOÁN "ca gần nhất" trong phiếu lương/thẻ ca thay vì tính
+/// chính xác. Giúp Ông Chủ rà và bổ sung dần cho hết đoán mò.
+function computeMissingPickupDateWarnings(){
+  const out = [];
+  for(const sh of state.shifts){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType!=='commercial') continue;
+      (s.commercialTrips||[]).forEach(t=>{
+        if(t.pickupDriverId && t.pickupDriverId!==sh.driverId && !t.pickupDate){
+          const pd = driverById(t.pickupDriverId);
+          out.push({ shiftId: sh.id, date: sh.date, siteName: s.siteName||'(chưa đặt tên)', pickupDriverName: pd?pd.name:'(chưa rõ)' });
+        }
+      });
+    }
+  }
+  out.sort((a,b)=>b.date.localeCompare(a.date));
+  return out;
 }
 // Quét mọi công trình THƯƠNG MẠI xem chuyến hàng nào còn thiếu hóa đơn MUA
 // hoặc BÁN (vì cả 2 bên cuối tháng mới xuất) — để Ông Chủ chủ động đòi/xuất,
@@ -1107,6 +1129,37 @@ function openInvoiceWarningsDetail(){
         </div>`).join('')}
     </section>`;
   document.getElementById('invoiceDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+}
+/// SỬA 2026-08-25 (Ông Chủ yêu cầu — mục C2): trang chi tiết cho cảnh báo
+/// "Chuyến Lấy Hộ Thiếu Ngày Múc" — theo đúng mẫu openInvoiceWarningsDetail
+/// ở trên, có thêm nút "Bổ Sung Ngay →" mở thẳng ca đó ra sửa cho nhanh,
+/// khỏi phải tự tìm lại đúng ngày/ca trong danh sách.
+function openMissingPickupDateDetail(){
+  saveMainScroll();
+  const items = computeMissingPickupDateWarnings();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="pickupDateDetailBackBtn">← Quay Lại Ca Làm Việc</button>
+    </section>
+
+    <section class="group">
+      <h3>📌 Chuyến Lấy Hộ Thiếu Ngày Múc</h3>
+      <div class="hint" style="margin-bottom:12px;">${items.length} chuyến đã chọn tài xế lấy hàng khác tài xế ca nhưng CHƯA chọn "Múc ngày nào?" — các chuyến này đang phải ĐOÁN ca gần nhất khi tính lương/doanh thu cá nhân, dễ sai nếu tài xế có nhiều ca liên tiếp. Bổ sung ngày múc để tính chính xác tuyệt đối.</div>
+      ${items.length===0 ? '<div class="hint">Không còn chuyến nào thiếu ngày múc.</div>' : items.map((v,idx)=>`
+        <div class="card" style="padding:12px 14px; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <span style="font-weight:700; font-size:14.5px;">${escapeHtml(v.siteName)}</span>
+            <span class="rating-badge warn">${escapeHtml(v.pickupDriverName)} lấy hàng</span>
+          </div>
+          <div class="hint" style="margin-top:2px;">Ca đổ hộ ngày ${formatDateVN(v.date)}</div>
+          <button class="btn btn-ghost btn-sm" data-shift-id="${escapeHtml(v.shiftId)}" style="margin-top:8px;">Bổ Sung Ngay →</button>
+        </div>`).join('')}
+    </section>`;
+  document.getElementById('pickupDateDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  app.querySelectorAll('button[data-shift-id]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ openShift(btn.dataset.shiftId); });
+  });
 }
 // Cảnh báo đến hạn đóng lãi ngân hàng — hiện từ ngày 17 (3 ngày trước hạn,
 // nếu hạn là 20) tới hết ngày đến hạn, và tiếp tục hiện QUÁ HẠN nếu chưa
@@ -4482,7 +4535,79 @@ function driverTripWageStatsInRange(driverId, from, to, shiftsList){
   return { tripCount, tripWage };
 }
 
-function shiftOdoDriven(sh){ return Math.max(0, (Number(sh.odoEnd)||0) - (Number(sh.odoStart)||0)); }
+/// SỬA 2026-08-25 (Ông Chủ yêu cầu — mục B): "Doanh Thu Tạo Ra" và "Lợi
+/// Nhuận Ròng Tạo Ra" ở màn CHI TIẾT TÀI XẾ (KPI cá nhân để so sánh/xây
+/// chiến lược, KHÔNG PHẢI sổ sách công ty) giờ chia đúng theo TÀI XẾ MÚC
+/// cho từng chuyến thương mại, thay vì luôn tính hết cho tài xế đứng ca
+/// (đổ hộ) như cũ. Ông Chủ đã xác nhận rõ ràng: CHỈ áp dụng ở đây — thẻ
+/// ca, "Kết Quả Kinh Doanh", file KT Thuế... vẫn giữ NGUYÊN 100% theo
+/// shiftTotalRevenue/shiftNetProfit cũ (không đụng, không gọi hàm này ở
+/// bất kỳ đâu khác), vì đó là sổ sách thật phải khớp hoá đơn/VAT theo
+/// đúng ngày giao dịch.
+/// Nguyên tắc chia lại (đã thống nhất với Ông Chủ):
+///  - CHUYỂN cho tài xế múc: doanh thu bán (net) + giá vốn mua (net) +
+///    lương chuyến — của ĐÚNG chuyến đó (dùng effDriver =
+///    t.pickupDriverId || sh.driverId, giống hệt driverTripWageStatsInRange).
+///  - GIỮ NGUYÊN cho tài xế đứng ca (đổ hộ): xăng dầu, lương cứng, tiền
+///    ăn, tiền nhà, phát sinh, luật đường, chi phí bổ sung hoá đơn kho —
+///    đây là chi phí THẬT phát sinh đúng ngày họ lái ca đó, không liên
+///    quan tới hàng của ai.
+/// Doanh thu/giá vốn từng chuyến tính bằng ĐÚNG công thức chia VAT y hệt
+/// commercialNetSell()/commercialNetBuy() (hàm lõi, không đụng) — chỉ áp
+/// dụng cho TỪNG chuyến thay vì cộng cả site log rồi mới chia, về mặt đại
+/// số cho ra tổng giống hệt nhau (phép chia phân phối đúng qua phép cộng)
+/// nên không lệch 1 đồng nào so với tổng công ty.
+function driverPersonalRevenueCostStatsInRange(driverId, from, to, shiftsList){
+  const list = shiftsList || state.shifts;
+  let revenue = 0, materialCost = 0, fixedCost = 0;
+
+  list.forEach(sh=>{
+    // LƯU Ý: KHÔNG lọc status!=='active' ở đây — theo đúng tinh thần bản
+    // sửa 2026-08-23 (Ông Chủ: "tất cả các con số trong app phải đồng
+    // nhất"), chi phí cố định (lương cứng/ăn/nhà...) vẫn phát sinh cả ở
+    // ca Nằm Bãi/Nghỉ Phép tuỳ Chính Sách Chi Phí Theo Trạng Thái, nên
+    // vẫn phải cộng cho đúng ca đó. Phần lương chuyến (tripWage) vẫn tự
+    // lọc đúng "chỉ ca Hoạt Động" bên trong driverTripWageStatsInRange
+    // (gọi riêng bên dưới) — không đổi hành vi hàm đó.
+    if(sh.date<from || sh.date>to) return;
+    const isMine = sh.driverId===driverId;
+
+    if(isMine){
+      fixedCost += shiftFuelCost(sh) + (Number(sh.baseSalaryAllocation)||0)
+        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0)
+        + (Number(sh.incidentalCost)||0) + (Number(sh.roadFeeIncidental)||0)
+        + shiftInvoiceSupplementCost(sh);
+    }
+
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial'){
+        // Chở cước: không có khái niệm lấy hộ — doanh thu vẫn 100% theo
+        // đúng ca như cũ.
+        if(isMine) revenue += siteRevenue(s);
+        return;
+      }
+      const trips = s.commercialTrips||[];
+      const completeTrips = trips.filter(t=>
+        (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+        (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
+      const vatFrac = siteVatRateFraction(s);
+      completeTrips.forEach(t=>{
+        const effDriver = t.pickupDriverId || sh.driverId;
+        if(effDriver!==driverId) return;
+        const grossSell = (Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0);
+        const grossBuy = (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
+        revenue += s.sellIncludesVat ? grossSell/(1+vatFrac) : grossSell;
+        materialCost += s.buyIncludesVat ? grossBuy/(1+vatFrac) : grossBuy;
+      });
+    });
+  });
+
+  const tripWage = driverTripWageStatsInRange(driverId, from, to, list).tripWage;
+  const netProfit = revenue - materialCost - tripWage - fixedCost;
+  return { revenue, materialCost, tripWage, fixedCost, netProfit };
+}
+
+
 function shiftFuelConsumed(sh){ return Math.max(0, ((Number(sh.fuelStart)||0)+(Number(sh.fuelAdded)||0)) - (Number(sh.fuelEnd)||0)); }
 function shiftFuelCost(sh){ return shiftFuelConsumed(sh) * (Number(sh.fuelUnitPrice)||0); }
 function shiftTotalRevenue(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteRevenue(s),0); }
@@ -4851,6 +4976,33 @@ function driverOnlineStatusHtml(driverKey){
 }
 /// Card 1 ca dùng chung cho cả layout cột — bỏ dòng "Tài xế: ..." so với
 /// bản gộp cũ vì tên tài xế giờ đã là tiêu đề cột, tránh lặp lại 2 lần.
+/// SỬA 2026-08-25 (Ông Chủ yêu cầu — mục C1): kiểm tra 1 ca có "dính"
+/// chuyến múc-hộ/đổ-hộ hay không, để gắn dấu ghim 📌 ngay trên thẻ ca ở
+/// danh sách chính — trước đây chỉ thấy khi mở "Sửa Ca" ra xem từng
+/// chuyến, không tiện theo dõi nhanh.
+/// Trả về { isDeliveringForOthers, isPickingUpForOthers } — 1 ca có thể
+/// đúng cả 2 vai cùng lúc (vd vừa đổ hộ người khác, vừa có chuyến của
+/// chính mình được người khác múc đi đâu đó khác).
+function shiftCrossDriverInfo(sh){
+  let isDeliveringForOthers = false;
+  (sh.siteLogs||[]).forEach(s=>{
+    if(s.siteType!=='commercial') return;
+    if((s.commercialTrips||[]).some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId)) isDeliveringForOthers = true;
+  });
+  let isPickingUpForOthers = false;
+  (state.shifts||[]).forEach(other=>{
+    if(other.id===sh.id || other.driverId===sh.driverId) return;
+    (other.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      (s.commercialTrips||[]).forEach(t=>{
+        if(t.pickupDriverId===sh.driverId && (t.pickupDate ? t.pickupDate===sh.date : false)){
+          isPickingUpForOthers = true;
+        }
+      });
+    });
+  });
+  return { isDeliveringForOthers, isPickingUpForOthers };
+}
 function renderShiftCard(sh){
   const profit=shiftNetProfit(sh);
   const positive = profit>=0;
@@ -4862,6 +5014,10 @@ function renderShiftCard(sh){
   const km = shiftOdoDriven(sh);
   const fuel = shiftFuelConsumed(sh);
   const revenue = shiftTotalRevenue(sh);
+  const crossInfo = shiftCrossDriverInfo(sh);
+  const crossTag = crossInfo.isDeliveringForOthers
+    ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Đổ hộ</span>'
+    : (crossInfo.isPickingUpForOthers ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Múc hộ</span>' : '');
   return `
     <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
       <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
@@ -4871,6 +5027,7 @@ function renderShiftCard(sh){
           <div class="row1-right">
             ${(Number(sh.intensity)||1)===1.5 ? '<span class="tag" style="background:#FDF0D5; color:#B8791A;">1,5 ca</span>' : ''}
             <span class="tag" style="${statusColorStyle(sh.status)}">${statusLabel(sh.status)}</span>
+            ${crossTag}
             ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
           </div>
         </div>
@@ -4947,6 +5104,12 @@ function renderShiftList(){
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:10px 12px; background:#FFF3CD; border-radius:12px;">
           <span style="font-weight:700; font-size:13.5px; color:#8A6D00;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</span>
           <button class="btn btn-ghost btn-sm" id="invoiceWarningsDetailBtn" style="flex:none; white-space:nowrap; margin-top:0;">Chi Tiết →</button>
+        </div>
+      ` : ''}
+      ${warnings.missingPickupDates && warnings.missingPickupDates.length>0 ? `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:10px 12px; background:#FDECEC; border-radius:12px;">
+          <span style="font-weight:700; font-size:13.5px; color:#B23A2E;">📌 Chuyến Lấy Hộ Thiếu Ngày Múc (${warnings.missingPickupDates.length})</span>
+          <button class="btn btn-ghost btn-sm" id="missingPickupDateDetailBtn" style="flex:none; white-space:nowrap; margin-top:0;">Chi Tiết →</button>
         </div>
       ` : ''}
       <button class="link-btn" id="warningsGoToSettingsBtn" style="margin-top:6px;">Quản lý giấy tờ / bảo dưỡng →</button>
@@ -5081,6 +5244,8 @@ function bindSearchBar(){
 function bindWarningsBanner(){
   const invBtn = document.getElementById('invoiceWarningsDetailBtn');
   if(invBtn) invBtn.addEventListener('click', openInvoiceWarningsDetail);
+  const pickupBtn = document.getElementById('missingPickupDateDetailBtn');
+  if(pickupBtn) pickupBtn.addEventListener('click', openMissingPickupDateDetail);
   const btn = document.getElementById('warningsGoToSettingsBtn');
   if(btn) btn.addEventListener('click', ()=>{ state.currentTab='settings'; renderAll(); });
   const loanBtn = document.getElementById('loanPaidBtn');
@@ -7131,14 +7296,15 @@ function openDriverDetail(driverId){
   // Thu KHÔNG đổi số — chỉ riêng Lợi Nhuận Ròng đổi, vì đây là chỗ DUY
   // NHẤT có chi phí (lương cứng/ăn/nhà) bị bỏ sót trước đây.
   const totalKm = inRange.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
-  const totalRevenue = inRange.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
-  // Lợi nhuận RÒNG mà tài xế này tạo ra trong kỳ — cộng dồn đúng
-  // shiftNetProfit() (hàm lãi/lỗ gốc, không đụng vào) của TẤT CẢ ca trong
-  // kỳ (không riêng ca Hoạt Động) — để khớp đúng "Kết Quả Kinh Doanh"
-  // cùng khoảng ngày, có cộng cả chi phí lương cứng/ăn/nhà của ca Nằm
-  // Bãi/Nghỉ Phép (những ca này vẫn được tính các khoản đó theo đúng
-  // Chính Sách Chi Phí Theo Trạng Thái).
-  const totalNetProfit = inRange.reduce((s,sh)=>s+shiftNetProfit(sh),0);
+  // SỬA 2026-08-25 (Ông Chủ yêu cầu — mục B, đã xác nhận CHỈ áp dụng ở
+  // đúng màn này): Doanh Thu/Lợi Nhuận Ròng cá nhân giờ chia đúng theo
+  // tài xế MÚC cho từng chuyến thương mại (xem driverPersonalRevenueCostStatsInRange
+  // ở trên, không đụng shiftTotalRevenue/shiftNetProfit gốc). Thẻ ca,
+  // "Kết Quả Kinh Doanh", file KT Thuế... vẫn dùng đúng công thức cũ,
+  // không đổi.
+  const personalStats = driverPersonalRevenueCostStatsInRange(driverId, from, to, state.shifts);
+  const totalRevenue = personalStats.revenue;
+  const totalNetProfit = personalStats.netProfit;
 
   // Only real statuses the app actually has (STATUS_OPTIONS) — no invented
   // categories like "Nghỉ Lễ" that don't exist elsewhere in the app.
