@@ -231,15 +231,23 @@
   input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
   input[type=date]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
-  /* input[type=month] (ô "Thêm Tháng Mới") TRƯỚC ĐÂY chưa từng được style
-     (không có mặt trong rule chung phía trên) — hiện ra như 1 ô trống/xám
-     mặc định của trình duyệt, lệch hẳn với ô nút "+ Thêm Tháng Mới" bên
-     cạnh (ảnh Ông Chủ chỉ 2026-08-16). Thêm rule riêng y hệt input[type=date]
-     ở trên (cùng lỗi shadow pseudo-element của iOS Safari không tự nhận
-     font-size) để đồng bộ kích cỡ, không còn ô trống bất thường nữa. */
-  input[type=month]{ -webkit-text-size-adjust:100%; text-align:left; height:48px; line-height:20px; font-size:19px; overflow:hidden; }
-  input[type=month]::-webkit-date-and-time-value{ text-align:left; margin:0; height:20px; font-size:19px; line-height:20px; }
-  input[type=month]::-webkit-datetime-edit{ font-size:19px; line-height:20px; }
+  /* input[type=month] (ô "Thêm Tháng Mới", "Tháng thưởng"...) TRƯỚC ĐÂY
+     chưa từng được style (không có mặt trong rule chung phía trên) — hiện
+     ra như 1 ô trống/xám mặc định của trình duyệt, lệch hẳn với ô nút
+     "+ Thêm Tháng Mới" bên cạnh (ảnh Ông Chủ chỉ 2026-08-16). Thêm rule
+     riêng y hệt input[type=date] ở trên (cùng lỗi shadow pseudo-element
+     của iOS Safari không tự nhận font-size) để đồng bộ kích cỡ, không còn
+     ô trống bất thường nữa.
+     SỬA LẠI 2026-08-25 (Ông Chủ chỉ ảnh "Tháng thưởng" to hẳn so với ô
+     "Số tiền thưởng" bên dưới): bản sửa 2026-08-19 đồng bộ TOÀN BỘ ô ngày
+     (input[type=date]) về đúng cỡ 14.5px/cao 44px đã kiểm chứng ổn định —
+     nhưng CHỈ sửa input[type=date], quên mất input[type=month] vẫn còn
+     nguyên cỡ cũ (19px/cao 48px) từ bản 2026-08-16. Đồng bộ nốt về ĐÚNG
+     cùng 1 con số với input[type=date], để mọi ô ngày/tháng trong toàn app
+     to bằng nhau và bằng đúng ô số tiền như Ông Chủ yêu cầu. */
+  input[type=month]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; }
+  input[type=month]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
+  input[type=month]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
   /* "Từ ngày/Đến ngày" cho chữ nhãn NỔI hơn hẳn (yêu cầu Ông Chủ 2026-08-16)
      — đậm + đen hẳn thay vì xám nhạt như nhãn thường, áp dụng tự động cho
      toàn bộ 10 chỗ dùng chung class .date-range trong app. */
@@ -477,9 +485,12 @@
      .search-bar ở trên, thêm khoảng cách dưới trước khối 2 tài xế cho
      thoáng mắt (yêu cầu Ông Chủ 2026-08-16). */
   .month-picker-row{ display:flex; gap:8px; margin-top:8px; margin-bottom:20px; }
-  .month-picker-row input[type=month]{ flex:1; height:44px; padding:0 13px; font-size:15.5px; }
-  .month-picker-row input[type=month]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:15.5px; line-height:18px; }
-  .month-picker-row input[type=month]::-webkit-datetime-edit{ font-size:15.5px; line-height:18px; }
+  /* SỬA 2026-08-25 (rà soát toàn app theo yêu cầu Ông Chủ): đổi từ 15.5px
+     xuống đúng 14.5px — khớp tuyệt đối với input[type=date]/input[type=month]
+     gốc ở trên, không còn lệch nhau 1px giữa các ô ngày/tháng trong app. */
+  .month-picker-row input[type=month]{ flex:1; height:44px; padding:0 12px; font-size:14.5px; }
+  .month-picker-row input[type=month]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
+  .month-picker-row input[type=month]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
   .month-picker-row .btn{ flex-shrink:0; height:44px; padding:0 16px; font-size:13.5px; white-space:nowrap; }
 
   /* 2 ô "Từ ngày / Đến ngày" xếp DỌC (mỗi ô 1 dòng riêng), không xếp ngang */
@@ -627,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #100';
+const APP_BUILD = '2026-08-25 · #102';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -5083,6 +5094,14 @@ function shiftCrossDriverInfo(sh){
   // vẫn hiện bình thường — chỉ mất đúng dấu ghim 📌 của riêng ca đó, không
   // ảnh hưởng gì khác.
   try {
+    // SỬA 2026-08-25 (Ông Chủ chỉ ảnh — ca 19/8 Ca Đêm "Nằm Bãi" bị gắn
+    // nhầm ghim "Múc hộ"): hàm này TRƯỚC ĐÂY chỉ so khớp theo NGÀY, không
+    // kiểm tra ca đó có đang Hoạt Động hay không — nên khi 1 tài xế có cả
+    // ca Ngày (Hoạt Động) lẫn ca Đêm (Nằm Bãi) cùng ngày, cả 2 ca đều bị
+    // gắn ghim dù ca Đêm không hề có chuyến hàng nào. Chỉ ca "Hoạt Động"
+    // mới có thể thật sự chứa/liên quan chuyến hàng — ca Nằm Bãi/Nghỉ Phép
+    // không bao giờ nên có ghim, theo đúng yêu cầu Ông Chủ.
+    if(sh.status!=='active') return { isDeliveringForOthers:false, isPickingUpForOthers:false };
     let isDeliveringForOthers = false;
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
@@ -14210,10 +14229,14 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
       // người lấy hàng, ở vòng thứ 2 bên dưới).
       completeTrips.filter(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId).forEach(t=>{
         const pd = driverById(t.pickupDriverId);
+        const pdName = pd?pd.name:'tài xế khác';
         const dateNote = t.pickupDate ? ` ngày ${formatDateVN(t.pickupDate)}` : '';
         rows.push({ ...blankDateInfo, isShiftHead:false, _sortKey:sortKey,
           baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0, notes:'',
-          siteLabel:`📌 1 chuyến tại ${s.siteName||'công trình này'} do ${pd?pd.name:'tài xế khác'} lấy hàng${dateNote} — lương tính bên phiếu của ${pd?pd.name:'người đó'}`,
+          // SỬA 2026-08-25 (Ông Chủ yêu cầu — ghi thật rõ vì nhận thức tài
+          // xế còn hạn chế): dẫn thẳng bằng câu "ĐỔ GIÚP CHO [tên] MÚC",
+          // không nói vòng vo, kèm đủ công trình + ngày để đối chiếu.
+          siteLabel:`📌 ĐỔ GIÚP CHO ${pdName.toUpperCase()} MÚC — 1 chuyến tại ${s.siteName||'công trình này'}${dateNote}, tiền công của chuyến này tính bên phiếu lương của ${pdName}`,
           typeLabel:'Ghi chú', volumePerTrip:'', unitPrice:'', tripCount:0, wagePerTrip:0, effectiveTrips:0, wageAmount:0 });
       });
     });
@@ -14283,8 +14306,11 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
           targetRow.tripCount = (targetRow.tripCount||0) + count;
           targetRow.effectiveTrips = (targetRow.effectiveTrips||0) + count;
           targetRow.wageAmount = (targetRow.wageAmount||0) + count*wagePerTrip;
+          // SỬA 2026-08-25 (Ông Chủ yêu cầu — ghi thật rõ vì nhận thức tài
+          // xế còn hạn chế): dẫn thẳng bằng câu "MÚC HỘ CHO [tên] ĐI ĐỔ".
+          const ownerName = owner?owner.name:'tài xế khác';
           targetRow.notes = (targetRow.notes ? targetRow.notes+' · ' : '') +
-            `📌 Gồm ${count} chuyến lấy hộ${guessNote} (${owner?owner.name:'tài xế khác'} đổ hộ ngày ${formatDateVN(sh.date)})`;
+            `📌 MÚC HỘ CHO ${ownerName.toUpperCase()} ĐI ĐỔ — ${count} chuyến${guessNote}, ${ownerName} đổ ngày ${formatDateVN(sh.date)}`;
           return;
         }
 
@@ -14298,10 +14324,13 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
         const dispShiftType = targetShift ? targetShift.shiftType : sh.shiftType;
         const dispIntensity = targetShift ? targetShift.intensity : sh.intensity;
         const dispStatus = targetShift ? targetShift.status : sh.status;
+        // SỬA 2026-08-25 (Ông Chủ yêu cầu — ghi thật rõ): dẫn thẳng bằng
+        // câu "MÚC HỘ CHO [tên] ĐI ĐỔ", không nói vòng vo.
+        const ownerName2 = owner?owner.name:'tài xế khác';
         rows.push({ date:formatDateVN(dispDate), shiftType:shiftTypeLabel(dispShiftType),
           intensity:(Number(dispIntensity)||1)===1.5?'1,5 ca':'1 ca', status:statusLabel(dispStatus),
           isShiftHead:true, baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0,
-          notes:`📌 Tự đi lấy hàng tại ${s.siteName||'công trình này'}${guessNote}, ${owner?owner.name:'tài xế khác'} đổ hộ ngày ${formatDateVN(sh.date)}`,
+          notes:`📌 MÚC HỘ CHO ${ownerName2.toUpperCase()} ĐI ĐỔ — chuyến hàng tại ${s.siteName||'công trình này'}${guessNote}, ${ownerName2} đổ ngày ${formatDateVN(sh.date)}`,
           _sortKey:chronoKey(dispDate, dispShiftType), siteLabel:s.siteName||'', typeLabel:'Thương Mại (lấy hộ)',
           volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
           tripCount:count, wagePerTrip, effectiveTrips:count,
@@ -14792,8 +14821,8 @@ async function exportDriverPayslipXLSX(driverId){
 
   const FONT='Times New Roman';
   const NUMFMT='#,##0" đ"'; // luôn kèm đơn vị "đ" ngay trong số, khỏi phải đoán cột nào là tiền
-  const lastColLetter = 'H';
-  ws.columns = [ {width:16},{width:14},{width:14},{width:27},{width:49},{width:12},{width:18},{width:20} ];
+  const lastColLetter = 'I';
+  ws.columns = [ {width:16},{width:14},{width:14},{width:27},{width:55},{width:12},{width:18},{width:20},{width:45} ];
 
   let r = 1;
   const merge = (row, a, b)=>ws.mergeCells(`${a}${row}:${b}${row}`);
@@ -14822,7 +14851,7 @@ async function exportDriverPayslipXLSX(driverId){
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); nextRow(24);
   const headRow = r;
-  const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến','Thành tiền chuyến'];
+  const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến','Thành tiền chuyến','Ghi Chú'];
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
   nextRow(32);
 
@@ -14831,6 +14860,13 @@ async function exportDriverPayslipXLSX(driverId){
   // của từng chuyến, không còn cộng nhầm lương chuyến lấy-hộ vào ca của
   // người đổ hộ. "Số chuyến" ở đây vẫn là số chuyến TÍNH LƯƠNG (khớp
   // đúng ý nghĩa siteEffectiveWageTrips cũ), không phải tổng số chuyến.
+  // SỬA 2026-08-25 (Ông Chủ chỉ ảnh — cột Công trình bị cắt cụt giữa
+  // chừng, VD "...Mỏ Hoàng" thay vì hiện đủ tên): trước đây các ô KHÔNG
+  // bật wrapText, nên tên công trình dài hơn bề rộng cột bị cắt đứt ngay
+  // tại biên cột thay vì xuống dòng. Bật wrap:true riêng cho cột Công
+  // trình + tự tính chiều cao dòng theo ĐỘ DÀI CHỮ THẬT (ước lượng ~45 ký
+  // tự/dòng khớp đúng bề rộng cột E hiện tại), để tên dài mấy cũng hiện
+  // đủ, không mất chữ.
   const tripRowsXlsx = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver);
   tripRowsXlsx.forEach(rw=>{
     const siteLabel = rw.isEmptyShift ? '' : (rw.siteLabel||'');
@@ -14838,9 +14874,13 @@ async function exportDriverPayslipXLSX(driverId){
       siteLabel,
       rw.isEmptyShift?'':(rw.effectiveTrips||0),
       rw.isEmptyShift?'':(rw.wagePerTrip||0),
-      rw.isEmptyShift?'':(rw.wageAmount||0) ];
-    vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined }));
-    nextRow();
+      rw.isEmptyShift?'':(rw.wageAmount||0),
+      rw.notes||'' ];
+    vals.forEach((v,i)=>setCell(ws.getCell(r,i+1).address, v, { border:true, align:(i>=5&&i<=7?'right':'left'), numFmt:(i===6||i===7)?NUMFMT:undefined, wrap:(i===4||i===8) }));
+    const siteLines = Math.max(1, Math.ceil((siteLabel||'').length / 50));
+    const noteLines = Math.max(1, Math.ceil((rw.notes||'').length / 42));
+    const estimatedLines = Math.max(siteLines, noteLines);
+    nextRow(Math.max(ROW_H, 16*estimatedLines + 10));
   });
   nextRow(12);
 
