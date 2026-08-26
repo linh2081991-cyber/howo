@@ -627,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #99';
+const APP_BUILD = '2026-08-25 · #100';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3829,6 +3829,18 @@ function shiftMaterialCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+sit
 /// Khi công trình chỉ có 1 loại hàng (mọi ca TRƯỚC khi có ô "Loại hàng" ở
 /// từng chuyến), kết quả giống hệt công thức gộp cũ — đã chứng minh đại số
 /// và được Ông Chủ xác nhận trước khi sửa.
+/// SỬA 2026-08-25 (Ông Chủ yêu cầu — tình huống múc Base A nhưng khách
+/// nhận ghi Base B, hoặc ngược lại, tuỳ chất lượng hàng hoá thực tế):
+/// TRƯỚC ĐÂY hàm này gom 1 chuyến vào ĐÚNG 1 nhóm duy nhất theo t.goodsType
+/// dùng chung cho cả mua lẫn bán — giả định ngầm mua/bán luôn cùng 1 loại.
+/// Ông Chủ đã xác nhận rõ nguyên tắc chứng từ thực tế: khối lượng MUA ghi
+/// nhận và lấy hoá đơn từ mỏ theo ĐÚNG loại hàng lúc múc; khối lượng BÁN
+/// xuất hoá đơn cho khách theo ĐÚNG loại khách ghi nhận — 2 BÊN HOÀN TOÀN
+/// TÁCH BIỆT, không bù trừ cho nhau. Giờ mỗi chuyến cộng buyVolume vào
+/// đúng nhóm theo t.goodsType (lúc múc), và cộng sellVolume vào đúng nhóm
+/// theo t.sellGoodsType NẾU có khai (khác lúc múc), còn không thì mặc
+/// định vẫn dùng chung t.goodsType như cũ — nên mọi chuyến BÌNH THƯỜNG
+/// (không lệch loại) cho kết quả GIỐNG HỆT công thức gốc, không đổi gì.
 function siteGoodsTypeGroups(s){
   if(s.siteType!=='commercial') return [];
   const sup = s.supplierId ? supplierById(s.supplierId) : null;
@@ -3839,12 +3851,20 @@ function siteGoodsTypeGroups(s){
   const noShortfallConfig = (invoicedPct>=100 || density<=0);
 
   const byType = {};
+  function ensureGroup(name){
+    const key = normGoodsType(name);
+    if(!byType[key]) byType[key] = { goodsType: (name||'').trim(), buyVolume:0, buyGross:0, sellVolume:0 };
+    return byType[key];
+  }
   (s.commercialTrips||[]).forEach(t=>{
-    const key = normGoodsType(t.goodsType);
-    if(!byType[key]) byType[key] = { goodsType: (t.goodsType||'').trim(), buyVolume:0, buyGross:0, sellVolume:0 };
-    byType[key].buyVolume += Number(t.buyVolume)||0;
-    byType[key].buyGross += (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
-    byType[key].sellVolume += Number(t.sellVolume)||0;
+    const buyGroup = ensureGroup(t.goodsType);
+    buyGroup.buyVolume += Number(t.buyVolume)||0;
+    buyGroup.buyGross += (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
+    // Loại hàng lúc bán: mặc định GIỐNG lúc mua nếu Ông Chủ chưa khai gì
+    // khác — giữ đúng hành vi cũ 100% cho mọi chuyến bình thường.
+    const sellTypeName = (t.sellGoodsType||'').trim() ? t.sellGoodsType : t.goodsType;
+    const sellGroup = ensureGroup(sellTypeName);
+    sellGroup.sellVolume += Number(t.sellVolume)||0;
   });
   return Object.values(byType).map(g=>{
     const avgBuyUnitPrice = g.buyVolume>0 ? g.buyGross/g.buyVolume : 0;
@@ -5856,7 +5876,7 @@ function renderSiteRows(){
           <div class="commercial-trip" style="border:1px dashed var(--border); border-radius:10px; padding:8px; margin-bottom:8px;">
             <div class="site-head" style="margin-bottom:6px;"><strong>Chuyến ${ti+1}</strong><button class="link-btn removeTripBtn" data-idx="${i}" data-tidx="${ti}">Xoá</button></div>
             <div class="field">
-              <label>Loại hàng (VD Base A, Base B... — điền sau khi mua xong)</label>
+              <label>Loại hàng lúc Múc (Mua)</label>
               <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="goodsType" list="goodsTypesList" value="${escapeHtml(t.goodsType||'')}">
             </div>
             <div class="field">
@@ -5871,6 +5891,11 @@ function renderSiteRows(){
             <div class="two-col" style="margin-bottom:0;">
               <div class="field" style="margin-bottom:0;"><label>KL bán (khối)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="sellVolume" placeholder="0" value="${blankIfZero(t.sellVolume)}"></div>
               <div class="field" style="margin-bottom:0;"><label>Đơn giá bán (đ/khối)</label><input type="text" inputmode="decimal" class="ctrip-money" data-idx="${i}" data-tidx="${ti}" data-field="sellUnitPrice" placeholder="0" value="${t.sellUnitPrice?toIntSafe(t.sellUnitPrice).toLocaleString('vi-VN'):''}"></div>
+            </div>
+            <div class="field" style="margin-top:8px; margin-bottom:0;">
+              <label>Loại hàng lúc Đổ (Bán) — CHỈ điền nếu khách nhận hàng ghi nhận KHÁC loại hàng lúc múc (VD múc Base A nhưng khách ghi Base B do chất lượng thực tế)</label>
+              <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="sellGoodsType" list="goodsTypesList" placeholder="Để trống = giống lúc múc (${escapeHtml(t.goodsType||'chưa khai')})" value="${escapeHtml(t.sellGoodsType||'')}">
+              ${t.sellGoodsType && normGoodsType(t.sellGoodsType)!==normGoodsType(t.goodsType) ? `<div class="hint" style="margin-top:4px; color:var(--accent); font-weight:700;">📌 Chuyến này mua ${escapeHtml(t.goodsType||'(chưa khai)')} nhưng bán ${escapeHtml(t.sellGoodsType)} — sổ kho/hoá đơn sẽ tính riêng 2 loại hàng này, không gộp chung</div>` : ''}
             </div>
             <div class="field" style="margin-top:8px; margin-bottom:0;">
               <label>Tài xế lấy hàng (CHỈ đổi nếu KHÁC tài xế trực ca — VD lấy hôm nay, hôm sau tài khác đổ hộ)</label>
@@ -15029,7 +15054,10 @@ function refreshSiteDatalist(){
 /// đơn đã mua, để gõ tay không bị lệch chính tả (VD "Base A" vs "base a").
 function allGoodsTypes(){
   const set = new Set();
-  state.shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>(s.commercialTrips||[]).forEach(t=>{ const n=(t.goodsType||'').trim(); if(n) set.add(n); })));
+  state.shifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>(s.commercialTrips||[]).forEach(t=>{
+    const n=(t.goodsType||'').trim(); if(n) set.add(n);
+    const n2=(t.sellGoodsType||'').trim(); if(n2) set.add(n2); // SỬA 2026-08-25: gom thêm loại hàng lúc bán (nếu có khai khác lúc múc)
+  })));
   state.invoiceLots.forEach(l=>{ const n=(l.goodsType||'').trim(); if(n) set.add(n); });
   state.mineInvoices.forEach(inv=>{ const n=(inv.goodsType||'').trim(); if(n) set.add(n); });
   return [...set].sort();
