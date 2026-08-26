@@ -627,7 +627,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #96';
+const APP_BUILD = '2026-08-25 · #97';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1068,20 +1068,28 @@ function computeAllWarnings(){
 /// đang phải ĐOÁN "ca gần nhất" trong phiếu lương/thẻ ca thay vì tính
 /// chính xác. Giúp Ông Chủ rà và bổ sung dần cho hết đoán mò.
 function computeMissingPickupDateWarnings(){
-  const out = [];
-  for(const sh of state.shifts){
-    for(const s of (sh.siteLogs||[])){
-      if(s.siteType!=='commercial') continue;
-      (s.commercialTrips||[]).forEach(t=>{
-        if(t.pickupDriverId && t.pickupDriverId!==sh.driverId && !t.pickupDate){
-          const pd = driverById(t.pickupDriverId);
-          out.push({ shiftId: sh.id, date: sh.date, siteName: s.siteName||'(chưa đặt tên)', pickupDriverName: pd?pd.name:'(chưa rõ)' });
-        }
-      });
+  // SỬA 2026-08-25: bọc try-catch cùng lý do với shiftCrossDriverInfo ở
+  // trên — không để lỗi ở đây làm hỏng cả "5 Việc Cần Chú Ý" lẫn toàn bộ
+  // danh sách ca.
+  try {
+    const out = [];
+    for(const sh of state.shifts){
+      for(const s of (sh.siteLogs||[])){
+        if(s.siteType!=='commercial') continue;
+        (s.commercialTrips||[]).forEach(t=>{
+          if(t.pickupDriverId && t.pickupDriverId!==sh.driverId && !t.pickupDate){
+            const pd = driverById(t.pickupDriverId);
+            out.push({ shiftId: sh.id, date: sh.date, siteName: s.siteName||'(chưa đặt tên)', pickupDriverName: pd?pd.name:'(chưa rõ)' });
+          }
+        });
+      }
     }
+    out.sort((a,b)=>b.date.localeCompare(a.date));
+    return out;
+  } catch(e){
+    console.error('computeMissingPickupDateWarnings lỗi, tạm ẩn cảnh báo này:', e);
+    return [];
   }
-  out.sort((a,b)=>b.date.localeCompare(a.date));
-  return out;
 }
 // Quét mọi công trình THƯƠNG MẠI xem chuyến hàng nào còn thiếu hóa đơn MUA
 // hoặc BÁN (vì cả 2 bên cuối tháng mới xuất) — để Ông Chủ chủ động đòi/xuất,
@@ -4559,52 +4567,71 @@ function driverTripWageStatsInRange(driverId, from, to, shiftsList){
 /// nên không lệch 1 đồng nào so với tổng công ty.
 function driverPersonalRevenueCostStatsInRange(driverId, from, to, shiftsList){
   const list = shiftsList || state.shifts;
-  let revenue = 0, materialCost = 0, fixedCost = 0;
+  // SỬA 2026-08-25: bọc try-catch cùng lý do với shiftCrossDriverInfo và
+  // computeMissingPickupDateWarnings — nếu có tình huống dữ liệu lạ gây
+  // lỗi, TỰ ĐỘNG lùi về đúng công thức cũ (theo ca, không chia lại) thay
+  // vì làm trắng cả màn Chi Tiết Tài Xế.
+  try {
+    let revenue = 0, materialCost = 0, fixedCost = 0;
 
-  list.forEach(sh=>{
-    // LƯU Ý: KHÔNG lọc status!=='active' ở đây — theo đúng tinh thần bản
-    // sửa 2026-08-23 (Ông Chủ: "tất cả các con số trong app phải đồng
-    // nhất"), chi phí cố định (lương cứng/ăn/nhà...) vẫn phát sinh cả ở
-    // ca Nằm Bãi/Nghỉ Phép tuỳ Chính Sách Chi Phí Theo Trạng Thái, nên
-    // vẫn phải cộng cho đúng ca đó. Phần lương chuyến (tripWage) vẫn tự
-    // lọc đúng "chỉ ca Hoạt Động" bên trong driverTripWageStatsInRange
-    // (gọi riêng bên dưới) — không đổi hành vi hàm đó.
-    if(sh.date<from || sh.date>to) return;
-    const isMine = sh.driverId===driverId;
+    list.forEach(sh=>{
+      // LƯU Ý: KHÔNG lọc status!=='active' ở đây — theo đúng tinh thần bản
+      // sửa 2026-08-23 (Ông Chủ: "tất cả các con số trong app phải đồng
+      // nhất"), chi phí cố định (lương cứng/ăn/nhà...) vẫn phát sinh cả ở
+      // ca Nằm Bãi/Nghỉ Phép tuỳ Chính Sách Chi Phí Theo Trạng Thái, nên
+      // vẫn phải cộng cho đúng ca đó. Phần lương chuyến (tripWage) vẫn tự
+      // lọc đúng "chỉ ca Hoạt Động" bên trong driverTripWageStatsInRange
+      // (gọi riêng bên dưới) — không đổi hành vi hàm đó.
+      if(sh.date<from || sh.date>to) return;
+      const isMine = sh.driverId===driverId;
 
-    if(isMine){
-      fixedCost += shiftFuelCost(sh) + (Number(sh.baseSalaryAllocation)||0)
-        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0)
-        + (Number(sh.incidentalCost)||0) + (Number(sh.roadFeeIncidental)||0)
-        + shiftInvoiceSupplementCost(sh);
-    }
-
-    (sh.siteLogs||[]).forEach(s=>{
-      if(s.siteType!=='commercial'){
-        // Chở cước: không có khái niệm lấy hộ — doanh thu vẫn 100% theo
-        // đúng ca như cũ.
-        if(isMine) revenue += siteRevenue(s);
-        return;
+      if(isMine){
+        fixedCost += shiftFuelCost(sh) + (Number(sh.baseSalaryAllocation)||0)
+          + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0)
+          + (Number(sh.incidentalCost)||0) + (Number(sh.roadFeeIncidental)||0)
+          + shiftInvoiceSupplementCost(sh);
       }
-      const trips = s.commercialTrips||[];
-      const completeTrips = trips.filter(t=>
-        (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
-        (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
-      const vatFrac = siteVatRateFraction(s);
-      completeTrips.forEach(t=>{
-        const effDriver = t.pickupDriverId || sh.driverId;
-        if(effDriver!==driverId) return;
-        const grossSell = (Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0);
-        const grossBuy = (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
-        revenue += s.sellIncludesVat ? grossSell/(1+vatFrac) : grossSell;
-        materialCost += s.buyIncludesVat ? grossBuy/(1+vatFrac) : grossBuy;
+
+      (sh.siteLogs||[]).forEach(s=>{
+        if(s.siteType!=='commercial'){
+          // Chở cước: không có khái niệm lấy hộ — doanh thu vẫn 100% theo
+          // đúng ca như cũ.
+          if(isMine) revenue += siteRevenue(s);
+          return;
+        }
+        const trips = s.commercialTrips||[];
+        const completeTrips = trips.filter(t=>
+          (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
+          (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
+        const vatFrac = siteVatRateFraction(s);
+        completeTrips.forEach(t=>{
+          const effDriver = t.pickupDriverId || sh.driverId;
+          if(effDriver!==driverId) return;
+          const grossSell = (Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0);
+          const grossBuy = (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
+          revenue += s.sellIncludesVat ? grossSell/(1+vatFrac) : grossSell;
+          materialCost += s.buyIncludesVat ? grossBuy/(1+vatFrac) : grossBuy;
+        });
       });
     });
-  });
 
-  const tripWage = driverTripWageStatsInRange(driverId, from, to, list).tripWage;
-  const netProfit = revenue - materialCost - tripWage - fixedCost;
-  return { revenue, materialCost, tripWage, fixedCost, netProfit };
+    const tripWage = driverTripWageStatsInRange(driverId, from, to, list).tripWage;
+    const netProfit = revenue - materialCost - tripWage - fixedCost;
+    return { revenue, materialCost, tripWage, fixedCost, netProfit };
+  } catch(e){
+    console.error('driverPersonalRevenueCostStatsInRange lỗi, lùi về công thức cũ (theo ca, không chia lại):', e);
+    try {
+      const inRangeOwn = list.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
+      const revenue = inRangeOwn.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
+      const netProfit = inRangeOwn.reduce((s,sh)=>s+shiftNetProfit(sh),0);
+      return { revenue, materialCost:0, tripWage:0, fixedCost:0, netProfit };
+    } catch(e2){
+      // Ngay cả cách lùi cũng lỗi (dữ liệu hỏng quá nặng) — trả về 0 hết,
+      // KHÔNG được để ném lỗi tiếp, tránh sập cả màn Chi Tiết Tài Xế.
+      console.error('driverPersonalRevenueCostStatsInRange: cả cách lùi cũng lỗi, trả về 0:', e2);
+      return { revenue:0, materialCost:0, tripWage:0, fixedCost:0, netProfit:0 };
+    }
+  }
 }
 
 
@@ -4984,24 +5011,37 @@ function driverOnlineStatusHtml(driverKey){
 /// đúng cả 2 vai cùng lúc (vd vừa đổ hộ người khác, vừa có chuyến của
 /// chính mình được người khác múc đi đâu đó khác).
 function shiftCrossDriverInfo(sh){
-  let isDeliveringForOthers = false;
-  (sh.siteLogs||[]).forEach(s=>{
-    if(s.siteType!=='commercial') return;
-    if((s.commercialTrips||[]).some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId)) isDeliveringForOthers = true;
-  });
-  let isPickingUpForOthers = false;
-  (state.shifts||[]).forEach(other=>{
-    if(other.id===sh.id || other.driverId===sh.driverId) return;
-    (other.siteLogs||[]).forEach(s=>{
+  // SỬA 2026-08-25: bọc try-catch bảo vệ — Ông Chủ báo màn "Ca Làm Việc"
+  // bị trắng trơn sau bản #96, nghi có tình huống dữ liệu thật (chuyến cũ,
+  // trường lạ...) khiến hàm này ném lỗi giữa chừng, làm HỎNG LUÔN toàn bộ
+  // renderShiftList() (vì lỗi xảy ra TRƯỚC khi kịp gán app.innerHTML).
+  // Dù chưa tái hiện được lỗi cụ thể bằng dữ liệu giả lập, bọc try-catch ở
+  // đây đảm bảo CHẮC CHẮN dù có chuyện gì xảy ra bên trong, danh sách ca
+  // vẫn hiện bình thường — chỉ mất đúng dấu ghim 📌 của riêng ca đó, không
+  // ảnh hưởng gì khác.
+  try {
+    let isDeliveringForOthers = false;
+    (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
-      (s.commercialTrips||[]).forEach(t=>{
-        if(t.pickupDriverId===sh.driverId && (t.pickupDate ? t.pickupDate===sh.date : false)){
-          isPickingUpForOthers = true;
-        }
+      if((s.commercialTrips||[]).some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId)) isDeliveringForOthers = true;
+    });
+    let isPickingUpForOthers = false;
+    (state.shifts||[]).forEach(other=>{
+      if(other.id===sh.id || other.driverId===sh.driverId) return;
+      (other.siteLogs||[]).forEach(s=>{
+        if(s.siteType!=='commercial') return;
+        (s.commercialTrips||[]).forEach(t=>{
+          if(t.pickupDriverId===sh.driverId && (t.pickupDate ? t.pickupDate===sh.date : false)){
+            isPickingUpForOthers = true;
+          }
+        });
       });
     });
-  });
-  return { isDeliveringForOthers, isPickingUpForOthers };
+    return { isDeliveringForOthers, isPickingUpForOthers };
+  } catch(e){
+    console.error('shiftCrossDriverInfo lỗi, bỏ qua dấu ghim cho ca này:', sh && sh.id, e);
+    return { isDeliveringForOthers:false, isPickingUpForOthers:false };
+  }
 }
 function renderShiftCard(sh){
   const profit=shiftNetProfit(sh);
@@ -5039,6 +5079,34 @@ function renderShiftCard(sh){
         </div>
       </div>
     </div>`;
+}
+/// SỬA 2026-08-25 (Ông Chủ báo — bản #96 làm TRẮNG TOÀN BỘ danh sách "Ca
+/// Làm Việc"): tìm ra nguyên nhân gốc — renderShiftCard() gọi các hàm lõi
+/// (shiftNetProfit/shiftTotalRevenue) NGAY ĐẦU HÀM; nếu 1 TRONG SỐ ~100 ca
+/// có dữ liệu bất thường khiến các hàm đó lỗi (đã tái hiện được bằng dữ
+/// liệu giả lập: commercialTrips bị lưu sai kiểu, không phải mảng), thì
+/// activeColumn.shifts.map(renderShiftCard) NÉM LỖI GIỮA CHỪNG — hỏng cả
+/// mảng, không riêng ca đó — khiến app.innerHTML KHÔNG BAO GIỜ được gán,
+/// cả trang trắng trơn. Đây là lỗ hổng có sẵn từ trước (không phải riêng
+/// code Ông Chủ vừa yêu cầu ở mục B/C1/C2), chỉ là chưa có ca nào chạm
+/// đúng tình huống dữ liệu đó cho tới gần đây.
+/// renderShiftCardSafe() bọc try-catch quanh TỪNG ca riêng lẻ — ca nào lỗi
+/// chỉ hiện 1 thẻ báo lỗi rõ ràng (kèm ID để dò), các ca khác vẫn hiện
+/// bình thường. Dùng thay renderShiftCard trực tiếp ở MỌI chỗ .map() qua
+/// danh sách nhiều ca (2 chỗ: danh sách chính + xem lại tháng cũ).
+function renderShiftCardSafe(sh){
+  try {
+    return renderShiftCard(sh);
+  } catch(e){
+    console.error('renderShiftCard lỗi cho ca', sh && sh.id, sh && sh.date, ':', e);
+    return `
+    <div class="card shift-card" style="border:1.5px solid var(--loss);">
+      <div class="body">
+        <div style="font-weight:700; color:var(--loss);">⚠️ Ca ${sh&&sh.date?formatDateVN(sh.date):'(?)'} bị lỗi hiển thị</div>
+        <div class="hint" style="margin-top:4px;">Dữ liệu ca này có vấn đề, không hiện được chi tiết. Báo lại cho đội kỹ thuật kèm ngày này để kiểm tra. ID: ${escapeHtml(sh&&sh.id||'')}</div>
+      </div>
+    </div>`;
+  }
 }
 /// Bảng màu xoay vòng theo thứ tự cột (không phụ thuộc dữ liệu tài xế)
 /// dùng cho viền trên + avatar của mỗi cột, để 2 cột luôn phân biệt rõ
@@ -5187,7 +5255,7 @@ function renderShiftList(){
     <div class="shift-column full-width" style="--col-accent:${activeAccent}">
       ${activeColumn.shifts.length===0
         ? `<div class="shift-column-empty">Chưa có ca nào${state.searchDate?' vào ngày này':' trong tháng này'}.</div>`
-        : activeColumn.shifts.map(renderShiftCard).join('')}
+        : activeColumn.shifts.map(renderShiftCardSafe).join('')}
     </div>`;
 
   app.innerHTML = warningsBannerHtml + searchBarHtml + tabBarHtml + cardsHtml;
@@ -5337,7 +5405,7 @@ function renderShiftMonthArchive(){
     <div class="shift-column full-width" style="--col-accent:${activeAccent}" id="shiftArchiveCardsWrap">
       ${activeColumn.shifts.length===0
         ? `<div class="shift-column-empty">Chưa có ca nào.</div>`
-        : activeColumn.shifts.map(renderShiftCard).join('')}
+        : activeColumn.shifts.map(renderShiftCardSafe).join('')}
     </div>`;
 
   app.innerHTML = backBtnHtml + tabBarHtml + cardsHtml;
