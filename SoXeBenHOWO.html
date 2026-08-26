@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #105';
+const APP_BUILD = '2026-08-25 · #106';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1292,7 +1292,6 @@ function computeShiftIssues(sh){
   });
 
   if(Number(sh.incidentalCost) < 0) issues.push('Chi phí phát sinh đang âm — kiểm tra lại số liệu');
-  if(Number(sh.travelAllowance) < 0) issues.push('Công tác phí đang âm — kiểm tra lại số liệu');
   if(Number(sh.advanceAmount) < 0) issues.push('Số tiền tạm ứng/phạt đang âm — kiểm tra lại số liệu');
 
   return issues;
@@ -4664,7 +4663,6 @@ function driverPersonalRevenueCostStatsInRange(driverId, from, to, shiftsList){
         fixedCost += shiftFuelCost(sh) + (Number(sh.baseSalaryAllocation)||0)
           + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0)
           + (Number(sh.incidentalCost)||0) + (Number(sh.roadFeeIncidental)||0)
-          + (Number(sh.travelAllowance)||0)
           + shiftInvoiceSupplementCost(sh);
       }
 
@@ -4711,17 +4709,17 @@ function driverPersonalRevenueCostStatsInRange(driverId, from, to, shiftsList){
 }
 
 
-/// SỬA 2026-08-25 (Ông Chủ yêu cầu — bổ sung "Công Tác Phí / Tạm Ứng Chi
-/// Phí" cho 2 tài xế, trước đây app CHƯA có khoản này): field mới
-/// sh.travelAllowance — nhập TAY từng ca (giống Chi Phí Phát Sinh, KHÔNG
-/// tự áp theo Chính Sách Chi Phí như Tiền Ăn, vì công tác phí chỉ phát
-/// sinh THỈNH THOẢNG khi có chuyến đi công tác cụ thể, không phải mỗi
-/// ngày). Xử lý giống hệt TIỀN ĂN (không giống Ứng Lương): CỘNG vào lương
-/// thực nhận của tài xế (đây là tiền trả/bù đắp cho tài xế, không phải
-/// khoản tạm ứng phải trừ lại sau) VÀ tính vào chi phí thật của công ty
-/// (shiftTotalCost). KHÔNG tính vào "Khớp Số Dư Ngân Hàng" (giống Tiền
-/// Ăn/Chi Phí Phát Sinh — coi là khoản phân bổ kế toán, không phải giao
-/// dịch tiền mặt cần đối chiếu bank theo đúng ngày).
+/// SỬA 2026-08-25 (Ông Chủ hỏi bổ sung "Công Tác Phí" — kết luận CUỐI
+/// CÙNG sau khi rà lại kỹ): KHÔNG cần thêm field hay hệ thống mới nào cả.
+/// "Công tác phí" thực chất chỉ là 1 dạng "Chi Phí Phát Sinh" (sh.incidentalCost)
+/// — field đã có sẵn theo từng ca từ trước, đã tính đủ trong shiftTotalCost.
+/// App cũng đã có sẵn màn "💰 Tạm Ứng Chi Phí" (nút trên thẻ tài xế, xây
+/// từ 2026-08-10) tự động trừ ĐÚNG sh.incidentalCost vào số dư tạm ứng
+/// tài xế đang giữ (xem driverAdvanceBalance() gần đây) — nên khi Ông Chủ
+/// ứng tiền công tác cho tài xế rồi họ tiêu vào chuyến đi, chỉ cần ghi vào
+/// đúng ô "Chi Phí Phát Sinh" của ca đó, hệ thống tự trừ đúng, không cần
+/// thao tác gì thêm. (Trước đó em từng nhầm thêm field riêng
+/// sh.travelAllowance rồi lại gỡ đi — đã dọn sạch, không còn dấu vết.)
 function shiftFuelConsumed(sh){ return Math.max(0, ((Number(sh.fuelStart)||0)+(Number(sh.fuelAdded)||0)) - (Number(sh.fuelEnd)||0)); }
 function shiftFuelCost(sh){ return shiftFuelConsumed(sh) * (Number(sh.fuelUnitPrice)||0); }
 function shiftTotalRevenue(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteRevenue(s),0); }
@@ -4729,7 +4727,7 @@ function shiftTotalTripWage(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+si
 function shiftTotalCost(sh){
   return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
-       + (Number(sh.roadFeeIncidental)||0) + (Number(sh.travelAllowance)||0) + shiftMaterialCost(sh) + shiftInvoiceSupplementCost(sh);
+       + (Number(sh.roadFeeIncidental)||0) + shiftMaterialCost(sh) + shiftInvoiceSupplementCost(sh);
 }
 function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); }
 /// Chi phí vận hành THUẦN TIỀN MẶT của 1 ca — giống shiftTotalCost() nhưng
@@ -4739,7 +4737,7 @@ function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); 
 function shiftOperatingCashCost(sh){
   return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
        + (Number(sh.foodAllowance)||0) + (Number(sh.housingAllocation)||0) + (Number(sh.incidentalCost)||0)
-       + (Number(sh.roadFeeIncidental)||0) + (Number(sh.travelAllowance)||0);
+       + (Number(sh.roadFeeIncidental)||0);
 }
 /// Tiền dầu THẬT ĐÃ ĐỔ THÊM (mua/nạp vào bình) trong ca — theo ĐÚNG SỐ
 /// LÍT ĐỔ (fuelAdded), KHÁC với shiftFuelCost() (tính theo lít TIÊU HAO,
@@ -4760,7 +4758,7 @@ function shiftFuelRefillCost(sh){
 /// tiền mặt THẬT phát sinh tại ca: Tiền dầu đổ thêm (shiftFuelRefillCost,
 /// theo lít ĐỔ chứ không phải lít tiêu hao) + Tiền ứng lương
 /// (advanceAmount). Dùng RIÊNG cho "Khớp Số Dư Ngân Hàng" — không đụng
-/// gì tới shiftOperatingCashCost() ở trên (vẫn tính đủ 8 khoản như cũ,
+/// gì tới shiftOperatingCashCost() ở trên (vẫn tính đủ 7 khoản như cũ,
 /// dùng cho Lợi Nhuận/Dòng Tiền Thuần).
 function shiftBankableOperatingCost(sh){
   return shiftFuelRefillCost(sh) + (Number(sh.advanceAmount)||0);
@@ -5573,7 +5571,6 @@ function startNewShift(){
     incidentalCost: 0,
     incidentalNotes: '',
     roadFeeIncidental: 0, // Tiền luật phát sinh theo chuyến — nhập tay, đặc thù cung/công trình mới. Là chi phí BIẾN ĐỔI của riêng ca, trừ thẳng vào lãi/lỗ ca (khác tiền luật đường THÁNG cố định ở tab Kết Quả).
-    travelAllowance: 0, // Công Tác Phí / Tạm Ứng Chi Phí — nhập tay khi tài xế có chuyến đi công tác cụ thể, không tự áp theo Chính Sách Chi Phí như Tiền Ăn.
     advanceAmount: 0,
     advanceRecipientName: '',
     notes: '',
@@ -5825,16 +5822,6 @@ function renderShiftForm(){
             <option value="cash" ${(sh.operatingCostMethod||'cash')==='cash'?'selected':''}>💵 Tiền mặt (mặc định)</option>
             <option value="bank" ${sh.operatingCostMethod==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
           </select>
-        </div>
-      </div>
-    </section>
-
-    <section class="group">
-      <h3>🧳 Công Tác Phí / Tạm Ứng Chi Phí</h3>
-      <div class="card">
-        <div class="field" style="margin-bottom:0;">
-          <label>Số tiền công tác phí (nếu ca này có chuyến đi công tác)</label>
-          <input type="text" inputmode="decimal" id="f_travelAllowance">
         </div>
       </div>
     </section>
@@ -6748,7 +6735,6 @@ function bindFormEvents(){
   attachMoneyInput(document.getElementById('f_housing'), sh.housingAllocation, v=>{ sh.housingAllocation=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_incidental'), sh.incidentalCost, v=>{ sh.incidentalCost=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_roadFeeIncidental'), sh.roadFeeIncidental, v=>{ sh.roadFeeIncidental=v; updateSummary(); });
-  attachMoneyInput(document.getElementById('f_travelAllowance'), sh.travelAllowance, v=>{ sh.travelAllowance=v; updateSummary(); });
   document.getElementById('f_operatingCostMethod').addEventListener('change', e=>{ sh.operatingCostMethod = e.target.value; });
   attachMoneyInput(document.getElementById('f_advance'), sh.advanceAmount, v=>{ sh.advanceAmount=v; updateSummary(); });
 
@@ -7502,7 +7488,6 @@ function openDriverDetail(driverId){
   const tripWage = driverStats.tripWage;
   const food = inRange.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const housing = inRange.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
-  const travelAllowance = inRange.reduce((s,sh)=>s+(sh.travelAllowance||0),0);
   const advance = inRange.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
   const repairDeduction = driverResponsibleRepairTotalInRange(driverId, from, to);
   // Tiền tip/thưởng CUỐI THÁNG: đây là 1 khoản chốt một lần cho cả
@@ -7510,7 +7495,7 @@ function openDriverDetail(driverId){
   // đang xem đi qua.
   const monthsSpanned = monthsInRange(from, to);
   const monthlyBonus = driverMonthlyBonusTotalInRange(driverId, from, to);
-  const netPay = baseSalary + tripWage + food + travelAllowance + monthlyBonus - advance - repairDeduction;
+  const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
 
   const advanceRecords = inRange.filter(sh=>(sh.advanceAmount||0)>0).sort((a,b)=>b.date.localeCompare(a.date));
   const repairRecords = state.repairs.filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to &&
@@ -7580,7 +7565,6 @@ function openDriverDetail(driverId){
         <div class="summary-row"><span>Lương cứng phân bổ</span><span class="val">${fmtVND(baseSalary)}</span></div>
         <div class="summary-row"><span>Tổng lương chuyến</span><span class="val">${fmtVND(tripWage)}</span></div>
         <div class="summary-row"><span>Tiền ăn</span><span class="val">${fmtVND(food)}</span></div>
-        <div class="summary-row"><span>Công tác phí</span><span class="val">${fmtVND(travelAllowance)}</span></div>
         <div class="summary-row"><span>Tiền tip/thưởng cuối tháng</span><span class="val">${fmtVND(monthlyBonus)}</span></div>
         <div class="summary-row"><span>− Ứng lương/Đền bù</span><span class="val" style="color:${advance>0?'var(--loss)':'inherit'}">${fmtVND(advance)}</span></div>
         <div class="summary-row"><span>− Trừ do hỏng hóc</span><span class="val" style="color:${repairDeduction>0?'var(--loss)':'inherit'}">${fmtVND(repairDeduction)}</span></div>
@@ -9478,9 +9462,6 @@ function currentMonthRange(){
 /// shiftOperatingCashCost) — thêm 2026-08-23 vì Ông Chủ hỏi số này sao ra
 /// nhiều, cần thấy rõ khoản nào chiếm nhiều nhất thay vì đoán. KHÔNG tính
 /// lại theo công thức khác — chỉ hiện lại đúng các số đã cộng thành tổng đó.
-/// SỬA 2026-08-25: thêm "Công tác phí" (travelAllowanceCost) làm khoản thứ
-/// 8 — đã cộng vào shiftOperatingCashCost() rồi, nên PHẢI liệt kê ở đây
-/// nữa mới khớp đúng tổng, không được để lệch dù chỉ 1 đồng.
 function renderOperatingCostBreakdownModal(gTotal){
   const items = [
     { label:'Tiền dầu tiêu hao', value: gTotal.fuelCost },
@@ -9490,7 +9471,6 @@ function renderOperatingCostBreakdownModal(gTotal){
     { label:'Tiền nhà/điện nước', value: gTotal.housingCost },
     { label:'Chi phí phát sinh (linh tinh/ca)', value: gTotal.incidentalCost },
     { label:'Luật đường phát sinh/chuyến', value: gTotal.roadFeeIncidentalCost },
-    { label:'Công tác phí', value: gTotal.travelAllowanceCost },
   ];
   const maxVal = Math.max(1, ...items.map(i=>i.value));
   openModal(`
@@ -9537,11 +9517,10 @@ function computeResultsGroup(shifts){
   const housingCost = shifts.reduce((s,sh)=>s+(Number(sh.housingAllocation)||0),0);
   const incidentalCost = shifts.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
   const roadFeeIncidentalCost = shifts.reduce((s,sh)=>s+(Number(sh.roadFeeIncidental)||0),0);
-  const travelAllowanceCost = shifts.reduce((s,sh)=>s+(Number(sh.travelAllowance)||0),0);
   const takeHomeTotal = revenue - materialCost - supplementCost;
   return { revenue, opCost, grossProfit, margin, totalKm, totalTrips, fuelLiters, fuelCost, fuelPerKm, revenuePerKm, profitPerTrip,
     materialCost, supplementCost, operatingCashCost, takeHomeTotal,
-    tripWageCost, baseSalaryCost, foodCost, housingCost, incidentalCost, roadFeeIncidentalCost, travelAllowanceCost };
+    tripWageCost, baseSalaryCost, foodCost, housingCost, incidentalCost, roadFeeIncidentalCost };
 }
 
 function fmtShortVND(n){
@@ -9623,7 +9602,7 @@ function computeBreakEvenDetailed(inRangeShifts, roadFee, repairTotal, otherFixe
   // hiểm xe + Đăng kiểm/Đăng ký/Phù hiệu vận tải (Cài Đặt) — cộng thêm
   // vào chi phí cố định, cùng cách roadFee đã được cộng từ trước.
   const fixedCost = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.housingAllocation)||0),0) + roadFee + repairTotal + otherFixedMonthly;
-  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+(Number(sh.travelAllowance)||0)+shiftMaterialCost(sh),0);
+  const variableCost = inRangeShifts.reduce((s,sh)=>s+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.foodAllowance)||0)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
   const grossProfit = totalRevenue - variableCost;
 
   const base = { dayTrips, nightTrips, dayRevenue, nightRevenue, totalTrips, totalRevenue, fixedCost, variableCost, grossProfit, roadFee, repairTotal, otherFixedMonthly };
@@ -9710,7 +9689,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
-  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+(Number(sh.travelAllowance)||0)+shiftMaterialCost(sh),0);
+  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
 
   const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost };
   if(totalTrips===0) return { ...base, breakEvenTrips:null, note:`Chưa có chuyến nào trong ${marginWindowDays} ngày gần nhất để tính lãi gộp bình quân.` };
@@ -9766,7 +9745,7 @@ Tổng doanh thu = ${fmtVND(be.dayRevenue)} + ${fmtVND(be.nightRevenue)} = ${fmt
     <div class="modal-step">
       <div class="st-title">Bước 3 — Tách chi phí BIẾN ĐỔI (tăng/giảm theo số chuyến)</div>
       <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, luật đường phát sinh/ca, chi phí phát sinh lặt vặt, và giá vốn hàng mua-bán (thương mại).</div>
-      <div class="st-formula">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường/ca + công tác phí) = ${fmtVND(be.pureOperatingVariable!==undefined?be.pureOperatingVariable:be.variableCost)}
+      <div class="st-formula">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường/ca) = ${fmtVND(be.pureOperatingVariable!==undefined?be.pureOperatingVariable:be.variableCost)}
 Giá vốn hàng mua-bán thương mại trong kỳ = ${fmtVND(be.materialCost||0)}
 → Chi phí biến đổi (cả kỳ) = ${fmtVND(be.variableCost)}
 Chi phí biến đổi bình quân / chuyến = ${fmtVND(be.variableCost)} ÷ ${be.totalTrips} = ${be.avgVariableCostPerTrip!==undefined?fmtVND(be.avgVariableCostPerTrip):'—'}</div>
@@ -11078,7 +11057,7 @@ function renderResults(){
 
       <div class="card">
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu) = <strong>${fmtVND(breakEven.fixedCost)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường phát sinh/ca + công tác phí) = <strong>${fmtVND(breakEvenPureOperatingVariable)}</strong></div>
+        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường phát sinh/ca) = <strong>${fmtVND(breakEvenPureOperatingVariable)}</strong></div>
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Giá vốn hàng mua-bán thương mại trong kỳ (tiền mua vật liệu từ mỏ) = <strong>${fmtVND(breakEvenMaterialCost)}</strong></div>
         <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink-soft); margin-top:6px;">→ Tổng chi phí biến đổi thực tế = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
         <div class="formula-divider" style="margin:10px 0;"></div>
@@ -13927,7 +13906,7 @@ function buildOperationLogRows(){
     'Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại Công Trình','Khối Lượng/Chuyến (Chở Cước)','Đơn Giá Vật Liệu/Cước','Tổng Mua (TM)','Tổng Bán (TM)','Số Chuyến','Thành Tiền / Lãi Gộp Công Trình',
     'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến Tổng',
     'Tổng Doanh Thu Ca','Lương Cứng Phân Bổ','Tiền Ăn','Tiền Nhà+Điện Nước',
-    'Tiền Luật Phát Sinh','Chi Phí Phát Sinh','Ghi Chú Phát Sinh','Công Tác Phí','Ứng Lương/Đền Bù','Người Nhận Ứng','Ghi Chú Ca',
+    'Tiền Luật Phát Sinh','Chi Phí Phát Sinh','Ghi Chú Phát Sinh','Ứng Lương/Đền Bù','Người Nhận Ứng','Ghi Chú Ca',
     'Tổng Chi Phí Ca','Lợi Nhuận Ròng Ca'];
   const rows = [header];
   const sorted = [...state.shifts].sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
@@ -13938,7 +13917,7 @@ function buildOperationLogRows(){
       sh.odoStart||0, sh.odoEnd||0, shiftOdoDriven(sh), sh.fuelStart||0, sh.fuelEnd||0, sh.fuelAdded||0, shiftFuelConsumed(sh),
       sh.fuelUnitPrice||0, shiftFuelCost(sh)];
     const trailing = [shiftTotalRevenue(sh), sh.baseSalaryAllocation||0, sh.foodAllowance||0, sh.housingAllocation||0,
-      sh.roadFeeIncidental||0, sh.incidentalCost||0, sh.incidentalNotes||'', sh.travelAllowance||0, sh.advanceAmount||0, sh.advanceRecipientName||'',
+      sh.roadFeeIncidental||0, sh.incidentalCost||0, sh.incidentalNotes||'', sh.advanceAmount||0, sh.advanceRecipientName||'',
       sh.notes||'', shiftTotalCost(sh), shiftNetProfit(sh)];
     if((sh.siteLogs||[]).length===0){
       rows.push([...shared, '','','','','','','','','','','','', ...trailing]);
@@ -14396,11 +14375,10 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
     : shiftsForDriver.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
   const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const housing = shiftsForDriver.reduce((s,sh)=>s+(sh.housingAllocation||0),0);
-  const travelAllowance = shiftsForDriver.reduce((s,sh)=>s+(sh.travelAllowance||0),0);
   const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
   const repairDeduction = driverId ? driverResponsibleRepairTotalInRange(driverId, from, to) : 0;
   const monthlyBonus = driverId ? driverMonthlyBonusTotalInRange(driverId, from, to) : 0;
-  const netPay = baseSalary + tripWage + food + travelAllowance + monthlyBonus - advance - repairDeduction;
+  const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
 
   rows.push(['TỔNG KẾT']);
   rows.push(['Số Ca Tính Lương', counts.paidCount]);
@@ -14409,7 +14387,6 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push(['Lương Cứng', Math.round(baseSalary)]);
   rows.push(['Tổng Lương Chuyến', Math.round(tripWage)]);
   rows.push(['Tổng Tiền Ăn', Math.round(food)]);
-  rows.push(['Tổng Công Tác Phí', Math.round(travelAllowance)]);
   rows.push(['Tiền Tip/Thưởng Cuối Tháng', Math.round(monthlyBonus)]);
   rows.push(['Ứng Lương/Đền Bù (Trừ)', Math.round(advance)]);
   rows.push(['Trừ Do Hỏng Hóc', Math.round(repairDeduction)]);
@@ -14842,11 +14819,10 @@ async function exportDriverPayslipXLSX(driverId){
   // đối với Chi Tiết Tài Xế + Bảng Lương + Phiếu Lương trong file KT Thuế.
   const tripWage = driverTripWageStatsInRange(driverId, from, to, state.shifts).tripWage;
   const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
-  const travelAllowance = shiftsForDriver.reduce((s,sh)=>s+(sh.travelAllowance||0),0);
   const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
   const repairDeduction = driverResponsibleRepairTotalInRange(driverId, from, to);
   const monthlyBonus = driverMonthlyBonusTotalInRange(driverId, from, to);
-  const netPay = baseSalary + tripWage + food + travelAllowance + monthlyBonus - advance - repairDeduction;
+  const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Phiếu Lương', {
@@ -14961,7 +14937,6 @@ async function exportDriverPayslipXLSX(driverId){
   line('Lương cứng', baseSalary);
   line('Tổng lương chuyến', tripWage);
   line('Tổng tiền ăn', food);
-  if(travelAllowance>0) line('Công tác phí', travelAllowance);
   if(monthlyBonus>0) line('Tiền thưởng cuối tháng', monthlyBonus);
   line('− Ứng lương / tạm ứng', advance);
   if(repairDeduction>0) line('− Trừ do hỏng hóc', repairDeduction);
