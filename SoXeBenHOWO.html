@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #107';
+const APP_BUILD = '2026-08-25 · #108';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4984,7 +4984,16 @@ function renderHeader(){
       sub.textContent = 'Xem lại — chỉ đọc';
     } else {
       title.textContent='Ca Làm Việc';
-      sub.textContent = state.shifts.length + ' ca đã ghi';
+      // SỬA 2026-08-25 (Ông Chủ yêu cầu — "102 ca đã ghi" trước đây LUÔN
+      // hiện tổng TOÀN BỘ lịch sử (state.shifts.length), không phản ánh
+      // đúng những gì đang thực sự hiện trên màn hình): giờ đếm ĐÚNG theo
+      // cùng bộ lọc mà renderShiftList() đang dùng — có ngày tìm kiếm thì
+      // đếm đúng ngày đó, không thì đếm đúng THÁNG HIỆN TẠI (khớp tuyệt
+      // đối với danh sách ca thực sự hiện ra bên dưới, không lệch số).
+      const headerShiftCount = state.searchDate
+        ? state.shifts.filter(sh=>sh.date===state.searchDate).length
+        : state.shifts.filter(sh=>sh.date.slice(0,7)===todayLocalDateStr().slice(0,7)).length;
+      sub.textContent = headerShiftCount + ' ca đã ghi' + (state.searchDate ? ` (ngày ${formatDateVN(state.searchDate)})` : ` (Tháng ${monthLabelVN(todayLocalDateStr().slice(0,7))})`);
       const add=document.createElement('button');
       add.className='btn btn-accent btn-sm'; add.textContent='+ Ca Mới';
       add.onclick=startNewShift;
@@ -5401,10 +5410,11 @@ function bindSearchBar(){
     const picked = e.target.value || null;
     if(picked === state.searchDate) return;
     state.searchDate = picked;
+    renderHeader(); // SỬA 2026-08-25: cập nhật ngay "X ca đã ghi" theo đúng ngày vừa lọc, không đứng số cũ
     renderShiftList();
   });
   const clearBtn = document.getElementById('clearSearchBtn');
-  if(clearBtn) clearBtn.addEventListener('click', (e)=>{ e.stopPropagation(); state.searchDate=null; renderShiftList(); });
+  if(clearBtn) clearBtn.addEventListener('click', (e)=>{ e.stopPropagation(); state.searchDate=null; renderHeader(); renderShiftList(); });
 }
 function bindWarningsBanner(){
   const invBtn = document.getElementById('invoiceWarningsDetailBtn');
