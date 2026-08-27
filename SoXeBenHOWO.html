@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #106';
+const APP_BUILD = '2026-08-25 · #107';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9462,7 +9462,13 @@ function currentMonthRange(){
 /// shiftOperatingCashCost) — thêm 2026-08-23 vì Ông Chủ hỏi số này sao ra
 /// nhiều, cần thấy rõ khoản nào chiếm nhiều nhất thay vì đoán. KHÔNG tính
 /// lại theo công thức khác — chỉ hiện lại đúng các số đã cộng thành tổng đó.
-function renderOperatingCostBreakdownModal(gTotal){
+/// SỬA 2026-08-25 (Ông Chủ yêu cầu — gộp Chi Phí Sửa Chữa/Khấu Hao và Chi
+/// Phí Luật Đường (kỳ này) vào chung "Chi phí vận hành"): thêm 2 tham số
+/// repairTotal/roadFee, liệt kê thành 2 khoản nữa trong modal này — khớp
+/// đúng con số "Chi phí vận hành" MỚI đã gộp hiển thị ở màn chính. KHÔNG
+/// đụng finalNetProfit hay bất kỳ công thức tính tiền nào — chỉ đổi cách
+/// NHÓM HIỂN THỊ, số LỢI NHUẬN THỰC TẾ cuối cùng giữ nguyên y hệt.
+function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee){
   const items = [
     { label:'Tiền dầu tiêu hao', value: gTotal.fuelCost },
     { label:'Lương chuyến (theo số chuyến)', value: gTotal.tripWageCost },
@@ -9471,6 +9477,8 @@ function renderOperatingCostBreakdownModal(gTotal){
     { label:'Tiền nhà/điện nước', value: gTotal.housingCost },
     { label:'Chi phí phát sinh (linh tinh/ca)', value: gTotal.incidentalCost },
     { label:'Luật đường phát sinh/chuyến', value: gTotal.roadFeeIncidentalCost },
+    { label:'Chi phí sửa chữa / khấu hao', value: repairTotal||0 },
+    { label:'Chi phí luật đường (kỳ này)', value: roadFee||0 },
   ];
   const maxVal = Math.max(1, ...items.map(i=>i.value));
   openModal(`
@@ -10991,12 +10999,10 @@ function renderResults(){
         <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(gTotal.revenue)}</span></div>
         <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
-        <div class="summary-row total" style="font-size:16px;"><span style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
-        <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh)</span><span class="val">${fmtVND(gTotal.operatingCashCost)}</span></div>
+        <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
+        <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh, sửa chữa/khấu hao, luật đường)</span><span class="val">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee)}</span></div>
         <button class="btn btn-ghost btn-sm" id="operatingCostDetailBtn" style="width:auto; padding:6px 12px; margin:0 0 6px;">🔍 Chi Tiết Từng Khoản</button>
-        <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span>= Lợi nhuận gộp vận hành</span><span class="val">${fmtVND(gTotal.grossProfit)}</span></div>
-        <div class="summary-row"><span>− Chi phí sửa chữa / khấu hao</span><span class="val">${fmtVND(repairTotal)}</span></div>
-        <div class="summary-row"><span>− Chi phí luật đường (kỳ này)</span><span class="val">${fmtVND(roadFee)}</span></div>
+        <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span style="color:${(gTotal.grossProfit-repairTotal-roadFee)>=0?'var(--profit)':'var(--loss)'}">= Lợi nhuận gộp vận hành</span><span class="val" style="color:${(gTotal.grossProfit-repairTotal-roadFee)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee)}</span></div>
         <div class="summary-row"><span>− Khấu hao xe dự kiến / tháng</span><span class="val">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</span></div>
         <div class="summary-row"><span>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</span><span class="val">${fmtVND(state.settings.monthlyLoanInterest||0)}</span></div>
         <div class="summary-row"><span>− Bảo hiểm xe / tháng</span><span class="val">${fmtVND(state.settings.monthlyInsurance||0)}</span></div>
@@ -11279,7 +11285,7 @@ function renderResults(){
   const goCompleteBtn = document.getElementById('goCompletePendingShiftsBtn');
   if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
   const opCostDetailBtn = document.getElementById('operatingCostDetailBtn');
-  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>renderOperatingCostBreakdownModal(gTotal));
+  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee));
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
@@ -13994,9 +14000,12 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   out.push([`Kết Quả Kinh Doanh: ${formatDateVN(from)} - ${formatDateVN(to)}`]);
   out.push([]);
   out.push(['LỢI NHUẬN THỰC TẾ CUỐI CÙNG']);
-  out.push(['Lợi nhuận gộp vận hành', Math.round(gTotal.grossProfit)]);
-  out.push(['− Chi phí sửa chữa/khấu hao', Math.round(repairTotal)]);
-  out.push(['− Chi phí luật đường', Math.round(roadFee)]);
+  // SỬA 2026-08-25 (đồng bộ với màn hình — Ông Chủ yêu cầu gộp Chi Phí Sửa
+  // Chữa/Khấu Hao và Chi Phí Luật Đường vào chung "Chi phí vận hành"):
+  // "Lợi nhuận gộp vận hành" xuất ra đây giờ ĐÃ TRỪ SẴN 2 khoản đó, khớp
+  // đúng con số hiện trên màn "Kết Quả Kinh Doanh". LỢI NHUẬN THỰC TẾ cuối
+  // cùng không đổi số nào cả.
+  out.push(['Lợi nhuận gộp vận hành (đã gồm sửa chữa/khấu hao, luật đường)', Math.round(gTotal.grossProfit - repairTotal - roadFee)]);
   out.push(['− Khấu hao xe dự kiến/tháng', Math.round(state.settings.monthlyVehicleDepreciation||0)]);
   out.push(['− Lãi vay ngân hàng/tháng (chỉ phần lãi, không gồm gốc)', Math.round(state.settings.monthlyLoanInterest||0)]);
   out.push(['− Bảo hiểm xe/tháng', Math.round(state.settings.monthlyInsurance||0)]);
