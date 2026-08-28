@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-25 · #108';
+const APP_BUILD = '2026-08-27 · #109';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10219,7 +10219,24 @@ function partnerTripRows(partnerId, side, from, to){
         // cash = ĐÚNG công thức gốc (không đổi) — chỉ viết lại gọn hơn:
         // vatApplied ? withVatAmt : netAmt luôn khớp tuyệt đối 3 nhánh cũ.
         const cash = vatApplied ? withVatAmt : netAmt;
-        return { goodsType: t.goodsType||'(chưa khai)', tripLocation, vol, price, unit: side==='customer'?'khối':'tấn', netAmt, withVatAmt, cash };
+        // SỬA 2026-08-27 (Ông Chủ yêu cầu — hiện đúng HIỆN TRẠNG chuyến
+        // hàng khi loại hàng lúc múc khác lúc đổ, ví dụ múc Base A nhưng
+        // khách nhận ghi Base B do chất lượng thực tế): so sánh
+        // t.goodsType (lúc múc) với t.sellGoodsType (lúc đổ, nếu có khai
+        // khác) — lệch nhau thì hiện "Múc [mua] đổ [bán]", giống nhau thì
+        // vẫn hiện đúng 1 tên như cũ.
+        // QUAN TRỌNG: đây CHỈ là field HIỂN THỊ riêng (goodsTypeDisplay) —
+        // KHÔNG đụng field `goodsType` gốc, vì field đó còn được
+        // supplierGoodsBreakdown()/customerGoodsBreakdown() dùng làm KHOÁ
+        // GỘP NHÓM để tính tổng theo loại hàng cho báo cáo công nợ. Nếu
+        // đổi thẳng `goodsType` thành chuỗi "Múc X đổ Y", 2 hàm đó sẽ gộp
+        // sai nhóm (mỗi chuyến lệch loại thành 1 nhóm riêng lẻ, không cộng
+        // đúng vào Base A hay Base B nào cả).
+        const buyType = (t.goodsType||'').trim() || '(chưa khai)';
+        const sellTypeRaw = (t.sellGoodsType||'').trim();
+        const hasGoodsMismatch = !!sellTypeRaw && normGoodsType(sellTypeRaw)!==normGoodsType(t.goodsType);
+        const goodsTypeDisplay = hasGoodsMismatch ? `Múc ${buyType} đổ ${sellTypeRaw}` : buyType;
+        return { goodsType: t.goodsType||'(chưa khai)', goodsTypeDisplay, tripLocation, vol, price, unit: side==='customer'?'khối':'tấn', netAmt, withVatAmt, cash };
       });
       const driver = driverById(sh.driverId);
       groups.push({
@@ -10278,7 +10295,7 @@ function partnerTransactionTableHtml(partnerId, side, from, to){
     const tripLines = g.trips.map(t=>`
       <tr>
         <td>
-          <div>${escapeHtml(t.goodsType)}</div>
+          <div>${escapeHtml(t.goodsTypeDisplay)}</div>
           <div style="font-size:11px; color:var(--ink-soft); font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">${escapeHtml(t.tripLocation)}</div>
         </td>
         <td class="num">${fmtQty(t.vol)} ${t.unit}</td>
