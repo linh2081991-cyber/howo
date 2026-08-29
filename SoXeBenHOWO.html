@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #111';
+const APP_BUILD = '2026-08-27 · #112';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10355,6 +10355,17 @@ function supplierGoodsBreakdown(supplierId, from, to){
   const invoicedPct = (rawPct===undefined) ? 100 : Number(rawPct);
   const byGoods = {};
   let totalVol=0, totalTrips=0, totalNet=0, totalVat=0, totalCash=0;
+  // SỬA 2026-08-27 (Ông Chủ yêu cầu — biết chính xác còn phải nộp thêm
+  // bao nhiêu cho mỏ để họ xuất ĐỦ hoá đơn, vì tiền ứng cho mỏ là tạm ứng
+  // chung, không tách riêng phần nào là tiền hàng/VAT): tính RIÊNG tổng
+  // tiền CÓ VAT của ĐÚNG phần khối lượng dự kiến phải xuất hoá đơn (đúng
+  // tỉ lệ % hoá đơn cấu hình cho nhà cung cấp này) — dùng LUÔN t.withVatAmt
+  // đã có sẵn từ partnerTripRows() (đã tính đúng % VAT riêng từng công
+  // trình, KHÔNG bị chặn bởi vatApplied — vì đây là số ƯỚC TÍNH cần trả
+  // để CÓ hoá đơn, không phải số đã ghi nhận kế toán thật). Tính theo
+  // TỪNG CHUYẾN rồi cộng dồn — không lấy giá bình quân cả kỳ, để đúng
+  // ngay cả khi các chuyến trong kỳ có đơn giá khác nhau.
+  let totalInvoicedCashWithVat = 0;
   for(const g of groups){
     for(const t of g.trips){
       const key = t.goodsType || '(chưa khai)';
@@ -10367,13 +10378,14 @@ function supplierGoodsBreakdown(supplierId, from, to){
       const vat = g.vatApplied ? (t.withVatAmt - t.netAmt) : 0;
       b.trips += 1; b.vol += t.vol; b.net += t.netAmt; b.vat += vat; b.cash += t.cash;
       totalVol += t.vol; totalTrips += 1; totalNet += t.netAmt; totalVat += vat; totalCash += t.cash;
+      totalInvoicedCashWithVat += t.withVatAmt * invoicedPct / 100;
     }
   }
   const rows = Object.values(byGoods)
     .map(r=>({ ...r, expectedInvoiceVolume: r.vol * invoicedPct / 100 }))
     .sort((a,b)=>b.cash-a.cash);
   const totalExpectedInvoiceVolume = totalVol * invoicedPct / 100;
-  return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash, invoicedPct, totalExpectedInvoiceVolume };
+  return { rows, totalVol, totalTrips, totalNet, totalVat, totalCash, invoicedPct, totalExpectedInvoiceVolume, totalInvoicedCashWithVat };
 }
 /// Y HỆT supplierGoodsBreakdown() ở trên nhưng cho phía KHÁCH HÀNG (yêu
 /// cầu Ông Chủ 2026-08-16, "hiển thị đầy đủ giống y hệt nhà cung cấp") —
@@ -11737,6 +11749,7 @@ function openSupplierDetail(supplierId){
   const periodPaid = range ? payments.filter(p=>p.date>=range.from && p.date<=range.to).reduce((s,p)=>s+(Number(p.amount)||0),0) : 0;
   const periodPayable = range ? goodsForDisplay.totalCash : 0;
   const periodNet = periodPayable - periodPaid;
+  const owedForInvoice = range ? (goodsForDisplay.totalInvoicedCashWithVat - periodPaid) : 0;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="supDetailBackBtn">← Quay Lại Kết Quả</button>
@@ -11781,6 +11794,8 @@ function openSupplierDetail(supplierId){
         <div class="summary-row"><span>Tiền hàng lấy trong kỳ</span><span class="val">${fmtVND(periodPayable)}</span></div>
         <div class="summary-row"><span>Đã trả trong kỳ</span><span class="val">${fmtVND(periodPaid)}</span></div>
         <div class="summary-row total"><span>CHÊNH LỆCH TRONG KỲ</span><span class="val" style="color:${periodNet>0?'var(--loss)':'var(--profit)'}">${fmtVND(periodNet)}</span></div>
+        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsForDisplay.invoicedPct}%)</span><span class="val" style="color:${owedForInvoice>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoice)}${owedForInvoice<=0?' (đã đủ/dư)':''}</span></div>
+        <div class="hint" style="margin-top:4px;">= (Khối lượng dự kiến xuất hoá đơn × Đơn giá × (1 + %VAT)) − Đã trả trong kỳ. Coi tiền đã trả là tạm ứng chung, ưu tiên trừ vào đúng phần cần có hoá đơn trước.</div>
       </div>` : ''}
     </section>
     <section class="group">
