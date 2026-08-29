@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #110';
+const APP_BUILD = '2026-08-27 · #111';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10234,7 +10234,11 @@ function partnerTripRows(partnerId, side, from, to){
         // đúng vào Base A hay Base B nào cả).
         const buyType = (t.goodsType||'').trim() || '(chưa khai)';
         const sellTypeRaw = (t.sellGoodsType||'').trim();
-        const hasGoodsMismatch = !!sellTypeRaw && normGoodsType(sellTypeRaw)!==normGoodsType(t.goodsType);
+        // SỬA 2026-08-27 (lần 3 — Ông Chủ chỉ rõ): nhãn "Múc X đổ Y" CHỈ
+        // có ý nghĩa ở trang KHÁCH HÀNG (biết chuyến nào bị lệch loại lúc
+        // giao). Trang NHÀ CUNG CẤP (mỏ) chỉ cần đúng loại hàng đã MUA —
+        // không cần biết sau đó bán thành loại gì, hiện thêm chỉ gây rối.
+        const hasGoodsMismatch = side==='customer' && !!sellTypeRaw && normGoodsType(sellTypeRaw)!==normGoodsType(t.goodsType);
         const goodsTypeDisplay = hasGoodsMismatch ? `Múc ${buyType} đổ ${sellTypeRaw}` : buyType;
         // SỬA 2026-08-27 (lần 2 — Ông Chủ chỉ ra "Chi Tiết Tiền Hàng — Theo
         // Loại Hàng" bên trang KHÁCH HÀNG vẫn gộp nhầm theo loại lúc MÚC,
