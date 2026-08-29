@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #109';
+const APP_BUILD = '2026-08-27 · #110';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10236,7 +10236,16 @@ function partnerTripRows(partnerId, side, from, to){
         const sellTypeRaw = (t.sellGoodsType||'').trim();
         const hasGoodsMismatch = !!sellTypeRaw && normGoodsType(sellTypeRaw)!==normGoodsType(t.goodsType);
         const goodsTypeDisplay = hasGoodsMismatch ? `Múc ${buyType} đổ ${sellTypeRaw}` : buyType;
-        return { goodsType: t.goodsType||'(chưa khai)', goodsTypeDisplay, tripLocation, vol, price, unit: side==='customer'?'khối':'tấn', netAmt, withVatAmt, cash };
+        // SỬA 2026-08-27 (lần 2 — Ông Chủ chỉ ra "Chi Tiết Tiền Hàng — Theo
+        // Loại Hàng" bên trang KHÁCH HÀNG vẫn gộp nhầm theo loại lúc MÚC,
+        // dẫn tới nguy cơ xuất hoá đơn sai loại cho khách): thêm field
+        // sellGoodsTypeEffective = loại hàng THẬT SỰ bán ra (ưu tiên
+        // sellGoodsType nếu có khai khác, không thì = goodsType) — để
+        // customerGoodsBreakdown() gộp nhóm ĐÚNG theo cái sẽ lên hoá đơn
+        // khách, thay vì theo cái đã mua. supplierGoodsBreakdown() vẫn
+        // dùng field `goodsType` gốc (đúng theo hoá đơn mỏ xuất), không đổi.
+        const sellGoodsTypeEffective = sellTypeRaw || buyType;
+        return { goodsType: t.goodsType||'(chưa khai)', goodsTypeDisplay, sellGoodsTypeEffective, tripLocation, vol, price, unit: side==='customer'?'khối':'tấn', netAmt, withVatAmt, cash };
       });
       const driver = driverById(sh.driverId);
       groups.push({
@@ -10368,13 +10377,21 @@ function supplierGoodsBreakdown(supplierId, from, to){
 /// tuyệt đối commercialCashFromCustomer() ở cấp công trình, nên totalCash
 /// dưới đây LUÔN bằng đúng debt.billed (không lọc theo kỳ) hoặc đúng phần
 /// billed trong kỳ (khi có lọc from/to) — không có đường tính nào khác.
+/// SỬA 2026-08-27 (Ông Chủ chỉ ra — bảng "Chi Tiết Tiền Hàng Theo Loại
+/// Hàng" gộp nhầm theo loại MÚC, dẫn tới nguy cơ xuất hoá đơn SAI LOẠI
+/// HÀNG cho khách khi có chuyến múc Base A nhưng khách nhận ghi Base B):
+/// khoá gộp nhóm đổi từ t.goodsType (loại lúc múc) sang
+/// t.sellGoodsTypeEffective (loại THẬT SỰ bán ra cho khách — ưu tiên
+/// sellGoodsType nếu có khai khác, không thì bằng goodsType) — vì bảng
+/// này dùng để BIẾT CẦN XUẤT BAO NHIÊU HOÁ ĐƠN LOẠI GÌ cho khách, phải
+/// khớp đúng cái khách ghi nhận, không phải cái mua từ mỏ.
 function customerGoodsBreakdown(customerId, from, to){
   const groups = partnerTripRows(customerId, 'customer', from, to);
   const byGoods = {};
   let totalVol=0, totalTrips=0, totalNet=0, totalVat=0, totalCash=0;
   for(const g of groups){
     for(const t of g.trips){
-      const key = t.goodsType || '(chưa khai)';
+      const key = t.sellGoodsTypeEffective || '(chưa khai)';
       if(!byGoods[key]) byGoods[key] = { goodsType:key, trips:0, vol:0, net:0, vat:0, cash:0 };
       const b = byGoods[key];
       const vat = g.vatApplied ? (t.withVatAmt - t.netAmt) : 0;
@@ -14765,7 +14782,12 @@ function ktBuildCustomerDetail(wb, from, to){
         sVol+=t.vol; sNet+=t.netAmt; sVat+=vat; sCash+=t.cash;
         ktCell(ws,`A${r}`,formatDateVN(g.date),{align:'center'});
         ktCell(ws,`B${r}`,cus.name);
-        ktCell(ws,`C${r}`,t.goodsType||'');
+        // SỬA 2026-08-27 (Ông Chủ chỉ ra — nguy cơ xuất hoá đơn sai loại
+        // hàng cho khách): dùng t.sellGoodsTypeEffective (loại THẬT SỰ bán
+        // ra, đúng cái khách ghi nhận) thay vì t.goodsType (loại lúc múc)
+        // — vì đây là sheet dùng để xuất hoá đơn BÁN cho khách, phải khớp
+        // đúng thực tế giao hàng, không phải nguồn gốc mua vào.
+        ktCell(ws,`C${r}`,t.sellGoodsTypeEffective||'');
         ktCell(ws,`D${r}`,t.tripLocation||'');
         ktCell(ws,`E${r}`,t.vol.toLocaleString('vi-VN',{maximumFractionDigits:2})+' '+t.unit,{align:'right'});
         ktCell(ws,`F${r}`,Math.round(t.price),{align:'right',numFmt:KT_NUMFMT});
