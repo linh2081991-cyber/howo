@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #122';
+const APP_BUILD = '2026-08-27 · #124';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3771,9 +3771,28 @@ function baseSalaryForShift(sh, driver, intensity){
   const daily = dailyBaseSalary(driver);
   return Math.round(daily*(priorIntensitySum+intensity)) - Math.round(daily*priorIntensitySum);
 }
-function dailyHousing(driver, dateStr){
-  const dim = daysInMonth(dateStr) || 30;
-  return (driver.monthlyHousingBudget||0) / dim;
+// SỬA 2026-08-27 (Ông Chủ yêu cầu — "Tiền nhà + điện nước là cố định dù
+// như thế nào, để cố định luôn theo cài đặt chứ không cần chia bao nhiêu
+// ngày"): bỏ hẳn cách chia đều theo số ngày trong tháng rồi nhân số ca
+// (gây ra hiện tượng cộng dồn quá nhiều nếu nhiều ca/tháng, kể cả ca Nằm
+// Bãi). Giờ dùng ĐÚNG 1 LẦN/THÁNG — y hệt cách baseSalaryForShift() xác
+// định "ca nào là ca đầu tiên trong tháng" (shiftPositionInfo), nhưng đơn
+// giản hơn: ca ĐỦ ĐIỀU KIỆN (đúng Chính Sách Chi Phí đang bật) và SỚM
+// NHẤT trong tháng của đúng tài xế đó nhận ĐỦ NGUYÊN số tiền cài đặt
+// (driver.monthlyHousingBudget) — mọi ca đủ điều kiện KHÁC trong CÙNG
+// tháng nhận 0đ (tránh cộng trùng). Tổng cộng dồn cả tháng LUÔN đúng
+// bằng ĐÚNG 1 LẦN số đã cài đặt, không hơn không kém, không phụ thuộc số
+// ngày trong tháng hay có bao nhiêu ca.
+function housingForShift(sh, driver){
+  const ym = (sh.date||'').slice(0,7);
+  const earnsHousing = s => !!(state.settings.costPolicies[s.status]||{}).housing;
+  if(!earnsHousing(sh)) return 0;
+  const pool = state.shifts
+    .filter(s=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym && earnsHousing(s))
+    .concat([sh]);
+  pool.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : String(a.id).localeCompare(String(b.id)));
+  const ordinal = pool.findIndex(s=>s.id===sh.id) + 1;
+  return ordinal===1 ? (Number(driver.monthlyHousingBudget)||0) : 0;
 }
 
 function vatRateFraction(){ return (Number(state.settings.vatRatePercent)||0)/100; }
@@ -5604,7 +5623,7 @@ function startNewShift(){
     intensity: 1, // Cường Độ Ca: 1 = ca thường, 1.5 = ca rưỡi (tài xế làm gấp 1,5 khối lượng). CHỈ nhân vào lương cứng, không đụng tiền ăn/nhà/dầu/lương chuyến.
     baseSalaryAllocation: 0, // gán đúng ngay bên dưới, sau khi draft đã dựng xong (baseSalaryForShift cần tham chiếu draft.id/date/driverId)
     foodAllowance: policy.food ? driver.dailyFoodAllowance : 0,
-    housingAllocation: policy.housing ? dailyHousing(driver, dateStr) : 0,
+    housingAllocation: 0, // gán đúng ngay bên dưới, sau khi draft đã dựng xong (housingForShift cần tham chiếu draft.id/date/driverId)
     incidentalCost: 0,
     incidentalNotes: '',
     roadFeeIncidental: 0, // Tiền luật phát sinh theo chuyến — nhập tay, đặc thù cung/công trình mới. Là chi phí BIẾN ĐỔI của riêng ca, trừ thẳng vào lãi/lỗ ca (khác tiền luật đường THÁNG cố định ở tab Kết Quả).
@@ -5615,6 +5634,7 @@ function startNewShift(){
   };
   state.draftShift = draft;
   draft.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(draft, driver, 1) : 0;
+  draft.housingAllocation = policy.housing ? housingForShift(draft, driver) : 0;
   state.view='form';
   renderAll();
 }
@@ -5627,7 +5647,7 @@ function reapplyCostPolicyToDraft(){
   if(!driver){ sh.baseSalaryAllocation=0; sh.foodAllowance=0; sh.housingAllocation=0; return; }
   sh.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(sh, driver, intensity) : 0;
   sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
-  sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
+  sh.housingAllocation = policy.housing ? housingForShift(sh, driver) : 0;
 }
 
 /// Khi Ông Chủ sửa Lương cứng/tháng, Tiền ăn/ngày hoặc Tiền nhà/tháng của
@@ -5635,7 +5655,7 @@ function reapplyCostPolicyToDraft(){
 /// (baseSalaryAllocation, foodAllowance, housingAllocation) cho TOÀN BỘ
 /// ca ĐÃ LƯU của đúng tài xế đó — mọi thời điểm, quá khứ lẫn hiện tại —
 /// theo số tiền MỚI vừa sửa. Dùng lại đúng công thức gốc đã có sẵn
-/// (dailyBaseSalary, dailyHousing) và đúng chính sách chi phí theo trạng
+/// (dailyBaseSalary, housingForShift) và đúng chính sách chi phí theo trạng
 /// thái ca (costPolicies[sh.status]) — y hệt logic reapplyCostPolicyToDraft()
 /// đang dùng cho ca mới — nên KHÔNG đụng vào bất kỳ hàm tính toán gốc nào.
 /// Các ca của tài xế KHÁC không bị ảnh hưởng.
@@ -5648,7 +5668,7 @@ function recalcDriverShiftAllocations(driverId){
     const intensity = Number(sh.intensity)||1; // giữ đúng hệ số ca rưỡi đã snapshot của từng ca khi tính lại
     sh.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(sh, driver, intensity) : 0;
     sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
-    sh.housingAllocation = policy.housing ? dailyHousing(driver, sh.date) : 0;
+    sh.housingAllocation = policy.housing ? housingForShift(sh, driver) : 0;
   });
 }
 
@@ -7015,7 +7035,17 @@ function renderDrivers(){
     btn.addEventListener('click', ()=>openEditDriver(btn.dataset.id));
   });
   document.querySelectorAll('.viewDriverDetailBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverDetail(btn.dataset.id); });
+    // SỬA 2026-08-27 (Ông Chủ báo — mở lại trang Tài Xế cứ hiện "Tháng
+    // Trước" dù không cố ý chọn): state.driverDetailRange TRƯỚC ĐÂY chỉ
+    // được gán "Tháng Này" đúng 1 LẦN DUY NHẤT khi undefined — sau đó, dù
+    // đã rời khỏi trang này, đổi sang xem tài xế khác, hay quay lại vào
+    // ngày hôm sau, nó vẫn GIỮ NGUYÊN lựa chọn cũ (Tháng Trước/Toàn Thời
+    // Gian/ngày tự chọn) mãi mãi — không tự về lại đúng tháng hiện hành.
+    // Giờ RESET về đúng "Tháng Này" MỖI LẦN mở mới từ danh sách (đây mới
+    // là hành vi mong đợi: mở lên luôn thấy đúng tháng đang chạy) — bên
+    // trong trang, Ông Chủ vẫn có thể tự bấm "Tháng Trước"/"Toàn Thời
+    // Gian" bình thường cho phiên xem hiện tại, không mất tính năng đó.
+    btn.addEventListener('click', ()=>{ saveMainScroll(); state.driverDetailRange = currentMonthRange(); openDriverDetail(btn.dataset.id); });
   });
   document.querySelectorAll('.viewDriverAdvanceBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceDetail(btn.dataset.id); });
