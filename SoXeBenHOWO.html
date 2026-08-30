@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #119';
+const APP_BUILD = '2026-08-27 · #121';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3782,6 +3782,16 @@ function vatRateFraction(){ return (Number(state.settings.vatRatePercent)||0)/10
 /// vật liệu chứ không phải của điểm đổ. Nếu chưa gắn nhà cung cấp, dùng
 /// tạm mức đã gõ tay trực tiếp trên công trình (dữ liệu cũ trước khi có
 /// Nhà Cung Cấp). Bỏ trống hết = dùng mức chung ở Cài Đặt.
+// SỬA 2026-08-27 (Ông Chủ chỉ ra logic sai — "mua 100% thì chỉ cần đóng
+// VAT cho đúng 70%", KHÔNG PHẢI đóng VAT cho 100%): hàm tra tỉ lệ % hoá
+// đơn nhà cung cấp thực xuất được — dùng CHUNG ở mọi chỗ tính VAT phía
+// MUA (commercialCashToSupplier, partnerTripRows phía supplier), để nhất
+// quán tuyệt đối, không lệch nhau giữa các nơi tính song song.
+function siteInvoicedBuyPercent(s){
+  const sup = s.supplierId ? supplierById(s.supplierId) : null;
+  const rawPct = sup && sup.invoicedBuyPercent!==undefined && sup.invoicedBuyPercent!==null && sup.invoicedBuyPercent!=='' ? sup.invoicedBuyPercent : undefined;
+  return (rawPct===undefined) ? 100 : Number(rawPct);
+}
 function siteVatRateFraction(s){
   const sup = s.supplierId ? supplierById(s.supplierId) : null;
   if(sup && sup.vatRatePercent!==undefined && sup.vatRatePercent!==null && sup.vatRatePercent!=='') return Number(sup.vatRatePercent)/100;
@@ -4500,7 +4510,11 @@ function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
   const vat = siteVatRateFraction(s);
   const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vat : 0);
-  const inputVatFromBuy = buyIsDeductible(s) ? (commercialNetBuy(s) * vat) : 0;
+  // SỬA 2026-08-27 (cùng đợt sửa commercialCashToSupplier — VAT ĐẦU VÀO
+  // được khấu trừ cũng CHỈ đúng % hoá đơn mỏ thực xuất, không phải 100%,
+  // vì mỏ chỉ thực THU VAT cho đúng % đó — khấu trừ quá số VAT thật đã
+  // nộp là sai luật thuế).
+  const inputVatFromBuy = buyIsDeductible(s) ? (commercialNetBuy(s) * (siteInvoicedBuyPercent(s)/100) * vat) : 0;
   // VAT khấu trừ từ hoá đơn bù giờ lấy đúng từ Kho Hoá Đơn Bù (VAT suất
   // THẬT của từng lô đã rút cho ca này) — không ước lượng theo giá mua nội
   // bộ nữa. Xem siteInvoiceSupplementVatCredit() / buildInvoiceLotLedger().
@@ -4548,10 +4562,21 @@ function commercialCashFromCustomer(s){
 // Tiền THỰC trả nhà cung cấp: nếu giá mua đã gồm VAT thì là số đã nhập; nếu
 // giá mua là net và CÓ hoá đơn thì trả thêm phần VAT (được khấu trừ sau);
 // nếu net và không hoá đơn thì trả đúng số net (không cộng VAT).
+// SỬA 2026-08-27 (Ông Chủ chỉ ra lỗi thật, có bằng chứng đối chiếu hoá đơn
+// mỏ xuất — "mua 100% khối lượng thì CHỈ cần đóng VAT cho đúng 70%, KHÔNG
+// PHẢI 100%"): trước đây khi tick "Đã nhận hoá đơn MUA", công thức cộng
+// VAT trên TOÀN BỘ 100% giá trị đã mua — SAI, vì mỏ chỉ thực xuất hoá đơn
+// (và chỉ THU VAT thật) cho đúng % đã cấu hình riêng cho nhà cung cấp này
+// (invoicedBuyPercent, mặc định 100% nếu chưa khai — không đổi hành vi
+// cho nhà cung cấp nào chưa cấu hình riêng). 100% GIÁ TRỊ HÀNG vẫn luôn
+// phải trả đủ (đây là tiền hàng thật, không phụ thuộc hoá đơn) — CHỈ CÓ
+// phần VAT cộng thêm là bị giới hạn đúng theo % đó.
 function commercialCashToSupplier(s){
   const entered = commercialGrossBuy(s);
   if(s.buyIncludesVat) return entered;             // số nhập đã gồm VAT = tiền trả mỏ
-  return buyIsDeductible(s) ? entered*(1+siteVatRateFraction(s)) : entered; // mua net + có hoá đơn → trả net + VAT
+  if(!buyIsDeductible(s)) return entered;           // net + chưa hoá đơn → trả đúng số net
+  const pct = siteInvoicedBuyPercent(s)/100;
+  return entered + entered*pct*siteVatRateFraction(s); // net (100%) + VAT (chỉ đúng % hoá đơn)
 }
 // VAT đầu vào tính trên tiền mặt thực (dùng cho dòng phụ "gồm VAT" khi hiển thị)
 function commercialCashInputVat(s){ return commercialCashToSupplier(s) - commercialNetBuy(s); }
@@ -6368,7 +6393,7 @@ function renderSiteCashFlowExplainerModal(s){
 
   // Y HỆT logic nội bộ commercialVatPayable() — xem hàm đó để đối chiếu.
   const outputVatForPayable = netSell * (s.sellIncludesVat ? vatFrac : 0);
-  const inputVatCreditFromBuy = deductibleBuy ? (netBuy * vatFrac) : 0;
+  const inputVatCreditFromBuy = deductibleBuy ? (netBuy * (siteInvoicedBuyPercent(s)/100) * vatFrac) : 0;
   const supplementVatCredit = siteInvoiceSupplementVatCredit(s);
   const vatBeforeClamp = outputVatForPayable - inputVatCreditFromBuy - supplementVatCredit;
   const vatToState = commercialVatPayable(s);
@@ -6529,7 +6554,7 @@ function periodVatBreakdown(inRangeShifts){
       if(s.siteType!=='commercial') continue;
       const vatFrac = siteVatRateFraction(s);
       const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vatFrac : 0);
-      const inputVat = buyIsDeductible(s) ? (commercialNetBuy(s) * vatFrac) : 0;
+      const inputVat = buyIsDeductible(s) ? (commercialNetBuy(s) * (siteInvoicedBuyPercent(s)/100) * vatFrac) : 0;
       const supplementCredit = siteInvoiceSupplementVatCredit(s);
       const payable = commercialVatPayable(s); // hàm gốc — đã tự kẹp về 0 nếu âm
       totalOutputRaw += outputVat; totalInputRaw += inputVat;
@@ -10221,8 +10246,15 @@ function partnerTripRows(partnerId, side, from, to){
         // netAmt = tiền CHƯA VAT · withVatAmt = tiền ĐÃ CỘNG VAT — quy cả
         // 2 về CÙNG 1 gốc dù đơn giá gõ vào là giá net hay giá đã gồm
         // VAT, để 2 cột luôn so sánh ngang hàng được với nhau.
+        // SỬA 2026-08-27 (Ông Chủ chỉ ra lỗi thật, đối chiếu hoá đơn mỏ):
+        // phía NHÀ CUNG CẤP (supplier), VAT cộng thêm CHỈ áp đúng tỉ lệ %
+        // hoá đơn nhà cung cấp thực xuất (invoicedBuyPercent, mặc định
+        // 100% nếu chưa cấu hình — không đổi hành vi cũ cho ai chưa khai
+        // riêng) — KHÔNG áp cho 100% như trước. Phía KHÁCH HÀNG (customer)
+        // giữ nguyên 100% như cũ, vì khách luôn nhận đủ hoá đơn 100%.
+        const invoicedPctFrac = side==='supplier' ? (siteInvoicedBuyPercent(s)/100) : 1;
         const netAmt = priceIncludesVat ? gross/(1+vatFrac) : gross;
-        const withVatAmt = priceIncludesVat ? gross : gross*(1+vatFrac);
+        const withVatAmt = priceIncludesVat ? gross : gross + gross*invoicedPctFrac*vatFrac;
         // cash = ĐÚNG công thức gốc (không đổi) — chỉ viết lại gọn hơn:
         // vatApplied ? withVatAmt : netAmt luôn khớp tuyệt đối 3 nhánh cũ.
         const cash = vatApplied ? withVatAmt : netAmt;
@@ -10380,6 +10412,13 @@ function supplierGoodsBreakdown(supplierId, from, to){
   // nộp đủ tiền để mỏ xuất hoá đơn. Vẫn tính TỪNG CHUYẾN rồi cộng dồn
   // (không lấy giá bình quân), tự động cập nhật ngay khi có chuyến mới
   // hoặc khi 1 ca chuyển từ "chưa xuất" sang "đã xuất" hoá đơn.
+  // SỬA 2026-08-27 (lần 3 — vì withVatAmt ở partnerTripRows() giờ ĐÃ TỰ
+  // scale đúng invoicedPct% cho phía supplier rồi, KHÔNG được nhân thêm
+  // invoicedPct/100 lần nữa ở đây nữa — nếu không sẽ bị nhân đúp (0,7×0,7
+  // thay vì đúng 0,7), ra số sai. Giờ totalInvoicedCashWithVat chỉ còn đại
+  // diện đúng "phần VAT ước tính thêm" (không phải cả gốc) cho phần CHƯA
+  // xuất — dùng thẳng (t.withVatAmt - t.netAmt), đã tự đúng % + đúng VAT
+  // rate riêng từng công trình, không cần tính lại.
   let totalInvoicedCashWithVat = 0;
   for(const g of groups){
     for(const t of g.trips){
@@ -10394,7 +10433,7 @@ function supplierGoodsBreakdown(supplierId, from, to){
       b.trips += 1; b.vol += t.vol; b.net += t.netAmt; b.vat += vat; b.cash += t.cash;
       totalVol += t.vol; totalTrips += 1; totalNet += t.netAmt; totalVat += vat; totalCash += t.cash;
       if(g.vatApplied){ totalNetInvoiced += t.netAmt; totalVatInvoiced += vat; }
-      else { totalNetNotInvoiced += t.netAmt; totalInvoicedCashWithVat += t.withVatAmt * invoicedPct / 100; }
+      else { totalNetNotInvoiced += t.netAmt; totalInvoicedCashWithVat += (t.withVatAmt - t.netAmt); }
     }
   }
   const rows = Object.values(byGoods)
@@ -11777,20 +11816,19 @@ function openSupplierDetail(supplierId){
   // (đều đã là số toàn bộ lịch sử có sẵn) — bỏ hẳn owedForInvoice theo kỳ,
   // không còn phụ thuộc range đang chọn nữa.
   // SỬA 2026-08-27 (lần 2 — Ông Chủ chỉ ra công thức lần 1 vẫn CHƯA chặt
-  // chẽ, vì lấy 70% của TOÀN BỘ LỊCH SỬ trừ đi TOÀN BỘ đã trả — trong đó
-  // phần "đã trả" bị trộn lẫn tiền đã dùng để thanh toán CHO ĐÚNG phần đã
-  // xuất hoá đơn rồi, không liên quan gì tới nhu cầu của phần CÒN CHƯA
-  // xuất). Logic ĐÚNG, bám sát 3 dữ liệu Ông Chủ yêu cầu:
-  //  1) Tiền hàng Mỏ CHƯA xuất hoá đơn (goodsAllTime.totalNetNotInvoiced)
-  //     — tự cập nhật ngay mỗi khi nhập chuyến mới (qua supplierGoodsBreakdown
-  //     đọc lại toàn bộ state.shifts mỗi lần gọi, không cache).
-  //  2) Số tiền CẦN CÓ (đã gồm VAT) để đủ 70% hoá đơn của ĐÚNG phần đó —
-  //     goodsAllTime.totalInvoicedCashWithVat (giờ CHỈ tính trên phần
-  //     "chưa xuất", không còn lẫn phần đã xong).
-  //  3) Số dư/thiếu HIỆN TẠI với mỏ (debt.owed — âm nghĩa là đang tạm ứng
-  //     dư, có sẵn "của để dành" bù vào nhu cầu trên) — CỘNG thẳng debt.owed
-  //     (số âm sẽ tự trừ bớt, số dương sẽ tự cộng thêm, đúng bản chất).
-  const owedForInvoiceAllTime = goodsAllTime.totalInvoicedCashWithVat + debt.owed;
+  // SỬA 2026-08-27 (lần 4 — CĂN NGUYÊN CUỐI CÙNG, Ông Chủ chỉ ra bằng
+  // đúng hoá đơn mỏ thật): lỗi gốc không phải ở công thức "Ông chủ còn
+  // phải nộp" — mà ở chính công thức lõi commercialCashToSupplier() TRƯỚC
+  // ĐÂY tính VAT trên TOÀN BỘ 100% khi đã tick "Đã nhận hoá đơn MUA", dù
+  // mỏ chỉ thực thu VAT cho đúng % hoá đơn cấu hình (70%). Đã sửa TẬN GỐC
+  // commercialCashToSupplier() + partnerTripRows() để VAT LUÔN chỉ áp
+  // đúng % đó — nên giờ debt.owed (CÒN NỢ MỎ) đã ĐÚNG, phản ánh đủ 100%
+  // giá trị hàng + đúng % VAT của phần đã xuất. Công thức giờ ĐƠN GIẢN,
+  // KHÔNG còn trộn phạm vi: CÒN NỢ MỎ (đã đúng) + phần VAT CÒN THIẾU của
+  // đúng phần CHƯA xuất (totalInvoicedCashWithVat — giờ chỉ là phần VAT
+  // chênh lệch, không phải cả gốc, tránh cộng trùng phần gốc đã có sẵn
+  // trong CÒN NỢ MỎ rồi).
+  const owedForInvoiceAllTime = debt.owed + goodsAllTime.totalInvoicedCashWithVat;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="supDetailBackBtn">← Quay Lại Kết Quả</button>
@@ -11806,18 +11844,18 @@ function openSupplierDetail(supplierId){
         <div class="summary-row total" style="font-size:15.5px;"><span>Tổng tiền hàng đã lấy (chưa tính VAT)</span><span class="val">${fmtVND(goodsAllTime.totalNet)}</span></div>
         <div style="margin:8px 0 4px; padding-left:10px; border-left:3px solid var(--profit);">
           <div class="summary-row"><span style="color:var(--ink-soft);">— Tiền hàng Mỏ ĐÃ xuất hoá đơn</span><span class="val">${fmtVND(goodsAllTime.totalNetInvoiced)}</span></div>
-          <div class="summary-row"><span style="color:var(--ink-soft);">— VAT (của phần Mỏ đã xuất)</span><span class="val">${fmtVND(goodsAllTime.totalVatInvoiced)}</span></div>
+          <div class="summary-row"><span style="color:var(--ink-soft);">— VAT (chỉ đúng ${goodsAllTime.invoicedPct}% của phần Mỏ đã xuất)</span><span class="val">${fmtVND(goodsAllTime.totalVatInvoiced)}</span></div>
         </div>
         <div style="margin:4px 0 8px; padding-left:10px; border-left:3px solid var(--loss);">
           <div class="summary-row"><span style="color:var(--ink-soft);">— Tiền hàng Mỏ CHƯA xuất hoá đơn</span><span class="val">${fmtVND(goodsAllTime.totalNetNotInvoiced)}</span></div>
         </div>
-        <div class="hint" style="margin-bottom:10px;">💡 Phần "chưa xuất hoá đơn" chưa được cộng VAT — đúng nguyên tắc chỉ ghi nhận VAT khi đã có hoá đơn thật. Khi Mỏ xuất hoá đơn, phần này sẽ chuyển sang nhóm "đã xuất" và VAT tương ứng mới hiện ra.</div>
+        <div class="hint" style="margin-bottom:10px;">💡 100% tiền hàng luôn phải trả đủ cho mỏ (tiền hàng thật, không phụ thuộc hoá đơn) — CHỈ CÓ phần VAT là bị giới hạn đúng ${goodsAllTime.invoicedPct}% (tỉ lệ hoá đơn mỏ thực xuất), và phần "chưa xuất hoá đơn" thì VAT tạm chưa ghi nhận (đúng nguyên tắc chỉ ghi nhận khi đã có hoá đơn thật).</div>
         ` : ''}
         <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
         <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
         <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (anh tạm ứng dư)':''}</span></div>
         <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoiceAllTime)}${owedForInvoiceAllTime<=0?' (đã đủ/dư)':''}</span></div>
-        <div class="hint" style="margin-top:4px;">= (Tiền hàng Mỏ CHƯA xuất hoá đơn × ${goodsAllTime.invoicedPct}% × (1+%VAT), tính riêng từng chuyến) ${debt.owed<0?'−':'+'} ${fmtVND(Math.abs(debt.owed))} (đúng số ${debt.owed<0?'đang tạm ứng dư':'đang còn thiếu'} với mỏ hiện tại, xem dòng "CÒN NỢ MỎ" ở trên). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
+        <div class="hint" style="margin-top:4px;">= CÒN NỢ MỎ (ở trên, đã đúng 100% gốc + ${goodsAllTime.invoicedPct}% VAT của phần đã xuất) + Phần VAT còn thiếu của phần CHƯA xuất (= Tiền hàng CHƯA xuất × ${goodsAllTime.invoicedPct}% × %VAT, tính riêng từng chuyến). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
