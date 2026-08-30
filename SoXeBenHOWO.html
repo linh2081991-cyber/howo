@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #121';
+const APP_BUILD = '2026-08-27 · #122';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7467,6 +7467,42 @@ function openDriverExpenseReportEditor(id, driverId){
   });
 }
 
+// SỬA 2026-08-27 (Ông Chủ yêu cầu — cần xem chi tiết đúng ngày nào chở
+// bao nhiêu chuyến, để yên tâm trước khi in phiếu lương): dùng LẠI ĐÚNG
+// buildDriverPayslipTripRows() — hàm NÀY tạo ra bảng chi tiết dùng trong
+// chính phiếu lương Excel (đã kiểm chứng khớp tuyệt đối với tổng chính
+// thức driverTripWageStatsInRange ở bản #116) — nên số hiện ở đây LUÔN
+// khớp 100% với phiếu lương thật, không có đường tính thứ 2 nào khác có
+// thể lệch nhau.
+function openDriverTripDetailModal(driverId, from, to){
+  const driver = driverById(driverId);
+  const shiftsForDriver = state.shifts.filter(sh=>sh.driverId===driverId);
+  const rows = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver)
+    .filter(r=>(r.tripCount||0)>0)
+    .sort((a,b)=>(a._sortKey||0)-(b._sortKey||0));
+  const totalCheck = rows.reduce((s,r)=>s+(r.tripCount||0),0);
+  openModal(`
+    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
+    <h3>🔍 Chi Tiết Từng Chuyến — ${escapeHtml(driver?driver.name:'')}</h3>
+    <div class="hint" style="margin-bottom:10px;">${formatDateVN(from)} → ${formatDateVN(to)} — dùng ĐÚNG nguồn dữ liệu với phiếu lương Excel, luôn khớp tuyệt đối.</div>
+    ${rows.length===0 ? '<div class="hint">Không có chuyến nào trong kỳ này.</div>' : `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Ngày</th><th>Ca</th><th>Công Trình</th><th class="num">Số Chuyến</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`
+          <tr>
+            <td>${r.date}${r.notes?` <span style="color:#B23A2E;">📌</span>`:''}</td>
+            <td>${r.shiftType}</td>
+            <td>${escapeHtml((r.siteLabel||'').split('\n').join(', '))||(r.notes?escapeHtml(r.notes):'')}</td>
+            <td class="num" style="font-weight:700;">${r.tripCount}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr style="font-weight:800;"><td colspan="3">TỔNG CỘNG</td><td class="num">${totalCheck} chuyến</td></tr></tfoot>
+      </table>
+    </div>`}
+  `);
+}
 function openDriverDetail(driverId){
   const driver = driverById(driverId);
   if(!driver){ renderAll(); return; }
@@ -7587,6 +7623,9 @@ function openDriverDetail(driverId){
           <div class="driver-cv-item"><span class="k">Số Ngày Có Ca Hoạt Động</span><span class="v">${activeDates.size} ngày</span></div>
           ${duplicateActiveDates.length ? `<div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k" style="color:var(--loss);">⚠️ Ngày bị nhập cả 2 ca đều "Hoạt Động"</span><span class="v" style="color:var(--loss);">${duplicateActiveDates.map(formatDateVN).join(', ')}</span></div>` : ''}
           <div class="driver-cv-item"><span class="k">Tổng Số Chuyến</span><span class="v">${totalTrips} chuyến</span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="driverTripDetailBtn" style="width:auto; padding:6px 12px; margin-top:10px;">🔍 Chi Tiết Từng Ngày</button>
+        <div class="driver-cv-grid" style="margin-top:10px;">
           <div class="driver-cv-item"><span class="k">Tổng Km Đã Chạy</span><span class="v">${Math.round(totalKm).toLocaleString('vi-VN')} km</span></div>
           <div class="driver-cv-item"><span class="k">Doanh Thu Tạo Ra Trong Kỳ</span><span class="v">${fmtVND(totalRevenue)}</span></div>
           <div class="driver-cv-item"><span class="k">Lợi Nhuận Ròng Tạo Ra Trong Kỳ</span><span class="v" style="color:${totalNetProfit>=0?'var(--profit)':'var(--loss)'}">${totalNetProfit>=0?'+':''}${fmtVND(totalNetProfit)}</span></div>
@@ -7712,6 +7751,8 @@ function openDriverDetail(driverId){
   document.getElementById('driverDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   const exportPayslipBtn = document.getElementById('exportPayslipBtn');
   if(exportPayslipBtn) exportPayslipBtn.addEventListener('click', ()=>{ exportDriverPayslipXLSX(driverId); });
+  const tripDetailBtn = document.getElementById('driverTripDetailBtn');
+  if(tripDetailBtn) tripDetailBtn.addEventListener('click', ()=>openDriverTripDetailModal(driverId, from, to));
   document.getElementById('dd_thisMonth').addEventListener('click', ()=>{ state.driverDetailRange = currentMonthRange(); openDriverDetail(driverId); });
   document.getElementById('dd_lastMonth').addEventListener('click', ()=>{
     const now = new Date();
