@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #116';
+const APP_BUILD = '2026-08-27 · #117';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11755,7 +11755,14 @@ function openSupplierDetail(supplierId){
   const periodPaid = range ? payments.filter(p=>p.date>=range.from && p.date<=range.to).reduce((s,p)=>s+(Number(p.amount)||0),0) : 0;
   const periodPayable = range ? goodsForDisplay.totalCash : 0;
   const periodNet = periodPayable - periodPaid;
-  const owedForInvoice = range ? (goodsForDisplay.totalInvoicedCashWithVat - periodPaid) : 0;
+  // SỬA 2026-08-27 (Ông Chủ chỉ ra — cách tính CŨ lấy "Đã trả TRONG KỲ" so
+  // với nhu cầu hoá đơn CỦA KỲ ĐÓ là SAI BẢN CHẤT, vì tiền bank cho mỏ là
+  // 1 dòng chảy LIÊN TỤC, không tách riêng theo từng đợt — y hệt logic
+  // "CÒN NỢ MỎ" đã dùng đúng cách CỘNG DỒN TOÀN BỘ LỊCH SỬ, không tách kỳ.
+  // Giờ tính lại HOÀN TOÀN theo all-time, dùng goodsAllTime + debt.paid
+  // (đều đã là số toàn bộ lịch sử có sẵn) — bỏ hẳn owedForInvoice theo kỳ,
+  // không còn phụ thuộc range đang chọn nữa.
+  const owedForInvoiceAllTime = goodsAllTime.totalInvoicedCashWithVat - debt.paid;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="supDetailBackBtn">← Quay Lại Kết Quả</button>
@@ -11781,6 +11788,8 @@ function openSupplierDetail(supplierId){
         <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
         <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
         <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (anh tạm ứng dư)':''}</span></div>
+        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}%)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoiceAllTime)}${owedForInvoiceAllTime<=0?' (đã đủ/dư)':''}</span></div>
+        <div class="hint" style="margin-top:4px;">= (Toàn bộ khối lượng đã lấy × ${goodsAllTime.invoicedPct}% × Đơn giá × (1 + %VAT)) − Toàn bộ đã trả (cộng dồn từ trước tới giờ, không tách theo kỳ đang xem — coi tiền bank cho mỏ là 1 dòng chảy liên tục, y hệt cách tính "CÒN NỢ MỎ" ở trên).</div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
@@ -11807,8 +11816,6 @@ function openSupplierDetail(supplierId){
         <div class="summary-row"><span>Tiền hàng lấy trong kỳ</span><span class="val">${fmtVND(periodPayable)}</span></div>
         <div class="summary-row"><span>Đã trả trong kỳ</span><span class="val">${fmtVND(periodPaid)}</span></div>
         <div class="summary-row total"><span>CHÊNH LỆCH TRONG KỲ</span><span class="val" style="color:${periodNet>0?'var(--loss)':'var(--profit)'}">${fmtVND(periodNet)}</span></div>
-        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsForDisplay.invoicedPct}%)</span><span class="val" style="color:${owedForInvoice>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoice)}${owedForInvoice<=0?' (đã đủ/dư)':''}</span></div>
-        <div class="hint" style="margin-top:4px;">= (Khối lượng dự kiến xuất hoá đơn × Đơn giá × (1 + %VAT)) − Đã trả trong kỳ. Coi tiền đã trả là tạm ứng chung, ưu tiên trừ vào đúng phần cần có hoá đơn trước.</div>
       </div>` : ''}
     </section>
     <section class="group">
