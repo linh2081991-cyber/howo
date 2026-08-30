@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #114';
+const APP_BUILD = '2026-08-27 · #116';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14278,7 +14278,21 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
     const intensityLabel = (Number(sh.intensity)||1)===1.5 ? '1,5 ca' : '1 ca';
     const dateInfo = { date: formatDateVN(sh.date), shiftType: shiftTypeLabel(sh.shiftType), intensity: intensityLabel, status: statusLabel(sh.status) };
     const blankDateInfo = { date:'', shiftType:'', intensity:'', status:'' };
-    const sites = sh.siteLogs || [];
+    // SỬA 2026-08-27 (Ông Chủ yêu cầu rà soát toàn bộ cơ chế lương — phát
+    // hiện lỗi thật): driverTripWageStatsInRange() (nguồn CHÍNH THỨC tính
+    // lương chuyến) CHỈ tính ca có status==='active' — nhưng dòng gốc bên
+    // dưới (`const sites = sh.siteLogs || [];`) lấy TOÀN BỘ site log bất kể
+    // trạng thái ca, nên nếu 1 ca đã đổi sang "Nghỉ Phép"/"Nằm Bãi"... mà
+    // VẪN CÒN sót dữ liệu chuyến hàng cũ (nhập từ trước khi đổi trạng
+    // thái), bảng chi tiết phiếu lương sẽ hiện nhầm đúng số chuyến/tiền đó
+    // — dù KHÔNG hề được cộng vào LƯƠNG THỰC NHẬN cuối phiếu (số đó vẫn
+    // luôn đúng vì lấy từ driverTripWageStatsInRange, không lấy từ đây).
+    // Hậu quả nếu không sửa: cộng tay các dòng hiện trên phiếu sẽ RA SỐ
+    // CAO HƠN đúng bằng đúng số tiền của ca không hoạt động đó, dễ gây
+    // hiểu lầm "tính thiếu lương" dù tổng cuối vẫn chính xác. Sửa bằng
+    // cách coi ca KHÔNG active y hệt ca rỗng (không hiện chi tiết chuyến),
+    // khớp tuyệt đối với cách driverTripWageStatsInRange() đang lọc.
+    const sites = sh.status==='active' ? (sh.siteLogs || []) : [];
     if(sites.length===0){
       rows.push({ ...dateInfo, isEmptyShift:true, isShiftHead:true, _sortKey:sortKey,
         baseSalaryAllocation:sh.baseSalaryAllocation||0, foodAllowance:sh.foodAllowance||0,
@@ -14333,14 +14347,17 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
         const pd = driverById(t.pickupDriverId);
         const pdName = pd?pd.name:'tài xế khác';
         const dateNote = t.pickupDate ? ` ngày ${formatDateVN(t.pickupDate)}` : ' (chưa rõ ngày)';
+        // SỬA 2026-08-27 (Ông Chủ chỉ ra qua ảnh phiếu lương thật — dòng
+        // "📌 Đổ giúp chuyến hàng cho..." đang hiện SAI CỘT: bị gán vào
+        // siteLabel (cột "Điểm Múc - Điểm Đổ") thay vì đúng cột "Ghi Chú"
+        // (field `notes`). Sửa: để siteLabel trống, đưa đúng câu chữ này
+        // vào `notes` — cả 3 nơi xuất phiếu lương đều đọc `notes` cho đúng
+        // cột "Ghi Chú"/"Ghi Chú Ca", không đổi nội dung câu chữ, chỉ đổi
+        // đúng vị trí cột hiển thị.
         rows.push({ ...blankDateInfo, isShiftHead:false, _sortKey:sortKey,
-          baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0, notes:'',
-          // SỬA 2026-08-25 (Ông Chủ yêu cầu — rút GỌN, bỏ tên công trình lặp
-          // lại vì đã có ở cột bên trái, tối ưu đọc trên điện thoại):
-          // "Đổ giúp chuyến hàng cho (tên) lấy ngày (ngày)" — đúng nguyên
-          // văn mẫu Ông Chủ đưa, không thêm bớt.
-          siteLabel:`📌 Đổ giúp chuyến hàng cho ${pdName} lấy${dateNote}`,
-          typeLabel:'Ghi chú', volumePerTrip:'', unitPrice:'', tripCount:0, wagePerTrip:0, effectiveTrips:0, wageAmount:0 });
+          baseSalaryAllocation:0, foodAllowance:0, advanceAmount:0,
+          notes:`📌 Đổ giúp chuyến hàng cho ${pdName} lấy${dateNote}`,
+          siteLabel:'', typeLabel:'Ghi chú', volumePerTrip:'', unitPrice:'', tripCount:0, wagePerTrip:0, effectiveTrips:0, wageAmount:0 });
       });
     });
   });
@@ -14500,9 +14517,18 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
       : [isC?'':(r.siteLabel||''), isC?(r.siteLabel||''):'', r.typeLabel||'',
          r.volumePerTrip===undefined?'':r.volumePerTrip, r.unitPrice===undefined?'':r.unitPrice,
          r.tripCount||0, r.wagePerTrip||0, r.effectiveTrips||0, r.wageAmount||0];
-    const trailing = r.isShiftHead
-      ? [r.baseSalaryAllocation||0, r.foodAllowance||0, r.advanceAmount||0, r.notes||'']
-      : ['','','',''];
+    // SỬA 2026-08-27 (phát hiện khi sửa lỗi cột Ghi Chú bên phiếu Excel
+    // chính — nếu giữ nguyên "chỉ hiện notes khi isShiftHead", dòng "📌 Đổ
+    // giúp..." sẽ MẤT HẲN khỏi sheet này, vì dòng đó có isShiftHead=false.
+    // Lương cứng/tiền ăn/ứng lương vẫn đúng chỉ thuộc về dòng đầu ca (giữ
+    // nguyên logic cũ cho 3 cột đó), nhưng Ghi Chú Ca thì PHẢI hiện cho
+    // MỌI dòng có ghi chú, không riêng gì dòng đầu ca.
+    const trailing = [
+      r.isShiftHead ? (r.baseSalaryAllocation||0) : '',
+      r.isShiftHead ? (r.foodAllowance||0) : '',
+      r.isShiftHead ? (r.advanceAmount||0) : '',
+      r.notes||''
+    ];
     rows.push([r.date||'', r.shiftType||'', r.intensity||'', r.status||'', ...siteFields, ...trailing]);
   });
 
