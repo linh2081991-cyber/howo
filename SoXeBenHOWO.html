@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #113';
+const APP_BUILD = '2026-08-27 · #114';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11580,7 +11580,10 @@ function openCustomerDetail(customerId){
       ${partnerTransactionTableHtml(customerId, 'customer', range?range.from:undefined, range?range.to:undefined)}
     </section>
     <section class="group">
-      <h3>Lịch Sử Đã Thu</h3>
+      <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+        <span>Lịch Sử Đã Thu</span>
+        ${payments.length>0?`<span style="font-size:14px; font-weight:800; color:var(--profit);">Tổng: +${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</span>`:''}
+      </h3>
       ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':`
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -11817,7 +11820,10 @@ function openSupplierDetail(supplierId){
       ${partnerTransactionTableHtml(supplierId, 'supplier', range?range.from:undefined, range?range.to:undefined)}
     </section>
     <section class="group">
-      <h3>Lịch Sử Đã Trả</h3>
+      <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+        <span>Lịch Sử Đã Trả</span>
+        ${payments.length>0?`<span style="font-size:14px; font-weight:800; color:var(--loss);">Tổng: −${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</span>`:''}
+      </h3>
       ${payments.length===0?'<div class="hint">Chưa có khoản trả nào.</div>':`
       <div class="grid-table-wrap">
         <table class="grid-table">
