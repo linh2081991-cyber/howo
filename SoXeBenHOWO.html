@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #117';
+const APP_BUILD = '2026-08-27 · #118';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1715,7 +1715,7 @@ function updateVehicleScopeBar(){
   if(!bar) return;
   bar.innerHTML = `<span class="vsb-label" id="vsbEquityLink" style="cursor:pointer;"><span class="vsb-icon">🏢</span>LINH CHÍ THÀNH</span><span class="vsb-chev" id="vsbVehicleLink" style="cursor:pointer;">Đổi xe ▾</span>`;
   bar.onclick = null;
-  document.getElementById('vsbEquityLink').addEventListener('click', e=>{ e.stopPropagation(); state.showCompanyDashboard = true; renderAll(); });
+  document.getElementById('vsbEquityLink').addEventListener('click', e=>{ e.stopPropagation(); saveMainScroll(); state.showCompanyDashboard = true; renderAll(); });
   document.getElementById('vsbVehicleLink').addEventListener('click', e=>{ e.stopPropagation(); renderVehiclePickerModal(); });
 }
 
@@ -3629,7 +3629,7 @@ function renderWarehouseDrawHistoryPage(goodsType, from, to){
       </div>
     </section>
   `;
-  document.getElementById('drawHistoryBackBtn').addEventListener('click', ()=>{ renderInvoiceLotFullDetailPage(goodsType, from, to); });
+  document.getElementById('drawHistoryBackBtn').addEventListener('click', ()=>{ renderInvoiceLotFullDetailPage(goodsType, from, to); restoreMainScroll(); });
 }
 
 /// Modal quản lý Khách Hàng — thêm/sửa/xoá, mirror y hệt Nhà Cung Cấp.
@@ -4977,7 +4977,7 @@ function renderHeader(){
       sub.textContent = state.draftShift.date;
       const back=document.createElement('button');
       back.className='btn btn-ghost btn-sm'; back.textContent='Đóng';
-      back.onclick=()=>{ state.view='list'; state.draftShift=null; renderAll(); };
+      back.onclick=()=>{ state.view='list'; state.draftShift=null; renderAll(); restoreMainScroll(); };
       action.appendChild(back);
     } else if(state.shiftArchiveMonth){
       title.textContent = 'Tháng ' + monthLabelVN(state.shiftArchiveMonth);
@@ -5538,6 +5538,7 @@ function escapeHtml(s){
 function openShift(id){
   const sh = state.shifts.find(s=>s.id===id);
   if(!sh) return;
+  saveMainScroll();
   state.draftShift = JSON.parse(JSON.stringify(sh));
   state.draftShift.isNew=false;
   state.view='form';
@@ -5549,6 +5550,7 @@ function startNewShift(){
     showToast('Hãy thêm tài xế trước ở tab "Tài Xế".');
     return;
   }
+  saveMainScroll();
   const today=new Date();
   const dateStr=todayLocalDateStr();
   const shiftType='day';
@@ -6769,6 +6771,7 @@ function bindFormEvents(){
       if(!ok){ state.shifts = backup; showToast('XOÁ THẤT BẠI — kiểm tra mạng rồi thử lại.'); return; }
       state.view='list'; state.draftShift=null;
       renderAll();
+      restoreMainScroll();
       showToast('Đã xoá ca.');
     }
   });
@@ -6823,6 +6826,7 @@ async function saveDraftShift(){
   }
   state.view='list'; state.draftShift=null;
   renderAll();
+  restoreMainScroll();
   showToast('Đã lưu ca thành công.');
 }
 
@@ -8997,6 +9001,7 @@ function renderAppraisalList(metricsById){
 /// keystroke via computeAppraisalMetrics(), so Ông Chủ sees the impact
 /// immediately instead of only after saving.
 function openProjectAppraisalEditor(id){
+  saveMainScroll();
   // Số liệu CHI PHÍ CỐ ĐỊNH THẬT hiện tại của đội xe (đọc lại mỗi lần mở
   // màn hình này) — dùng làm số gợi ý điền sẵn cho công trình MỚI, và
   // dùng làm số tham chiếu hiển thị dưới mỗi ô ngay cả khi Sửa công
@@ -9302,15 +9307,17 @@ function openProjectAppraisalEditor(id){
     if(idx>=0) state.siteAppraisals[idx]=draft; else state.siteAppraisals.push(draft);
     if(!(await saveSiteAppraisals())) return;
     renderProjectAppraisal();
+    restoreMainScroll();
     showToast('Đã lưu công trình dự kiến.');
   });
-  document.getElementById('cancelAppraisalBtn').addEventListener('click', renderProjectAppraisal);
+  document.getElementById('cancelAppraisalBtn').addEventListener('click', ()=>{ renderProjectAppraisal(); restoreMainScroll(); });
   const delBtn = document.getElementById('delAppraisalEditBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá công trình dự kiến này?')){
       state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==draft.id);
       if(!(await saveSiteAppraisals())) return;
       renderProjectAppraisal();
+      restoreMainScroll();
       showToast('Đã xoá.');
     }
   });
@@ -12316,6 +12323,7 @@ function renderDocumentList(){
 }
 
 function openDocumentEditor(id){
+  saveMainScroll();
   const existing = id ? state.documents.find(d=>d.id===id) : null;
   const draft = existing ? {...existing} : { id: uid('doc'), scope:'vehicle', type: DOCUMENT_TYPE_OPTIONS.vehicle[0], driverId: null, expiryDate: todayLocalDateStr(), notes:'' };
   const app = document.getElementById('app');
@@ -12384,15 +12392,17 @@ function openDocumentEditor(id){
     if(idx>=0) state.documents[idx]=draft; else state.documents.push(draft);
     if(!(await saveDocuments())) return;
     renderAll();
+    restoreMainScroll();
     showToast('Đã lưu giấy tờ.');
   });
-  document.getElementById('cancelDocumentBtn').addEventListener('click', renderAll);
+  document.getElementById('cancelDocumentBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   const delBtn = document.getElementById('delDocumentBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá giấy tờ này?')){
       state.documents = state.documents.filter(d=>d.id!==draft.id);
       if(!(await saveDocuments())) return;
       renderAll();
+      restoreMainScroll();
       showToast('Đã xoá.');
     }
   });
@@ -12426,6 +12436,7 @@ function renderMaintenanceList(){
 }
 
 function openMaintenanceEditor(id){
+  saveMainScroll();
   const existing = id ? state.maintenanceSchedules.find(m=>m.id===id) : null;
   const draft = existing ? {...existing} : { id: uid('maint'), name:'', intervalKm:5000, lastDoneOdo: currentOdometer(), lastDoneDate: todayLocalDateStr(), notes:'', history:[] };
   const history = [...(draft.history||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -12496,15 +12507,17 @@ function openMaintenanceEditor(id){
     if(idx>=0) state.maintenanceSchedules[idx]=draft; else state.maintenanceSchedules.push(draft);
     if(!(await saveMaintenanceSchedules())) return;
     renderAll();
+    restoreMainScroll();
     showToast('Đã lưu lịch bảo dưỡng.');
   });
-  document.getElementById('cancelMaintenanceBtn').addEventListener('click', renderAll);
+  document.getElementById('cancelMaintenanceBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   const delBtn = document.getElementById('delMaintenanceBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá hạng mục bảo dưỡng này?')){
       state.maintenanceSchedules = state.maintenanceSchedules.filter(m=>m.id!==draft.id);
       if(!(await saveMaintenanceSchedules())) return;
       renderAll();
+      restoreMainScroll();
       showToast('Đã xoá.');
     }
   });
@@ -12542,6 +12555,7 @@ function renderRepairList(repairsHere){
 }
 
 function openRepairEditor(id){
+  saveMainScroll();
   const existing = id ? state.repairs.find(r=>r.id===id) : null;
   const draft = existing ? {...existing, responsibility: existing.responsibility || 'owner_full', responsibleDriverId: existing.responsibleDriverId || null, driverCustomAmount: existing.driverCustomAmount || 0}
     : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'', responsibility:'owner_full', responsibleDriverId:null, driverCustomAmount:0 };
@@ -12646,15 +12660,17 @@ function openRepairEditor(id){
     if(idx>=0) state.repairs[idx]=draft; else state.repairs.push(draft);
     if(!(await saveRepairs())) return;
     renderAll();
+    restoreMainScroll();
     showToast('Đã lưu khoản sửa chữa.');
   });
-  document.getElementById('cancelRepairBtn').addEventListener('click', renderAll);
+  document.getElementById('cancelRepairBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   const delBtn = document.getElementById('delRepairBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá khoản sửa chữa này?')){
       state.repairs = state.repairs.filter(r=>r.id!==draft.id);
       if(!(await saveRepairs())) return;
       renderAll();
+      restoreMainScroll();
       showToast('Đã xoá.');
     }
   });
@@ -13040,6 +13056,7 @@ function renderCompanyDashboardPage(){
   document.getElementById('companyDashBackBtn').addEventListener('click', ()=>{
     state.showCompanyDashboard = false;
     renderAll();
+    restoreMainScroll();
   });
   document.getElementById('cashFlowLedgerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
   document.getElementById('debtDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(); });
