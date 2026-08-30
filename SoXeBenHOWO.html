@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #124';
+const APP_BUILD = '2026-08-27 · #125';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -925,6 +925,24 @@ function restoreMainScroll(){
   const apply = () => {
     const el = getActualScrollEl();
     if(el) el.scrollTop = savedMainScrollTop;
+  };
+  requestAnimationFrame(()=>requestAnimationFrame(apply));
+  setTimeout(apply, 60);
+  setTimeout(apply, 200);
+}
+// SỬA 2026-08-27 (Ông Chủ báo — bấm "Xem Chi Tiết Vận Hành" từ vị trí
+// cuộn sâu trong trang tài xế, màn mới lại hiện đúng ngay khúc cuối thay
+// vì đầu trang): saveMainScroll() TRƯỚC ĐÂY chỉ lo phần "nhớ vị trí cũ để
+// dùng khi QUAY LẠI" — nhưng khi ĐI TỚI 1 trang mới, không có bước nào
+// chủ động đưa về đầu trang, nên vị trí cuộn cũ (có thể rất sâu) bị mang
+// nguyên sang trang mới, nếu trang mới ngắn hơn sẽ bị kẹp xuống tận cuối.
+// Dùng lại ĐÚNG cơ chế 3 lớp an toàn (2 requestAnimationFrame lồng nhau +
+// 2 setTimeout dự phòng) như restoreMainScroll(), chỉ khác là luôn đưa về
+// 0 thay vì về đúng vị trí đã lưu.
+function scrollMainToTop(){
+  const apply = () => {
+    const el = getActualScrollEl();
+    if(el) el.scrollTop = 0;
   };
   requestAnimationFrame(()=>requestAnimationFrame(apply));
   setTimeout(apply, 60);
@@ -7536,6 +7554,7 @@ function openDriverTripDetailModal(driverId, from, to){
 function openDriverDetail(driverId){
   const driver = driverById(driverId);
   if(!driver){ renderAll(); return; }
+  scrollMainToTop();
   const app = document.getElementById('app');
 
   if(!state.driverDetailRange) state.driverDetailRange = currentMonthRange();
