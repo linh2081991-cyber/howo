@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #118';
+const APP_BUILD = '2026-08-27 · #119';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10372,6 +10372,14 @@ function supplierGoodsBreakdown(supplierId, from, to){
   //  - g.vatApplied === true  → ĐÃ có hoá đơn thật (hoặc giá đã gồm VAT)
   //  - g.vatApplied === false → CHƯA có hoá đơn thật, còn "để lý thuyết"
   let totalNetInvoiced=0, totalVatInvoiced=0, totalNetNotInvoiced=0;
+  // SỬA 2026-08-27 (lần 2 — Ông Chủ chỉ ra công thức cũ tính 70% trên
+  // TOÀN BỘ LỊCH SỬ, kể cả phần mỏ ĐÃ xuất hoá đơn rồi — vô lý, vì phần
+  // đã xuất coi như ĐÃ XONG, không còn "cần nộp thêm" gì nữa): đổi
+  // totalInvoicedCashWithVat để CHỈ tính trên đúng phần CHƯA xuất hoá đơn
+  // (g.vatApplied===false) — đây mới đúng là phần còn "treo", cần Ông Chủ
+  // nộp đủ tiền để mỏ xuất hoá đơn. Vẫn tính TỪNG CHUYẾN rồi cộng dồn
+  // (không lấy giá bình quân), tự động cập nhật ngay khi có chuyến mới
+  // hoặc khi 1 ca chuyển từ "chưa xuất" sang "đã xuất" hoá đơn.
   let totalInvoicedCashWithVat = 0;
   for(const g of groups){
     for(const t of g.trips){
@@ -10385,9 +10393,8 @@ function supplierGoodsBreakdown(supplierId, from, to){
       const vat = g.vatApplied ? (t.withVatAmt - t.netAmt) : 0;
       b.trips += 1; b.vol += t.vol; b.net += t.netAmt; b.vat += vat; b.cash += t.cash;
       totalVol += t.vol; totalTrips += 1; totalNet += t.netAmt; totalVat += vat; totalCash += t.cash;
-      totalInvoicedCashWithVat += t.withVatAmt * invoicedPct / 100;
       if(g.vatApplied){ totalNetInvoiced += t.netAmt; totalVatInvoiced += vat; }
-      else { totalNetNotInvoiced += t.netAmt; }
+      else { totalNetNotInvoiced += t.netAmt; totalInvoicedCashWithVat += t.withVatAmt * invoicedPct / 100; }
     }
   }
   const rows = Object.values(byGoods)
@@ -11769,7 +11776,21 @@ function openSupplierDetail(supplierId){
   // Giờ tính lại HOÀN TOÀN theo all-time, dùng goodsAllTime + debt.paid
   // (đều đã là số toàn bộ lịch sử có sẵn) — bỏ hẳn owedForInvoice theo kỳ,
   // không còn phụ thuộc range đang chọn nữa.
-  const owedForInvoiceAllTime = goodsAllTime.totalInvoicedCashWithVat - debt.paid;
+  // SỬA 2026-08-27 (lần 2 — Ông Chủ chỉ ra công thức lần 1 vẫn CHƯA chặt
+  // chẽ, vì lấy 70% của TOÀN BỘ LỊCH SỬ trừ đi TOÀN BỘ đã trả — trong đó
+  // phần "đã trả" bị trộn lẫn tiền đã dùng để thanh toán CHO ĐÚNG phần đã
+  // xuất hoá đơn rồi, không liên quan gì tới nhu cầu của phần CÒN CHƯA
+  // xuất). Logic ĐÚNG, bám sát 3 dữ liệu Ông Chủ yêu cầu:
+  //  1) Tiền hàng Mỏ CHƯA xuất hoá đơn (goodsAllTime.totalNetNotInvoiced)
+  //     — tự cập nhật ngay mỗi khi nhập chuyến mới (qua supplierGoodsBreakdown
+  //     đọc lại toàn bộ state.shifts mỗi lần gọi, không cache).
+  //  2) Số tiền CẦN CÓ (đã gồm VAT) để đủ 70% hoá đơn của ĐÚNG phần đó —
+  //     goodsAllTime.totalInvoicedCashWithVat (giờ CHỈ tính trên phần
+  //     "chưa xuất", không còn lẫn phần đã xong).
+  //  3) Số dư/thiếu HIỆN TẠI với mỏ (debt.owed — âm nghĩa là đang tạm ứng
+  //     dư, có sẵn "của để dành" bù vào nhu cầu trên) — CỘNG thẳng debt.owed
+  //     (số âm sẽ tự trừ bớt, số dương sẽ tự cộng thêm, đúng bản chất).
+  const owedForInvoiceAllTime = goodsAllTime.totalInvoicedCashWithVat + debt.owed;
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="supDetailBackBtn">← Quay Lại Kết Quả</button>
@@ -11795,8 +11816,8 @@ function openSupplierDetail(supplierId){
         <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
         <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
         <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (anh tạm ứng dư)':''}</span></div>
-        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}%)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoiceAllTime)}${owedForInvoiceAllTime<=0?' (đã đủ/dư)':''}</span></div>
-        <div class="hint" style="margin-top:4px;">= (Toàn bộ khối lượng đã lấy × ${goodsAllTime.invoicedPct}% × Đơn giá × (1 + %VAT)) − Toàn bộ đã trả (cộng dồn từ trước tới giờ, không tách theo kỳ đang xem — coi tiền bank cho mỏ là 1 dòng chảy liên tục, y hệt cách tính "CÒN NỢ MỎ" ở trên).</div>
+        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoiceAllTime)}${owedForInvoiceAllTime<=0?' (đã đủ/dư)':''}</span></div>
+        <div class="hint" style="margin-top:4px;">= (Tiền hàng Mỏ CHƯA xuất hoá đơn × ${goodsAllTime.invoicedPct}% × (1+%VAT), tính riêng từng chuyến) ${debt.owed<0?'−':'+'} ${fmtVND(Math.abs(debt.owed))} (đúng số ${debt.owed<0?'đang tạm ứng dư':'đang còn thiếu'} với mỏ hiện tại, xem dòng "CÒN NỢ MỎ" ở trên). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
