@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #125';
+const APP_BUILD = '2026-08-27 · #126';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3384,6 +3384,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
 /// customerGoodsBreakdown) — KHÔNG tính lại bằng công thức khác, để không
 /// bao giờ lệch với 3 con số đã hiện ở trang trước.
 function renderCombinedStockDetailPage(goodsType, from, to){
+  scrollMainToTop();
   const gt = normGoodsType(goodsType);
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const combined = withLedgerReportMode(()=>combinedStockOverview(goodsType, from, to));
@@ -3565,6 +3566,7 @@ function renderCombinedStockDetailPage(goodsType, from, to){
 /// lý thuyết), và bù lấy từ đâu (đúng allocations trong buildInvoiceLotLedger,
 /// không tính lại công thức khác). Dòng TỔNG in đậm, tô nền riêng.
 function renderWarehouseDrawHistoryPage(goodsType, from, to){
+  scrollMainToTop();
   const gt = normGoodsType(goodsType);
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const ledger = buildInvoiceLotLedger(goodsType);
@@ -7343,6 +7345,7 @@ function renderDriverExpenseReportHistoryHtml(driverId){
     </div>`;
 }
 function openDriverAdvanceDetail(driverId){
+  scrollMainToTop();
   saveMainScroll();
   const d = driverById(driverId);
   const app = document.getElementById('app');
@@ -7381,6 +7384,7 @@ function openDriverAdvanceDetail(driverId){
   document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverExpenseReportEditor(null, driverId); });
 }
 function openDriverAdvanceEditor(id, driverId){
+  scrollMainToTop();
   const existing = id ? state.driverAdvances.find(a=>a.id===id) : null;
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
@@ -7454,6 +7458,7 @@ function renderIncidentalAutoDeductedHtml(driverId, yearMonth){
     </div>`;
 }
 function openDriverExpenseReportEditor(id, driverId){
+  scrollMainToTop();
   const existing = id ? state.driverExpenseReports.find(r=>r.id===id) : null;
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
@@ -8299,6 +8304,7 @@ function renderHiringAdvisorPreviewHtml(m){
 /// Giả định lưu tạm trong state.hiringAdvisorDraft (không lưu Firestore —
 /// đây là công cụ thử số, không phải hồ sơ cần lưu vĩnh viễn).
 function renderHiringAdvisor(){
+  scrollMainToTop();
   state.strategyView = 'hiring';
   const app = document.getElementById('app');
 
@@ -8438,6 +8444,7 @@ function renderStrategyHub(){
 }
 
 function renderStrategy(){
+  scrollMainToTop();
   state.strategyView = 'ai';
   const app = document.getElementById('app');
   const sa = state.strategyAnalysis;
@@ -8502,6 +8509,7 @@ function renderStrategy(){
 /// (date range + nút chạy + hoạt cảnh xe + retry), chỉ khác dữ liệu gửi AI
 /// và có thêm phần Ông Chủ tự chấm điểm thái độ từng tài xế trước khi chạy.
 function renderBonusAdvisor(){
+  scrollMainToTop();
   state.strategyView = 'bonus';
   const app = document.getElementById('app');
   const ba = state.bonusAnalysis;
@@ -8893,6 +8901,7 @@ function computeAppraisalMetrics(p){
 /// and returns there via renderAll()+restoreMainScroll(), matching every
 /// other full-screen drill-down in the app (openPartnerDetail, etc).
 function renderProjectAppraisal(){
+  scrollMainToTop();
   state.strategyView = 'appraisal';
   const app = document.getElementById('app');
   const fuelPerKm = historicalAvgFuelPerKm();
@@ -11585,6 +11594,7 @@ function renderMonthLedgerDetailModal(m, customerName){
   `);
 }
 function openCustomerDetail(customerId){
+  scrollMainToTop();
   saveMainScroll();
   const cus = customerById(customerId);
   const app = document.getElementById('app');
@@ -11778,6 +11788,7 @@ function openCustomerDetail(customerId){
   if(custRangeResetBtn) custRangeResetBtn.addEventListener('click', ()=>{ state.customerDetailRange=null; saveMainScroll(); openCustomerDetail(customerId); restoreMainScroll(); });
 }
 function openCustomerPaymentEditor(id, customerId){
+  scrollMainToTop();
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
   const cid = customerId || (existing && existing.customerId);
   const cus = customerById(cid);
@@ -11883,6 +11894,7 @@ function openBulkInvoiceTickModal(partyId, kind){
 }
 
 function openSupplierDetail(supplierId){
+  scrollMainToTop();
   saveMainScroll();
   const sup = supplierById(supplierId);
   const app = document.getElementById('app');
@@ -12024,6 +12036,7 @@ function openSupplierDetail(supplierId){
   if(supRangeResetBtn) supRangeResetBtn.addEventListener('click', ()=>{ state.supplierDetailRange=null; saveMainScroll(); openSupplierDetail(supplierId); restoreMainScroll(); });
 }
 function openSupplierPaymentEditor(id, supplierId){
+  scrollMainToTop();
   const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
   const sid = supplierId || (existing && existing.supplierId);
   const sup = supplierById(sid);
@@ -12115,6 +12128,7 @@ function renderPartnersOverview(){
 /// khu ĐANG CHẠY / LÂU KHÔNG CHẠY (quá 60 ngày không có chuyến nào) để
 /// không lẫn lộn đối tác còn hoạt động với đối tác đã ngưng từ lâu.
 function renderPartnersFullDetailPage(){
+  scrollMainToTop();
   const partners = computePartnersOverview();
   const INACTIVE_DAYS = 60;
   const active = partners.filter(p=>p.daysSinceActivity===null || p.daysSinceActivity<=INACTIVE_DAYS);
@@ -12169,6 +12183,7 @@ function renderPartnersFullDetailPage(){
 /// outstanding), reliability rating, per-site breakdown, and the complete
 /// payment history across every site tied to them.
 function openPartnerDetail(partnerName){
+  scrollMainToTop();
   const app = document.getElementById('app');
   const partners = computePartnersOverview();
   const P = partners.find(x=>x.name===partnerName);
@@ -12233,6 +12248,7 @@ function openPartnerDetail(partnerName){
 }
 
 function openSiteDetail(siteName, from, to){
+  scrollMainToTop();
   const app = document.getElementById('app');
   const det = computeSiteDetail(siteName, from, to);
   const driverRows = Object.entries(det.tripsByDriver).sort((a,b)=>b[1].trips-a[1].trips);
@@ -12348,6 +12364,7 @@ function renderSitePaymentList(payments, partnerName){
 /// payment belongs to, then hands off to openSitePaymentEditor. Skipped
 /// entirely (goes straight to the editor) when the partner only has one site.
 function openAddSitePaymentForPartner(partnerName){
+  scrollMainToTop();
   const partners = computePartnersOverview();
   const P = partners.find(x=>x.name===partnerName);
   if(!P || P.sites.length===0){ showToast('Đối tác này chưa có công trình nào.'); return; }
@@ -12377,6 +12394,7 @@ function openAddSitePaymentForPartner(partnerName){
 /// to the PARTNER detail screen (openPartnerDetail), since collection is
 /// now managed exclusively from there rather than from the site screen.
 function openSitePaymentEditor(id, siteName, from, to, partnerName){
+  scrollMainToTop();
   const existing = id ? state.sitePayments.find(p=>p.id===id) : null;
   const resolvedSiteName = existing ? existing.siteName : siteName;
   const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'', method:'bank' };
@@ -12961,6 +12979,7 @@ function recomputeBankLoanMonthlyPayment(){
   state.settings.monthlyLoanInterest = Math.round(r.monthlyInterestCurrent);
 }
 function renderCompanyDashboardPage(){
+  scrollMainToTop();
   const eq = computeOwnerEquity();
   const charterStatus = computeCharterCapitalStatus();
   const timeline = computeMonthlyEquityTimeline();
@@ -13311,6 +13330,7 @@ function computeCompanyCashFlowLedger(){
   return entries;
 }
 function renderCompanyCashFlowLedgerPage(){
+  scrollMainToTop();
   const entries = computeCompanyCashFlowLedger();
   const totalFromCustomers = state.sitePayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const totalContributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
@@ -13350,6 +13370,7 @@ function renderCompanyCashFlowLedgerPage(){
 /// (owed khác 0), bấm vào từng dòng mở đúng trang chi tiết đối tác đã có
 /// sẵn (openCustomerDetail/openSupplierDetail — không viết lại logic).
 function renderDebtDetailPage(){
+  scrollMainToTop();
   const customersWithDebt = state.customers.map(c=>({...c, debt: computeCustomerDebt(c.id)})).filter(c=>Math.abs(c.debt.owed)>0.5);
   const suppliersWithDebt = state.suppliers.map(s=>({...s, debt: computeSupplierDebt(s.id)})).filter(s=>Math.abs(s.debt.owed)>0.5);
   const app = document.getElementById('app');
@@ -13403,6 +13424,7 @@ function renderDebtDetailPage(){
 /// khách/tiền mỏ/từng ca vận hành/từng khoản sửa chữa) — minh bạch tuyệt
 /// đối, không phải 1 số gộp không rõ nguồn gốc.
 function renderCashFlowBreakdownDetailPage(){
+  scrollMainToTop();
   const breakdown = computeCumulativeCashFlowBreakdown();
   const from = breakdown.from, to = breakdown.to;
   const sitePaymentsInRange = from ? state.sitePayments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
@@ -13472,6 +13494,7 @@ function renderCashFlowBreakdownDetailPage(){
 /// (computeCompanyCashFlowLedger) CHỈ những giao dịch SAU mốc chốt gần
 /// nhất, để Ông Chủ tự soát từng dòng thay vì chỉ nhìn 1 số gộp.
 function renderBankReconDetailPage(){
+  scrollMainToTop();
   const bankRecon = computeBankBalanceReconciliation();
   const allEntries = computeCompanyCashFlowLedger();
   const entries = bankRecon ? allEntries.filter(e=>{
@@ -13586,6 +13609,7 @@ function renderBankReconDetailPage(){
 /// để Ông Chủ tự đối chiếu đúng đã góp bao nhiêu, còn thiếu bao nhiêu so
 /// với số đã đăng ký, tránh bị Cơ Quan Thuế/Sở KH-ĐT xử phạt do góp thiếu.
 function renderCharterCapitalDetailPage(){
+  scrollMainToTop();
   const status = computeCharterCapitalStatus();
   const entries = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.isCharterCapital).sort((a,b)=>a.date.localeCompare(b.date));
   let running = 0;
