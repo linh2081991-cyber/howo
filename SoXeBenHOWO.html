@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-27 · #126';
+const APP_BUILD = '2026-08-31 · #127';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7527,9 +7527,26 @@ function openDriverExpenseReportEditor(id, driverId){
 // thức driverTripWageStatsInRange ở bản #116) — nên số hiện ở đây LUÔN
 // khớp 100% với phiếu lương thật, không có đường tính thứ 2 nào khác có
 // thể lệch nhau.
+// SỬA 2026-08-31 (Ông Chủ phát hiện qua ảnh chụp — modal liệt kê SAI:
+// header ghi đúng khoảng ngày đang chọn nhưng bảng lại hiện chuyến của
+// tháng khác): `shiftsForDriver` truyền vào buildDriverPayslipTripRows()
+// trước đây KHÔNG lọc theo from/to — lấy TOÀN BỘ lịch sử ca của tài xế
+// từ trước tới giờ, nên hễ có ca tháng khác là hiện lẫn vào, dù header
+// vẫn ghi đúng tháng. Sửa DUY NHẤT bằng cách lọc đúng sh.date nằm trong
+// [from, to] TRƯỚC khi truyền vào — giống hệt cách bên xuất phiếu lương
+// Excel đang làm ĐÚNG (buildDriverPayslipSheetRows/XLSX). KHÔNG đụng
+// buildDriverPayslipTripRows() hay bất kỳ công thức lương nào.
+// Thêm ô "Chọn tháng xem" ngay trong modal (Ông Chủ yêu cầu): đổi
+// tháng thì modal tự tính lại from/to (mùng 1 → ngày cuối tháng đó) và
+// gọi lại chính hàm này để render lại đúng số chuyến của riêng tháng
+// vừa chọn — không đụng "Khoảng Thời Gian" đang chọn ở màn Tài Xế phía
+// sau (đóng modal xong màn đó vẫn giữ nguyên lựa chọn cũ).
 function openDriverTripDetailModal(driverId, from, to){
   const driver = driverById(driverId);
-  const shiftsForDriver = state.shifts.filter(sh=>sh.driverId===driverId);
+  const sameMonth = (from||'').slice(0,7) === (to||'').slice(0,7);
+  const monthInputVal = sameMonth ? from.slice(0,7) : todayLocalDateStr().slice(0,7);
+
+  const shiftsForDriver = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
   const rows = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver)
     .filter(r=>(r.tripCount||0)>0)
     .sort((a,b)=>(a._sortKey||0)-(b._sortKey||0));
@@ -7537,6 +7554,10 @@ function openDriverTripDetailModal(driverId, from, to){
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
     <h3>🔍 Chi Tiết Từng Chuyến — ${escapeHtml(driver?driver.name:'')}</h3>
+    <div class="field" style="margin-bottom:10px;">
+      <label>Chọn tháng xem</label>
+      <input type="month" id="tripDetailMonthPicker" value="${monthInputVal}">
+    </div>
     <div class="hint" style="margin-bottom:10px;">${formatDateVN(from)} → ${formatDateVN(to)} — dùng ĐÚNG nguồn dữ liệu với phiếu lương Excel, luôn khớp tuyệt đối.</div>
     ${rows.length===0 ? '<div class="hint">Không có chuyến nào trong kỳ này.</div>' : `
     <div class="grid-table-wrap">
@@ -7555,6 +7576,16 @@ function openDriverTripDetailModal(driverId, from, to){
       </table>
     </div>`}
   `);
+  const monthPicker = document.getElementById('tripDetailMonthPicker');
+  if(monthPicker) monthPicker.addEventListener('change', ()=>{
+    const val = monthPicker.value; // "YYYY-MM"
+    if(!val) return;
+    const [y,m] = val.split('-').map(Number);
+    const firstDay = new Date(y, m-1, 1);
+    const lastDay = new Date(y, m, 0);
+    const toLocalISO = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    openDriverTripDetailModal(driverId, toLocalISO(firstDay), toLocalISO(lastDay));
+  });
 }
 function openDriverDetail(driverId){
   const driver = driverById(driverId);
