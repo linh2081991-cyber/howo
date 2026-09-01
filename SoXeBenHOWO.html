@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #131';
+const APP_BUILD = '2026-09-01 · #132';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7382,13 +7382,19 @@ function renderDriverExpenseReportHistoryHtml(driverId){
       </table>
     </div>`;
 }
-function openDriverAdvanceDetail(driverId){
+// SỬA 2026-09-01 (Ông Chủ báo — mở lên chỉ thấy Tháng 9/2026 số dư 0đ, dù
+// Lịch Sử Ứng Tiền có sẵn 2 lần ứng hồi tháng 8, không có cách nào xem lại
+// đúng số dư tháng 8): thêm tham số yearMonthOverride + ô "Chọn tháng xem"
+// — y hệt cơ chế đã thêm cho modal Chi Tiết Từng Chuyến. Mặc định vẫn mở
+// đúng tháng hiện tại như cũ (không đổi hành vi khi bấm vào từ danh sách
+// tài xế), chỉ thêm khả năng đổi tháng ngay tại đây.
+function openDriverAdvanceDetail(driverId, yearMonthOverride){
   scrollMainToTop();
   saveMainScroll();
   const d = driverById(driverId);
   const app = document.getElementById('app');
   if(!d){ renderAll(); return; }
-  const yearMonth = todayLocalDateStr().slice(0,7);
+  const yearMonth = yearMonthOverride || todayLocalDateStr().slice(0,7);
   const balance = driverAdvanceBalance(driverId, yearMonth);
   app.innerHTML = `
     <section class="group">
@@ -7397,6 +7403,10 @@ function openDriverAdvanceDetail(driverId){
     <section class="group">
       <div class="card">
         <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)} · Tháng ${monthLabelVN(yearMonth)}</h3>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Chọn tháng xem</label>
+          <input type="month" id="advMonthPicker" value="${yearMonth}">
+        </div>
         <div class="summary-row total"><span>Số dư đang giữ</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
       </div>
       <div class="two-col" style="margin-top:10px;">
@@ -7420,6 +7430,10 @@ function openDriverAdvanceDetail(driverId){
   document.getElementById('advDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addAdvanceBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceEditor(null, driverId); });
   document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverExpenseReportEditor(null, driverId); });
+  const monthPicker = document.getElementById('advMonthPicker');
+  if(monthPicker) monthPicker.addEventListener('change', ()=>{
+    if(monthPicker.value) openDriverAdvanceDetail(driverId, monthPicker.value);
+  });
 }
 function openDriverAdvanceEditor(id, driverId){
   scrollMainToTop();
