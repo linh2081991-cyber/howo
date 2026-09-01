@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-31 · #129';
+const APP_BUILD = '2026-09-01 · #130';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2215,14 +2215,18 @@ async function saveRoadFeeByMonth(){
     if(vid) state.allVehiclesRoadFee[vid] = state.roadFeeByMonth;
     return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường — kiểm tra mạng.'); return false; }
+  // SỬA 2026-09-01 (Ông Chủ báo — mạng rất tốt vẫn hiện "kiểm tra mạng"):
+  // trước đây MỌI lỗi đều bị đoán bừa là do mạng, nuốt mất lý do thật.
+  // Giờ hiện thẳng e.message (Firestore/withTimeout luôn trả lỗi có nội
+  // dung rõ ràng) để biết chính xác là timeout mạng thật hay lỗi khác.
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền luật đường: ' + (e?.message || e)); return false; }
 }
 // SỬA 2026-08-31 — Tiền Thuê Nhà + Điện Nước Theo Tháng: CHUNG CÔNG TY,
 // dùng sharedDataRef (giống sitePayments/siteContracts) — KHÔNG theo xe,
 // khác saveRoadFeeByMonth() ở trên (theo từng xe qua vehicleDataRef).
 async function saveHousingUtilitiesByMonth(){
   try { await withTimeout(sharedDataRef('housingUtilitiesByMonth').set({ list: state.housingUtilitiesByMonth })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu tiền nhà/điện nước — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền nhà/điện nước: ' + (e?.message || e)); return false; }
 }
 // "2026-07" -> "7/2026" để hiện nhãn gọn cho từng dòng trong danh sách.
 function monthLabelVN(ym){
