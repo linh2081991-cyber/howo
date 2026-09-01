@@ -638,7 +638,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-08-31 · #128';
+const APP_BUILD = '2026-08-31 · #129';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13786,7 +13786,6 @@ function renderSettings(){
 
     <section class="group">
       <h3>Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
-      <div class="hint" style="margin-bottom:8px;">Chi phí CỐ ĐỊNH CHUNG CÔNG TY — không tính theo ca/theo tài xế nữa, y hệt cách nhập Tiền Luật Đường ở trên. Tiền Điện Nước thường cuối tháng mới có số, cứ để 0đ rồi quay lại điền sau cũng được.</div>
       <div class="card" id="housingUtilMonthListWrap"></div>
       <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
         <input type="month" id="hu_newMonth" style="flex:1;">
@@ -14843,6 +14842,11 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push(['Trừ Do Hỏng Hóc', Math.round(repairDeduction)]);
   rows.push(['LƯƠNG THỰC NHẬN', Math.round(netPay)]);
   rows.push([]);
+  // SỬA 2026-09-01: hiện thêm Số Dư Tạm Ứng Chi Phí đang giữ — sổ ĐỘC LẬP,
+  // KHÔNG cộng/trừ vào LƯƠNG THỰC NHẬN ở trên (xem driverAdvanceBalance()).
+  const advanceBalance = driverId ? driverAdvanceBalance(driverId, from.slice(0,7)) : 0;
+  rows.push([`TẠM ỨNG CHI PHÍ VẬN HÀNH ĐANG GIỮ (tháng ${from.slice(5,7)}/${from.slice(0,4)}, KHÔNG PHẢI LƯƠNG)`, Math.round(advanceBalance)]);
+  rows.push([]);
 
   rows.push(['CHI TIẾT TỪNG CA']);
   const detailHeader = ['Ngày','Ca','Cường Độ','Trạng Thái','Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại','Khối Lượng/Chuyến','Đơn Giá','Số Chuyến',
@@ -15368,9 +15372,14 @@ async function exportDriverPayslipXLSX(driverId){
     //  - Mọi dòng có dính múc-hộ/đổ-hộ (kể cả dòng Ghi chú lẫn dòng chính
     //    có notes) được TÔ NỀN VÀNG NHẠT để nổi bật ngay khi lướt mắt qua
     //    cả bảng, không cần đọc từng dòng mới biết ca nào có liên quan.
+    // SỬA 2026-09-01 (Ông Chủ yêu cầu — "bỏ hết chữ ghi chú ở cột trạng
+    // thái"): để TRỐNG cột Trạng thái cho dòng Ghi chú thay vì hiện "— GHI
+    // CHÚ —" — nội dung ghi chú vẫn hiện đủ ở cột Công trình (in đậm) và
+    // cột Ghi Chú, dòng vẫn tô vàng như cũ để dễ nhận ra, chỉ bỏ CHỮ ở
+    // đúng cột Trạng thái.
     const isNoteRow = rw.typeLabel==='Ghi chú';
     const hasCrossNote = isNoteRow || !!(rw.notes && rw.notes.trim());
-    const statusText = isNoteRow ? '— GHI CHÚ —' : (rw.status||'');
+    const statusText = isNoteRow ? '' : (rw.status||'');
     const highlightFill = hasCrossNote ? 'FFFFF3CD' : undefined;
     const vals = [ rw.date||'', rw.shiftType||'', rw.intensity||'', statusText,
       siteLabel,
@@ -15404,6 +15413,22 @@ async function exportDriverPayslipXLSX(driverId){
   line('− Ứng lương / tạm ứng', advance);
   if(repairDeduction>0) line('− Trừ do hỏng hóc', repairDeduction);
   line('THỰC NHẬN', netPay, { bold:true, size:16, fill:'FFDDF2E0', color:'FF1B7A3D' });
+
+  // SỬA 2026-09-01 (Ông Chủ yêu cầu — "để lái xe nắm được họ đang cầm của
+  // tao bao nhiêu"): hiện thêm Số Dư Tạm Ứng Chi Phí đang giữ, dùng ĐÚNG
+  // driverAdvanceBalance() đã có sẵn (đang hiện ở hồ sơ tài xế trong app)
+  // — KHÔNG cộng/trừ vào THỰC NHẬN ở trên, đây là sổ ĐỘC LẬP (tiền chi
+  // phí vận hành tài xế đang giữ hộ, khác bản chất với lương) — tách hẳn
+  // thành mục riêng để tài xế không nhầm đây là 1 phần lương của họ.
+  const advanceBalance = driverId ? driverAdvanceBalance(driverId, from.slice(0,7)) : 0;
+  nextRow(12);
+  merge(r,'A',lastColLetter); setCell(`A${r}`, 'TẠM ỨNG CHI PHÍ VẬN HÀNH (KHÔNG PHẢI LƯƠNG)', { size:14, bold:true }); nextRow(24);
+  line(`Số dư tạm ứng chi phí đang giữ (tháng ${from.slice(5,7)}/${from.slice(0,4)})`, Math.abs(advanceBalance),
+    { bold:true, color: advanceBalance>=0?'FF8A6D00':'FFB23A2E', fill:'FFFFF3CD' });
+  merge(r,'A',lastColLetter); setCell(`A${r}`, advanceBalance>=0
+    ? 'Số dương = tài xế đang cầm tiền công ty để chi phí vận hành (dầu/phát sinh...), chưa quyết toán hết.'
+    : 'Số âm = tài xế đã chi vượt số tiền đã ứng, công ty còn nợ lại tài xế khoản này.',
+    { size:11.5, color:'FF666666' }); nextRow(20);
 
   const repairRows = repairsInRange(from, to).filter(x=>x.responsibleDriverId===driverId && repairDriverResponsibleAmount(x)>0);
   if(repairRows.length>0){
