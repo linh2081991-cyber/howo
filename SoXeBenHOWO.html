@@ -35,7 +35,7 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-tap-highlight-color:transparent;
   }
-  #shell{ max-width:520px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--bg); }
+  #shell{ max-width:520px; margin:0 auto; min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; background:var(--bg); }
   header.top{
     position:sticky; top:0; z-index:10; background:var(--bg);
     padding:calc(16px + env(safe-area-inset-top)) 16px 12px 16px; border-bottom:1px solid var(--border);
@@ -312,6 +312,19 @@
     background:var(--surface); border-top:1px solid var(--border);
     display:flex; max-width:520px; margin:0 auto;
     padding-bottom:env(safe-area-inset-bottom);
+    /* SỬA 2026-09-01 (Ông Chủ báo — bản web thường, kéo màn hình lên thì
+       thanh tab bar chạy theo): position:fixed vẫn ĐÚNG, không phải lỗi
+       code — đây là lỗi vẽ lại (jank) đặc thù của Safari/Chrome di động
+       khi mở qua link thường (không phải app đã thêm ra Màn Hình Chính):
+       lúc cuộn, thanh công cụ trình duyệt tự thu gọn, và thanh tab bị vẽ
+       trễ nhịp theo animation đó nên trông như trôi theo. translateZ(0)
+       ép trình duyệt xử lý thanh này trên 1 lớp đồ hoạ riêng (GPU layer),
+       giảm hẳn độ giật trong lúc thanh công cụ trình duyệt thu/phóng —
+       không sửa được 100% vì đây là giới hạn của trình duyệt, không phải
+       app; mở app từ icon đã thêm ra Màn Hình Chính (không có thanh công
+       cụ trình duyệt) sẽ không còn gặp lại hiện tượng này. */
+    transform:translateZ(0);
+    -webkit-transform:translateZ(0);
   }
   nav.tabbar button{
     position:relative; z-index:1;
@@ -638,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #130';
+const APP_BUILD = '2026-09-01 · #131';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
