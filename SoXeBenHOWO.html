@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #132';
+const APP_BUILD = '2026-09-01 · #133';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11325,9 +11325,9 @@ function renderResults(){
         <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
         <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
-        <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh, sửa chữa/khấu hao, luật đường)</span><span class="val">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee)}</span></div>
+        <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh, sửa chữa/khấu hao, luật đường)</span><span class="val">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee + houseRent + utilities)}</span></div>
         <button class="btn btn-ghost btn-sm" id="operatingCostDetailBtn" style="width:auto; padding:6px 12px; margin:0 0 6px;">🔍 Chi Tiết Từng Khoản</button>
-        <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span style="color:${(gTotal.grossProfit-repairTotal-roadFee)>=0?'var(--profit)':'var(--loss)'}">= Lợi nhuận gộp vận hành</span><span class="val" style="color:${(gTotal.grossProfit-repairTotal-roadFee)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee)}</span></div>
+        <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)>=0?'var(--profit)':'var(--loss)'}">= Lợi nhuận gộp vận hành</span><span class="val" style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)}</span></div>
         <div class="summary-row"><span>− Khấu hao xe dự kiến / tháng</span><span class="val">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</span></div>
         <div class="summary-row"><span>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</span><span class="val">${fmtVND(state.settings.monthlyLoanInterest||0)}</span></div>
         <div class="summary-row"><span>− Bảo hiểm xe / tháng</span><span class="val">${fmtVND(state.settings.monthlyInsurance||0)}</span></div>
@@ -11612,7 +11612,7 @@ function renderResults(){
   const opCostDetailBtn = document.getElementById('operatingCostDetailBtn');
   if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities));
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
-    exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
+    exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent, utilities, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
   document.getElementById('exportKTThueBtn').addEventListener('click', ()=>{
     exportKTThueBundle(from, to);
@@ -14451,7 +14451,7 @@ function buildDriverPayrollRows(from, to){
 /// Builds the "Kết Quả Kinh Doanh" sheet: final net profit, financial
 /// health overview (Day/Night/Total), daily breakdown, site ranking —
 /// matching the Kết Quả tab exactly for the given [from, to] period.
-function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee, otherFixedMonthly=0, finalNetProfit, dailyBreakdown, siteRanking, rows: overviewRows}){
+function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent=0, utilities=0, otherFixedMonthly=0, finalNetProfit, dailyBreakdown, siteRanking, rows: overviewRows}){
   const out = [];
   out.push([`Kết Quả Kinh Doanh: ${formatDateVN(from)} - ${formatDateVN(to)}`]);
   out.push([]);
@@ -14461,7 +14461,11 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   // "Lợi nhuận gộp vận hành" xuất ra đây giờ ĐÃ TRỪ SẴN 2 khoản đó, khớp
   // đúng con số hiện trên màn "Kết Quả Kinh Doanh". LỢI NHUẬN THỰC TẾ cuối
   // cùng không đổi số nào cả.
-  out.push(['Lợi nhuận gộp vận hành (đã gồm sửa chữa/khấu hao, luật đường)', Math.round(gTotal.grossProfit - repairTotal - roadFee)]);
+  // SỬA 2026-09-01 (Ông Chủ báo lệch — LỢI NHUẬN THỰC TẾ đã trừ Tiền Thuê
+  // Nhà+Điện Nước nhưng dòng "Lợi nhuận gộp vận hành" phía trên chưa trừ,
+  // khiến cộng tay các dòng hiển thị không khớp số cuối): thêm houseRent/
+  // utilities vào đúng dòng này, y hệt cách repairTotal/roadFee đã có.
+  out.push(['Lợi nhuận gộp vận hành (đã gồm sửa chữa/khấu hao, luật đường, tiền nhà/điện nước)', Math.round(gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities)]);
   out.push(['− Khấu hao xe dự kiến/tháng', Math.round(state.settings.monthlyVehicleDepreciation||0)]);
   out.push(['− Lãi vay ngân hàng/tháng (chỉ phần lãi, không gồm gốc)', Math.round(state.settings.monthlyLoanInterest||0)]);
   out.push(['− Bảo hiểm xe/tháng', Math.round(state.settings.monthlyInsurance||0)]);
@@ -14985,8 +14989,8 @@ function ktBuildTongQuan(wb, S, companyName, mst){
   ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (trực tiếp)',{bold:true,fill:KT_HEAD_FILL,wrap:true}); setH(30);
   line('Tiền khách bank vào (thật)', S.cashIn, {color:'FF1F7A4D'});
   line('Tiền bank cho mỏ (thật)', -S.cashOutToSuppliers);
-  line('Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)', -S.operatingCashCost);
-  line('Sửa chữa + luật đường + gốc/lãi vay/bảo hiểm/đăng kiểm (thật)', -(S.repairTotal+S.roadFee+S.otherFixedMonthlyForCashFlow));
+  line('Chi phí vận hành (dầu, lương, ăn, phát sinh)', -S.operatingCashCost);
+  line('Sửa chữa + luật đường + tiền nhà/điện nước + gốc/lãi vay/bảo hiểm/đăng kiểm (thật)', -(S.repairTotal+S.roadFee+S.houseRent+S.utilities+S.otherFixedMonthlyForCashFlow));
   line('DÒNG TIỀN THUẦN', S.netOperatingCashFlow, {bold:true, color:S.netOperatingCashFlow>=0?'FF1F7A4D':'FFB23A2E'});
 }
 function ktBuildHoaDonRa(wb, taxData, from, to){
