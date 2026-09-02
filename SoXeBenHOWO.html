@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #135';
+const APP_BUILD = '2026-09-01 · #136';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2395,6 +2395,35 @@ function showFatalErrorBanner(err){
   try {
     const shell = document.getElementById('shell');
     if(!shell || shell.style.display==='none') return; // chưa đăng nhập xong thì thôi, khỏi làm rối màn đăng nhập
+    const msg = (err && err.message) || String(err||'');
+    // SỬA 2026-09-01 (Ông Chủ báo — thi thoảng hiện "Lỗi hệ thống" với nội
+    // dung "Connection to Indexed Database server lost..."): đây KHÔNG
+    // PHẢI lỗi code, KHÔNG PHẢI lỗi mạng — đây là lỗi ĐÃ BIẾT ở tầng
+    // TRÌNH DUYỆT: Safari/Chrome trên điện thoại thỉnh thoảng tự đóng kết
+    // nối tới bộ nhớ đệm ngoại tuyến (IndexedDB) mà Firestore dùng để lưu
+    // cache — thường do chuyển app ra nền lâu hoặc máy tạm giải phóng bộ
+    // nhớ. Chính Firebase tự báo đúng "Refresh the page to try again" —
+    // nghĩa là CÁCH DUY NHẤT khôi phục là tải lại trang, không có cách
+    // nào vá bằng code để lỗi này KHÔNG BAO GIỜ xảy ra (nằm ngoài tầm
+    // JS, do hệ điều hành/trình duyệt quyết định). Vậy thay vì bắt Ông
+    // Chủ tự chụp màn hình rồi tự bấm tải lại thủ công, TỰ ĐỘNG tải lại
+    // trang giúp Ông Chủ — chỉ hiện đúng 1 dòng thông báo ngắn gọn, không
+    // phải khung lỗi đỏ đáng sợ như trước. Có giới hạn tối đa 1 lần tự
+    // tải lại / 15 giây — nếu tải lại xong vẫn lỗi lại ngay lập tức (hiếm,
+    // thường do máy hết bộ nhớ/Duyệt Ẩn Danh hết dung lượng lưu trữ) thì
+    // mới hiện khung lỗi như cũ để Ông Chủ biết cần xử lý thủ công (đóng
+    // bớt tab khác, khởi động lại máy).
+    if(/Connection to Indexed ?DB|IndexedDb|Indexed Database/i.test(msg)){
+      const RELOAD_GUARD_KEY = 'howoIdbReloadAt';
+      const lastReload = Number(sessionStorage.getItem(RELOAD_GUARD_KEY)||0);
+      const now = Date.now();
+      if(now - lastReload > 15000){
+        sessionStorage.setItem(RELOAD_GUARD_KEY, String(now));
+        showToast('Mất kết nối tạm thời tới bộ nhớ đệm của máy — đang tự tải lại trang...');
+        setTimeout(()=>location.reload(), 800);
+        return;
+      }
+    }
     let box = document.getElementById('fatalErrorBanner');
     if(!box){
       box = document.createElement('div');
@@ -2402,7 +2431,6 @@ function showFatalErrorBanner(err){
       box.style.cssText = 'position:fixed; left:10px; right:10px; bottom:80px; z-index:999; background:#FDECEC; border:2px solid #B23A2E; border-radius:12px; padding:12px; max-height:45vh; overflow:auto; font-family:monospace; font-size:11.5px; color:#7A1F1F; white-space:pre-wrap; word-break:break-word;';
       document.body.appendChild(box);
     }
-    const msg = (err && err.message) || String(err||'');
     const stack = (err && err.stack) || '';
     box.innerHTML = `<div style="font-weight:800; margin-bottom:6px; font-family:-apple-system,sans-serif; font-size:13px;">⚠️ Lỗi hệ thống — chụp màn hình khung này gửi đội kỹ thuật</div>${escapeHtml(msg)}\n${escapeHtml(stack)}`;
   } catch(e2){ /* không để lưới an toàn tự gây lỗi thêm */ }
