@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #136';
+const APP_BUILD = '2026-09-02 · #138';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4703,7 +4703,28 @@ function siteEffectiveWageTrips(s){
   return (s.wageQualifyingTripsOverride===null || s.wageQualifyingTripsOverride===undefined)
     ? trips : (Number(s.wageQualifyingTripsOverride)||0);
 }
-function siteWageTotal(s){ return siteEffectiveWageTrips(s) * (Number(s.driverWagePerTrip)||0); }
+// SỬA 2026-09-01 (Ông Chủ yêu cầu — "3 chuyến đầu 1 mức giá, chuyến 4 trở
+// đi 1 mức giá khác"): tách lương chuyến thành 2 bậc, đếm THEO TỪNG DÒNG
+// CÔNG TRÌNH này (không cộng dồn qua dòng khác trong cùng ca — mỗi dòng
+// tự đếm lại từ chuyến 1). Bậc 2 (driverWagePerTripTier2) CHỈ áp dụng
+// đúng những chuyến từ thứ 4 trở đi — chuyến 1,2,3 luôn giữ nguyên giá
+// bậc 1 (driverWagePerTrip), không bị tính lại theo giá mới. Để trống ô
+// bậc 2 → dùng lại ĐÚNG giá bậc 1 cho toàn bộ, tức giữ nguyên 100% hành
+// vi cũ (trips × driverWagePerTrip) cho MỌI dòng công trình chưa từng
+// đụng tới ô mới này — không ảnh hưởng ca cũ.
+function siteWageTiers(s){
+  const rate1 = Number(s.driverWagePerTrip)||0;
+  const tier2Raw = s.driverWagePerTripTier2;
+  const rate2 = (tier2Raw===null || tier2Raw===undefined || tier2Raw==='') ? rate1 : (Number(tier2Raw)||0);
+  return { rate1, rate2 };
+}
+function siteWageTotal(s){
+  const trips = siteEffectiveWageTrips(s);
+  const { rate1, rate2 } = siteWageTiers(s);
+  const tier1Trips = Math.min(trips, 3);
+  const tier2Trips = Math.max(0, trips - 3);
+  return tier1Trips*rate1 + tier2Trips*rate2;
+}
 
 /// Số chuyến + lương chuyến ĐÚNG cho 1 tài xế cụ thể, GỘP TẤT CẢ ca trong
 /// khoảng ngày — tôn trọng field "Tài xế lấy hàng" riêng của từng chuyến
@@ -4736,10 +4757,15 @@ function driverTripWageStatsInRange(driverId, from, to, shiftsList){
         (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
         (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0)
       );
-      const wagePerTrip = Number(s.driverWagePerTrip)||0;
-      completeTrips.forEach(t=>{
+      // SỬA 2026-09-01: áp đúng bậc lương chuyến (siteWageTiers) theo VỊ TRÍ
+      // THỨ TỰ của từng chuyến trong DÒNG CÔNG TRÌNH này (index 0,1,2 = bậc
+      // 1; index 3 trở đi = bậc 2) — GIỮ NGUYÊN thứ tự chuyến bất kể chuyến
+      // đó cuối cùng được tính lương cho tài xế nào (múc hộ/đổ hộ không làm
+      // xáo trộn thứ tự đếm chuyến của dòng công trình).
+      const { rate1, rate2 } = siteWageTiers(s);
+      completeTrips.forEach((t, tIdx)=>{
         const effDriver = t.pickupDriverId || sh.driverId;
-        if(effDriver===driverId){ tripCount += 1; tripWage += wagePerTrip; }
+        if(effDriver===driverId){ tripCount += 1; tripWage += (tIdx<3 ? rate1 : rate2); }
       });
     });
   });
@@ -5019,16 +5045,27 @@ function findPreviousShift(dateStr, shiftType, excludeId){
 ///     động đầu tiên, y hệt hành vi cũ.
 /// LUÔN chỉ là GỢI Ý điền sẵn vào ô chọn — Ông Chủ đổi tay bình thường bất
 /// cứ lúc nào, không khoá hay ép buộc gì cả.
+// SỬA 2026-09-02 (Ông Chủ báo — "Thêm Ca Mới" tự động chọn sẵn tài xế ĐÃ
+// NGHỈ làm mặc định): hàm này trước đây trả thẳng `prev.driverId` (tài xế
+// của ca gần nhất tìm được) mà KHÔNG kiểm tra người đó còn đang hoạt động
+// hay không — nếu tài xế của ca gần nhất đã bị chuyển "Ngừng Hoạt Động"
+// sau đó, ca mới vẫn bị gợi ý đúng người đã nghỉ đó. Giờ LUÔN kiểm tra:
+// nếu gợi ý ra tài xế không còn hoạt động, rơi về tài xế ĐANG HOẠT ĐỘNG
+// đầu tiên thay thế — tài xế đã nghỉ sẽ không bao giờ còn được tự động
+// chọn sẵn cho ca MỚI nữa (vẫn xem/sửa lại bình thường cho CA CŨ đã ghi
+// nhận đúng tên họ, không đụng gì tới lịch sử).
 function suggestDriverIdForNewShift(dateStr, shiftType, excludeId){
   const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
+  const fallbackActive = (activeDrivers[0]||state.drivers[0]||{}).id;
   const prev = findPreviousShift(dateStr, shiftType, excludeId);
-  if(!prev) return (activeDrivers[0]||state.drivers[0]||{}).id;
-  if(prev.date===dateStr) return prev.driverId;
+  if(!prev) return fallbackActive;
+  const prevIsActive = activeDrivers.some(d=>d.id===prev.driverId);
+  if(prev.date===dateStr) return prevIsActive ? prev.driverId : fallbackActive;
   if(activeDrivers.length===2){
     const other = activeDrivers.find(d=>d.id!==prev.driverId);
     if(other) return other.id;
   }
-  return prev.driverId;
+  return prevIsActive ? prev.driverId : fallbackActive;
 }
 
 /// Gợi ý tên công trình khi gõ — CHỈ những công trình còn hoạt động (lần
@@ -5834,8 +5871,16 @@ function refreshDriverSelectInput(){
 function renderShiftForm(){
   const sh = state.draftShift;
   const app = document.getElementById('app');
+  // SỬA 2026-09-02 (Ông Chủ yêu cầu — "lái xe đã nghỉ không cần hiện tên
+  // trong chọn tài xế, chỉ hiện những lái xe còn online"): với ca MỚI
+  // (sh.isNew) chỉ hiện tài xế ĐANG HOẠT ĐỘNG — không có lý do gì để chọn
+  // tài xế đã nghỉ cho 1 ca sắp diễn ra. Với ca CŨ đang SỬA LẠI (không
+  // phải isNew) vẫn GIỮ NGUYÊN ngoại lệ hiện thêm đúng tài xế đã nghỉ đó
+  // (kèm nhãn "(đã nghỉ)") — nếu ẩn hẳn, Ông Chủ mở lại 1 ca lịch sử thật
+  // sự do người đã nghỉ đứng ca sẽ bị ép đổi sang tên người khác, làm sai
+  // lịch sử lương/công nợ đã ghi nhận đúng của người đó.
   const driverOptions = state.drivers
-    .filter(d=>d.isActive!==false || d.id===sh.driverId)
+    .filter(d=>d.isActive!==false || (!sh.isNew && d.id===sh.driverId))
     .map(d=>`<option value="${d.id}" ${d.id===sh.driverId?'selected':''}>${escapeHtml(d.name)}${d.isActive===false?' (đã nghỉ)':''}</option>`).join('');
 
   app.innerHTML = `
@@ -6149,8 +6194,12 @@ function renderSiteRows(){
           </label>
         </div>
         <div class="field" style="margin-bottom:0;">
-          <label>Lương / chuyến (đ)</label>
+          <label>Lương / chuyến (đ) — áp dụng chuyến 1, 2, 3</label>
           <input type="text" inputmode="decimal" class="site-money" data-idx="${i}" data-field="driverWagePerTrip" placeholder="0" value="${s.driverWagePerTrip?toIntSafe(s.driverWagePerTrip).toLocaleString('vi-VN'):''}">
+        </div>
+        <div class="field" style="margin-bottom:0; margin-top:10px;">
+          <label>Lương / chuyến từ chuyến thứ 4 trở đi (đ) — để trống = dùng chung giá ở trên</label>
+          <input type="text" inputmode="decimal" class="site-money" data-idx="${i}" data-field="driverWagePerTripTier2" placeholder="Để trống = giống giá chuyến 1-3" value="${s.driverWagePerTripTier2?toIntSafe(s.driverWagePerTripTier2).toLocaleString('vi-VN'):''}">
         </div>`;
     } else {
       body = `
@@ -6177,9 +6226,13 @@ function renderSiteRows(){
             <input type="number" inputmode="numeric" class="site-input" data-idx="${i}" data-field="trips" placeholder="0" value="${blankIfZero(s.trips)}">
           </div>
           <div class="field">
-            <label>Lương / chuyến</label>
+            <label>Lương / chuyến — áp dụng chuyến 1, 2, 3</label>
             <input type="text" inputmode="decimal" class="site-money" data-idx="${i}" data-field="driverWagePerTrip" placeholder="0" value="${s.driverWagePerTrip?toIntSafe(s.driverWagePerTrip).toLocaleString('vi-VN'):''}">
           </div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Lương / chuyến từ chuyến thứ 4 trở đi (đ) — để trống = dùng chung giá ở trên</label>
+          <input type="text" inputmode="decimal" class="site-money" data-idx="${i}" data-field="driverWagePerTripTier2" placeholder="Để trống = giống giá chuyến 1-3" value="${s.driverWagePerTripTier2?toIntSafe(s.driverWagePerTripTier2).toLocaleString('vi-VN'):''}">
         </div>`;
     }
     return `
@@ -6900,7 +6953,7 @@ function bindFormEvents(){
   document.getElementById('f_notes').addEventListener('input', e=>{ sh.notes=e.target.value; });
 
   document.getElementById('addSiteBtn').addEventListener('click', ()=>{
-    sh.siteLogs.push({ siteType:'freight', siteName:'', volumePerTrip:0, materialUnitPrice:0, priceIncludesVat:false, trips:0, driverWagePerTrip:0, wageQualifyingTripsOverride:null,
+    sh.siteLogs.push({ siteType:'freight', siteName:'', volumePerTrip:0, materialUnitPrice:0, priceIncludesVat:false, trips:0, driverWagePerTrip:0, driverWagePerTripTier2:null, wageQualifyingTripsOverride:null,
       commercialTrips:[], buyIncludesVat:false, sellIncludesVat:false, buyHasInvoice:false, sellHasInvoice:false });
     renderSiteRows(); updateSummary();
   });
@@ -14407,7 +14460,7 @@ function buildOperationLogRows(){
   const header = ['Ngày','Ca','Cường Độ','Tài Xế','Trạng Thái','Odo Đầu','Odo Cuối','Odo Chạy (Km)',
     'Chỉ Số Dầu Đầu','Chỉ Số Dầu Cuối','Dầu Đổ Thêm (Lít)','Dầu Tiêu Hao (Lít)','Đơn Giá Dầu/Lít','Tiền Dầu Tiêu Hao',
     'Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại Công Trình','Khối Lượng/Chuyến (Chở Cước)','Đơn Giá Vật Liệu/Cước','Tổng Mua (TM)','Tổng Bán (TM)','Số Chuyến','Thành Tiền / Lãi Gộp Công Trình',
-    'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến Tổng',
+    'Lương/Chuyến (chuyến 1-3)','Lương/Chuyến (chuyến 4+)','Số Chuyến Tính Lương','Lương Chuyến Tổng',
     'Tổng Doanh Thu Ca','Lương Cứng Phân Bổ','Tiền Ăn',
     'Tiền Luật Phát Sinh','Chi Phí Phát Sinh','Ghi Chú Phát Sinh','Ứng Lương/Đền Bù','Người Nhận Ứng','Ghi Chú Ca',
     'Tổng Chi Phí Ca','Lợi Nhuận Ròng Ca'];
@@ -14426,7 +14479,7 @@ function buildOperationLogRows(){
       sh.roadFeeIncidental||0, sh.incidentalCost||0, sh.incidentalNotes||'', sh.advanceAmount||0, sh.advanceRecipientName||'',
       sh.notes||'', shiftTotalCost(sh), shiftNetProfit(sh)];
     if((sh.siteLogs||[]).length===0){
-      rows.push([...shared, '','','','','','','','','','','','', ...trailing]);
+      rows.push([...shared, '','','','','','','','','','','','','', ...trailing]);
     } else {
       for(const s of sh.siteLogs){
         const isC = s.siteType==='commercial';
@@ -14435,9 +14488,9 @@ function buildOperationLogRows(){
         // mình, cột kia để trống, không lẫn 2 khái niệm vào cùng 1 cột nữa.
         const siteFields = isC
           ? ['', s.siteName||'', 'Thương Mại', '', '', Math.round(commercialNetBuy(s)), Math.round(commercialNetSell(s)), siteTripCount(s), Math.round(siteRevenue(s)),
-             s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)]
+             s.driverWagePerTrip||0, siteWageTiers(s).rate2, siteEffectiveWageTrips(s), siteWageTotal(s)]
           : [s.siteName||'', '', 'Chở Cước', s.volumePerTrip||0, s.materialUnitPrice||0, '', '', siteTripCount(s), Math.round(siteRevenue(s)),
-             s.driverWagePerTrip||0, siteEffectiveWageTrips(s), siteWageTotal(s)];
+             s.driverWagePerTrip||0, siteWageTiers(s).rate2, siteEffectiveWageTrips(s), siteWageTotal(s)];
         rows.push([...shared, ...siteFields, ...trailing]);
       }
     }
@@ -14756,16 +14809,25 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
       }
       // Site log này có ít nhất 1 chuyến bị đổi người lấy hàng — tách
       // riêng đúng theo CÙNG điều kiện với driverTripWageStatsInRange().
-      const wagePerTrip = Number(s.driverWagePerTrip)||0;
       const completeTrips = trips.filter(t=>
         (Number(t.buyVolume)>0) && (Number(t.buyUnitPrice)>0) &&
         (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
-      const mineCount = completeTrips.filter(t=>(t.pickupDriverId||sh.driverId)===sh.driverId).length;
+      // SỬA 2026-09-01: áp đúng bậc lương chuyến theo VỊ TRÍ THỨ TỰ của
+      // từng chuyến trong TOÀN BỘ dòng công trình (index 0,1,2 = bậc 1;
+      // từ index 3 trở đi = bậc 2) — GIỮ NGUYÊN thứ tự đếm dù chuyến đó
+      // cuối cùng thuộc về ai, y hệt driverTripWageStatsInRange().
+      const { rate1, rate2 } = siteWageTiers(s);
+      let mineCount = 0, mineWage = 0;
+      completeTrips.forEach((t, tIdx)=>{
+        const isMine = (t.pickupDriverId||sh.driverId)===sh.driverId;
+        if(isMine){ mineCount++; mineWage += (tIdx<3 ? rate1 : rate2); }
+      });
+      const wagePerTrip = rate1; // hiển thị tham khảo (chuyến 1-3) trên dòng tổng — số tiền thật đã tính đúng theo bậc ở mineWage
       const r2 = { ...head, isShiftHead, ...trailingFields, _sortKey:sortKey,
         siteLabel:s.siteName||'', typeLabel:'Thương Mại',
         volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
         tripCount:mineCount, wagePerTrip, effectiveTrips:mineCount,
-        wageAmount:mineCount*wagePerTrip };
+        wageAmount:mineWage };
       rows.push(r2);
       rowsBySiteKey.set(siteKeyOf(sh.date, sh.shiftType, s.siteName), r2);
       // Dòng phụ chú thích cho từng chuyến bị lấy hộ bởi người KHÁC —
@@ -14816,19 +14878,31 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
         (Number(t.sellVolume)>0) && (Number(t.sellUnitPrice)>0));
       const mineAll = completeTrips.filter(t=>t.pickupDriverId===driverId);
       if(mineAll.length===0) return;
-      const wagePerTrip = Number(s.driverWagePerTrip)||0;
+      // SỬA 2026-09-01: áp đúng bậc lương chuyến theo VỊ TRÍ THỨ TỰ THẬT
+      // của từng chuyến trong TOÀN BỘ dòng công trình (completeTrips, index
+      // 0,1,2 = bậc 1; từ index 3 trở đi = bậc 2) — KHÔNG được đánh số lại
+      // từ đầu chỉ trong danh sách đã lọc riêng theo người múc, vì thứ tự
+      // chuyến của dòng công trình không đổi dù ai lấy hàng.
+      const { rate1, rate2 } = siteWageTiers(s);
+      const wagePerTrip = rate1; // dùng để so khớp gộp dòng + hiển thị tham khảo — tiền thật đã tính đúng theo bậc ở g.wage bên dưới
       const owner = driverById(sh.driverId);
       const deliverySortKey = chronoKey(sh.date, sh.shiftType);
 
-      // Nhóm theo đúng ngày múc thật (pickupDate) — chuyến nào chưa có
-      // pickupDate thì gom chung vào nhóm '' (đoán ca gần nhất như cũ).
-      const groups = new Map(); // pickupDate ('' nếu chưa có) -> số chuyến
-      mineAll.forEach(t=>{
+      // Nhóm theo đúng ngày múc thật (pickupDate) — vừa đếm SỐ CHUYẾN vừa
+      // cộng đúng TIỀN theo bậc lương của từng chuyến (chuyến nào chưa có
+      // pickupDate thì gom chung vào nhóm '' (đoán ca gần nhất như cũ)).
+      const groups = new Map(); // pickupDate ('' nếu chưa có) -> {count, wage}
+      completeTrips.forEach((t, tIdx)=>{
+        if(t.pickupDriverId !== driverId) return;
         const key = t.pickupDate || '';
-        groups.set(key, (groups.get(key)||0)+1);
+        const g = groups.get(key) || {count:0, wage:0};
+        g.count += 1;
+        g.wage += (tIdx<3 ? rate1 : rate2);
+        groups.set(key, g);
       });
 
-      groups.forEach((count, pickupDateKey)=>{
+      groups.forEach((g, pickupDateKey)=>{
+        const count = g.count, wage = g.wage;
         let targetShift = null;
         if(pickupDateKey){
           // Biết CHẮC ngày múc — tìm đúng ca của driverId đúng ngày đó
@@ -14853,7 +14927,7 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
           // thẳng vào dòng ngày đó, "Số Chuyến" hiện đủ trên cùng 1 dòng.
           targetRow.tripCount = (targetRow.tripCount||0) + count;
           targetRow.effectiveTrips = (targetRow.effectiveTrips||0) + count;
-          targetRow.wageAmount = (targetRow.wageAmount||0) + count*wagePerTrip;
+          targetRow.wageAmount = (targetRow.wageAmount||0) + wage;
           // SỬA 2026-08-25 (Ông Chủ yêu cầu — rút GỌN, tối ưu đọc trên điện
           // thoại): "Múc chuyến hàng cho (tên) đi đổ ngày (ngày)" — đối
           // xứng đúng mẫu "Đổ giúp chuyến hàng cho..." bên phiếu người đổ.
@@ -14883,7 +14957,7 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
           _sortKey:chronoKey(dispDate, dispShiftType), siteLabel:s.siteName||'', typeLabel:'Thương Mại (lấy hộ)',
           volumePerTrip:s.volumePerTrip||0, unitPrice:s.materialUnitPrice||0,
           tripCount:count, wagePerTrip, effectiveTrips:count,
-          wageAmount:count*wagePerTrip });
+          wageAmount:wage });
       });
     });
   });
@@ -14932,7 +15006,7 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
 
   rows.push(['CHI TIẾT TỪNG CA']);
   const detailHeader = ['Ngày','Ca','Cường Độ','Trạng Thái','Công Trình (Chở Cước)','Điểm Múc - Điểm Đổ (Thương Mại)','Loại','Khối Lượng/Chuyến','Đơn Giá','Số Chuyến',
-    'Lương/Chuyến','Số Chuyến Tính Lương','Lương Chuyến (Ca Này)','Lương Cứng (Ca Này)','Tiền Ăn (Ca Này)','Ứng Lương (Ca Này)','Ghi Chú Ca'];
+    'Lương/Chuyến (chuyến 1-3)','Số Chuyến Tính Lương','Lương Chuyến (Ca Này)','Lương Cứng (Ca Này)','Tiền Ăn (Ca Này)','Ứng Lương (Ca Này)','Ghi Chú Ca'];
   rows.push(detailHeader);
   // SỬA 2026-08-25: dùng buildDriverPayslipTripRows() để bảng chi tiết
   // tôn trọng đúng "Tài xế lấy hàng" của từng chuyến — không còn cộng
@@ -15420,7 +15494,7 @@ async function exportDriverPayslipXLSX(driverId){
   // file không cần ai giải thích thêm.
   merge(r,'A',lastColLetter); setCell(`A${r}`, '📌 Dòng tô vàng là liên quan chuyến 2 tài xế Múc hộ/Đổ hộ nhau.', { size:11.5, color:'FF8A6D00', fill:'FFFFF3CD', border:true, wrap:true }); nextRow(24);
   const headRow = r;
-  const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến','Thành tiền chuyến','Ghi Chú'];
+  const headers = ['Ngày','Ca','Cường độ','Trạng thái','Công trình / Điểm Múc-Điểm Đổ','Số chuyến','Lương/chuyến (chuyến 1-3)','Thành tiền chuyến','Ghi Chú'];
   headers.forEach((h,i)=>setCell(ws.getCell(headRow, i+1).address, h, { bold:true, align:(i>=5?'center':'left'), fill:'FFEDEDED', border:true, wrap:true }));
   nextRow(32);
 
