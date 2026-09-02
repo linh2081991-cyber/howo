@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #133';
+const APP_BUILD = '2026-09-01 · #134';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11304,6 +11304,11 @@ function renderResults(){
     </section>` : ''}
     <section class="group">
       <h3>Khoảng Thời Gian</h3>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button class="btn btn-ghost btn-sm" id="res_thisMonth" style="flex:1;">Tháng Này</button>
+        <button class="btn btn-ghost btn-sm" id="res_lastMonth" style="flex:1;">Tháng Trước</button>
+        <button class="btn btn-ghost btn-sm" id="res_allTime" style="flex:1;">Toàn Thời Gian</button>
+      </div>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -11591,6 +11596,20 @@ function renderResults(){
   renderMonthlyInvoiceReconciliation();
   document.getElementById('openInvoiceLotManagerBtn').addEventListener('click', ()=>renderInvoiceLotManagerModal(null));
 
+  document.getElementById('res_thisMonth').addEventListener('click', ()=>{
+    state.resultsRange = currentMonthRange(); state.resultsRoadFeeOverride=null; renderResults();
+  });
+  document.getElementById('res_lastMonth').addEventListener('click', ()=>{
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), 0);
+    const toLocalISO = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    state.resultsRange = { from: toLocalISO(first), to: toLocalISO(last) };
+    state.resultsRoadFeeOverride=null; renderResults();
+  });
+  document.getElementById('res_allTime').addEventListener('click', ()=>{
+    state.resultsRange = { from: ALL_TIME_FROM, to: ALL_TIME_TO }; state.resultsRoadFeeOverride=null; renderResults();
+  });
   document.getElementById('res_from').addEventListener('change', e=>{
     state.resultsRange.from = e.target.value; state.resultsRoadFeeOverride=null; renderResults();
   });
