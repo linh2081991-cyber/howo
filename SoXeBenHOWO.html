@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-01 · #134';
+const APP_BUILD = '2026-09-01 · #135';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1562,7 +1562,7 @@ async function loadAll(){
     await ensureVehiclesMigrated();
     await refreshAllVehiclesShiftsCache();
   } catch(e) {
-    showToast('Lỗi tải dữ liệu — kiểm tra mạng.');
+    showToast('Lỗi tải dữ liệu: ' + (e?.message || e));
   }
   state.loaded = true;
 }
@@ -1580,7 +1580,7 @@ async function ensureVehiclesMigrated(){
 }
 async function saveVehicles(){
   try { await withTimeout(sharedDataRef('vehicles').set({ list: state.vehicles })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu xe — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu xe: ' + (e?.message || e)); return false; }
 }
 /// Modal chọn phạm vi đang xem: LINH CHÍ THÀNH (Toàn Công Ty) hoặc 1 xe cụ thể.
 /// GHI CHÚ (Giai đoạn 1): bấm chọn xe hiện mới chỉ đổi NHÃN đang xem
@@ -1665,7 +1665,7 @@ function renderAddVehicleModal(){
     const v = { id: uid('vehicle'), plate, name, isPrimary:false, createdAt: todayLocalDateStr() };
     state.vehicles.push(v);
     const ok = await saveVehicles();
-    if(!ok){ state.vehicles.pop(); showToast('LƯU THẤT BẠI — kiểm tra mạng rồi thử thêm xe lại.'); return; }
+    if(!ok){ state.vehicles.pop(); showToast('Lưu xe mới thất bại — xem lý do lỗi ở thông báo trước đó, thử thêm lại.'); return; }
     showToast(`Đã thêm ${name}.`);
     switchVehicle(v.id);
   });
@@ -1729,7 +1729,7 @@ async function loadVehicleWorkingSet(vehicleId){
       state.allVehiclesSettings[vehicleId] = state.settings;
     }
   } catch(e) {
-    showToast('Lỗi tải dữ liệu xe — kiểm tra mạng.');
+    showToast('Lỗi tải dữ liệu xe: ' + (e?.message || e));
   }
 }
 async function switchVehicle(vid){
@@ -1791,47 +1791,47 @@ function activeVehicleIdForEditing(){
 }
 async function saveDrivers(){
   try { await vehicleDataRef(activeVehicleIdForEditing(), 'drivers').set({ list: state.drivers }); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu tài xế — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tài xế: ' + (e?.message || e)); return false; }
 }
 async function saveSuppliers(){
   try { await withTimeout(sharedDataRef('suppliers').set({ list: state.suppliers })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu nhà cung cấp: ' + (e?.message || e)); return false; }
 }
 async function saveInvoiceLots(){
   try { await withTimeout(sharedDataRef('invoiceLots').set({ list: state.invoiceLots })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu kho hoá đơn bù: ' + (e?.message || e)); return false; }
 }
 async function saveMineInvoices(){
   try { await withTimeout(sharedDataRef('mineInvoices').set({ list: state.mineInvoices })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu sổ hoá đơn thật từ mỏ — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu sổ hoá đơn thật từ mỏ: ' + (e?.message || e)); return false; }
 }
 async function saveDriverAdvances(){
   try { await withTimeout(sharedDataRef('driverAdvances').set({ list: state.driverAdvances })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu tạm ứng chi phí tài xế — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tạm ứng chi phí tài xế: ' + (e?.message || e)); return false; }
 }
 async function saveDriverExpenseReports(){
   try { await withTimeout(sharedDataRef('driverExpenseReports').set({ list: state.driverExpenseReports })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu báo cáo chi phí tài xế — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu báo cáo chi phí tài xế: ' + (e?.message || e)); return false; }
 }
 async function saveCustomers(){
   try { await withTimeout(sharedDataRef('customers').set({ list: state.customers })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu khách hàng — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu khách hàng: ' + (e?.message || e)); return false; }
 }
 async function saveSupplierPayments(){
   try { await withTimeout(sharedDataRef('supplierPayments').set({ list: state.supplierPayments })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu tiền đã trả nhà cung cấp: ' + (e?.message || e)); return false; }
 }
 async function saveOwnerEquityEntries(){
   try { await withTimeout(sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries })); return true; }
-  catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu: ' + (e?.message || e)); return false; }
 }
 async function saveEquityProjectInfo(){
   try { await withTimeout(sharedDataRef('equityProjectInfo').set(state.equityProjectInfo)); return true; }
-  catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư: ' + (e?.message || e)); return false; }
 }
 async function saveBankBalanceCheckpoints(){
   try { await withTimeout(sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints })); return true; }
-  catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng: ' + (e?.message || e)); return false; }
 }
 async function saveShifts(){
   try {
@@ -1840,7 +1840,7 @@ async function saveShifts(){
     if(vid) state.allVehiclesShifts[vid] = state.shifts;
     return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu ca: ' + (e?.message || e)); return false; }
 }
 /// Lưu ĐÚNG danh sách ca của 1 XE CỤ THỂ (không nhất thiết là xe đang
 /// xem) — dùng cho các thao tác HÀNG LOẠT xuyên suốt TOÀN CÔNG TY (VD
@@ -1855,7 +1855,7 @@ async function saveShiftsForVehicleId(vid, shiftsList){
     if(vid === activeVehicleIdForEditing()) state.shifts = shiftsList;
     return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu ca — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu ca: ' + (e?.message || e)); return false; }
 }
 /// Tick/bỏ tick hàng loạt "Đã nhận hóa đơn MUA" hoặc "Đã xuất hóa đơn
 /// BÁN" cho MỌI ca gắn đúng 1 đối tác (nhà cung cấp/khách hàng), trong 1
@@ -2219,7 +2219,7 @@ async function saveRepairs(){
     if(vid) state.allVehiclesRepairs[vid] = state.repairs;
     return true;
   }
-  catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu sửa chữa: ' + (e?.message || e)); return false; }
 }
 async function saveRoadFeeByMonth(){
   try {
@@ -2324,27 +2324,27 @@ function utilitiesForRange(from, to){
 }
 async function saveSitePayments(){
   try { await withTimeout(sharedDataRef('sitePayments').set({ list: state.sitePayments })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu công nợ — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu công nợ: ' + (e?.message || e)); return false; }
 }
 async function saveDocuments(){
   try { await vehicleDataRef(activeVehicleIdForEditing(), 'documents').set({ list: state.documents }); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu giấy tờ — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu giấy tờ: ' + (e?.message || e)); return false; }
 }
 async function saveMaintenanceSchedules(){
   try { await vehicleDataRef(activeVehicleIdForEditing(), 'maintenanceSchedules').set({ list: state.maintenanceSchedules }); return true; }
-  catch(e){ showToast('Lỗi lưu lịch bảo dưỡng — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu lịch bảo dưỡng: ' + (e?.message || e)); return false; }
 }
 async function saveSiteContracts(){
   try { await withTimeout(sharedDataRef('siteContracts').set({ list: state.siteContracts })); return true; }
-  catch(e){ showToast('Lỗi lưu hợp đồng công trình — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu hợp đồng công trình: ' + (e?.message || e)); return false; }
 }
 async function saveSiteAppraisals(){
   try { await withTimeout(sharedDataRef('siteAppraisals').set({ list: state.siteAppraisals })); return true; }
-  catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình: ' + (e?.message || e)); return false; }
 }
 async function saveMonthlyBonuses(){
   try { await vehicleDataRef(activeVehicleIdForEditing(), 'monthlyBonuses').set({ list: state.monthlyBonuses }); return true; }
-  catch(e){ showToast('Lỗi lưu tiền tip/thưởng cuối tháng — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu tiền tip/thưởng cuối tháng: ' + (e?.message || e)); return false; }
 }
 /// Lưu Cài Đặt — TÁCH LÀM 2: 4 field dùng chung (giá dầu/VAT/CIT/API key)
 /// ghi vào 1 document CHUNG cho cả công ty; mọi field còn lại (khấu hao,
@@ -2365,7 +2365,7 @@ async function saveSettings(){
     if(vid) state.allVehiclesSettings[vid] = state.settings;
     return true;
   }
-  catch(e){ showToast('Lỗi lưu cài đặt — kiểm tra mạng.'); return false; }
+  catch(e){ showToast('Lỗi lưu cài đặt: ' + (e?.message || e)); return false; }
 }
 
 async function startApp(){
@@ -2444,7 +2444,7 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
       'auth/invalid-credential': 'Sai email hoặc mật khẩu.',
       'auth/too-many-requests': 'Sai quá nhiều lần, thử lại sau ít phút.'
     };
-    errBox.textContent = messages[err.code] || 'Đăng nhập thất bại — kiểm tra mạng và thử lại.';
+    errBox.textContent = messages[err.code] || ('Đăng nhập thất bại: ' + (err.code || err.message || err));
   } finally {
     btn.disabled = false;
     btn.textContent = 'Đăng Nhập';
@@ -6885,7 +6885,7 @@ function bindFormEvents(){
       const backup = state.shifts.slice();
       state.shifts = state.shifts.filter(s=>s.id!==sh.id);
       const ok = await saveShifts();
-      if(!ok){ state.shifts = backup; showToast('XOÁ THẤT BẠI — kiểm tra mạng rồi thử lại.'); return; }
+      if(!ok){ state.shifts = backup; showToast('Xoá ca thất bại — xem lý do lỗi ở thông báo trước đó, thử lại.'); return; }
       state.view='list'; state.draftShift=null;
       renderAll();
       restoreMainScroll();
@@ -7059,7 +7059,7 @@ function renderDrivers(){
     try {
       state.drivers.forEach(d=>recalcDriverShiftAllocations(d.id));
       const ok = await saveShifts();
-      if(!ok) showToast('Đã lưu Công Chuẩn nhưng LƯU LẠI CA CŨ THẤT BẠI — kiểm tra mạng rồi vào từng ca lưu lại, nếu không lương cứng cũ sẽ chưa cập nhật.');
+      if(!ok) showToast('Đã lưu Công Chuẩn nhưng LƯU LẠI CA CŨ THẤT BẠI (xem lý do lỗi ở thông báo trước đó) — vào từng ca lưu lại, nếu không lương cứng cũ sẽ chưa cập nhật.');
     } catch(e) {
       showToast('Đã lưu Công Chuẩn nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
     }
@@ -7196,7 +7196,7 @@ function openEditDriver(id){
     try {
       recalcDriverShiftAllocations(d.id);
       const ok = await saveShifts();
-      if(!ok) showToast('Đã lưu tài xế nhưng LƯU LẠI CA CŨ THẤT BẠI — kiểm tra mạng, vào từng ca lưu lại nếu cần.');
+      if(!ok) showToast('Đã lưu tài xế nhưng LƯU LẠI CA CŨ THẤT BẠI (xem lý do lỗi ở thông báo trước đó) — vào từng ca lưu lại nếu cần.');
     } catch(e) {
       showToast('Đã lưu tài xế nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
     }
@@ -14075,7 +14075,7 @@ function renderSettings(){
       // để chắc chắn tab đang mở (bất kỳ tab nào) luôn phản ánh đúng ngay.
       else renderAll();
       const ok = await saveSettings();
-      showToast(ok ? (paid ? `Đã ghi nhận trả kỳ hạn tháng ${monthLabelVN(ym)} (tổng ${bl.paidMonths.length} kỳ đã trả).` : `Đã bỏ ghi nhận kỳ hạn tháng ${monthLabelVN(ym)}.`) : 'LƯU THẤT BẠI — kiểm tra mạng rồi thử lại.');
+      showToast(ok ? (paid ? `Đã ghi nhận trả kỳ hạn tháng ${monthLabelVN(ym)} (tổng ${bl.paidMonths.length} kỳ đã trả).` : `Đã bỏ ghi nhận kỳ hạn tháng ${monthLabelVN(ym)}.`) : 'Lưu thất bại — xem lý do lỗi ở thông báo trước đó, thử lại.');
     });
   }
   // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
