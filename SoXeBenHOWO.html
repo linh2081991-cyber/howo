@@ -257,7 +257,7 @@
   .seg button.active{ background:var(--accent); color:#fff; }
 
   section.group{ margin-bottom:18px; }
-  section.group h3{ font-size:13px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); margin:0 0 10px 2px; }
+  section.group h3{ font-size:13px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink); font-weight:800; margin:0 0 10px 2px; }
 
   .site-row{ background:var(--bg); border:1px dashed var(--border); border-radius:12px; padding:12px; margin-bottom:10px; }
   .site-row .site-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-02 · #142';
+const APP_BUILD = '2026-09-02 · #143';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9903,7 +9903,6 @@ function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRe
     { label:'Tiền điện nước (kỳ này)', value: utilities||0 },
   ];
   const total = items.reduce((s,i)=>s+i.value,0);
-  const maxVal = Math.max(1, ...items.map(i=>i.value));
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -9911,22 +9910,21 @@ function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRe
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">🔍 Chi Phí Vận Hành — Chi Tiết Từng Khoản</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đúng ${items.length} khoản dưới đây cộng lại ra khớp tuyệt đối số "Chi phí vận hành" — không có khoản nào khác, không tính lại kiểu nào khác.</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Khoản Chi Phí</th><th class="num">Số Tiền</th><th>Tỷ Trọng</th></tr></thead>
+          <thead><tr><th>Khoản Chi Phí</th><th class="num">Số Tiền</th><th class="num">Tỷ Trọng</th></tr></thead>
           <tbody>
-            ${items.map(i=>`<tr>
+            ${items.map(i=>{
+              const pct = total>0 ? (i.value/total*100) : 0;
+              return `<tr>
               <td>${i.label}</td>
               <td class="num" style="font-weight:700;">${fmtVND(i.value)}</td>
-              <td style="min-width:110px;">
-                <div style="height:10px; background:var(--bg); border-radius:4px; overflow:hidden;"><div style="height:100%; width:${Math.max(2,i.value/maxVal*100)}%; background:var(--accent);"></div></div>
-              </td>
-            </tr>`).join('')}
+              <td class="num">${pct.toLocaleString('vi-VN',{maximumFractionDigits:1})}%</td>
+            </tr>`;}).join('')}
             <tr class="grid-total-row">
               <td>TỔNG (khớp đúng Chi phí vận hành)</td>
               <td class="num">${fmtVND(total)}</td>
-              <td></td>
+              <td class="num">100%</td>
             </tr>
           </tbody>
         </table>
@@ -11676,7 +11674,7 @@ function renderResults(){
         <div class="formula-divider"></div>
         <div class="summary-row">
           <span>Dự kiến cả tháng nếu giữ đúng tốc độ này</span>
-          <span class="val" style="color:${monthlyProjection.onTrackToHitBreakEven?'var(--profit)':'var(--loss)'}; font-weight:800;">${Math.round(monthlyProjection.projectedTotalTripsThisMonth)} chuyến ${monthlyProjection.onTrackToHitBreakEven ? '✓ Đạt hoà vốn' : '⚠️ Chưa đạt'}</span>
+          <span class="val" style="color:${monthlyProjection.onTrackToHitBreakEven?'var(--profit)':'var(--loss)'}; font-weight:800;">${Math.round(monthlyProjection.projectedTotalTripsThisMonth)} chuyến<br><span style="white-space:nowrap;">${monthlyProjection.onTrackToHitBreakEven ? '✓ Đạt hoà vốn' : '⚠️ Chưa đạt'}</span></span>
         </div>
         ${monthlyProjection.remainingTripsNeeded>0 ? `
         <div class="summary-row">
