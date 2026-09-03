@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-02 · #138';
+const APP_BUILD = '2026-09-02 · #139';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3097,7 +3097,27 @@ function renderInvoiceLotOverview(){
     wrap.innerHTML = '<div class="hint">Chưa khai "Loại hàng" ở công trình nào, hoặc chưa mua lô hoá đơn nào.</div>';
     return;
   }
-  if(!state.invoiceLotFilter) state.invoiceLotFilter = { goodsType: goodsTypes[0], ...currentMonthRange() };
+  // SỬA 2026-09-02 (Ông Chủ báo — bấm "Tháng Trước" ở trên, hầu hết mục
+  // Kết Quả đổi đúng nhưng riêng mục "Kho Hoá Đơn Bù" này vẫn kẹt ở tháng
+  // cũ): trước đây state.invoiceLotFilter chỉ khởi tạo ĐÚNG 1 LẦN DUY
+  // NHẤT rồi giữ nguyên mãi, không hề biết khoảng ngày CHÍNH của tab Kết
+  // Quả (state.resultsRange) đã đổi. Giờ: mỗi khi khoảng ngày CHÍNH đổi
+  // (Tháng Này/Tháng Trước/Toàn Thời Gian/tự sửa Từ ngày-Đến ngày ở trên
+  // cùng), mục này TỰ ĐỘNG đồng bộ theo ngay. Ông Chủ vẫn có thể tự sửa
+  // riêng "Từ ngày/Đến ngày" NGAY TRONG mục này để xem lệch tạm thời so
+  // với khoảng chính — chỉ khi khoảng CHÍNH đổi tiếp thì mới bị đồng bộ
+  // lại (đúng ý ban đầu của tính năng lọc riêng, không bị mất hẳn).
+  const mainRange = state.resultsRange || currentMonthRange();
+  const needsSync = !state.invoiceLotFilter ||
+    state.invoiceLotFilter._syncedFrom !== mainRange.from ||
+    state.invoiceLotFilter._syncedTo !== mainRange.to;
+  if(needsSync){
+    state.invoiceLotFilter = {
+      goodsType: (state.invoiceLotFilter && state.invoiceLotFilter.goodsType) || goodsTypes[0],
+      from: mainRange.from, to: mainRange.to,
+      _syncedFrom: mainRange.from, _syncedTo: mainRange.to
+    };
+  }
   if(!goodsTypes.includes(state.invoiceLotFilter.goodsType)) state.invoiceLotFilter.goodsType = goodsTypes[0];
   const { goodsType, from, to } = state.invoiceLotFilter;
   const vatByShift = withLedgerReportMode(()=>computeInvoiceLotVatCreditByShift(from, to));
