@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-02 · #141';
+const APP_BUILD = '2026-09-02 · #142';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2705,94 +2705,116 @@ function mineInvoiceById(id){ return state.mineInvoices.find(x=>x.id===id); }
 /// đây là hoá đơn thật 1:1, không phải mua bù ăn chênh ngoài. Chỉ dùng để
 /// tính "Tồn Kho Tổng Hợp" (combinedStockOverview) đối chiếu KT Thuế —
 /// KHÔNG đụng gì tới missingVolume/shiftTotalCost/commercialVatPayable.
+/// SỬA 2026-09-02 (Ông Chủ yêu cầu — "muốn 1 trang hoàn chỉnh, kẻ ô khoa
+/// học thẩm mỹ rõ ràng chứ không phải trang tạm"): chuyển hẳn từ modal
+/// nhỏ (openModal, danh sách kiểu dòng chữ) sang 1 TRANG RIÊNG full màn
+/// hình, liệt kê bằng bảng .grid-table chuẩn — đồng bộ giao diện với các
+/// trang chi tiết khác trong app. KHÔNG đụng logic lưu/sửa/xoá hay công
+/// thức tính toán — chỉ đổi cách trình bày.
 function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
+  scrollMainToTop();
   const editing = editingId ? mineInvoiceById(editingId) : null;
   const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
-  const listHtml = state.mineInvoices.length ? [...state.mineInvoices]
-    .sort((a,b)=>(b.invoiceDate||'').localeCompare(a.invoiceDate||''))
-    .map(inv=>{
-      const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
-      const khoi = mineInvoiceVolumeKhoi(inv);
-      return `
-    <div class="summary-row" style="align-items:center;">
-      <span><strong>${escapeHtml(inv.goodsType||'(chưa khai loại hàng)')}</strong> — Hoá đơn ngày ${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?` — Số ${escapeHtml(inv.invoiceNumber)}`:''}<br>
-        <span class="hint">Hoá đơn mỏ trả ${dateRangeLabel(inv.deliveryFrom||inv.invoiceDate, inv.deliveryTo||inv.invoiceDate)} · ${sup?escapeHtml(sup.name):'(chưa gắn nhà cung cấp)'} · ${fmtQty(inv.totalVolume)} tấn${sup&&Number(sup.densityRatio)>0?` ≈ ${fmtQty(khoi)} khối`:' (chưa cấu hình tỷ trọng để quy đổi)'}</span></span>
-      <span>
-        <button class="btn btn-ghost btn-sm mineInvEditBtn" data-id="${inv.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
-        <button class="btn btn-ghost btn-sm mineInvDelBtn" data-id="${inv.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
-      </span>
-    </div>`;}).join('') : '<div class="hint">Chưa nhập hoá đơn thật nào.</div>';
+  const sortedInvoices = [...state.mineInvoices].sort((a,b)=>
+    (b.deliveryFrom||b.invoiceDate||'').localeCompare(a.deliveryFrom||a.invoiceDate||''));
+  const tableHtml = sortedInvoices.length ? `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Loại Hàng</th><th>Hoá Đơn Mỏ Trả</th><th>Ngày HĐ / Số HĐ</th><th>Nhà Cung Cấp</th><th class="num">Số Tấn</th><th class="num">Quy Đổi (Khối)</th><th>Hành Động</th></tr></thead>
+        <tbody>
+          ${sortedInvoices.map(inv=>{
+            const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
+            const khoi = mineInvoiceVolumeKhoi(inv);
+            return `<tr>
+              <td><strong>${escapeHtml(inv.goodsType||'(chưa khai)')}</strong></td>
+              <td>${dateRangeLabel(inv.deliveryFrom||inv.invoiceDate, inv.deliveryTo||inv.invoiceDate)}</td>
+              <td>${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?`<br><span class="hint">Số ${escapeHtml(inv.invoiceNumber)}</span>`:''}</td>
+              <td>${sup?escapeHtml(sup.name):'(chưa gắn)'}</td>
+              <td class="num">${fmtQty(inv.totalVolume)}</td>
+              <td class="num">${sup&&Number(sup.densityRatio)>0?fmtQty(khoi):'—'}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn btn-ghost btn-sm mineInvEditBtn" data-id="${inv.id}" style="width:auto; padding:5px 9px; margin-right:4px;">Sửa</button>
+                <button class="btn btn-ghost btn-sm mineInvDelBtn" data-id="${inv.id}" style="width:auto; padding:5px 9px; color:var(--loss);">Xoá</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div class="hint">Chưa nhập hoá đơn thật nào.</div>';
 
   const supplierOptions = state.suppliers.map(s=>`<option value="${s.id}" ${val(editing,'supplierId')===s.id?'selected':''}>${escapeHtml(s.name)}${Number(s.densityRatio)>0?'':' (chưa có tỷ trọng)'}</option>`).join('');
 
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>📄 Sổ Hoá Đơn Thật Từ Mỏ</h3>
-    <div class="hint" style="margin-bottom:12px;">Nhập đúng số liệu trên hoá đơn thật (PDF/ảnh) mỏ đã xuất — dùng để tính "Tồn Kho Tổng Hợp" đối chiếu với KT Thuế. Không ảnh hưởng công thức lãi/thuế đang chạy.</div>
-    <div style="margin-bottom:14px;">${listHtml}</div>
-    <div class="formula-divider" style="margin:10px 0;"></div>
-    <h3>${editing?'Sửa Hoá Đơn':'Thêm Hoá Đơn Thật'}</h3>
-    <div class="field">
-      <label>Nhà cung cấp (mỏ đã đăng ký)</label>
-      <select id="mi_supplierId">
-        <option value="">— Chọn nhà cung cấp —</option>
-        ${supplierOptions}
-      </select>
-    </div>
-    <div class="field">
-      <label>Loại hàng (VD Base A, Base B...)</label>
-      <input type="text" id="mi_goodsType" list="goodsTypesList" value="${escapeHtml(val(editing,'goodsType')||defaultGoodsType||'')}">
-    </div>
-    <div class="two-col">
-      <div class="field">
-        <label>Số hoá đơn (không bắt buộc)</label>
-        <input type="text" id="mi_invoiceNumber" placeholder="VD 244" value="${escapeHtml(val(editing,'invoiceNumber'))}">
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="mineInvBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📄 Sổ Hoá Đơn Thật Từ Mỏ</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Nhập đúng số liệu trên hoá đơn thật (PDF/ảnh) mỏ đã xuất — dùng để tính "Tồn Kho Tổng Hợp" đối chiếu với KT Thuế. Không ảnh hưởng công thức lãi/thuế đang chạy.</div>
+      ${tableHtml}
+    </section>
+    <section class="group">
+      <h3>${editing?'✏️ Sửa Hoá Đơn':'+ Thêm Hoá Đơn Thật'}</h3>
+      <div class="card">
+        <div class="field">
+          <label>Nhà cung cấp (mỏ đã đăng ký)</label>
+          <select id="mi_supplierId">
+            <option value="">— Chọn nhà cung cấp —</option>
+            ${supplierOptions}
+          </select>
+        </div>
+        <div class="field">
+          <label>Loại hàng (VD Base A, Base B...)</label>
+          <input type="text" id="mi_goodsType" list="goodsTypesList" value="${escapeHtml(val(editing,'goodsType')||defaultGoodsType||'')}">
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>Số hoá đơn (không bắt buộc)</label>
+            <input type="text" id="mi_invoiceNumber" placeholder="VD 244" value="${escapeHtml(val(editing,'invoiceNumber'))}">
+          </div>
+          <div class="field">
+            <label>Ngày hoá đơn (ngày mỏ xuất)</label>
+            <input type="date" id="mi_invoiceDate" value="${val(editing,'invoiceDate')}">
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>Hoá Đơn Mỏ Trả từ ngày (để trống = như Ngày hoá đơn)</label>
+            <input type="date" id="mi_deliveryFrom" value="${val(editing,'deliveryFrom')}">
+          </div>
+          <div class="field">
+            <label>Hoá Đơn Mỏ Trả đến ngày (để trống = như Ngày hoá đơn)</label>
+            <input type="date" id="mi_deliveryTo" value="${val(editing,'deliveryTo')}">
+          </div>
+        </div>
+        <div class="hint" style="margin-bottom:10px;">Khoảng ngày THẬT mỏ tính hàng đã giao cho hoá đơn này (thường trễ hơn nhiều so với ngày xuất hoá đơn) — dùng để tính đúng "Tồn Kho Tổng Hợp" theo từng kỳ, không ảnh hưởng gì tới công thức lãi/thuế đang chạy.</div>
+        <div class="two-col">
+          <div class="field">
+            <label>Tổng khối lượng trên hoá đơn (TẤN — đúng đơn vị mỏ ghi)</label>
+            <input type="text" inputmode="decimal" id="mi_volume" placeholder="VD 141,65" value="${val(editing,'totalVolume')}">
+          </div>
+          <div class="field">
+            <label>Đơn giá (đ/tấn, chưa VAT — không bắt buộc)</label>
+            <input type="text" inputmode="decimal" id="mi_unitPrice" placeholder="đ/tấn" value="${val(editing,'unitPrice')}">
+          </div>
+        </div>
+        <div class="field">
+          <label>VAT suất trên hoá đơn (%)</label>
+          <input type="text" inputmode="decimal" id="mi_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
+        </div>
+        <div class="hint" id="mi_conversionHint" style="margin-bottom:10px;"></div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="mi_note" value="${escapeHtml(val(editing,'note'))}">
+        </div>
       </div>
-      <div class="field">
-        <label>Ngày hoá đơn (ngày mỏ xuất)</label>
-        <input type="date" id="mi_invoiceDate" value="${val(editing,'invoiceDate')}">
-      </div>
-    </div>
-    <!-- SỬA 2026-09-02 (Ông Chủ yêu cầu — hoá đơn mỏ xuất TRỄ so với ngày
-    giao hàng thật, VD hoá đơn ghi 06/08 nhưng thực chi trả cho hàng giao
-    28-31/7): thêm khoảng "Giao hàng từ-đến" ĐỘC LẬP với "Ngày hoá đơn" ở
-    trên — "Tồn Kho Tổng Hợp" giờ tính theo ĐÚNG khoảng giao hàng này,
-    không còn theo ngày xuất hoá đơn nữa. Để trống = mặc định = đúng
-    "Ngày hoá đơn" (tương thích ngược với hoá đơn cũ chưa từng đụng 2 ô
-    này, không đổi số cũ). -->
-    <div class="two-col">
-      <div class="field">
-        <label>Hoá Đơn Mỏ Trả từ ngày (để trống = như Ngày hoá đơn)</label>
-        <input type="date" id="mi_deliveryFrom" value="${val(editing,'deliveryFrom')}">
-      </div>
-      <div class="field">
-        <label>Hoá Đơn Mỏ Trả đến ngày (để trống = như Ngày hoá đơn)</label>
-        <input type="date" id="mi_deliveryTo" value="${val(editing,'deliveryTo')}">
-      </div>
-    </div>
-    <div class="hint" style="margin-bottom:10px;">Khoảng ngày THẬT mỏ tính hàng đã giao cho hoá đơn này (thường trễ hơn nhiều so với ngày xuất hoá đơn) — dùng để tính đúng "Tồn Kho Tổng Hợp" theo từng kỳ, không ảnh hưởng gì tới công thức lãi/thuế đang chạy.</div>
-    <div class="two-col">
-      <div class="field">
-        <label>Tổng khối lượng trên hoá đơn (TẤN — đúng đơn vị mỏ ghi)</label>
-        <input type="text" inputmode="decimal" id="mi_volume" placeholder="VD 141,65" value="${val(editing,'totalVolume')}">
-      </div>
-      <div class="field">
-        <label>Đơn giá (đ/tấn, chưa VAT — không bắt buộc)</label>
-        <input type="text" inputmode="decimal" id="mi_unitPrice" placeholder="đ/tấn" value="${val(editing,'unitPrice')}">
-      </div>
-    </div>
-    <div class="field">
-      <label>VAT suất trên hoá đơn (%)</label>
-      <input type="text" inputmode="decimal" id="mi_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
-    </div>
-    <div class="hint" id="mi_conversionHint" style="margin-bottom:10px;"></div>
-    <div class="field">
-      <label>Ghi chú</label>
-      <input type="text" id="mi_note" value="${escapeHtml(val(editing,'note'))}">
-    </div>
-    <button class="btn btn-accent" id="saveMineInvBtn">${editing?'💾 Lưu Thay Đổi':'+ Thêm Hoá Đơn Thật'}</button>
-  `);
+      <button class="btn btn-accent btn-block" id="saveMineInvBtn" style="margin-top:10px;">${editing?'💾 Lưu Thay Đổi':'+ Thêm Hoá Đơn Thật'}</button>
+    </section>
+  `;
+
+  document.getElementById('mineInvBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
 
   const supplierSelEl = document.getElementById('mi_supplierId');
   const volumeInputEl = document.getElementById('mi_volume');
@@ -3253,7 +3275,7 @@ function renderInvoiceLotOverview(){
   document.getElementById('lotFilterFrom').addEventListener('change', e=>{ state.invoiceLotFilter.from = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterTo').addEventListener('change', e=>{ state.invoiceLotFilter.to = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCombinedStockDetailPage(goodsType, from, to); });
-  document.getElementById('mineInvoiceOpenBtn').addEventListener('click', ()=>renderMineInvoiceManagerModal(null, goodsType));
+  document.getElementById('mineInvoiceOpenBtn').addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null, goodsType); });
   const forceRefreshBtn = document.getElementById('forceRefreshLedgerBtn');
   if(forceRefreshBtn) forceRefreshBtn.addEventListener('click', forceRefreshInvoiceLedgerData);
 }
@@ -3494,7 +3516,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
     </section>
   `;
   document.getElementById('lotFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('lotFullDetailMineInvBtn').addEventListener('click', ()=>renderMineInvoiceManagerModal(null, goodsType));
+  document.getElementById('lotFullDetailMineInvBtn').addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null, goodsType); });
   document.getElementById('lotFullDetailScrollToLotsBtn').addEventListener('click', ()=>{
     saveMainScroll();
     renderWarehouseDrawHistoryPage(goodsType, from, to);
@@ -3696,7 +3718,7 @@ function renderCombinedStockDetailPage(goodsType, from, to){
     el.addEventListener('click', ()=>{ renderInvoiceLotManagerModal(el.dataset.openLot); });
   });
   document.querySelectorAll('[data-open-mineinv]').forEach(el=>{
-    el.addEventListener('click', ()=>{ renderMineInvoiceManagerModal(el.dataset.openMineinv, goodsType); });
+    el.addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(el.dataset.openMineinv, goodsType); });
   });
 }
 
@@ -9860,7 +9882,14 @@ function currentMonthRange(){
 /// còn gắn theo ca), thêm 2 tham số houseRent/utilities, liệt kê CHUNG
 /// nhóm với "Chi phí luật đường (kỳ này)" — đều là chi phí CỐ ĐỊNH THEO
 /// THÁNG, không phải chi phí phát sinh theo ca.
+/// SỬA 2026-09-02 (Ông Chủ yêu cầu — "muốn 1 trang hoàn chỉnh, kẻ ô khoa
+/// học thẩm mỹ rõ ràng chứ không phải trang tạm"): chuyển hẳn từ modal
+/// nhỏ (openModal, các dòng thanh progress bar) sang 1 TRANG RIÊNG full
+/// màn hình, dùng ĐÚNG class .grid-table đã dùng chuẩn ở khắp app (Chi
+/// Tiết Từng Chuyến, Tồn Kho Tổng Hợp...) cho đồng bộ giao diện toàn app.
+/// KHÔNG đụng bất kỳ số liệu/công thức nào — chỉ đổi cách trình bày.
 function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities){
+  scrollMainToTop();
   const items = [
     { label:'Tiền dầu tiêu hao', value: gTotal.fuelCost },
     { label:'Lương chuyến (theo số chuyến)', value: gTotal.tripWageCost },
@@ -9873,19 +9902,38 @@ function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRe
     { label:'Tiền thuê nhà (kỳ này)', value: houseRent||0 },
     { label:'Tiền điện nước (kỳ này)', value: utilities||0 },
   ];
+  const total = items.reduce((s,i)=>s+i.value,0);
   const maxVal = Math.max(1, ...items.map(i=>i.value));
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>🔍 Chi Phí Vận Hành — Chi Tiết Từng Khoản</h3>
-    <div class="hint" style="margin-bottom:10px;">Đúng ${items.length} khoản dưới đây cộng lại ra khớp tuyệt đối số "Chi phí vận hành" ở trên — không có khoản nào khác, không tính lại kiểu nào khác.</div>
-    ${items.map(i=>`
-      <div style="margin-bottom:10px;">
-        <div class="summary-row" style="padding:2px 0;"><span>${i.label}</span><span class="val" style="font-weight:700;">${fmtVND(i.value)}</span></div>
-        <div style="height:8px; background:var(--bg); border-radius:4px; overflow:hidden;"><div style="height:100%; width:${Math.max(2,i.value/maxVal*100)}%; background:var(--accent);"></div></div>
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="opCostBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🔍 Chi Phí Vận Hành — Chi Tiết Từng Khoản</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đúng ${items.length} khoản dưới đây cộng lại ra khớp tuyệt đối số "Chi phí vận hành" — không có khoản nào khác, không tính lại kiểu nào khác.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Chi Phí</th><th class="num">Số Tiền</th><th>Tỷ Trọng</th></tr></thead>
+          <tbody>
+            ${items.map(i=>`<tr>
+              <td>${i.label}</td>
+              <td class="num" style="font-weight:700;">${fmtVND(i.value)}</td>
+              <td style="min-width:110px;">
+                <div style="height:10px; background:var(--bg); border-radius:4px; overflow:hidden;"><div style="height:100%; width:${Math.max(2,i.value/maxVal*100)}%; background:var(--accent);"></div></div>
+              </td>
+            </tr>`).join('')}
+            <tr class="grid-total-row">
+              <td>TỔNG (khớp đúng Chi phí vận hành)</td>
+              <td class="num">${fmtVND(total)}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-    `).join('')}
-    <div class="summary-row total" style="margin-top:4px;"><span>TỔNG (khớp đúng Chi phí vận hành)</span><span class="val">${fmtVND(items.reduce((s,i)=>s+i.value,0))}</span></div>
-  `);
+    </section>
+  `;
+  document.getElementById('opCostBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
 }
 
 function computeResultsGroup(shifts){
@@ -11792,7 +11840,7 @@ function renderResults(){
   const goCompleteBtn = document.getElementById('goCompletePendingShiftsBtn');
   if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
   const opCostDetailBtn = document.getElementById('operatingCostDetailBtn');
-  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities));
+  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities); });
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent, utilities, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
