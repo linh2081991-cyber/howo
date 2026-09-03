@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-02 · #139';
+const APP_BUILD = '2026-09-02 · #141';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2716,8 +2716,8 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
       const khoi = mineInvoiceVolumeKhoi(inv);
       return `
     <div class="summary-row" style="align-items:center;">
-      <span><strong>${escapeHtml(inv.goodsType||'(chưa khai loại hàng)')}</strong> — ${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?` — Số ${escapeHtml(inv.invoiceNumber)}`:''}<br>
-        <span class="hint">${sup?escapeHtml(sup.name):'(chưa gắn nhà cung cấp)'} · ${fmtQty(inv.totalVolume)} tấn${sup&&Number(sup.densityRatio)>0?` ≈ ${fmtQty(khoi)} khối`:' (chưa cấu hình tỷ trọng để quy đổi)'}</span></span>
+      <span><strong>${escapeHtml(inv.goodsType||'(chưa khai loại hàng)')}</strong> — Hoá đơn ngày ${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?` — Số ${escapeHtml(inv.invoiceNumber)}`:''}<br>
+        <span class="hint">Hoá đơn mỏ trả ${dateRangeLabel(inv.deliveryFrom||inv.invoiceDate, inv.deliveryTo||inv.invoiceDate)} · ${sup?escapeHtml(sup.name):'(chưa gắn nhà cung cấp)'} · ${fmtQty(inv.totalVolume)} tấn${sup&&Number(sup.densityRatio)>0?` ≈ ${fmtQty(khoi)} khối`:' (chưa cấu hình tỷ trọng để quy đổi)'}</span></span>
       <span>
         <button class="btn btn-ghost btn-sm mineInvEditBtn" data-id="${inv.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
         <button class="btn btn-ghost btn-sm mineInvDelBtn" data-id="${inv.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
@@ -2750,10 +2750,28 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
         <input type="text" id="mi_invoiceNumber" placeholder="VD 244" value="${escapeHtml(val(editing,'invoiceNumber'))}">
       </div>
       <div class="field">
-        <label>Ngày hoá đơn</label>
+        <label>Ngày hoá đơn (ngày mỏ xuất)</label>
         <input type="date" id="mi_invoiceDate" value="${val(editing,'invoiceDate')}">
       </div>
     </div>
+    <!-- SỬA 2026-09-02 (Ông Chủ yêu cầu — hoá đơn mỏ xuất TRỄ so với ngày
+    giao hàng thật, VD hoá đơn ghi 06/08 nhưng thực chi trả cho hàng giao
+    28-31/7): thêm khoảng "Giao hàng từ-đến" ĐỘC LẬP với "Ngày hoá đơn" ở
+    trên — "Tồn Kho Tổng Hợp" giờ tính theo ĐÚNG khoảng giao hàng này,
+    không còn theo ngày xuất hoá đơn nữa. Để trống = mặc định = đúng
+    "Ngày hoá đơn" (tương thích ngược với hoá đơn cũ chưa từng đụng 2 ô
+    này, không đổi số cũ). -->
+    <div class="two-col">
+      <div class="field">
+        <label>Hoá Đơn Mỏ Trả từ ngày (để trống = như Ngày hoá đơn)</label>
+        <input type="date" id="mi_deliveryFrom" value="${val(editing,'deliveryFrom')}">
+      </div>
+      <div class="field">
+        <label>Hoá Đơn Mỏ Trả đến ngày (để trống = như Ngày hoá đơn)</label>
+        <input type="date" id="mi_deliveryTo" value="${val(editing,'deliveryTo')}">
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:10px;">Khoảng ngày THẬT mỏ tính hàng đã giao cho hoá đơn này (thường trễ hơn nhiều so với ngày xuất hoá đơn) — dùng để tính đúng "Tồn Kho Tổng Hợp" theo từng kỳ, không ảnh hưởng gì tới công thức lãi/thuế đang chạy.</div>
     <div class="two-col">
       <div class="field">
         <label>Tổng khối lượng trên hoá đơn (TẤN — đúng đơn vị mỏ ghi)</label>
@@ -2813,6 +2831,8 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
     if(!totalVolume || totalVolume<=0){ showToast('Nhập tổng khối lượng trên hoá đơn (tấn).'); return; }
     const data = {
       supplierId, goodsType, invoiceDate, totalVolume,
+      deliveryFrom: document.getElementById('mi_deliveryFrom').value || '',
+      deliveryTo: document.getElementById('mi_deliveryTo').value || '',
       invoiceNumber: document.getElementById('mi_invoiceNumber').value.trim(),
       unitPrice: parseVN(document.getElementById('mi_unitPrice').value),
       vatRatePercent: parseVN(document.getElementById('mi_vat').value),
@@ -3504,10 +3524,18 @@ function renderCombinedStockDetailPage(goodsType, from, to){
   // theo" khoảng ngày đang chọn): LỌC CẢ 4 NGUỒN theo đúng [from,to], dùng
   // CHUNG hàm dateRangeLabel() để hiện rõ khoảng ngày thật của dữ liệu ĐÃ
   // LỌC (không còn "toàn bộ dữ liệu" như trước).
-  const mineInvRows = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt
-    && inv.invoiceDate>=from && inv.invoiceDate<=to)
-    .sort((a,b)=>(a.invoiceDate||'').localeCompare(b.invoiceDate||''));
-  const mineInvRange = dateRangeLabel(mineInvRows[0]?.invoiceDate, mineInvRows[mineInvRows.length-1]?.invoiceDate);
+  // SỬA 2026-09-02 (đồng bộ với totalMineInvoiceVolumeKhoi() đã sửa —
+  // lọc theo KHOẢNG GIAO HÀNG chồng lấn [from,to], không còn theo
+  // invoiceDate nữa, để bảng liệt kê từng dòng LUÔN cộng khớp tuyệt đối
+  // với combined.mineVolKhoi ở trên, kể cả trường hợp hiếm 1 hoá đơn bị
+  // khoảng ngày đang xem cắt ngang (chỉ tính đúng phần chồng lấn).
+  const mineInvRows = state.mineInvoices
+    .filter(inv=>normGoodsType(inv.goodsType)===gt && mineInvoiceOverlapKhoi(inv, from, to)>0.0001)
+    .sort((a,b)=>(a.deliveryFrom||a.invoiceDate||'').localeCompare(b.deliveryFrom||b.invoiceDate||''));
+  const mineInvRange = dateRangeLabel(
+    mineInvRows[0] ? (mineInvRows[0].deliveryFrom||mineInvRows[0].invoiceDate) : undefined,
+    mineInvRows.length ? (mineInvRows[mineInvRows.length-1].deliveryTo||mineInvRows[mineInvRows.length-1].invoiceDate) : undefined
+  );
 
   const lotsRaw = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt
     && l.purchaseDate>=from && l.purchaseDate<=to)
@@ -3568,20 +3596,21 @@ function renderCombinedStockDetailPage(goodsType, from, to){
       ${mineInvRows.length===0 ? '<div class="hint">Chưa nhập hoá đơn thật nào cho loại hàng này.</div>' : `
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Ngày Hoá Đơn</th><th>Nhà Cung Cấp</th><th>Số Tấn</th><th>Quy Đổi (Khối)</th></tr></thead>
+          <thead><tr><th>Hoá Đơn Mỏ Trả</th><th>Nhà Cung Cấp</th><th>Số Tấn (hoá đơn)</th><th>Quy Đổi Vào Kỳ Này (Khối)</th></tr></thead>
           <tbody>
             ${mineInvRows.map(inv=>{
               const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
-              const khoi = mineInvoiceVolumeKhoi(inv);
+              const khoi = mineInvoiceOverlapKhoi(inv, from, to);
+              const deliveryLabel = dateRangeLabel(inv.deliveryFrom||inv.invoiceDate, inv.deliveryTo||inv.invoiceDate);
               return `<tr data-open-mineinv="${inv.id}" style="cursor:pointer;">
-                <td>${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?' · Số '+escapeHtml(inv.invoiceNumber):''}</td>
+                <td>${deliveryLabel}${inv.invoiceNumber?' · Số '+escapeHtml(inv.invoiceNumber):''}<br><span class="hint">Hoá đơn ngày ${formatDateVN(inv.invoiceDate)}</span></td>
                 <td>${sup?escapeHtml(sup.name):'(chưa gắn NCC)'}</td>
                 <td class="num">${fmtQty(inv.totalVolume)} tấn</td>
                 <td class="num">${fmtQty(khoi)} khối</td>
               </tr>`;
             }).join('')}
             <tr class="grid-total-row">
-              <td colspan="2">TỔNG CỘNG</td>
+              <td colspan="2">TỔNG CỘNG (đúng phần rơi vào kỳ đang xem)</td>
               <td class="num">${fmtQty(mineInvRows.reduce((s,inv)=>s+(Number(inv.totalVolume)||0),0))} tấn</td>
               <td class="num">${fmtQty(combined.mineVolKhoi)} khối</td>
             </tr>
@@ -4085,15 +4114,48 @@ function mineInvoiceVolumeKhoi(inv){
   if(density<=0) return 0; // chưa cấu hình tỷ trọng cho mỏ này — không tự chế số quy đổi
   return (Number(inv.totalVolume)||0) / density;
 }
+/// Khối lượng (đã quy đổi) của ĐÚNG 1 hoá đơn thật, PHẦN chồng lấn với
+/// [from,to] đang xem — dùng chung cho cả bảng tổng (totalMineInvoiceVolumeKhoi)
+/// lẫn bảng liệt kê từng dòng (renderCombinedStockDetailPage), để 2 nơi
+/// LUÔN cộng ra khớp tuyệt đối, không lệch nhau ở trường hợp hiếm hoá đơn
+/// bị cắt ngang bởi khoảng ngày đang xem.
+function mineInvoiceOverlapKhoi(inv, from, to){
+  const volKhoi = mineInvoiceVolumeKhoi(inv);
+  if(volKhoi<=0) return 0;
+  if(!from || !to) return volKhoi; // không truyền khoảng ngày -> lấy TOÀN BỘ (tương thích ngược)
+  const dFrom = inv.deliveryFrom || inv.invoiceDate;
+  const dTo = inv.deliveryTo || inv.invoiceDate;
+  if(!dFrom || !dTo) return 0; // hoá đơn thiếu cả ngày hoá đơn lẫn ngày giao hàng -> bỏ qua, không đoán bừa
+  const overlapFrom = dFrom > from ? dFrom : from;
+  const overlapTo = dTo < to ? dTo : to;
+  if(overlapFrom > overlapTo) return 0; // không chồng lấn gì với kỳ đang xem
+  const totalSpanDays = daysBetweenDates(new Date(dFrom+'T00:00:00'), new Date(dTo+'T00:00:00')) + 1;
+  if(totalSpanDays<=1) return volKhoi; // hoá đơn chỉ đúng 1 ngày -> không cần chia tỷ lệ gì cả
+  const overlapDays = daysBetweenDates(new Date(overlapFrom+'T00:00:00'), new Date(overlapTo+'T00:00:00')) + 1;
+  return volKhoi * (overlapDays / totalSpanDays);
+}
 /// Tổng khối (đã quy đổi) từ hoá đơn thật đã nhập, đúng 1 loại hàng — lọc
-/// theo invoiceDate trong [from,to] nếu có truyền (2026-08-22, yêu cầu Ông
-/// Chủ: "các số liên quan kho sẽ luôn cập nhật theo" khoảng ngày đang
-/// chọn). Không truyền from/to → TOÀN BỘ (tương thích ngược).
+/// theo KHOẢNG GIAO HÀNG THẬT (deliveryFrom/deliveryTo) trong [from,to]
+/// nếu có truyền.
+/// SỬA 2026-09-02 (Ông Chủ chỉ ra — hoá đơn mỏ xuất TRỄ hơn nhiều so với
+/// ngày hàng thật giao, VD hoá đơn ghi 06/08 nhưng thực chi trả cho hàng
+/// giao 28-31/7): trước đây lọc theo invoiceDate (ngày XUẤT hoá đơn) —
+/// SAI bản chất, vì "Tồn Kho Tổng Hợp" đang so sánh với "Đã Bán" (lọc
+/// theo ngày CA GIAO HÀNG THẬT) — 2 cột mốc khác nhau khiến 1 kỳ vừa
+/// thừa (cộng nhầm hoá đơn của hàng tháng trước) vừa thiếu (bỏ sót hoá
+/// đơn của hàng cuối kỳ, vì hoá đơn xuất SAU kỳ đang xem). Giờ lọc đúng
+/// theo deliveryFrom/deliveryTo (khoảng ngày hoá đơn đó THẬT SỰ chi trả
+/// cho) — hoá đơn cũ chưa từng nhập 2 trường này mặc định coi
+/// deliveryFrom=deliveryTo=invoiceDate (giữ nguyên số cũ, không phá dữ
+/// liệu).
 function totalMineInvoiceVolumeKhoi(goodsType, from, to){
   const gt = normGoodsType(goodsType);
-  return state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt
-    && (!from || !to || (inv.invoiceDate>=from && inv.invoiceDate<=to)))
-    .reduce((sum,inv)=>sum+mineInvoiceVolumeKhoi(inv), 0);
+  let sum = 0;
+  state.mineInvoices.forEach(inv=>{
+    if(normGoodsType(inv.goodsType)!==gt) return;
+    sum += mineInvoiceOverlapKhoi(inv, from, to);
+  });
+  return sum;
 }
 /// Tổng khối lượng ĐÃ BÁN cho khách (mọi khách, mọi công trình), đúng 1
 /// loại hàng — lọc theo ngày ca trong [from,to] nếu có truyền (2026-08-22,
