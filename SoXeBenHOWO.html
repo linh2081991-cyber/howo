@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-02 · #143';
+const APP_BUILD = '2026-09-02 · #145';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3583,7 +3583,7 @@ function renderCombinedStockDetailPage(goodsType, from, to){
     if(sh.date<from || sh.date>to) return;
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
-      siteGoodsTypeGroups(s).forEach(g=>{
+      siteRawGoodsTypeGroups(s).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
         const customer = s.customerId ? customerById(s.customerId) : null;
         const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
@@ -3740,7 +3740,7 @@ function renderWarehouseDrawHistoryPage(goodsType, from, to){
     if(sh.date<from || sh.date>to) return;
     (sh.siteLogs||[]).forEach((s,idx)=>{
       if(s.siteType!=='commercial') return;
-      siteGoodsTypeGroups(s).forEach(g=>{
+      siteGoodsTypeGroups(s, {sh, idx}).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
         const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
         const realNeeded = siteGroupRealMissingVolume(s, g);
@@ -4050,15 +4050,24 @@ function shiftMaterialCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+sit
 /// theo t.sellGoodsType NẾU có khai (khác lúc múc), còn không thì mặc
 /// định vẫn dùng chung t.goodsType như cũ — nên mọi chuyến BÌNH THƯỜNG
 /// (không lệch loại) cho kết quả GIỐNG HỆT công thức gốc, không đổi gì.
-function siteGoodsTypeGroups(s){
-  if(s.siteType!=='commercial') return [];
+/// Tách riêng phần % hoá đơn mỏ xuất được + hệ số quy đổi (ưu tiên Nhà
+/// Cung Cấp trước, site log là dự phòng) — dùng chung cho cả
+/// siteGoodsTypeGroups() lẫn buildMineInvoiceMatchLedger() bên dưới.
+function siteInvoicedConfig(s){
   const sup = s.supplierId ? supplierById(s.supplierId) : null;
   const rawPct = sup && sup.invoicedBuyPercent!==undefined && sup.invoicedBuyPercent!==null && sup.invoicedBuyPercent!=='' ? sup.invoicedBuyPercent : s.invoicedBuyPercent;
   const rawDensity = sup && sup.densityRatio!==undefined && sup.densityRatio!==null && sup.densityRatio!=='' ? sup.densityRatio : s.densityRatio;
   const invoicedPct = (rawPct===undefined||rawPct===null||rawPct==='') ? 100 : Number(rawPct);
   const density = Number(rawDensity)||0;
-  const noShortfallConfig = (invoicedPct>=100 || density<=0);
-
+  return { invoicedPct, density, noShortfallConfig: (invoicedPct>=100 || density<=0) };
+}
+/// Phần THÔ (chỉ buyVolume/sellVolume/avgBuyUnitPrice theo từng nhóm loại
+/// hàng, KHÔNG tính missingVolume) — TÁCH RIÊNG khỏi siteGoodsTypeGroups()
+/// để buildMineInvoiceMatchLedger() dùng được mà KHÔNG gọi ngược lại
+/// siteGoodsTypeGroups() (tránh đệ quy vô hạn, vì siteGoodsTypeGroups giờ
+/// cần đọc chính ledger đó).
+function siteRawGoodsTypeGroups(s){
+  if(s.siteType!=='commercial') return [];
   const byType = {};
   function ensureGroup(name){
     const key = normGoodsType(name);
@@ -4075,16 +4084,133 @@ function siteGoodsTypeGroups(s){
     const sellGroup = ensureGroup(sellTypeName);
     sellGroup.sellVolume += Number(t.sellVolume)||0;
   });
-  return Object.values(byType).map(g=>{
-    const avgBuyUnitPrice = g.buyVolume>0 ? g.buyGross/g.buyVolume : 0;
-    let missingVolume = 0;
-    if(!noShortfallConfig){
-      const documentedVolume = (g.buyVolume * invoicedPct/100) / density;
-      missingVolume = Math.max(0, g.sellVolume - documentedVolume);
+  return Object.values(byType).map(g=>({
+    goodsType: g.goodsType, buyVolume: g.buyVolume, sellVolume: g.sellVolume,
+    avgBuyUnitPrice: g.buyVolume>0 ? g.buyGross/g.buyVolume : 0
+  }));
+}
+/// SỬA 2026-09-02 (Ông Chủ chỉ ra — "mỏ trả hoá đơn đúng khoảng ngày nào
+/// thì ca đúng khoảng ngày đó phải rút đúng hoá đơn thật đó trước, hết
+/// mới sang kho, KHÔNG được nhảy sang lô hoá đơn của khoảng ngày khác"):
+/// TRƯỚC ĐÂY "documentedVolume" (mỏ đã trả bao nhiêu) chỉ là số LÝ THUYẾT
+/// = buyVolume × %cấu hình — không hề đọc Sổ Hoá Đơn Thật Từ Mỏ. Giờ ưu
+/// tiên TUYỆT ĐỐI khớp theo hoá đơn thật đã nhập đúng khoảng ngày giao
+/// hàng che phủ ngày của ca này (xem buildMineInvoiceMatchLedger) — CHỈ
+/// khi KHÔNG CÓ hoá đơn thật nào khớp ngày (chưa kịp nhập, hoặc mỏ chưa
+/// xuất) mới rơi về công thức % lý thuyết cũ làm DỰ PHÒNG (Ông Chủ xác
+/// nhận rõ 2026-09-02). Áp dụng lại cho TOÀN BỘ lịch sử (không có số nào
+/// được "chốt cứng" riêng theo tháng cũ — đúng ý Ông Chủ).
+/// Tham số `shCtx` ({sh, idx}) là TUỲ CHỌN — truyền vào khi ĐÃ SẴN CÓ từ
+/// vòng lặp ngoài (VD buildInvoiceLotLedger) để tránh phải quét lại toàn
+/// bộ ca tìm context (findSiteLogContext là O(n), gọi lặp lại trong vòng
+/// lặp O(n) khác sẽ thành O(n²) — bài học cũ "lưu ca bị lâu hơn hẳn").
+/// Không truyền thì tự tìm (đủ nhanh cho các màn xem 1 ca đơn lẻ).
+function siteGoodsTypeGroups(s, shCtx){
+  if(s.siteType!=='commercial') return [];
+  const { invoicedPct, density, noShortfallConfig } = siteInvoicedConfig(s);
+  const rawGroups = siteRawGoodsTypeGroups(s);
+  if(noShortfallConfig){
+    return rawGroups.map(g=>({ goodsType: g.goodsType, buyVolume: g.buyVolume, sellVolume: g.sellVolume,
+      avgBuyUnitPrice: g.avgBuyUnitPrice, missingVolume: 0, missingValue: 0 }));
+  }
+  const ctx = shCtx || findSiteLogContext(s);
+  return rawGroups.map(g=>{
+    let documentedVolume = null;
+    if(ctx && buyIsDeductible(s)){
+      const ledger = buildMineInvoiceMatchLedger(g.goodsType);
+      const key = siteLogGroupKey(ctx.sh, ctx.idx, g.goodsType);
+      const val = ledger[key];
+      if(val!==undefined && val!==null) documentedVolume = val;
     }
+    if(documentedVolume===null) documentedVolume = (g.buyVolume * invoicedPct/100) / density; // dự phòng — chưa có hoá đơn thật khớp ngày
+    const missingVolume = Math.max(0, g.sellVolume - documentedVolume);
     return { goodsType: g.goodsType, buyVolume: g.buyVolume, sellVolume: g.sellVolume,
-      avgBuyUnitPrice, missingVolume, missingValue: missingVolume*avgBuyUnitPrice };
+      avgBuyUnitPrice: g.avgBuyUnitPrice, missingVolume, missingValue: missingVolume*g.avgBuyUnitPrice };
   });
+}
+/// Sổ cái khớp Hoá Đơn Thật Từ Mỏ THEO ĐÚNG KHOẢNG NGÀY GIAO HÀNG THẬT —
+/// mỗi hoá đơn là 1 "ngăn kho" RIÊNG, chỉ phục vụ đúng các ca có ngày rơi
+/// vào khoảng [deliveryFrom, deliveryTo] của hoá đơn đó — HẾT NGĂN NÀY
+/// KHÔNG ĐƯỢC nhảy sang ngăn của hoá đơn khoảng ngày khác (đúng yêu cầu
+/// Ông Chủ). MỖI NGÀY CHỈ ĐƯỢC RÚT ĐÚNG PHẦN CỦA RIÊNG NÓ (buyVolume ×
+/// %cấu hình, VD 70%) — KHÔNG được rút quá phần này dù ngăn còn dư bao
+/// nhiêu (2026-09-02, Ông Chủ chỉnh lại: "chỉ được lấy đúng lượng của
+/// ngày hôm ấy... không được dư lượng HĐ thật" — sửa lỗi bản trước lỡ để
+/// mỗi ngày đòi rút ĐỦ 100% khối lượng mua, khiến ngày đến lượt trước ăn
+/// hết phần của ngày sau). FIFO (ca ngày sớm hơn được ưu tiên trước) chỉ
+/// còn ý nghĩa cho trường hợp hoá đơn thật KHÔNG ĐỦ để trả đúng phần
+/// (VD %) cho tất cả các ngày nó che phủ — hãn hữu, do sai lệch dữ liệu
+/// thật (Ông Chủ xác nhận "thông cảm được"). CHỈ áp dụng cho ca ĐÃ tick
+/// "Đã nhận hoá đơn MUA" (buyIsDeductible) — ca chưa tick vẫn theo đúng
+/// cơ chế cũ (rút CẢ 2 nguồn qua buildInvoiceLotLedger, không đụng ở
+/// đây). Trả về map key (siteLogGroupKey) -> khối lượng đã khớp được
+/// (null/undefined = không có hoá đơn thật nào khớp ngày, để
+/// siteGoodsTypeGroups() tự rơi về % lý thuyết — cho ra CÙNG 1 SỐ như
+/// khi có hoá đơn khớp đủ, vì bản chất là cùng công thức buyVolume×%).
+const _mineInvoiceMatchCache = {};
+function buildMineInvoiceMatchLedger(goodsType){
+  const gt = normGoodsType(goodsType);
+  if(!gt) return {};
+  const allSh = _ledgerReportMode ? allShiftsCompanyWide() : allShiftsForLedgerCompanyWide();
+  const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).map(s=>{
+    if(s.siteType!=='commercial') return '0';
+    let buy=0;
+    (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt) buy+=Number(t.buyVolume)||0; });
+    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+(s.supplierId||'')+':'+(s.densityRatio??'');
+  }).join('|')).join(',');
+  const cacheKey = (_ledgerReportMode?'R':'L')+'|'+gt+'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
+    +'|'+JSON.stringify((state.suppliers||[]).map(sp=>[sp.id, sp.invoicedBuyPercent, sp.densityRatio]))
+    +'|'+shiftSig;
+  if(_mineInvoiceMatchCache[gt] && _mineInvoiceMatchCache[gt].key===cacheKey) return _mineInvoiceMatchCache[gt].data;
+
+  // Mỗi hoá đơn thật = 1 ngăn kho riêng, khoá cứng đúng khoảng ngày giao
+  // hàng thật của nó — không gộp chung 1 pool như Kho Hoá Đơn Bù.
+  const buckets = state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt).map(inv=>{
+    const from = inv.deliveryFrom || inv.invoiceDate;
+    const to = inv.deliveryTo || inv.invoiceDate;
+    return { from, to, remainingVolume: mineInvoiceVolumeKhoi(inv) };
+  }).filter(b=>b.from && b.to);
+
+  const demand = [];
+  allSh.forEach(sh=>{
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      // CHỈ nhu cầu bên "đã tick MUA" mới dùng cơ chế khớp hoá đơn thật —
+      // bên chưa tick vẫn theo cơ chế cũ (buildInvoiceLotLedger, rút cả 2
+      // nguồn), không đụng ở đây, tránh 1 đồng vốn hoá đơn thật bị tính 2 lần.
+      if(s.siteType!=='commercial' || !buyIsDeductible(s)) return;
+      siteRawGoodsTypeGroups(s).forEach(g=>{
+        if(normGoodsType(g.goodsType)!==gt || g.buyVolume<=0) return;
+        const { density, invoicedPct } = siteInvoicedConfig(s);
+        if(density<=0) return; // chưa cấu hình tỷ trọng — không quy đổi được, để trống cho fallback lý thuyết ở siteGoodsTypeGroups tự xử lý (cũng sẽ ra 0 vì noShortfallConfig)
+        // SỬA 2026-09-02 (Ông Chủ chỉ rõ lại — "chỉ được lấy đúng lượng của
+        // NGÀY HÔM ẤY, không được dư lượng HĐ thật"): TRƯỚC ĐÂY nhầm để mỗi
+        // ngày đòi rút ĐỦ 100% khối lượng mua của ngày đó từ hoá đơn thật —
+        // khiến ngày nào đến lượt trước (FIFO) ăn hết phần của ngày sau,
+        // dù đáng lẽ mỗi ngày chỉ có quyền đúng %cấu hình (70%) của CHÍNH
+        // ngày đó, không hơn. Giờ mỗi ngày CHỈ ĐÒI đúng phần 70% của riêng
+        // nó (entitlement), 30% còn lại LUÔN về kho dù hoá đơn thật còn dư
+        // bao nhiêu — FIFO ở dưới chỉ còn tác dụng cho trường hợp hoá đơn
+        // thật KHÔNG ĐỦ để trả đúng 70% cho tất cả các ngày trong khoảng nó
+        // che phủ (sai lệch dữ liệu thật, đã được Ông Chủ xác nhận "thông
+        // cảm được").
+        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType,
+          entitlementKhoi: (g.buyVolume * invoicedPct/100) / density });
+      });
+    });
+  });
+  demand.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
+
+  const documentedBySiteLog = {};
+  demand.forEach(d=>{
+    const bucket = buckets.find(b=>d.date>=b.from && d.date<=b.to && b.remainingVolume>0.0001);
+    if(!bucket){ documentedBySiteLog[d.key] = null; return; } // không có hoá đơn thật khớp ngày này -> để null (fallback % lý thuyết)
+    const take = Math.min(bucket.remainingVolume, d.entitlementKhoi);
+    bucket.remainingVolume -= take;
+    documentedBySiteLog[d.key] = take;
+  });
+
+  _mineInvoiceMatchCache[gt] = { key: cacheKey, data: documentedBySiteLog };
+  return documentedBySiteLog;
 }
 function siteMissingDocumentedVolume(s){
   return siteGoodsTypeGroups(s).reduce((sum,g)=>sum+g.missingVolume, 0);
@@ -4192,7 +4318,7 @@ function totalSoldVolumeAllTime(goodsType, from, to){
     if(from && to && (sh.date<from || sh.date>to)) return;
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
-      siteGoodsTypeGroups(s).forEach(g=>{
+      siteRawGoodsTypeGroups(s).forEach(g=>{
         if(normGoodsType(g.goodsType)===gt) sum += g.sellVolume;
       });
     });
@@ -4368,7 +4494,7 @@ function buildInvoiceLotLedger(goodsType){
   allSh.forEach(sh=>{
     (sh.siteLogs||[]).forEach((s,idx)=>{
       if(s.siteType!=='commercial') return;
-      siteGoodsTypeGroups(s).forEach(g=>{
+      siteGoodsTypeGroups(s, {sh, idx}).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt) return;
         const real = siteGroupRealMissingVolume(s, g);
         if(real<=0) return; // chưa tick BÁN → vẫn là lý thuyết, không tạo nhu cầu rút kho
@@ -4649,7 +4775,7 @@ function computeMonthlyInvoiceReconciliation(monthsBack){
     const m = byMonth[ym];
     const driver = driverById(sh.driverId);
     const driverName = driver ? driver.name : (sh.driverNameSnapshot||'—');
-    for(const s of (sh.siteLogs||[])){
+    for(const [idx, s] of (sh.siteLogs||[]).entries()){
       if(s.siteType!=='commercial') continue;
       const tripsCount = (s.commercialTrips||[]).length;
       if(tripsCount>0){
@@ -4663,7 +4789,7 @@ function computeMonthlyInvoiceReconciliation(monthsBack){
         }
       }
       const buyConfirmedByHand = buyIsDeductible(s); // ô tick tay "Đã nhận hóa đơn MUA" — căn cứ cao nhất
-      for(const g of siteGoodsTypeGroups(s)){
+      for(const g of siteGoodsTypeGroups(s, {sh, idx})){
         if(g.sellVolume<=0) continue;
         m.buyTotalVolume += g.sellVolume;
         if(buyConfirmedByHand || g.missingVolume<=0.001){
