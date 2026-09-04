@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-04 · #151';
+const APP_BUILD = '2026-09-04 · #152';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12425,26 +12425,40 @@ function openSupplierDetail(supplierId){
         <h3 style="margin:0; font-size:22px; font-weight:800; color:var(--ink); letter-spacing:-0.2px;">${escapeHtml(sup.name)}</h3>
       </div>
     </section>
+    ${goodsAllTime.totalTrips>0 ? `
     <section class="group">
-      <div class="card">
-        ${goodsAllTime.totalTrips>0 ? `
-        <div class="summary-row total" style="font-size:15.5px;"><span>Tổng tiền hàng đã lấy (chưa tính VAT)</span><span class="val">${fmtVND(goodsAllTime.totalNet)}</span></div>
-        <div style="margin:8px 0 4px; padding-left:10px; border-left:3px solid var(--profit);">
-          <div class="summary-row"><span style="color:var(--ink-soft);">— Tiền hàng Mỏ ĐÃ xuất hoá đơn</span><span class="val">${fmtVND(goodsAllTime.totalNetInvoiced)}</span></div>
-          <div class="summary-row"><span style="color:var(--ink-soft);">— VAT (chỉ đúng ${goodsAllTime.invoicedPct}% của phần Mỏ đã xuất)</span><span class="val">${fmtVND(goodsAllTime.totalVatInvoiced)}</span></div>
-        </div>
-        <div style="margin:4px 0 8px; padding-left:10px; border-left:3px solid var(--loss);">
-          <div class="summary-row"><span style="color:var(--ink-soft);">— Tiền hàng Mỏ CHƯA xuất hoá đơn</span><span class="val">${fmtVND(goodsAllTime.totalNetNotInvoiced)}</span></div>
-        </div>
-        <div class="hint" style="margin-bottom:10px;">💡 100% tiền hàng luôn phải trả đủ cho mỏ (tiền hàng thật, không phụ thuộc hoá đơn) — CHỈ CÓ phần VAT là bị giới hạn đúng ${goodsAllTime.invoicedPct}% (tỉ lệ hoá đơn mỏ thực xuất), và phần "chưa xuất hoá đơn" thì VAT tạm chưa ghi nhận (đúng nguyên tắc chỉ ghi nhận khi đã có hoá đơn thật).</div>
-        ` : ''}
-        <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
-        <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
-        <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${debt.owed>0 ? fmtVND(debt.owed) : `0đ (anh đang tạm ứng dư ${fmtVND(Math.abs(debt.owed))})`}</span></div>
-        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${owedForInvoiceAllTime>0 ? fmtVND(owedForInvoiceAllTime) : `0đ (đã đủ — đang dư ${fmtVND(Math.abs(owedForInvoiceAllTime))})`}</span></div>
-        <div class="hint" style="margin-top:4px;">= CÒN NỢ MỎ (ở trên, đã đúng 100% gốc + ${goodsAllTime.invoicedPct}% VAT của phần đã xuất) + Phần VAT còn thiếu của phần CHƯA xuất (= Tiền hàng CHƯA xuất × ${goodsAllTime.invoicedPct}% × %VAT, tính riêng từng chuyến). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
+      <h3>💰 Tiền Hàng Đã Lấy (chưa tính VAT)</h3>
+      <div class="card" style="text-align:center; padding:16px;">
+        <div style="font-size:28px; font-weight:800; color:var(--ink);">${fmtVND(goodsAllTime.totalNet)}</div>
       </div>
-      <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>🟢 Tiền hàng Mỏ <b>ĐÃ</b> xuất hoá đơn</td><td class="num" style="font-weight:700;">${fmtVND(goodsAllTime.totalNetInvoiced)}</td></tr>
+            <tr><td style="padding-left:28px; color:var(--ink-soft);">↳ VAT (đúng ${goodsAllTime.invoicedPct}% phần đã xuất)</td><td class="num" style="color:var(--ink-soft);">${fmtVND(goodsAllTime.totalVatInvoiced)}</td></tr>
+            <tr><td>🔴 Tiền hàng Mỏ <b>CHƯA</b> xuất hoá đơn</td><td class="num" style="font-weight:700;">${fmtVND(goodsAllTime.totalNetNotInvoiced)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:10px;">💡 100% tiền hàng luôn phải trả đủ cho mỏ (tiền hàng thật, không phụ thuộc hoá đơn) — CHỈ CÓ phần VAT là bị giới hạn đúng ${goodsAllTime.invoicedPct}% (tỉ lệ hoá đơn mỏ thực xuất), và phần "chưa xuất hoá đơn" thì VAT tạm chưa ghi nhận (đúng nguyên tắc chỉ ghi nhận khi đã có hoá đơn thật).</div>
+    </section>
+    ` : ''}
+    <section class="group">
+      <h3>🧾 Công Nợ Với Mỏ</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>= Phải trả (tổng)</td><td class="num" style="font-weight:700;">${fmtVND(debt.payable)}</td></tr>
+            <tr><td>Đã trả (tổng — đã bank cho mỏ)</td><td class="num">${fmtVND(debt.paid)}</td></tr>
+            <tr class="grid-total-row"><td>CÒN NỢ MỎ</td><td class="num" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${debt.owed>0 ? fmtVND(debt.owed) : `0đ (đang tạm ứng dư ${fmtVND(Math.abs(debt.owed))})`}</td></tr>
+            <tr class="grid-total-row"><td>Còn phải nộp thêm (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</td><td class="num" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${owedForInvoiceAllTime>0 ? fmtVND(owedForInvoiceAllTime) : `0đ (đã đủ — dư ${fmtVND(Math.abs(owedForInvoiceAllTime))})`}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px;">"Còn phải nộp thêm" = CÒN NỢ MỎ (ở trên, đã đúng 100% gốc + ${goodsAllTime.invoicedPct}% VAT của phần đã xuất) + Phần VAT còn thiếu của phần CHƯA xuất (= Tiền hàng CHƯA xuất × ${goodsAllTime.invoicedPct}% × %VAT, tính riêng từng chuyến). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
+      <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:12px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
     <section class="group">
