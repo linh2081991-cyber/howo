@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-02 · #145';
+const APP_BUILD = '2026-09-03 · #146';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6848,30 +6848,30 @@ Net Bán = ${s.sellIncludesVat ? `${fmtVND(grossSell)} ÷ (1 + ${vatPct}%) = ${f
 
     <div class="modal-step">
       <div class="st-title">Bước 5 — Tiền mặt THẬT trả nhà cung cấp / nhận từ khách</div>
-      <div class="st-body">Khác số Net ở Bước 4 — đây là số tiền THẬT chuyển khoản, tuỳ giá đã gồm VAT hay chưa và có hoá đơn hay không.</div>
+      <div class="st-body">Khác số Net ở Bước 4 — đây là số tiền THẬT chuyển khoản, tuỳ giá đã gồm VAT hay chưa và có hoá đơn hay không. <b>Chú ý:</b> mỏ chỉ THU VAT thật trên đúng ${rInv.val}% khối lượng (phần mỏ thật sự xuất hoá đơn) — 100% tiền HÀNG vẫn phải trả đủ, chỉ riêng phần VAT cộng thêm mới bị giới hạn theo đúng tỉ lệ này.</div>
       <div class="st-formula">"Đã nhận hóa đơn MUA (được khấu trừ VAT đầu vào)": ${deductibleBuy?'CÓ tick':'CHƯA tick'}
 Trả nhà cung cấp = ${s.buyIncludesVat
   ? `${fmtVND(grossBuy)} (giá đã gồm VAT = đúng số trả)`
   : deductibleBuy
-    ? `${fmtVND(netBuy)} × (1 + ${vatPct}%) = ${fmtVND(cashToSupplier)} (net + VAT vì đã có hoá đơn)`
+    ? `${fmtVND(netBuy)} + (${fmtVND(netBuy)} × ${rInv.val}% × ${vatPct}%) = ${fmtVND(cashToSupplier)} (100% tiền hàng + VAT CHỈ trên ${rInv.val}% — vì mỏ chỉ xuất hoá đơn đúng ${rInv.val}% khối lượng)`
     : `${fmtVND(netBuy)} (net — chưa có hoá đơn nên không cộng VAT)`}
-= ${fmtVND(cashToSupplier)}   (trong đó VAT thật đã trả mỏ = ${fmtVND(cashInputVat)})
+= ${fmtVND(cashToSupplier)}   (trong đó VAT thật đã trả mỏ, TRÊN ĐÚNG ${rInv.val}% khối lượng = ${fmtVND(cashInputVat)})
 
 "Đã xuất hóa đơn BÁN": ${s.sellHasInvoice?'CÓ tick':'CHƯA tick'}
 Khách trả = ${s.sellIncludesVat
   ? `${fmtVND(grossSell)} (giá đã gồm VAT = đúng số khách trả)`
   : s.sellHasInvoice
-    ? `${fmtVND(netSell)} × (1 + ${vatPct}%) = ${fmtVND(cashFromCustomer)} (net + VAT vì có xuất hoá đơn)`
+    ? `${fmtVND(netSell)} × (1 + ${vatPct}%) = ${fmtVND(cashFromCustomer)} (net + VAT vì có xuất hoá đơn — bán 100% khối lượng, không bị giới hạn %)`
     : `${fmtVND(netSell)} (net — chưa xuất hoá đơn nên không cộng VAT)`}
-= ${fmtVND(cashFromCustomer)}   (trong đó VAT thật khách đã trả = ${fmtVND(cashOutputVat)})</div>
+= ${fmtVND(cashFromCustomer)}   (trong đó VAT thật khách đã trả, TRÊN TOÀN BỘ khối lượng bán = ${fmtVND(cashOutputVat)})</div>
     </div>
 
     <div class="modal-step">
       <div class="st-title">Bước 6 — VAT phải nộp nhà nước cuối tháng</div>
       <div class="st-body">= VAT đầu ra − VAT đầu vào ĐƯỢC KHẤU TRỪ (chỉ tính khi đã tick "Đã nhận hóa đơn MUA") − VAT khấu trừ từ các lô Kho Hoá Đơn Bù đã rút cho ca này. Đây là NGHĨA VỤ THUẾ — khác với số VAT thật nằm trong tiền mặt ở Bước 5.</div>
       <div class="st-formula">VAT đầu ra = Net Bán × ${s.sellIncludesVat?`${vatPct}%`:'0% (giá bán chưa VAT)'} = ${fmtVND(outputVatForPayable)}
-VAT đầu vào được khấu trừ = ${deductibleBuy?`Net Mua × ${vatPct}% = ${fmtVND(inputVatCreditFromBuy)}`:'0đ (chưa có hoá đơn MUA)'}
-VAT khấu trừ từ Kho Hoá Đơn Bù = ${fmtVND(supplementVatCredit)}
+VAT đầu vào được khấu trừ = ${deductibleBuy?`Net Mua × ${rInv.val}% (mỏ chỉ xuất hoá đơn đúng ${rInv.val}% khối lượng) × ${vatPct}% = ${fmtVND(inputVatCreditFromBuy)}`:'0đ (chưa có hoá đơn MUA)'}
+VAT khấu trừ từ Kho Hoá Đơn Bù (đắp đúng phần ${100-rInv.val}% mỏ KHÔNG xuất hoá đơn) = ${fmtVND(supplementVatCredit)}
 VAT phải nộp = ${fmtVND(outputVatForPayable)} − ${fmtVND(inputVatCreditFromBuy)} − ${fmtVND(supplementVatCredit)} = ${fmtVND(vatBeforeClamp)}${vatBeforeClamp<0?`
 → Âm nghĩa là khấu trừ NHIỀU hơn phải nộp — app không cho âm (không tự bịa hoàn thuế), chốt về 0đ`:''}
 = ${fmtVND(vatToState)}</div>
@@ -6879,12 +6879,29 @@ VAT phải nộp = ${fmtVND(outputVatForPayable)} − ${fmtVND(inputVatCreditFro
 
     <div class="modal-step">
       <div class="st-title">Bước 7 — Khối lượng thiếu chứng từ (theo từng loại hàng)</div>
-      <div class="st-body">${groups.length===0?'Chưa có chuyến nào khai loại hàng.':'Khối lượng có chứng từ hợp lệ = (KL mua × %hoá đơn) ÷ hệ số quy đổi. Thiếu = MAX(0, KL bán − KL có chứng từ).'}</div>
+      <div class="st-body">${groups.length===0?'Chưa có chuyến nào khai loại hàng.':'Ưu tiên khớp ĐÚNG hoá đơn thật từ mỏ có khoảng ngày che phủ ca này (Sổ Hoá Đơn Thật Từ Mỏ) — CHỈ khi không có hoá đơn nào khớp mới tạm dùng % lý thuyết cấu hình sẵn. Thiếu = MAX(0, KL bán − KL có chứng từ).'}</div>
       ${groups.map(g=>{
-        const documentedVol = (rDen.val && rDen.val>0) ? (g.buyVolume*rInv.val/100)/rDen.val : null;
+        // SỬA 2026-09-03 (Ông Chủ báo — bảng giải trình này hiện SAI/CŨ so
+        // với công thức thật đang chạy từ 2026-09-02: g.missingVolume giờ
+        // ưu tiên khớp hoá đơn thật theo ngày, không còn CHỈ dùng % lý
+        // thuyết nữa): dựng lại đúng CÙNG đường tính với siteGoodsTypeGroups()
+        // — kiểm tra có khớp được hoá đơn thật hay không, hiện rõ dùng
+        // đường nào, và LUÔN khớp tuyệt đối với g.missingVolume cuối dòng.
+        let documentedVol = null, usedRealMatch = false;
+        const matchCtx = findSiteLogContext(s);
+        if(matchCtx && buyIsDeductible(s)){
+          const ledger = buildMineInvoiceMatchLedger(g.goodsType);
+          const val = ledger[siteLogGroupKey(matchCtx.sh, matchCtx.idx, g.goodsType)];
+          if(val!==undefined && val!==null){ documentedVol = val; usedRealMatch = true; }
+        }
+        if(!usedRealMatch){
+          documentedVol = (rDen.val && rDen.val>0) ? (g.buyVolume*rInv.val/100)/rDen.val : null;
+        }
         return `<div class="st-formula"><b>${escapeHtml(g.goodsType||'(chưa khai loại hàng)')}</b>
 KL mua = ${fmtQty(g.buyVolume)} tấn · KL bán = ${fmtQty(g.sellVolume)} khối
-KL có chứng từ = ${documentedVol!==null ? `(${fmtQty(g.buyVolume)} × ${rInv.val}%) ÷ ${rDen.val} = ${fmtQty(documentedVol)} khối` : 'không quy đổi được (thiếu % hoá đơn hoặc hệ số quy đổi)'}
+KL có chứng từ = ${usedRealMatch
+  ? `${fmtQty(documentedVol)} khối — khớp ĐÚNG hoá đơn thật từ mỏ có khoảng ngày che phủ ca này (xem "Sổ Hoá Đơn Thật Từ Mỏ"), KHÔNG dùng % lý thuyết nữa`
+  : documentedVol!==null ? `(${fmtQty(g.buyVolume)} × ${rInv.val}%) ÷ ${rDen.val} = ${fmtQty(documentedVol)} khối — CHƯA có hoá đơn thật nào khớp đúng ngày ca này, tạm dùng % lý thuyết cấu hình sẵn` : 'không quy đổi được (thiếu % hoá đơn hoặc hệ số quy đổi)'}
 KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(documentedVol):'—'}) = ${fmtQty(g.missingVolume)} khối</div>`;
       }).join('')}
       ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — nguồn nào có trước dùng trước, gộp cả lô mua bù + hoá đơn thật từ mỏ)</b>
