@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-03 · #148';
+const APP_BUILD = '2026-09-03 · #150';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -5498,7 +5498,7 @@ function driverColumnCountsLabel(shifts){
   // thành "22 ca lương · 2..." không đọc được số nghỉ phép.
   const lines = [
     `<span class="cnt-line">Đi làm: <strong>${c.paidCount}</strong> ca</span>`,
-    `<span class="cnt-line">Nghỉ phép: <strong>${c.onLeaveCount}</strong> ngày</span>`
+    `<span class="cnt-line">Nghỉ phép: <strong>${c.onLeaveCount}</strong> ca</span>`
   ];
   if(c.otherUnpaidCount>0){
     lines.push(`<span class="cnt-line">Khác (không lương): <strong>${c.otherUnpaidCount}</strong> ca</span>`);
@@ -7655,15 +7655,29 @@ function driverIncidentalShiftsInMonth(driverId, yearMonth){
 function driverManualReportsInMonth(driverId, yearMonth){
   return state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date.slice(0,7)===yearMonth);
 }
-/// Số dư tạm ứng chi phí đang giữ CỦA ĐÚNG THÁNG yearMonth (mặc định
-/// tháng hiện tại) = Tổng đã ứng TRONG THÁNG − Chi Phí Phát Sinh Trong Ca
-/// TRONG THÁNG (tự động) − Báo Cáo Chi Khác TRONG THÁNG (thủ công).
-/// KHÔNG cộng dồn từ tháng trước — mỗi tháng là 1 đợt độc lập.
+/// Số dư tạm ứng chi phí đang giữ TÍNH DỒN LIÊN TỤC từ trước tới hết
+/// THÁNG yearMonth (mặc định tháng hiện tại).
+/// SỬA 2026-09-03 (Ông Chủ chỉnh lại rõ ràng — "tiền ứng để riêng không
+/// tính vào lương, tháng trước còn thì tháng sau dùng tiếp, hiện số theo
+/// real time"): bản trước lỡ làm mỗi tháng là 1 đợt ĐỘC LẬP, reset về 0
+/// đầu mỗi tháng — SAI Ý, vì tạm ứng là 1 SỔ QUỸ LIÊN TỤC, không "chốt
+/// sổ" theo tháng. Giờ tính CỘNG DỒN: Tổng đã ứng TỪ TRƯỚC ĐẾN HẾT
+/// THÁNG NÀY − Chi Phí Phát Sinh Trong Ca TỪ TRƯỚC ĐẾN HẾT THÁNG NÀY (tự
+/// động) − Báo Cáo Chi Khác TỪ TRƯỚC ĐẾN HẾT THÁNG NÀY (thủ công). Dư/nợ
+/// tháng trước tự động mang nguyên sang tháng sau — không cần làm gì
+/// thêm, chọn đúng tháng nào là ra đúng số dư CỘNG DỒN tính tới hết
+/// tháng đó ngay (bao gồm cả các tháng trước nó).
 function driverAdvanceBalance(driverId, yearMonth){
   yearMonth = yearMonth || todayLocalDateStr().slice(0,7);
-  const advanced = driverAdvancesInMonth(driverId, yearMonth).reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const incidental = driverIncidentalShiftsInMonth(driverId, yearMonth).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
-  const manual = driverManualReportsInMonth(driverId, yearMonth).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const advanced = state.driverAdvances
+    .filter(a=>a.driverId===driverId && a.date.slice(0,7)<=yearMonth)
+    .reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const incidental = state.shifts
+    .filter(sh=>sh.driverId===driverId && sh.date.slice(0,7)<=yearMonth && (Number(sh.incidentalCost)||0)>0)
+    .reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
+  const manual = state.driverExpenseReports
+    .filter(r=>r.driverId===driverId && r.date.slice(0,7)<=yearMonth)
+    .reduce((s,r)=>s+(Number(r.amount)||0),0);
   return advanced - incidental - manual;
 }
 /// Lịch Sử ỨNG TIỀN riêng của 1 tài xế (toàn thời gian, để tiện đối chiếu
@@ -7730,12 +7744,13 @@ function openDriverAdvanceDetail(driverId, yearMonthOverride){
     </section>
     <section class="group">
       <div class="card">
-        <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)} · Tháng ${monthLabelVN(yearMonth)}</h3>
-        <div class="field" style="margin-bottom:10px;">
-          <label>Chọn tháng xem</label>
+        <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)}</h3>
+        <div class="field" style="margin-bottom:0;">
+          <label>Xem số dư cộng dồn tính đến hết tháng</label>
           <input type="month" id="advMonthPicker" value="${yearMonth}">
         </div>
-        <div class="summary-row total"><span>Số dư đang giữ</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
+        <div class="formula-divider"></div>
+        <div class="summary-row total"><span>Số dư đang giữ (cộng dồn đến hết ${monthLabelVN(yearMonth)})</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
       </div>
       <div class="two-col" style="margin-top:10px;">
         <button class="btn btn-accent" id="addAdvanceBtn">+ Ghi Ứng Thêm</button>
@@ -15739,7 +15754,7 @@ async function exportDriverPayslipXLSX(driverId){
   nextRow(12);
   merge(r,'A','C'); setCell(`A${r}`, 'Họ tên tài xế:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, driverName, { border:true }); nextRow(24);
   merge(r,'A','C'); setCell(`A${r}`, 'Kỳ lương:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${formatDateVN(from)} — ${formatDateVN(to)}`, { border:true }); nextRow(24);
-  merge(r,'A','C'); setCell(`A${r}`, 'Số ca đi làm:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${counts.paidCount} ca` + (counts.onLeaveCount?` · Nghỉ phép: ${counts.onLeaveCount} ngày`:''), { border:true }); nextRow(24);
+  merge(r,'A','C'); setCell(`A${r}`, 'Số ca đi làm:', { bold:true, border:true, fill:'FFF7F7F7' }); merge(r,'D',lastColLetter); setCell(`D${r}`, `${counts.paidCount} ca` + (counts.onLeaveCount?` · Nghỉ phép: ${counts.onLeaveCount} ca`:''), { border:true }); nextRow(24);
   nextRow(12);
 
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'CHI TIẾT TỪNG CA', { size:14, bold:true }); nextRow(24);
