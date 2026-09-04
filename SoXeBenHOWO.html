@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-03 · #146';
+const APP_BUILD = '2026-09-03 · #147';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12436,8 +12436,8 @@ function openSupplierDetail(supplierId){
         ` : ''}
         <div class="summary-row total"><span>= Phải trả (tổng)</span><span class="val">${fmtVND(debt.payable)}</span></div>
         <div class="summary-row" style="margin-top:10px;"><span>Đã trả (tổng — đã bank cho mỏ)</span><span class="val">${fmtVND(debt.paid)}</span></div>
-        <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (anh tạm ứng dư)':''}</span></div>
-        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${fmtVND(owedForInvoiceAllTime)}${owedForInvoiceAllTime<=0?' (đã đủ/dư)':''}</span></div>
+        <div class="summary-row total"><span>CÒN NỢ MỎ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${debt.owed>0 ? fmtVND(debt.owed) : `0đ (anh đang tạm ứng dư ${fmtVND(Math.abs(debt.owed))})`}</span></div>
+        <div class="summary-row total" style="margin-top:8px; border-top:1px dashed var(--border); padding-top:8px;"><span>Ông chủ còn phải nộp (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</span><span class="val" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${owedForInvoiceAllTime>0 ? fmtVND(owedForInvoiceAllTime) : `0đ (đã đủ — đang dư ${fmtVND(Math.abs(owedForInvoiceAllTime))})`}</span></div>
         <div class="hint" style="margin-top:4px;">= CÒN NỢ MỎ (ở trên, đã đúng 100% gốc + ${goodsAllTime.invoicedPct}% VAT của phần đã xuất) + Phần VAT còn thiếu của phần CHƯA xuất (= Tiền hàng CHƯA xuất × ${goodsAllTime.invoicedPct}% × %VAT, tính riêng từng chuyến). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
       </div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
