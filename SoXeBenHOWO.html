@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-03 · #147';
+const APP_BUILD = '2026-09-03 · #148';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11603,7 +11603,11 @@ function renderResults(){
   const dailyBreakdown = computeDailyBreakdown(inRange);
   const siteRanking = computeSiteRanking(inRange);
   const insights = generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, roadFee, inRangeShifts:inRange, from, to, siteRanking});
-  const financialWarnings = computeFinancialWarnings({ gTotal, finalNetProfit, repairTotal, roadFee, otherFixedMonthly, inRangeShifts:inRange, missingFuelPriceShifts, missingFuelPriceLiters, from, to });
+  // SỬA 2026-09-03 (Ông Chủ yêu cầu — "bỏ các cảnh báo tài chính vì không
+  // cần thiết"): đã bỏ hẳn khối hiển thị "⚠️ Cảnh Báo Tài Chính" phía dưới
+  // + xoá luôn dòng gọi computeFinancialWarnings() ở đây — hàm đó vẫn còn
+  // trong code (không xoá định nghĩa, phòng khi cần dùng lại), chỉ không
+  // gọi/hiển thị nữa.
   const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal, otherFixedMonthly, houseRent, utilities);
   // Chỉ để TÁCH HIỂN THỊ cho rõ ràng — KHÔNG đụng tới breakEven.variableCost
   // hay breakEven.grossProfit (2 số đó vẫn tính y nguyên trong
@@ -11638,22 +11642,7 @@ function renderResults(){
         <div class="hint" style="margin-top:8px;">Doanh thu/số chuyến/giá vốn của các ca này ĐÃ được cộng đủ vào Kết Quả Kinh Doanh ở dưới (vì chuyến múc-đổ đã khai đủ số, là giao dịch có thật). Riêng tiền dầu của đúng ca này đang tạm để 0đ cho tới khi Ông Chủ kết ca (nhập ODO/dầu cuối) — kết ca xong, tiền dầu sẽ tự cộng vào, không cần làm gì thêm.</div>
       </div>
     </section>` : ''}
-    ${financialWarnings.length>0 ? `
-    <section class="group">
-      <h3>⚠️ Cảnh Báo Tài Chính</h3>
-      ${financialWarnings.map(w=>`
-        <div class="card" style="border:1.5px solid var(--loss);">
-          <div style="display:flex; gap:12px; align-items:flex-start;">
-            <div style="font-size:22px; line-height:1;">${w.icon}</div>
-            <div style="flex:1;">
-              <div style="font-weight:800; color:var(--loss); margin-bottom:4px;">${escapeHtml(w.title)}</div>
-              <div style="font-size:13px; color:var(--ink-soft); line-height:1.5;">${escapeHtml(w.text)}</div>
-            </div>
-          </div>
-          <button class="btn btn-ghost btn-sm fin-warning-detail-btn" data-warning-id="${w.id}" style="margin-top:10px;">📖 Chi Tiết</button>
-        </div>
-      `).join('')}
-    </section>` : ''}
+
     <section class="group">
       <h3>Khoảng Thời Gian</h3>
       <div style="display:flex; gap:8px; margin-bottom:12px;">
@@ -11990,12 +11979,6 @@ function renderResults(){
   });
   document.getElementById('vatDetailBtn').addEventListener('click', ()=>{
     renderPeriodVatDetailModal(inRange, vatPayableInRange);
-  });
-  document.querySelectorAll('.fin-warning-detail-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const w = financialWarnings.find(x=>x.id===btn.dataset.warningId);
-      if(w) w.detail();
-    });
   });
 }
 
