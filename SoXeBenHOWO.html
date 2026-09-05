@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-04 · #152';
+const APP_BUILD = '2026-09-04 · #153';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6342,10 +6342,7 @@ function renderSiteRows(){
         : trips.map((t,ti)=>`
           <div class="commercial-trip" style="border:1.5px solid var(--border); border-radius:12px; padding:10px; margin-bottom:10px; background:var(--surface);">
             <div class="site-head" style="margin-bottom:6px;">
-              <span style="display:inline-flex; align-items:center; gap:9px;">
-                <span style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; font-weight:800; font-size:14px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,0.15);">${ti+1}</span>
-                <strong style="font-size:16px;">Chuyến ${ti+1}</strong>
-              </span>
+              <span style="display:inline-flex; align-items:center; justify-content:center; padding:6px 16px; border-radius:999px; background:var(--accent); color:#fff; font-weight:800; font-size:14px; box-shadow:0 2px 6px rgba(0,0,0,0.15);">Chuyến ${ti+1}</span>
               <button class="link-btn removeTripBtn" data-idx="${i}" data-tidx="${ti}">Xoá</button>
             </div>
             <div class="field">
