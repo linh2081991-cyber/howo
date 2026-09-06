@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-04 · #153';
+const APP_BUILD = '2026-09-05 · #156';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7360,7 +7360,7 @@ function renderDrivers(){
             <div class="driver-cv-item"><span class="k">Bằng lái</span><span class="v">${escapeHtml(d.licenseInfo||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tình trạng sức khoẻ</span><span class="v">${escapeHtml(d.healthStatus||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--loss)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
-            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ (tháng này)</span><span class="v" style="color:${driverAdvanceBalance(d.id)>=0?'inherit':'var(--loss)'}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ (tính đến hôm nay)</span><span class="v" style="color:${driverAdvanceBalance(d.id)>=0?'inherit':'var(--loss)'}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
           <button class="btn btn-ghost btn-block viewDriverDetailBtn" data-id="${d.id}" style="margin-top:10px;">📊 Xem Chi Tiết Vận Hành →</button>
@@ -7644,13 +7644,13 @@ function driverMonthWindowStart(driverId, yearMonth){
 function driverAdvancesInMonth(driverId, yearMonth){
   return state.driverAdvances.filter(a=>a.driverId===driverId && a.date.slice(0,7)===yearMonth);
 }
-/// Các ca của 1 tài xế có Chi Phí Phát Sinh > 0, rơi vào ĐÚNG tháng
-/// yearMonth và từ đúng driverMonthWindowStart() trở đi — đây là phần TỰ
-/// ĐỘNG trừ vào số dư, không cần Ông Chủ bấm "nhập" thủ công.
-function driverIncidentalShiftsInMonth(driverId, yearMonth){
-  const start = driverMonthWindowStart(driverId, yearMonth);
+/// Các ca của 1 tài xế có Chi Phí Phát Sinh > 0, rơi vào ĐÚNG khoảng
+/// [from,to] — dùng cho khối "Hoạt Động Trong Khoảng Đã Chọn" (đối chiếu
+/// tranh chấp với tài xế theo đúng khoảng ngày tự chọn, không bó buộc
+/// theo tháng).
+function driverIncidentalShiftsInRange(driverId, from, to){
   return state.shifts
-    .filter(sh=>sh.driverId===driverId && sh.date.slice(0,7)===yearMonth && sh.date>=start && (Number(sh.incidentalCost)||0)>0)
+    .filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to && (Number(sh.incidentalCost)||0)>0)
     .sort((a,b)=>b.date.localeCompare(a.date));
 }
 /// Các Báo Cáo Chi Khác (thủ công, ngoài ca) của 1 tài xế rơi vào ĐÚNG
@@ -7670,16 +7670,26 @@ function driverManualReportsInMonth(driverId, yearMonth){
 /// tháng trước tự động mang nguyên sang tháng sau — không cần làm gì
 /// thêm, chọn đúng tháng nào là ra đúng số dư CỘNG DỒN tính tới hết
 /// tháng đó ngay (bao gồm cả các tháng trước nó).
-function driverAdvanceBalance(driverId, yearMonth){
-  yearMonth = yearMonth || todayLocalDateStr().slice(0,7);
+/// Số dư tạm ứng chi phí đang giữ TÍNH DỒN LIÊN TỤC từ trước tới hết
+/// ĐÚNG NGÀY asOfDate (mặc định hôm nay).
+/// SỬA 2026-09-05 (Ông Chủ yêu cầu — "thiết kế dạng chọn xem từ ngày đến
+/// ngày, để có dữ liệu cho lái xe trong khoảng thời gian, không xảy ra
+/// tranh cãi"): trước đây chỉ chọn được THÁNG (luôn cộng dồn tới HẾT
+/// THÁNG, dù Ông Chủ muốn chốt đúng 1 ngày cụ thể giữa tháng để đối chiếu
+/// với tài xế) — giờ nhận đúng 1 NGÀY cụ thể (YYYY-MM-DD) làm mốc chốt,
+/// chính xác tới từng ngày thay vì làm tròn cả tháng. Vẫn CỘNG DỒN từ
+/// trước tới giờ như cũ (không đổi bản chất "tháng trước còn thì tháng
+/// sau dùng tiếp") — chỉ đổi độ chính xác của mốc chốt.
+function driverAdvanceBalance(driverId, asOfDate){
+  asOfDate = asOfDate || todayLocalDateStr();
   const advanced = state.driverAdvances
-    .filter(a=>a.driverId===driverId && a.date.slice(0,7)<=yearMonth)
+    .filter(a=>a.driverId===driverId && a.date<=asOfDate)
     .reduce((s,a)=>s+(Number(a.amount)||0),0);
   const incidental = state.shifts
-    .filter(sh=>sh.driverId===driverId && sh.date.slice(0,7)<=yearMonth && (Number(sh.incidentalCost)||0)>0)
+    .filter(sh=>sh.driverId===driverId && sh.date<=asOfDate && (Number(sh.incidentalCost)||0)>0)
     .reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
   const manual = state.driverExpenseReports
-    .filter(r=>r.driverId===driverId && r.date.slice(0,7)<=yearMonth)
+    .filter(r=>r.driverId===driverId && r.date<=asOfDate)
     .reduce((s,r)=>s+(Number(r.amount)||0),0);
   return advanced - incidental - manual;
 }
@@ -7733,14 +7743,30 @@ function renderDriverExpenseReportHistoryHtml(driverId){
 // — y hệt cơ chế đã thêm cho modal Chi Tiết Từng Chuyến. Mặc định vẫn mở
 // đúng tháng hiện tại như cũ (không đổi hành vi khi bấm vào từ danh sách
 // tài xế), chỉ thêm khả năng đổi tháng ngay tại đây.
-function openDriverAdvanceDetail(driverId, yearMonthOverride){
+// SỬA 2026-09-05 (Ông Chủ yêu cầu — "thiết kế dạng chọn xem từ ngày đến
+// ngày, để có dữ liệu cho lái xe trong khoảng thời gian, không xảy ra
+// tranh cãi"): thay hẳn ô "Chọn tháng xem" bằng 2 ô Từ ngày/Đến ngày.
+// "Đến ngày" quyết định mốc chốt Số Dư CỘNG DỒN (như cũ, chỉ chính xác
+// tới từng ngày thay vì làm tròn cả tháng). "Từ ngày" dùng để lọc riêng
+// khối "Hoạt Động Trong Khoảng Đã Chọn" — liệt kê ĐÚNG những gì xảy ra
+// trong khoảng Ông Chủ chọn (không phải cả lịch sử), để đối chiếu 1 giai
+// đoạn cụ thể với tài xế khi có tranh cãi, tách biệt với số dư cộng dồn
+// toàn thời gian ở trên.
+function openDriverAdvanceDetail(driverId, fromOverride, toOverride){
   scrollMainToTop();
   saveMainScroll();
   const d = driverById(driverId);
   const app = document.getElementById('app');
   if(!d){ renderAll(); return; }
-  const yearMonth = yearMonthOverride || todayLocalDateStr().slice(0,7);
-  const balance = driverAdvanceBalance(driverId, yearMonth);
+  const today = todayLocalDateStr();
+  const to = toOverride || today;
+  const from = fromOverride || (today.slice(0,8)+'01'); // mặc định đầu tháng hiện tại, Ông Chủ tự đổi lại nếu cần khoảng khác
+  const balance = driverAdvanceBalance(driverId, to);
+  const rangeIncidentalList = driverIncidentalShiftsInRange(driverId, from, to);
+  const rangeAdvances = state.driverAdvances.filter(a=>a.driverId===driverId && a.date>=from && a.date<=to);
+  const rangeManualReports = state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date>=from && r.date<=to);
+  const rangeAdvancedTotal = rangeAdvances.reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const rangeSpentTotal = rangeIncidentalList.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0) + rangeManualReports.reduce((s,r)=>s+(Number(r.amount)||0),0);
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="advDetailBackBtn">← Quay Lại Tài Xế</button>
@@ -7748,12 +7774,18 @@ function openDriverAdvanceDetail(driverId, yearMonthOverride){
     <section class="group">
       <div class="card">
         <h3 style="margin-top:0;">💰 Tạm Ứng Chi Phí — ${escapeHtml(d.name)}</h3>
-        <div class="field" style="margin-bottom:0;">
-          <label>Xem số dư cộng dồn tính đến hết tháng</label>
-          <input type="month" id="advMonthPicker" value="${yearMonth}">
+        <div class="date-range">
+          <div class="field">
+            <label>Từ ngày</label>
+            <input type="date" id="advFromPicker" value="${from}">
+          </div>
+          <div class="field">
+            <label>Đến ngày</label>
+            <input type="date" id="advToPicker" value="${to}">
+          </div>
         </div>
         <div class="formula-divider"></div>
-        <div class="summary-row total"><span>Số dư đang giữ (cộng dồn đến hết ${monthLabelVN(yearMonth)})</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
+        <div class="summary-row total"><span>Số dư đang giữ (cộng dồn từ trước đến hết ${formatDateVN(to)})</span><span class="val" style="color:${balance>=0?'var(--profit)':'var(--loss)'}">${balance>=0?'':'−'}${fmtVND(Math.abs(balance))}</span></div>
       </div>
       <div class="two-col" style="margin-top:10px;">
         <button class="btn btn-accent" id="addAdvanceBtn">+ Ghi Ứng Thêm</button>
@@ -7761,12 +7793,20 @@ function openDriverAdvanceDetail(driverId, yearMonthOverride){
       </div>
     </section>
     <section class="group">
+      <h3>📋 Hoạt Động Trong Khoảng Đã Chọn (${formatDateVN(from)} → ${formatDateVN(to)})</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Dùng để đối chiếu đúng 1 giai đoạn cụ thể với tài xế khi cần — tách riêng khỏi số dư cộng dồn toàn thời gian ở trên.</div>
+      <div class="card">
+        <div class="summary-row"><span>+ Đã ứng thêm trong khoảng</span><span class="val" style="color:var(--profit);">+${fmtVND(rangeAdvancedTotal)}</span></div>
+        <div class="summary-row total"><span>− Đã chi (phát sinh trong ca + báo cáo tay) trong khoảng</span><span class="val" style="color:var(--loss);">−${fmtVND(rangeSpentTotal)}</span></div>
+      </div>
+    </section>
+    <section class="group">
       <h3>Lịch Sử Ứng Tiền</h3>
       ${renderDriverAdvanceOnlyHistoryHtml(driverId)}
     </section>
     <section class="group">
-      <h3>🧾 Chi Phí Phát Sinh Trong Ca — Tháng ${monthLabelVN(yearMonth)}</h3>
-      ${renderIncidentalAutoDeductedHtml(driverId, yearMonth)}
+      <h3>🧾 Chi Phí Phát Sinh Trong Ca — Trong Khoảng Đã Chọn</h3>
+      ${renderIncidentalAutoDeductedHtml(driverId, from, to)}
     </section>
     <section class="group">
       <h3>Báo Cáo Chi Khác (Ngoài Ca, Ghi Tay)</h3>
@@ -7776,9 +7816,11 @@ function openDriverAdvanceDetail(driverId, yearMonthOverride){
   document.getElementById('advDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.getElementById('addAdvanceBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceEditor(null, driverId); });
   document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverExpenseReportEditor(null, driverId); });
-  const monthPicker = document.getElementById('advMonthPicker');
-  if(monthPicker) monthPicker.addEventListener('change', ()=>{
-    if(monthPicker.value) openDriverAdvanceDetail(driverId, monthPicker.value);
+  document.getElementById('advFromPicker').addEventListener('change', e=>{
+    if(e.target.value) openDriverAdvanceDetail(driverId, e.target.value, to);
+  });
+  document.getElementById('advToPicker').addEventListener('change', e=>{
+    if(e.target.value) openDriverAdvanceDetail(driverId, from, e.target.value);
   });
 }
 function openDriverAdvanceEditor(id, driverId){
@@ -7837,9 +7879,9 @@ function openDriverAdvanceEditor(id, driverId){
 /// Bảng kẻ ô CHỈ ĐỂ XEM (không bấm nhập gì) — hiện các ca có Chi Phí Phát
 /// Sinh > 0 trong ĐÚNG tháng yearMonth, đúng phần đang được TỰ ĐỘNG trừ
 /// vào số dư tháng đó ở driverAdvanceBalance().
-function renderIncidentalAutoDeductedHtml(driverId, yearMonth){
-  const list = driverIncidentalShiftsInMonth(driverId, yearMonth);
-  if(list.length===0) return '<div class="hint">Chưa có Chi phí phát sinh nào trong ca tháng này.</div>';
+function renderIncidentalAutoDeductedHtml(driverId, from, to){
+  const list = driverIncidentalShiftsInRange(driverId, from, to);
+  if(list.length===0) return '<div class="hint">Chưa có Chi phí phát sinh nào trong ca ở khoảng ngày đã chọn.</div>';
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
@@ -8053,6 +8095,18 @@ function openDriverDetail(driverId){
   const monthsSpanned = monthsInRange(from, to);
   const monthlyBonus = driverMonthlyBonusTotalInRange(driverId, from, to);
   const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
+  // SỬA 2026-09-04 (Ông Chủ yêu cầu — "tính chi tiết số nào nhân số nào ra
+  // kết quả" trước khi in phiếu lương): suy ngược ra "số lượng" từ ĐÚNG
+  // số tiền đã cộng dồn sẵn (baseSalary/food/tripWage) chia cho đơn giá
+  // gốc — KHÔNG tính lại từ đầu bằng vòng lặp riêng, để chắc chắn
+  // "đơn giá × số lượng" hiển thị LUÔN NHÂN RA ĐÚNG con số đang có, không
+  // có đường tính thứ 2 nào có thể lệch nhau.
+  const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||28;
+  const dailyBaseRate = (Number(driver.monthlyBaseSalary)||0) / standardWorkDays;
+  const baseSalaryEquivDays = dailyBaseRate>0 ? baseSalary/dailyBaseRate : 0;
+  const foodEligibleShifts = (Number(driver.dailyFoodAllowance)||0)>0 ? food/(Number(driver.dailyFoodAllowance)||1) : 0;
+  const avgWagePerTrip = totalTrips>0 ? tripWage/totalTrips : 0;
+  const fmtQtyPlain = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:1});
 
   const advanceRecords = inRange.filter(sh=>(sh.advanceAmount||0)>0).sort((a,b)=>b.date.localeCompare(a.date));
   const repairRecords = state.repairs.filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to &&
@@ -8121,22 +8175,53 @@ function openDriverDetail(driverId){
 
     <section class="group">
       <h3>💵 Dòng Tiền Liên Quan Đến Tài Xế</h3>
-      <div class="card">
-        <div class="summary-row"><span>Lương cứng phân bổ</span><span class="val">${fmtVND(baseSalary)}</span></div>
-        <div class="summary-row"><span>Tổng lương chuyến</span><span class="val">${fmtVND(tripWage)}</span></div>
-        <div class="summary-row"><span>Tiền ăn</span><span class="val">${fmtVND(food)}</span></div>
-        <div class="summary-row"><span>Tiền tip/thưởng cuối tháng</span><span class="val">${fmtVND(monthlyBonus)}</span></div>
-        <div class="summary-row"><span>− Ứng lương/Đền bù</span><span class="val" style="color:${advance>0?'var(--loss)':'inherit'}">${fmtVND(advance)}</span></div>
-        <div class="summary-row"><span>− Trừ do hỏng hóc</span><span class="val" style="color:${repairDeduction>0?'var(--loss)':'inherit'}">${fmtVND(repairDeduction)}</span></div>
-        <div class="summary-row total"><span>LƯƠNG THỰC NHẬN</span><span class="val" style="color:${netPay>=0?'var(--profit)':'var(--loss)'}">${fmtVND(netPay)}</span></div>
-        <div class="hint" style="margin-top:8px;">Ông Chủ đổi khoảng thời gian ở trên để xem lại kỳ khác bất cứ lúc nào.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th>Cách Tính</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Lương cứng phân bổ</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">${fmtVND(driver.monthlyBaseSalary||0)}/tháng ÷ ${standardWorkDays} ngày công chuẩn × ${fmtQtyPlain(baseSalaryEquivDays)} ngày công quy đổi</td>
+              <td class="num" style="font-weight:700;">${fmtVND(baseSalary)}</td>
+            </tr>
+            <tr>
+              <td>Tổng lương chuyến</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">${totalTrips} chuyến hiệu lực × ~${fmtVND(avgWagePerTrip)}/chuyến bình quân (có phân bậc giá chuyến 1-3/4+, xem "🔍 Chi Tiết Từng Ngày")</td>
+              <td class="num" style="font-weight:700;">${fmtVND(tripWage)}</td>
+            </tr>
+            <tr>
+              <td>Tiền ăn</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">${fmtVND(driver.dailyFoodAllowance||0)}/ca × ${fmtQtyPlain(foodEligibleShifts)} ca được tính tiền ăn</td>
+              <td class="num" style="font-weight:700;">${fmtVND(food)}</td>
+            </tr>
+            <tr>
+              <td>Tiền tip/thưởng cuối tháng</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">Số cố định Ông Chủ tự chốt riêng cho (các) tháng trong kỳ (xem mục 🎁 bên dưới) — không tính theo công thức</td>
+              <td class="num" style="font-weight:700;">${fmtVND(monthlyBonus)}</td>
+            </tr>
+            <tr>
+              <td>− Ứng lương/Đền bù</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">Cộng dồn từ đúng các ca trong kỳ có ghi số tiền ứng/đền bù riêng lẻ (không phải 1 mức cố định)</td>
+              <td class="num" style="font-weight:700; color:${advance>0?'var(--loss)':'inherit'}">${fmtVND(advance)}</td>
+            </tr>
+            <tr>
+              <td>− Trừ do hỏng hóc</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">Đúng phần tài xế này chịu trách nhiệm, cộng từ Sổ Chi Phí Sửa Chữa trong kỳ</td>
+              <td class="num" style="font-weight:700; color:${repairDeduction>0?'var(--loss)':'inherit'}">${fmtVND(repairDeduction)}</td>
+            </tr>
+            <tr class="grid-total-row">
+              <td colspan="2">= LƯƠNG THỰC NHẬN</td>
+              <td class="num" style="color:${netPay>=0?'var(--profit)':'var(--loss)'}">${fmtVND(netPay)}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+      <div class="hint" style="margin-top:8px;">Ông Chủ đổi khoảng thời gian ở trên để xem lại kỳ khác bất cứ lúc nào.</div>
     </section>
 
     <section class="group">
       <h3>🎁 Tiền Tip/Thưởng Cuối Tháng</h3>
       <div class="card">
-        <div class="hint" style="margin-bottom:10px;">Đây là khoản thưởng chốt MỘT LẦN vào cuối chu kỳ làm việc của một tháng cho tài xế này. Mỗi tháng chỉ nên lưu 1 dòng; lưu lại sẽ cập nhật đè lên số đã lưu của đúng tháng đó.</div>
         <div class="field">
           <label>Tháng thưởng</label>
           <input type="month" id="mb_month" value="${defaultYearMonth}">
@@ -10461,11 +10546,81 @@ function computeCostPerKmTrend(monthsBack){
     const shiftsInMonth = state.shifts.filter(sh=>sh.date>=monthStart && sh.date<=monthEnd);
     const totalKm = shiftsInMonth.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
     const totalCost = shiftsInMonth.reduce((s,sh)=>s+shiftTotalCost(sh),0);
-    buckets.push({ label, costPerKm: totalKm>0 ? totalCost/totalKm : 0, totalKm, totalCost });
+    // SỬA 2026-09-04 (Ông Chủ yêu cầu — cần giải trình rõ vì sao ra đúng
+    // con số đó): lưu sẵn ĐÚNG từng khoản đã cộng nên shiftTotalCost(),
+    // tính 1 LẦN DUY NHẤT ở đây — trang "Chi Tiết" dùng lại NGUYÊN các số
+    // này, không tính lại lần 2 ở chỗ khác, đảm bảo LUÔN khớp tuyệt đối
+    // với con số trên biểu đồ (tránh lặp lại bài học cũ: 2 nơi tính cùng
+    // 1 thứ dễ bị lệch nhau).
+    const breakdown = {
+      fuel: shiftsInMonth.reduce((s,sh)=>s+shiftFuelCost(sh),0),
+      tripWage: shiftsInMonth.reduce((s,sh)=>s+shiftTotalTripWage(sh),0),
+      baseSalary: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0),0),
+      food: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.foodAllowance)||0),0),
+      incidental: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0),
+      roadFeeIncidental: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.roadFeeIncidental)||0),0),
+      material: shiftsInMonth.reduce((s,sh)=>s+shiftMaterialCost(sh),0),
+      invoiceSupplement: shiftsInMonth.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0),
+    };
+    buckets.push({ label, monthStart, monthEnd, costPerKm: totalKm>0 ? totalCost/totalKm : 0, totalKm, totalCost, shiftCount: shiftsInMonth.length, breakdown });
   }
   return buckets;
 }
 
+/// SỬA 2026-09-04 (Ông Chủ yêu cầu — "cần giải trình rõ vì sao ra đúng
+/// con số đó, cho 1 trang riêng, mỗi tháng 1 ô rõ ràng"): trang full màn
+/// hình, liệt kê ĐÚNG 6 tháng như biểu đồ, mỗi tháng 1 khối riêng biệt
+/// (bảng .grid-table) — dùng LẠI NGUYÊN dữ liệu breakdown đã tính sẵn
+/// trong computeCostPerKmTrend() (KHÔNG tính lại lần 2), đảm bảo con số
+/// ở đây LUÔN khớp tuyệt đối với cột trên biểu đồ.
+function renderCostPerKmTrendDetailPage(costTrend){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const labels = {
+    fuel:'Tiền dầu tiêu hao', tripWage:'Lương chuyến', baseSalary:'Lương cứng phân bổ',
+    food:'Tiền ăn', incidental:'Chi phí phát sinh', roadFeeIncidental:'Luật đường phát sinh/chuyến',
+    material:'Giá vốn vật liệu (công trình chở cước/thương mại)', invoiceSupplement:'Chi phí bù hoá đơn kho'
+  };
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="costPerKmDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📈 Xu Hướng Chi Phí / Km — Chi Tiết Từng Tháng</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Chi Phí/Km = Tổng CHI PHÍ TOÀN BỘ của mọi ca trong tháng (dầu, lương chuyến, lương cứng, tiền ăn, phát sinh, luật đường, giá vốn vật liệu, chi phí bù hoá đơn) ÷ Tổng số Km đã chạy trong tháng đó. Tháng không có ca nào ghi nhận thì không tính được (hiện "—" trên biểu đồ).</div>
+      ${costTrend.map(b=>{
+        if(b.shiftCount===0){
+          return `
+          <div class="card" style="margin-bottom:12px;">
+            <div style="font-weight:800; font-size:15px; margin-bottom:6px;">Tháng ${b.label}</div>
+            <div class="hint" style="margin:0;">Chưa có ca nào ghi nhận trong tháng này — không tính được Chi Phí/Km.</div>
+          </div>`;
+        }
+        const items = Object.keys(labels).map(k=>({ label: labels[k], value: b.breakdown[k] })).filter(it=>it.value>0.0001);
+        return `
+        <div class="card" style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+            <div style="font-weight:800; font-size:15px;">Tháng ${b.label}</div>
+            <div style="font-weight:800; font-size:17px; color:var(--accent);">${fmtVND(Math.round(b.costPerKm))}/km</div>
+          </div>
+          <div class="grid-table-wrap">
+            <table class="grid-table">
+              <thead><tr><th>Khoản Chi Phí</th><th class="num">Số Tiền</th></tr></thead>
+              <tbody>
+                ${items.map(it=>`<tr><td>${it.label}</td><td class="num">${fmtVND(Math.round(it.value))}</td></tr>`).join('')}
+                <tr class="grid-total-row"><td>TỔNG CHI PHÍ (${b.shiftCount} ca)</td><td class="num">${fmtVND(Math.round(b.totalCost))}</td></tr>
+                <tr><td>Tổng Km đã chạy</td><td class="num">${Math.round(b.totalKm).toLocaleString('vi-VN')} km</td></tr>
+                <tr class="grid-total-row"><td>Chi Phí ÷ Km = Chi Phí/Km</td><td class="num">${fmtVND(Math.round(b.totalCost))} ÷ ${Math.round(b.totalKm).toLocaleString('vi-VN')} km = <b>${fmtVND(Math.round(b.costPerKm))}/km</b></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+      }).join('')}
+      <div class="hint">Nếu cột các tháng gần đây cao dần lên — dấu hiệu xe xuống cấp, hao dầu tăng, hoặc giá dầu tăng, cần xem lại.</div>
+    </section>
+  `;
+  document.getElementById('costPerKmDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+}
 function renderCostPerKmChartSVG(buckets){
   const maxVal = Math.max(1, ...buckets.map(b=>b.costPerKm));
   const chartH = 130, barW = 34, gap = 14, baseY = chartH + 20;
@@ -11847,7 +12002,7 @@ function renderResults(){
     <section class="group">
       <h3>📈 Xu Hướng Chi Phí / Km (6 Tháng Gần Nhất)</h3>
       <div class="card">${renderCostPerKmChartSVG(costTrend)}</div>
-      <div class="hint" style="margin-top:8px;">Nếu cột các tháng gần đây cao dần lên — dấu hiệu xe xuống cấp, hao dầu tăng, hoặc giá dầu tăng, cần xem lại.</div>
+      <button class="btn btn-ghost btn-block" id="costPerKmTrendDetailBtn" style="margin-top:10px;">📖 Chi Tiết Từng Tháng</button>
     </section>
 
     <section class="group">
@@ -11979,6 +12134,8 @@ function renderResults(){
   document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal({...breakEven, materialCost: breakEvenMaterialCost, pureOperatingVariable: breakEvenPureOperatingVariable}));
   const monthlyProjectionDetailBtn = document.getElementById('monthlyProjectionDetailBtn');
   if(monthlyProjectionDetailBtn) monthlyProjectionDetailBtn.addEventListener('click', ()=>renderMonthlyProjectionExplainerModal(monthlyProjection));
+  const costPerKmTrendDetailBtn = document.getElementById('costPerKmTrendDetailBtn');
+  if(costPerKmTrendDetailBtn) costPerKmTrendDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCostPerKmTrendDetailPage(costTrend); });
   document.querySelectorAll('#marginWindowToggle button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       state.resultsMarginWindowDays = Number(btn.dataset.val);
@@ -15286,8 +15443,11 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   rows.push([]);
   // SỬA 2026-09-01: hiện thêm Số Dư Tạm Ứng Chi Phí đang giữ — sổ ĐỘC LẬP,
   // KHÔNG cộng/trừ vào LƯƠNG THỰC NHẬN ở trên (xem driverAdvanceBalance()).
-  const advanceBalance = driverId ? driverAdvanceBalance(driverId, from.slice(0,7)) : 0;
-  rows.push([`TẠM ỨNG CHI PHÍ VẬN HÀNH ĐANG GIỮ (tháng ${from.slice(5,7)}/${from.slice(0,4)}, KHÔNG PHẢI LƯƠNG)`, Math.round(advanceBalance)]);
+  // SỬA 2026-09-05: driverAdvanceBalance() giờ nhận đúng 1 NGÀY cụ thể
+  // (không phải tháng) — dùng đúng "to" (ngày cuối kỳ phiếu lương) làm
+  // mốc chốt, đúng ý "số dư đang giữ tính đến hết kỳ lương này".
+  const advanceBalance = driverId ? driverAdvanceBalance(driverId, to) : 0;
+  rows.push([`TẠM ỨNG CHI PHÍ VẬN HÀNH ĐANG GIỮ (tính đến hết ${formatDateVN(to)}, KHÔNG PHẢI LƯƠNG)`, Math.round(advanceBalance)]);
   rows.push([]);
 
   rows.push(['CHI TIẾT TỪNG CA']);
@@ -15862,10 +16022,12 @@ async function exportDriverPayslipXLSX(driverId){
   // — KHÔNG cộng/trừ vào THỰC NHẬN ở trên, đây là sổ ĐỘC LẬP (tiền chi
   // phí vận hành tài xế đang giữ hộ, khác bản chất với lương) — tách hẳn
   // thành mục riêng để tài xế không nhầm đây là 1 phần lương của họ.
-  const advanceBalance = driverId ? driverAdvanceBalance(driverId, from.slice(0,7)) : 0;
+  // SỬA 2026-09-05: driverAdvanceBalance() giờ nhận đúng 1 NGÀY cụ thể
+  // (không phải tháng) — dùng đúng "to" (ngày cuối kỳ phiếu lương).
+  const advanceBalance = driverId ? driverAdvanceBalance(driverId, to) : 0;
   nextRow(12);
   merge(r,'A',lastColLetter); setCell(`A${r}`, 'TẠM ỨNG CHI PHÍ VẬN HÀNH (KHÔNG PHẢI LƯƠNG)', { size:14, bold:true }); nextRow(24);
-  line(`Số dư tạm ứng chi phí đang giữ (tháng ${from.slice(5,7)}/${from.slice(0,4)})`, Math.abs(advanceBalance),
+  line(`Số dư tạm ứng chi phí đang giữ (tính đến hết ${formatDateVN(to)})`, Math.abs(advanceBalance),
     { bold:true, color: advanceBalance>=0?'FF8A6D00':'FFB23A2E', fill:'FFFFF3CD' });
   merge(r,'A',lastColLetter); setCell(`A${r}`, advanceBalance>=0
     ? 'Số dương = tài xế đang cầm tiền công ty để chi phí vận hành (dầu/phát sinh...), chưa quyết toán hết.'
