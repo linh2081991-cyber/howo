@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-07 · #160';
+const APP_BUILD = '2026-09-07 · #161';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1604,7 +1604,7 @@ function renderVehiclePickerModal(){
   ];
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>Chọn Xe</h3>
+    <h3>🚛 Chọn Xe</h3>
     ${rows.map(r=>`
       <div class="summary-row" style="padding:12px 4px; gap:8px;">
         <span class="vehicle-pick-row" data-vid="${r.id===null?'':r.id}" style="cursor:pointer; flex:1; display:flex; justify-content:space-between; align-items:center;">
@@ -1656,7 +1656,7 @@ function renderDeleteVehicleConfirmModal(vehicleId, vehicleName){
 function renderAddVehicleModal(){
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="backToVehicleListBtn">← Quay lại</button></div>
-    <h3>+ Thêm Xe Mới</h3>
+    <h3>🚛 + Thêm Xe Mới</h3>
     <div class="field">
       <label>Biển số xe</label>
       <input type="text" id="newVehiclePlate" placeholder="VD 29H-123.45">
@@ -2668,7 +2668,7 @@ function renderSupplierManagerModal(editingId, linkToSiteIdx){
     <h3>🏔️ Nhà Cung Cấp / Điểm Múc</h3>
     <div style="margin-bottom:14px;">${listHtml}</div>
     <div class="formula-divider" style="margin:10px 0;"></div>
-    <h3>${editing?'Sửa Nhà Cung Cấp':'Thêm Nhà Cung Cấp Mới'}</h3>
+    <h3>🏔️ ${editing?'Sửa Nhà Cung Cấp':'Thêm Nhà Cung Cấp Mới'}</h3>
     <div class="field">
       <label>Tên nhà cung cấp / mỏ</label>
       <input type="text" id="sup_name" value="${escapeHtml(val(editing,'name'))}" placeholder="VD: Mỏ Hà Nam">
@@ -3907,7 +3907,7 @@ function renderCustomerManagerModal(editingId, linkToSiteIdx){
     <h3>🧑‍💼 Khách Hàng</h3>
     <div style="margin-bottom:14px;">${listHtml}</div>
     <div class="formula-divider" style="margin:10px 0;"></div>
-    <h3>${editing?'Sửa Khách Hàng':'Thêm Khách Hàng Mới'}</h3>
+    <h3>🧑‍💼 ${editing?'Sửa Khách Hàng':'Thêm Khách Hàng Mới'}</h3>
     <div class="field">
       <label>Tên khách hàng</label>
       <input type="text" id="cus_name" value="${escapeHtml(val(editing,'name'))}" placeholder="VD: Công ty XYZ">
@@ -7335,7 +7335,7 @@ function renderDrivers(){
   const s = state.settings;
   app.innerHTML = `
     <section class="group">
-      <h3>Thêm Tài Xế Mới</h3>
+      <h3>➕ Thêm Tài Xế Mới</h3>
       <div class="card">
         <div class="field">
           <label>Tên tài xế</label>
@@ -7354,7 +7354,7 @@ function renderDrivers(){
     </section>
 
     <section class="group">
-      <h3>Công Chuẩn Toàn Đội</h3>
+      <h3>📅 Công Chuẩn Toàn Đội</h3>
       <div class="card">
         <div class="field" style="margin-bottom:14px;">
           <label>Số ngày công chuẩn / tháng (dùng để chia lương cứng)</label>
@@ -7370,7 +7370,7 @@ function renderDrivers(){
     </section>
 
     <section class="group">
-      <h3>Thuế Suất Áp Dụng</h3>
+      <h3>🧾 Thuế Suất Áp Dụng</h3>
       <div class="card">
         <div class="field" style="margin-bottom:14px;">
           <label>Thuế suất VAT mặc định (%)</label>
@@ -7387,7 +7387,7 @@ function renderDrivers(){
     </section>
 
     <section class="group">
-      <h3>Danh Sách Tài Xế</h3>
+      <h3>👥 Danh Sách Tài Xế</h3>
       ${state.drivers.length===0 ? '<div class="empty"><div class="big">👤</div>Chưa có tài xế nào.</div>' :
         // SỬA 2026-08-23 (yêu cầu Ông Chủ): tài xế còn hoạt động lên trên,
         // tài xế ngừng hoạt động xuống dưới — chỉ đổi THỨ TỰ HIỂN THỊ ở
@@ -7518,7 +7518,7 @@ function openEditDriver(id){
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>Sửa Tài Xế</h3>
+      <h3>✏️ Sửa Tài Xế</h3>
       <div class="card">
         <div class="field">
           <label>Tên tài xế</label>
@@ -7631,7 +7631,7 @@ function renderShiftReadOnlyDetail(shiftId){
     </section>
 
     <section class="group">
-      <h3>Km &amp; Nhiên Liệu</h3>
+      <h3>⛽ Km &amp; Nhiên Liệu</h3>
       <div class="card">
         <div class="summary-row"><span>ODO đầu ca → cuối ca</span><span class="val">${(Number(sh.odoStart)||0).toLocaleString('vi-VN')} → ${(Number(sh.odoEnd)||0).toLocaleString('vi-VN')} km</span></div>
         <div class="summary-row"><span>Số Km đã chạy</span><span class="val">${kmDriven.toLocaleString('vi-VN')} km</span></div>
@@ -7642,7 +7642,7 @@ function renderShiftReadOnlyDetail(shiftId){
     </section>
 
     <section class="group">
-      <h3>Công Trình Đã Ghé (${sites.length})</h3>
+      <h3>📍 Công Trình Đã Ghé (${sites.length})</h3>
       ${sites.length===0 ? `<div class="hint">Ca này chưa ghi công trình nào.</div>` : sites.map(s=>`
         <div class="card" style="padding:12px 14px; margin-bottom:8px;">
           <div style="font-weight:700; font-size:14.5px; margin-bottom:6px;">${escapeHtml(s.siteName||'(chưa đặt tên)')}</div>
@@ -7658,7 +7658,7 @@ function renderShiftReadOnlyDetail(shiftId){
 
     ${sh.notes ? `
     <section class="group">
-      <h3>Ghi Chú</h3>
+      <h3>📝 Ghi Chú</h3>
       <div class="card"><div class="hint" style="font-size:14px; color:var(--ink);">${escapeHtml(sh.notes)}</div></div>
     </section>` : ''}
   `;
@@ -7851,7 +7851,7 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride){
       </div>
     </section>
     <section class="group">
-      <h3>Lịch Sử Ứng Tiền</h3>
+      <h3>📋 Lịch Sử Ứng Tiền</h3>
       ${renderDriverAdvanceOnlyHistoryHtml(driverId)}
     </section>
     <section class="group">
@@ -7859,7 +7859,7 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride){
       ${renderIncidentalAutoDeductedHtml(driverId, from, to)}
     </section>
     <section class="group">
-      <h3>Báo Cáo Chi Khác (Ngoài Ca, Ghi Tay)</h3>
+      <h3>🧾 Báo Cáo Chi Khác (Ngoài Ca, Ghi Tay)</h3>
       ${renderDriverExpenseReportHistoryHtml(driverId)}
     </section>
   `;
@@ -7883,7 +7883,7 @@ function openDriverAdvanceEditor(id, driverId){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi'} Khoản Ứng Cho — ${escapeHtml(d?d.name:'')}</h3>
+      <h3>💰 ${existing?'Sửa':'Ghi'} Khoản Ứng Cho — ${escapeHtml(d?d.name:'')}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày đưa tiền</label>
@@ -7957,7 +7957,7 @@ function openDriverExpenseReportEditor(id, driverId){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi'} Báo Cáo Chi Khác (Ngoài Ca) — ${escapeHtml(d?d.name:'')}</h3>
+      <h3>🧾 ${existing?'Sửa':'Ghi'} Báo Cáo Chi Khác (Ngoài Ca) — ${escapeHtml(d?d.name:'')}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày chi</label>
@@ -7983,7 +7983,7 @@ function openDriverExpenseReportEditor(id, driverId){
       </div>
     </section>
     <section class="group">
-      <h3>Lịch Sử Báo Cáo Chi Khác — ${escapeHtml(d?d.name:'')}</h3>
+      <h3>📋 Lịch Sử Báo Cáo Chi Khác — ${escapeHtml(d?d.name:'')}</h3>
       ${renderDriverExpenseReportHistoryHtml(did)}
     </section>
   `;
@@ -8183,7 +8183,7 @@ function openDriverDetail(driverId){
     </section>
 
     <section class="group">
-      <h3>Khoảng Thời Gian</h3>
+      <h3>📅 Khoảng Thời Gian</h3>
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <button class="btn btn-ghost btn-sm" id="dd_thisMonth" style="flex:1;">Tháng Này</button>
         <button class="btn btn-ghost btn-sm" id="dd_lastMonth" style="flex:1;">Tháng Trước</button>
@@ -8902,7 +8902,7 @@ function renderHiringAdvisor(){
     </section>
 
     <section class="group">
-      <h3>Khoảng Ngày Lấy Lãi Gộp/Chuyến Thực Tế</h3>
+      <h3>📅 Khoảng Ngày Lấy Lãi Gộp/Chuyến Thực Tế</h3>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -8916,7 +8916,7 @@ function renderHiringAdvisor(){
     </section>
 
     <section class="group">
-      <h3>Giả Định Số Chuyến Mỗi Ca</h3>
+      <h3>🔢 Giả Định Số Chuyến Mỗi Ca</h3>
       <div class="hint" style="margin-bottom:10px;">Phụ thuộc giờ hoạt động thực tế của điểm múc/điểm đổ — Ông Chủ tự đánh giá theo kinh nghiệm, app không kiểm tra được.</div>
       <div class="date-range">
         <div class="field">
@@ -8931,7 +8931,7 @@ function renderHiringAdvisor(){
     </section>
 
     <section class="group">
-      <h3>Lương Dự Kiến Trả Lái Xe Mới</h3>
+      <h3>💵 Lương Dự Kiến Trả Lái Xe Mới</h3>
       <div class="hint" style="margin-bottom:10px;">Mặc định lấy đúng mức tài xế hiện có đang hưởng — Ông Chủ chỉnh nếu định trả khác.</div>
       <div class="field">
         <label>Lương cứng/tháng</label>
@@ -9106,7 +9106,7 @@ function renderBonusAdvisor(){
 
     ${activeDrivers.length>0 ? `
     <section class="group">
-      <h3>Chấm Điểm Thái Độ (Tuỳ Chọn)</h3>
+      <h3>⭐ Chấm Điểm Thái Độ (Tuỳ Chọn)</h3>
       <div class="hint" style="margin-bottom:10px;">Thang 1-10 — bỏ trống nếu không muốn chấm, AI sẽ chỉ dùng số liệu khách quan.</div>
       ${activeDrivers.map(d=>`
         <div class="field" style="margin-bottom:10px;">
@@ -9158,7 +9158,7 @@ function renderBonusResult(result){
   const bonuses = Array.isArray(result.driverBonuses) ? [...result.driverBonuses].sort((a,b)=>(a.rank||99)-(b.rank||99)) : [];
   return `
     <section class="group">
-      <h3>Đề Xuất Mức Thưởng</h3>
+      <h3>🎁 Đề Xuất Mức Thưởng</h3>
       ${bonuses.map(b=>`
         <div class="card" style="margin-bottom:10px;">
           <div class="summary-row"><span style="font-weight:700;">#${b.rank||'?'} — ${escapeHtml(b.driverName||'')}</span>
@@ -9169,8 +9169,8 @@ function renderBonusResult(result){
         <div class="summary-row total"><span>Tổng đề xuất</span><span class="val">${fmtVND(result.totalProposed||0)}</span></div>
       </div>
     </section>
-    ${result.allocationPrinciple ? `<section class="group"><h3>Nguyên Tắc Phân Bổ</h3><div class="card"><div class="hint" style="color:var(--ink); font-size:14px;">${escapeHtml(result.allocationPrinciple)}</div></div></section>` : ''}
-    ${result.overallNote ? `<section class="group"><h3>Nhận Xét Chung</h3><div class="card"><div class="hint" style="color:var(--ink); font-size:14px;">${escapeHtml(result.overallNote)}</div></div></section>` : ''}
+    ${result.allocationPrinciple ? `<section class="group"><h3>📐 Nguyên Tắc Phân Bổ</h3><div class="card"><div class="hint" style="color:var(--ink); font-size:14px;">${escapeHtml(result.allocationPrinciple)}</div></div></section>` : ''}
+    ${result.overallNote ? `<section class="group"><h3>💬 Nhận Xét Chung</h3><div class="card"><div class="hint" style="color:var(--ink); font-size:14px;">${escapeHtml(result.overallNote)}</div></div></section>` : ''}
   `;
 }
 
@@ -9544,7 +9544,7 @@ function renderProjectAppraisal(){
     </section>
 
     <section class="group">
-      <h3>Danh Sách Công Trình Dự Kiến</h3>
+      <h3>📋 Danh Sách Công Trình Dự Kiến</h3>
       <button class="btn btn-accent btn-block" id="addAppraisalBtn">+ Thêm Công Trình Dự Kiến</button>
       <div id="appraisalListWrap" style="margin-top:10px;"></div>
     </section>
@@ -9769,7 +9769,7 @@ function openProjectAppraisalEditor(id){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Thêm'} Công Trình Dự Kiến</h3>
+      <h3>🏗️ ${existing?'Sửa':'Thêm'} Công Trình Dự Kiến</h3>
       <div class="card">
         <div class="field">
           <label>Tên công trình dự kiến</label>
@@ -9881,7 +9881,7 @@ function openProjectAppraisalEditor(id){
     </section>
 
     <section class="group">
-      <h3>Mô Phỏng Nhanh</h3>
+      <h3>⚡ Mô Phỏng Nhanh</h3>
       <div class="card" id="ap_preview"></div>
       <div class="hint" style="margin-top:8px;">Dầu ${historicalAvgFuelPerKm().toFixed(2)} lít/km · Đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít · Tiền ăn TB ${fmtVND(historicalAvgFoodPerShift())}/ca — lấy từ số liệu vận hành thực tế (sửa đơn giá dầu/VAT ở đầu trang "Thẩm Định Công Trình" trong tab Trợ Lý). Riêng lương chuyến do Ông Chủ tự nhập tay theo từng công trình.</div>
     </section>
@@ -10185,7 +10185,7 @@ function currentMonthRange(){
 /// màn hình, dùng ĐÚNG class .grid-table đã dùng chuẩn ở khắp app (Chi
 /// Tiết Từng Chuyến, Tồn Kho Tổng Hợp...) cho đồng bộ giao diện toàn app.
 /// KHÔNG đụng bất kỳ số liệu/công thức nào — chỉ đổi cách trình bày.
-function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities){
+function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities, tollFee){
   scrollMainToTop();
   const items = [
     { label:'Tiền dầu tiêu hao', value: gTotal.fuelCost },
@@ -10198,6 +10198,7 @@ function renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRe
     { label:'Chi phí luật đường (kỳ này)', value: roadFee||0 },
     { label:'Tiền thuê nhà (kỳ này)', value: houseRent||0 },
     { label:'Tiền điện nước (kỳ này)', value: utilities||0 },
+    { label:'CP cầu đường (kỳ này)', value: tollFee||0 },
   ];
   const total = items.reduce((s,i)=>s+i.value,0);
   const app = document.getElementById('app');
@@ -11871,7 +11872,7 @@ function renderResults(){
     </section>` : ''}
 
     <section class="group">
-      <h3>Khoảng Thời Gian</h3>
+      <h3>📅 Khoảng Thời Gian</h3>
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <button class="btn btn-ghost btn-sm" id="res_thisMonth" style="flex:1;">Tháng Này</button>
         <button class="btn btn-ghost btn-sm" id="res_lastMonth" style="flex:1;">Tháng Trước</button>
@@ -11893,44 +11894,60 @@ function renderResults(){
 
     <section class="group">
       <h3>💰 Lợi Nhuận Thực Tế Cuối Cùng</h3>
-      <div class="card">
-        <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(gTotal.revenue)}</span></div>
-        <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
-        <div class="summary-row"><span>− Chi phí mua hoá đơn bù</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
-        <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN</span><span class="val">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
-        <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh, sửa chữa/khấu hao, luật đường)</span><span class="val">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee + houseRent + utilities)}</span></div>
-        <button class="btn btn-ghost btn-sm" id="operatingCostDetailBtn" style="width:auto; padding:6px 12px; margin:0 0 6px;">🔍 Chi Tiết Từng Khoản</button>
-        <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)>=0?'var(--profit)':'var(--loss)'}">= Lợi nhuận gộp vận hành</span><span class="val" style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)}</span></div>
-        <div class="summary-row"><span>− Khấu hao xe dự kiến / tháng</span><span class="val">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</span></div>
-        <div class="summary-row"><span>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</span><span class="val">${fmtVND(state.settings.monthlyLoanInterest||0)}</span></div>
-        <div class="summary-row"><span>− Bảo hiểm xe / tháng</span><span class="val">${fmtVND(state.settings.monthlyInsurance||0)}</span></div>
-        <div class="summary-row"><span>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</span><span class="val">${fmtVND(state.settings.monthlyRegistrationFee||0)}</span></div>
-        <div class="summary-row total"><span>LỢI NHUẬN THỰC TẾ</span><span class="val" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</span></div>
-        <div class="formula-divider" style="margin:10px 0;"></div>
-        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">CÁC KHOẢN THUẾ TRONG KỲ</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Doanh thu</td><td class="num">${fmtVND(gTotal.revenue)}</td></tr>
+            <tr><td>− Giá vốn hàng mua (thương mại)</td><td class="num">${fmtVND(gTotal.materialCost)}</td></tr>
+            <tr><td>− Chi phí mua hoá đơn bù</td><td class="num">${fmtVND(gTotal.supplementCost)}</td></tr>
+            <tr class="grid-total-row"><td>= LÃI GỘP MUA-BÁN</td><td class="num" style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</td></tr>
+            <tr><td>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, phát sinh, sửa chữa/khấu hao, luật đường, nhà, điện nước, cầu đường)</td><td class="num">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee + houseRent + utilities + tollFee)}</td></tr>
+            <tr class="grid-total-row"><td>= Lợi nhuận gộp vận hành</td><td class="num" style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities-tollFee)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities-tollFee)}</td></tr>
+            <tr><td>− Khấu hao xe dự kiến / tháng</td><td class="num">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</td></tr>
+            <tr><td>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</td><td class="num">${fmtVND(state.settings.monthlyLoanInterest||0)}</td></tr>
+            <tr><td>− Bảo hiểm xe / tháng</td><td class="num">${fmtVND(state.settings.monthlyInsurance||0)}</td></tr>
+            <tr><td>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</td><td class="num">${fmtVND(state.settings.monthlyRegistrationFee||0)}</td></tr>
+            <tr class="grid-total-row"><td>= LỢI NHUẬN THỰC TẾ</td><td class="num" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="operatingCostDetailBtn" style="width:auto; padding:6px 12px; margin:10px 0 0;">🔍 Chi Tiết Từng Khoản</button>
+
+      <div class="card" style="margin-top:14px;">
+        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">🧾 CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
         <button class="btn btn-ghost btn-sm" id="vatDetailBtn" style="margin:2px 0 6px;">🔍 Chi Tiết Cách Tính VAT</button>
         <div class="field" style="margin-top:8px; margin-bottom:0;">
           <label>Thuế TNDN dự kiến (KT thuế tư vấn — Ông Chủ tự nhập theo đúng kỳ này)</label>
           <input type="text" inputmode="decimal" id="res_manualCit" placeholder="Chưa nhập">
         </div>
+      </div>
 
         <div class="formula-divider" style="margin:14px 0;"></div>
         ${periodSummary.isCompanyWide ? `
-        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (TOÀN CÔNG TY)</div>
-        <div class="summary-row"><span>Tiền khách bank vào (thật, trong kỳ)</span><span class="val" style="color:var(--profit);">+${fmtVND(cashIn)}</span></div>
-        <div class="summary-row"><span>− Tiền bank cho mỏ (thật, trong kỳ)</span><span class="val">${fmtVND(cashOutToSuppliers)}</span></div>
-        <div class="summary-row"><span>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh) — tất cả xe</span><span class="val">${fmtVND(operatingCashCost)}</span></div>
-        <div class="summary-row"><span>− Sửa chữa + luật đường — tất cả xe</span><span class="val">${fmtVND(periodSummary.cashFlowRepairTotal+periodSummary.cashFlowRoadFee)}</span></div>
-        <div class="summary-row"><span>− Gốc + lãi vay ngân hàng + bảo hiểm + đăng kiểm — tất cả xe (thật)</span><span class="val">${fmtVND(periodSummary.cashFlowFixedMonthly)}</span></div>
-        <div class="summary-row total" style="font-size:17px;"><span>DÒNG TIỀN THUẦN (TOÀN CÔNG TY)</span><span class="val" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</span></div>
-
+        <h3 style="margin:0 0 8px;">💰 Dòng Tiền Thuần Từ Hoạt Động Kinh Doanh (Toàn Công Ty)</h3>
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+            <tbody>
+              <tr><td>+ Tiền khách bank vào (thật, trong kỳ)</td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(cashIn)}</td></tr>
+              <tr><td>− Tiền bank cho mỏ (thật, trong kỳ)</td><td class="num">${fmtVND(cashOutToSuppliers)}</td></tr>
+              <tr><td>− Chi phí vận hành (dầu, lương, ăn, phát sinh) — tất cả xe</td><td class="num">${fmtVND(operatingCashCost)}</td></tr>
+              <tr><td>− Sửa chữa + luật đường — tất cả xe</td><td class="num">${fmtVND(periodSummary.cashFlowRepairTotal+periodSummary.cashFlowRoadFee)}</td></tr>
+              <tr><td>− Tiền nhà + điện nước + CP cầu đường — chung công ty</td><td class="num">${fmtVND(houseRent+utilities+tollFee)}</td></tr>
+              <tr><td>− Gốc + lãi vay ngân hàng + bảo hiểm + đăng kiểm — tất cả xe (thật)</td><td class="num">${fmtVND(periodSummary.cashFlowFixedMonthly)}</td></tr>
+              <tr class="grid-total-row"><td>= DÒNG TIỀN THUẦN (TOÀN CÔNG TY)</td><td class="num" style="color:${netOperatingCashFlow>=0?'var(--profit)':'var(--loss)'}">${netOperatingCashFlow>=0?'+':''}${fmtVND(netOperatingCashFlow)}</td></tr>
+            </tbody>
+          </table>
+        </div>
         ` : `
-        <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH</div>
+        <h3 style="margin:0 0 8px;">💰 Dòng Tiền Thuần Từ Hoạt Động Kinh Doanh</h3>
         <div class="hint">💡 Đây là tiền mặt thật của CẢ CÔNG TY (tiền khách trả/trả mỏ dùng chung, không thể quy đúng cho riêng 1 xe) — chỉ xem được ở chế độ <b>LINH CHÍ THÀNH</b>. Bấm "Đổi xe" ở đầu trang, chọn LINH CHÍ THÀNH để xem đúng số này.</div>
         `}
 
-        <div class="field" style="margin-top:14px; margin-bottom:0;">
+      <div class="card" style="margin-top:14px;">
+        <div class="field" style="margin-bottom:0;">
           <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
           <input type="text" inputmode="decimal" id="res_roadFee">
         </div>
@@ -12033,7 +12050,7 @@ function renderResults(){
         <div class="formula-divider"></div>
         <div class="summary-row">
           <span>Dự kiến cả tháng nếu giữ đúng tốc độ này</span>
-          <span class="val" style="color:${monthlyProjection.onTrackToHitBreakEven?'var(--profit)':'var(--loss)'}; font-weight:800;">${Math.round(monthlyProjection.projectedTotalTripsThisMonth)} chuyến<br><span style="white-space:nowrap;">${monthlyProjection.onTrackToHitBreakEven ? '✓ Đạt hoà vốn' : '⚠️ Chưa đạt'}</span></span>
+          <span class="val" style="color:${monthlyProjection.onTrackToHitBreakEven?'var(--profit)':'var(--loss)'}; font-weight:800;">${Math.round(monthlyProjection.projectedTotalTripsThisMonth)} chuyến</span>
         </div>
         ${monthlyProjection.remainingTripsNeeded>0 ? `
         <div class="summary-row">
@@ -12060,13 +12077,13 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>Sổ Chi Phí Sửa Chữa</h3>
+      <h3>🔧 Sổ Chi Phí Sửa Chữa</h3>
       <div id="repairListWrap"></div>
       <button class="btn btn-ghost btn-block" id="addRepairBtn">+ Thêm Khoản Sửa Chữa</button>
     </section>
 
     <section class="group">
-      <h3>Tổng Quan Sức Khoẻ Tài Chính</h3>
+      <h3>🩺 Tổng Quan Sức Khoẻ Tài Chính</h3>
       <div class="card dash-wrap">
         <table class="dash">
           <thead><tr><th>Chỉ số</th><th>Ca Ngày</th><th>Ca Đêm</th><th>Tổng Cộng</th></tr></thead>
@@ -12085,12 +12102,12 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>So Sánh Ca Ngày / Ca Đêm</h3>
+      <h3>⚖️ So Sánh Ca Ngày / Ca Đêm</h3>
       <div class="card">${renderComparisonChartSVG(gDay, gNight)}</div>
     </section>
 
     <section class="group">
-      <h3>Thống Kê Theo Từng Ngày</h3>
+      <h3>📊 Thống Kê Theo Từng Ngày</h3>
       <div class="card dash-wrap">
         ${dailyBreakdown.length===0 ? '<div class="hint">Không có ca nào trong khoảng thời gian này.</div>' : `
         <table class="dash">
@@ -12199,7 +12216,7 @@ function renderResults(){
   const goCompleteBtn = document.getElementById('goCompletePendingShiftsBtn');
   if(goCompleteBtn) goCompleteBtn.addEventListener('click', ()=>{ state.currentTab='shifts'; renderAll(); });
   const opCostDetailBtn = document.getElementById('operatingCostDetailBtn');
-  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities); });
+  if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities, tollFee); });
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
     exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent, utilities, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
   });
@@ -12394,7 +12411,7 @@ function openCustomerDetail(customerId){
       </div>`}
     </section>
     <section class="group">
-      <h3>Khoảng Thời Gian</h3>
+      <h3>📅 Khoảng Thời Gian</h3>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -12491,7 +12508,7 @@ function openCustomerPaymentEditor(id, customerId){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(cus?cus.name:'')}</h3>
+      <h3>💵 ${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(cus?cus.name:'')}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
@@ -12670,7 +12687,7 @@ function openSupplierDetail(supplierId){
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
     <section class="group">
-      <h3>Khoảng Thời Gian</h3>
+      <h3>📅 Khoảng Thời Gian</h3>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -12753,7 +12770,7 @@ function openSupplierPaymentEditor(id, supplierId){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Đã Trả Cho Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
+      <h3>💵 ${existing?'Sửa':'Ghi Nhận'} Khoản Đã Trả Cho Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày chuyển tiền</label>
@@ -12920,7 +12937,7 @@ function openPartnerDetail(partnerName){
     </section>
 
     <section class="group">
-      <h3>Công Trình Liên Quan</h3>
+      <h3>🏗️ Công Trình Liên Quan</h3>
       <div class="card dash-wrap" style="padding:0;">
         <table class="dash">
           <thead><tr><th>Công Trình</th><th>Đã Thu</th><th>Còn Nợ</th></tr></thead>
@@ -12997,7 +13014,7 @@ function openSiteDetail(siteName, from, to){
     </section>
 
     <section class="group">
-      <h3>Tài Xế Chạy Công Trình Này</h3>
+      <h3>👤 Tài Xế Chạy Công Trình Này</h3>
       <div class="card dash-wrap" style="padding:0;">
         <table class="dash">
           <thead><tr><th>Tài Xế</th><th>Số Chuyến</th><th>Doanh Thu</th><th>Chi Phí</th></tr></thead>
@@ -13011,7 +13028,7 @@ function openSiteDetail(siteName, from, to){
     </section>
 
     <section class="group">
-      <h3>Nhật Ký Từng Ngày</h3>
+      <h3>📔 Nhật Ký Từng Ngày</h3>
       <div class="card dash-wrap" style="padding:0;">
         <table class="dash">
           <thead><tr><th>Ngày</th><th>Tài Xế</th><th>Chuyến</th><th>Doanh Thu</th></tr></thead>
@@ -13081,7 +13098,7 @@ function openAddSitePaymentForPartner(partnerName){
   }
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>Chọn Công Trình</h3>
+    <h3>🏗️ Chọn Công Trình</h3>
     <div class="hint" style="margin-bottom:10px;">Khoản thu này thuộc công trình nào của đối tác "${escapeHtml(partnerName)}"?</div>
     <div class="field" style="margin-bottom:0;">
       <select id="pickSitePaymentSite">
@@ -13110,7 +13127,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(resolvedSiteName)}</h3>
+      <h3>💵 ${existing?'Sửa':'Ghi Nhận'} Khoản Thu — ${escapeHtml(resolvedSiteName)}</h3>
       <div class="card">
         <div class="field">
           <label>Ngày nhận tiền</label>
@@ -13203,7 +13220,7 @@ function openDocumentEditor(id){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Thêm'} Giấy Tờ</h3>
+      <h3>📄 ${existing?'Sửa':'Thêm'} Giấy Tờ</h3>
       <div class="card">
         <div class="field">
           <label>Phạm vi</label>
@@ -13317,7 +13334,7 @@ function openMaintenanceEditor(id){
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Thêm'} Hạng Mục Bảo Dưỡng</h3>
+      <h3>🔧 ${existing?'Sửa':'Thêm'} Hạng Mục Bảo Dưỡng</h3>
       <div class="card">
         <div class="field">
           <label>Tên hạng mục</label>
@@ -13436,7 +13453,7 @@ function openRepairEditor(id){
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>${existing?'Sửa':'Thêm'} Khoản Sửa Chữa / Khấu Hao</h3>
+      <h3>🔧 ${existing?'Sửa':'Thêm'} Khoản Sửa Chữa / Khấu Hao</h3>
       <div class="card">
         <div class="field">
           <label>Ngày sửa chữa</label>
@@ -14088,7 +14105,7 @@ function renderDebtDetailPage(){
     <section class="group">
       <h2 style="margin-bottom:2px;">🤝 Công Nợ Chi Tiết</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Theo từng khách hàng / nhà cung cấp (toàn công ty) — bấm vào từng dòng để xem chi tiết giao dịch.</div>
-      <h3>Khách Hàng Còn Nợ</h3>
+      <h3>💳 Khách Hàng Còn Nợ</h3>
       <div class="card" style="padding:0; overflow:hidden;">
         ${customersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có khách hàng nào còn nợ.</div>' : customersWithDebt.map(c=>{
           const isOwedByThem = c.debt.owed>=0;
@@ -14102,7 +14119,7 @@ function renderDebtDetailPage(){
           </div>`;
         }).join('')}
       </div>
-      <h3 style="margin-top:16px;">Nhà Cung Cấp Còn Nợ</h3>
+      <h3 style="margin-top:16px;">💳 Nhà Cung Cấp Còn Nợ</h3>
       <div class="card" style="padding:0; overflow:hidden;">
         ${suppliersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có nhà cung cấp nào còn nợ.</div>' : suppliersWithDebt.map(s=>{
           const weOweThem = s.debt.owed>=0;
@@ -14181,13 +14198,13 @@ function renderCashFlowBreakdownDetailPage(){
     <section class="group">
       <h2 style="margin-bottom:2px;">📒 Chi Tiết Lợi Nhuận Luỹ Kế</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay`:'Chưa có dữ liệu'}</div>
-      ${section('+ Tiền khách chuyển vào', breakdown.cashIn, sitePaymentRows)}
-      ${section('− Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, supplierPaymentRows)}
-      ${section('− Chi phí vận hành (theo từng ca)', -breakdown.operatingCashCost, operatingRows)}
-      ${section('− Sửa chữa', -breakdown.repairTotal, repairRows)}
-      ${section('− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, invoiceLotRows)}
-      ${section('− Tạm ứng lương tài xế', -breakdown.advanceCashOut, advanceRows)}
-      <h3 style="margin-top:16px;">− Luật đường + Gốc/Lãi vay + Bảo hiểm + Đăng kiểm</h3>
+      ${section('💵 + Tiền khách chuyển vào', breakdown.cashIn, sitePaymentRows)}
+      ${section('⛰️ − Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, supplierPaymentRows)}
+      ${section('⛽ − Chi phí vận hành (theo từng ca)', -breakdown.operatingCashCost, operatingRows)}
+      ${section('🔧 − Sửa chữa', -breakdown.repairTotal, repairRows)}
+      ${section('📦 − Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, invoiceLotRows)}
+      ${section('💵 − Tạm ứng lương tài xế', -breakdown.advanceCashOut, advanceRows)}
+      <h3 style="margin-top:16px;">🚧 − Luật đường + Gốc/Lãi vay + Bảo hiểm + Đăng kiểm</h3>
       <div class="card">
         <div class="summary-row"><span>Luật đường (đủ nguyên tháng nào có chạm tới)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.roadFee)}</span></div>
         <div class="summary-row"><span>Gốc+Lãi vay (đúng từng kỳ thật đã/đang tới hạn) + Bảo hiểm + Đăng kiểm (đủ nguyên tháng, tất cả xe)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</span></div>
@@ -14404,7 +14421,7 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>Tiền Luật Đường Theo Tháng</h3>
+      <h3>🚧 Tiền Luật Đường Theo Tháng</h3>
       <div class="card" id="roadFeeMonthListWrap"></div>
       <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
         <input type="month" id="rf_newMonth" style="flex:1;">
@@ -14413,7 +14430,7 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
+      <h3>🏠 Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
       <div class="card" id="housingUtilMonthListWrap"></div>
       <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
         <input type="month" id="hu_newMonth" style="flex:1;">
@@ -14436,7 +14453,7 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
+      <h3>💰 Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
       <div class="card">
         <div class="field">
           <label>Khấu hao xe dự kiến / tháng</label>
@@ -14503,7 +14520,7 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>Chính Sách Chi Phí Theo Trạng Thái Ca</h3>
+      <h3>⚙️ Chính Sách Chi Phí Theo Trạng Thái Ca</h3>
       <div class="card">
         ${STATUS_OPTIONS.map(st=>renderPolicyBlock(st)).join('<div style="height:14px"></div>')}
       </div>
@@ -14518,7 +14535,7 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>Xuất Dữ Liệu</h3>
+      <h3>📤 Xuất Dữ Liệu</h3>
       <button class="btn btn-ghost btn-block" id="exportBtn">⬇️ Xuất Toàn Bộ Dữ Liệu (.xlsx)</button>
     </section>
 
