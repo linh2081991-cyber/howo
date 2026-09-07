@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-07 · #163';
+const APP_BUILD = '2026-09-07 · #165';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3228,55 +3228,48 @@ function renderInvoiceLotOverview(){
     wrap.innerHTML = '<div class="hint">Chưa khai "Loại hàng" ở công trình nào, hoặc chưa mua lô hoá đơn nào.</div>';
     return;
   }
-  // SỬA 2026-09-02 (Ông Chủ báo — bấm "Tháng Trước" ở trên, hầu hết mục
-  // Kết Quả đổi đúng nhưng riêng mục "Kho Hoá Đơn Bù" này vẫn kẹt ở tháng
-  // cũ): trước đây state.invoiceLotFilter chỉ khởi tạo ĐÚNG 1 LẦN DUY
-  // NHẤT rồi giữ nguyên mãi, không hề biết khoảng ngày CHÍNH của tab Kết
-  // Quả (state.resultsRange) đã đổi. Giờ: mỗi khi khoảng ngày CHÍNH đổi
-  // (Tháng Này/Tháng Trước/Toàn Thời Gian/tự sửa Từ ngày-Đến ngày ở trên
-  // cùng), mục này TỰ ĐỘNG đồng bộ theo ngay. Ông Chủ vẫn có thể tự sửa
-  // riêng "Từ ngày/Đến ngày" NGAY TRONG mục này để xem lệch tạm thời so
-  // với khoảng chính — chỉ khi khoảng CHÍNH đổi tiếp thì mới bị đồng bộ
-  // lại (đúng ý ban đầu của tính năng lọc riêng, không bị mất hẳn).
+  // SỬA 2026-09-07 (Ông Chủ yêu cầu — "bỏ mục phải chọn từng loại hàng,
+  // hiện tất cả loại hàng luôn, kẻ ô rõ ràng"): state.invoiceLotFilter
+  // không còn cần lưu goodsType nữa — chỉ còn from/to.
   const mainRange = state.resultsRange || currentMonthRange();
   const needsSync = !state.invoiceLotFilter ||
     state.invoiceLotFilter._syncedFrom !== mainRange.from ||
     state.invoiceLotFilter._syncedTo !== mainRange.to;
   if(needsSync){
-    state.invoiceLotFilter = {
-      goodsType: (state.invoiceLotFilter && state.invoiceLotFilter.goodsType) || goodsTypes[0],
-      from: mainRange.from, to: mainRange.to,
-      _syncedFrom: mainRange.from, _syncedTo: mainRange.to
-    };
+    state.invoiceLotFilter = { from: mainRange.from, to: mainRange.to, _syncedFrom: mainRange.from, _syncedTo: mainRange.to };
   }
-  if(!goodsTypes.includes(state.invoiceLotFilter.goodsType)) state.invoiceLotFilter.goodsType = goodsTypes[0];
-  const { goodsType, from, to } = state.invoiceLotFilter;
+  const { from, to } = state.invoiceLotFilter;
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const vatByShift = withLedgerReportMode(()=>computeInvoiceLotVatCreditByShift(from, to));
   wrap.innerHTML = `
-    <div class="field">
-      <label>Loại hàng</label>
-      <select id="lotFilterGoodsType">
-        ${goodsTypes.map(g=>`<option value="${escapeHtml(g)}" ${g===goodsType?'selected':''}>${escapeHtml(g)}</option>`).join('')}
-      </select>
-    </div>
     <div class="date-range">
       <div class="field"><label>Từ ngày</label><input type="date" id="lotFilterFrom" value="${from}"></div>
       <div class="field"><label>Đến ngày</label><input type="date" id="lotFilterTo" value="${to}"></div>
     </div>
     ${(()=>{
-      // "Tồn Kho Tổng Hợp" (2026-08-22, yêu cầu Ông Chủ) — giờ là thẻ
-      // DUY NHẤT ở màn này (đã bỏ hẳn thẻ "Tổng Quan Kho — Phần Mua Bù"
-      // theo yêu cầu, chỉ giữ lại đúng thẻ này). Số PHÁT SINH TRONG KỲ —
-      // luôn cập nhật theo đúng khoảng ngày đang chọn ở trên.
-      const combined = withLedgerReportMode(()=>combinedStockOverview(goodsType, from, to));
+      // "Tồn Kho Tổng Hợp" (2026-09-07, Ông Chủ yêu cầu — hiện TẤT CẢ loại
+      // hàng cùng lúc, không phải chọn từng loại) — 1 bảng kẻ ô, mỗi loại
+      // hàng 1 dòng, đủ 4 cột số liệu + nút Chi Tiết riêng từng dòng.
+      const rows = goodsTypes.map(g => ({ goodsType: g, ...withLedgerReportMode(()=>combinedStockOverview(g, from, to)) }));
       return `
     <div class="card" style="margin-bottom:10px; border:1.5px solid var(--accent);">
-      <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp (${escapeHtml(goodsType)}) — đối chiếu KT Thuế</div>
-      <div class="summary-row"><span>Hoá đơn THẬT từ mỏ (÷ tỷ trọng)</span><span class="val">${combined.mineVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <div class="summary-row"><span>+ Lô mua bù đã mua</span><span class="val">${combined.lotVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <div class="summary-row"><span>− Đã bán cho khách (${combined.soldDateRange})</span><span class="val" style="color:var(--loss);">${combined.soldVolKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <div class="summary-row total"><span>= Tồn Kho Tổng Hợp</span><span class="val" style="font-weight:800; color:${combined.combinedRemaining>=0?'var(--profit)':'var(--loss)'};">${combined.combinedRemaining<0?'−':''}${Math.abs(combined.combinedRemaining).toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>
-      <button class="btn btn-ghost btn-sm" id="lotFilterDetailBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🔍 Chi Tiết (theo mẫu thống kê, có hàng tổng)</button>
+      <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🧮 Tồn Kho Tổng Hợp — Đối Chiếu KT Thuế (Tất Cả Loại Hàng)</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Loại Hàng</th><th class="num">Hoá Đơn Thật<br>(÷ tỷ trọng)</th><th class="num">+ Lô<br>Mua Bù</th><th class="num">− Đã<br>Bán</th><th class="num">= Tồn Kho<br>Tổng Hợp</th><th></th></tr></thead>
+          <tbody>
+            ${rows.map(r=>`<tr>
+              <td><strong>${escapeHtml(r.goodsType)}</strong></td>
+              <td class="num">${fmtQty(r.mineVolKhoi)}</td>
+              <td class="num">${fmtQty(r.lotVolKhoi)}</td>
+              <td class="num" style="color:var(--loss);">${fmtQty(r.soldVolKhoi)}</td>
+              <td class="num" style="font-weight:800; color:${r.combinedRemaining>=0?'var(--profit)':'var(--loss)'};">${r.combinedRemaining<0?'−':''}${fmtQty(Math.abs(r.combinedRemaining))}</td>
+              <td><button class="btn btn-ghost btn-sm lotDetailBtn" data-goods="${escapeHtml(r.goodsType)}" style="width:auto; padding:5px 8px;">🔍</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px;">"− Đã Bán" tính trong khoảng ${formatDateVN(from)} → ${formatDateVN(to)} đang chọn ở trên. Bấm 🔍 ở đúng dòng loại hàng để xem chi tiết theo mẫu thống kê.</div>
       <button class="btn btn-ghost btn-sm" id="mineInvoiceOpenBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
     </div>`;
     })()}
@@ -3360,11 +3353,12 @@ function renderInvoiceLotOverview(){
         </tbody>
       </table>
     </div>`;
-  document.getElementById('lotFilterGoodsType').addEventListener('change', e=>{ state.invoiceLotFilter.goodsType = e.target.value; renderInvoiceLotOverview(); });
+  document.querySelectorAll('.lotDetailBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ saveMainScroll(); renderCombinedStockDetailPage(btn.dataset.goods, from, to); });
+  });
   document.getElementById('lotFilterFrom').addEventListener('change', e=>{ state.invoiceLotFilter.from = e.target.value; renderInvoiceLotOverview(); });
   document.getElementById('lotFilterTo').addEventListener('change', e=>{ state.invoiceLotFilter.to = e.target.value; renderInvoiceLotOverview(); });
-  document.getElementById('lotFilterDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCombinedStockDetailPage(goodsType, from, to); });
-  document.getElementById('mineInvoiceOpenBtn').addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null, goodsType); });
+  document.getElementById('mineInvoiceOpenBtn').addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null); });
   const forceRefreshBtn = document.getElementById('forceRefreshLedgerBtn');
   if(forceRefreshBtn) forceRefreshBtn.addEventListener('click', forceRefreshInvoiceLedgerData);
 }
@@ -12171,7 +12165,7 @@ function renderResults(){
 
     <section class="group">
       <h3>🔒 Đối Soát Hoá Đơn Theo Tháng</h3>
-      <div class="hint" style="margin-bottom:10px;">Tháng nào đã xuất ĐỦ hoá đơn cả 2 đầu (Bán cho khách + Mua từ mỏ, kể cả đã bù qua Kho Hoá Đơn Bù) thì coi như chốt xong, sẵn sàng đối chiếu KT Thuế. Chỉ xét trạng thái hoá đơn — không xét đã thu/trả tiền hay chưa (tiền theo dõi riêng ở mục Công Nợ phía trên). Luôn tính lại real-time theo đúng tick hiện tại, kể cả ca của tháng trước mới được bổ sung hoá đơn hôm nay.</div>
+
       <div id="monthlyInvoiceReconWrap"></div>
     </section>
 
