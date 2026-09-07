@@ -30,6 +30,21 @@
     --radius:16px;
   }
   *{box-sizing:border-box;}
+  /* SỬA 2026-09-07 (Ông Chủ báo NHIỀU LẦN — "ô Từ ngày/Đến ngày vẫn tràn
+     màn hình ở tất cả mọi chỗ", dù đã sửa riêng .date-range/.two-col
+     nhiều lần trước đó): rà kỹ mới phát hiện bản chất KHÁC hẳn — không
+     phải do CHÍNH ô ngày quá khổ, mà do đâu đó trong CÙNG 1 trang có 1
+     phần tử khác (VD 1 bảng nhiều cột) vô tình rộng hơn màn hình 1 chút,
+     khiến CẢ TRANG bị kéo giãn ngang theo — và mọi ô "width:100%" khác
+     trên cùng trang đó (kể cả ô ngày đã tính đúng % của riêng nó) đều bị
+     "ăn theo" độ rộng đã bị kéo giãn oan đó, dù bản thân ô ngày không hề
+     sai. Sửa TẬN GỐC ở đây thay vì dò từng chỗ: khoá cứng html/body
+     KHÔNG được phép giãn ngang quá khung máy, dù bên trong có lỡ rộng
+     hơn thế nào — chỉ chặn ở cấp NGOÀI CÙNG này, không ảnh hưởng gì tới
+     các khung cuộn ngang CÓ CHỦ ĐÍCH bên trong (bảng .grid-table-wrap/
+     .dash-wrap/.driver-tabbar... vẫn tự cuộn ngang bình thường, vì đó là
+     overflow riêng của chính khung con, độc lập với khoá này ở ngoài). */
+  html, body{ overflow-x:hidden; width:100%; max-width:100vw; }
   body{
     margin:0; background:var(--bg); color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -651,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-07 · #161';
+const APP_BUILD = '2026-09-07 · #163';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3184,7 +3199,18 @@ function renderInvoiceLotManagerModal(editingId, opts){
     if(!ok){ btn.disabled = false; btn.textContent = originalLabel; return; } // lỗi mạng đã có toast riêng từ saveInvoiceLots()
     showToast('Đã lưu lô hoá đơn.');
     refreshGoodsTypesDatalist();
-    renderInvoiceLotManagerModal(savedId, {showReport:true});
+    // SỬA 2026-09-07 (Ông Chủ báo — "phải thoát ra vào lại mới thêm được
+    // lô tiếp theo, mất thời gian"): TRƯỚC ĐÂY lưu xong tự mở lại đúng lô
+    // vừa lưu ở chế độ SỬA (kèm báo cáo "đã che ca nào") — muốn thêm lô
+    // MỚI phải thoát hẳn ra rồi bấm lại nút "Quản Lý Kho Hoá Đơn Bù" mới
+    // có form trống. Giờ mirror ĐÚNG cách renderMineInvoiceManagerModal()
+    // đã làm: LUÔN quay về form "Mua Lô Hoá Đơn Mới" trống ngay tại chỗ,
+    // sẵn sàng gõ tiếp lô tiếp theo không cần thoát ra vào lại — đồng thời
+    // tránh đúng bẫy "gõ tiếp lô #2 tưởng đang thêm mới, thực ra đang ghi
+    // đè lên lô #1 vừa lưu". Muốn xem lại báo cáo "đã che ca nào" của lô
+    // vừa lưu, bấm thẳng nút đó ngay trong danh sách phía trên (đã tự cập
+    // nhật lô mới).
+    renderInvoiceLotManagerModal(null);
     if(typeof renderInvoiceLotOverview==='function') renderInvoiceLotOverview();
     if(typeof renderSiteRows==='function' && state.view==='form') { renderSiteRows(); updateSummary(); }
   });
