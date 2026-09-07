@@ -92,7 +92,7 @@
   /* dù có bao nhiêu tài xế; nếu chỉ có 1 tài xế, cột đó giãn hết chiều */
   /* rộng (.full-width); nếu có từ 3 tài xế trở lên, các cột dư tự động */
   /* xuống hàng dưới, vẫn giữ đúng khung 2 cột. */
-  .shift-columns{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; }
+  .shift-columns{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start; }
   .shift-column{ min-width:0; background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--col-accent, var(--accent)); border-radius:var(--radius); padding:10px; }
   .shift-column.full-width{ grid-column:1 / -1; }
   /* Tên tài xế được "làm nổi bật" bằng icon tài xế (thay cho avatar tròn */
@@ -124,7 +124,7 @@
   /* Khối "trường dữ liệu tương ứng" bên dưới mỗi ca: Km chạy, dầu tiêu */
   /* hao, doanh thu — trình bày dạng nhãn/giá trị 2 cột cho khoa học, */
   /* dễ quét mắt, tất cả đều lấy từ các hàm tính sẵn có (không tính lại). */
-  .shift-card-fields{ display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
+  .shift-card-fields{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px 8px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
   .shift-card-fields .field-item{ display:flex; flex-direction:column; gap:1px; min-width:0; }
   .shift-card-fields .field-item .lbl{ font-size:9.5px; color:var(--ink-soft); white-space:nowrap; }
   .shift-card-fields .field-item .val{ font-size:12.5px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -262,7 +262,7 @@
   .site-row{ background:var(--bg); border:1px dashed var(--border); border-radius:12px; padding:12px; margin-bottom:10px; }
   .site-row .site-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
   .site-row .site-head strong{ font-size:13px; }
-  .two-col{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .two-col{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
 
   /* Bảng diễn giải tài chính công trình thương mại — rõ ràng, khoa học */
   .cbreak{ margin-top:10px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
@@ -388,7 +388,7 @@
   .driver-cv-status.on{ color:var(--profit); }
   .driver-cv-status.off .dot{ background:var(--ink-soft); }
   .driver-cv-status.off{ color:var(--ink-soft); }
-  .driver-cv-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .driver-cv-grid{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
   .driver-cv-item{ display:flex; flex-direction:column; gap:2px; background:var(--bg); border-radius:10px; padding:8px 10px; }
   .driver-cv-item .k{ font-size:12.5px; color:var(--ink-soft); }
   .driver-cv-item .v{ font-size:15px; font-weight:700; word-break:break-word; }
@@ -519,7 +519,7 @@
      được thêm overflow:hidden (xem rule gốc phía trên) nên dù 2 ô cạnh
      nhau bị hẹp lại, chữ dài nhất cũng chỉ bị CẮT gọn theo khung, tuyệt
      đối không tràn ra ngoài — an toàn để xếp ngang trở lại. */
-  .date-range{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .date-range{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-bottom:14px; }
   .date-range .field{ min-width:0; margin-bottom:0; }
   /* 2026-08-16 LẦN 4 (yêu cầu Ông Chủ, ghi đè quyết định LẦN 3 ngay dưới
      đây): trước đó Ông Chủ chỉ muốn khớp kích cỡ input chuẩn, KHÔNG thu
@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-05 · #156';
+const APP_BUILD = '2026-09-05 · #158';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2910,9 +2910,17 @@ function invoiceLotCoverageReport(lotId, goodsType){
 /// từ đúng loại hàng đó, không phân biệt lấy từ mỏ nào — theo thứ tự mua
 /// trước dùng trước (FIFO), xem buildInvoiceLotLedger(). "Nguồn hoá đơn"
 /// chỉ là ghi chú tự do (bên bán hoá đơn thường KHÔNG phải mỏ đã đăng ký).
+/// SỬA 2026-09-05 (Ông Chủ yêu cầu — "sửa thành 1 trang hoàn chỉnh sạch
+/// đẹp, hiển thị rõ ràng"): chuyển từ modal nhỏ (openModal, danh sách
+/// kiểu dòng chữ) sang 1 TRANG RIÊNG full màn hình, liệt kê bằng bảng
+/// .grid-table chuẩn — đồng bộ giao diện với Sổ Hoá Đơn Thật Từ Mỏ và
+/// các trang chi tiết khác trong app. KHÔNG đụng logic lưu/sửa/xoá hay
+/// công thức tính toán — chỉ đổi cách trình bày.
 function renderInvoiceLotManagerModal(editingId, opts){
+  scrollMainToTop();
   const editing = editingId ? invoiceLotById(editingId) : null;
   const val = (obj,k) => obj && obj[k]!==undefined && obj[k]!==null ? obj[k] : '';
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const showReport = opts && opts.showReport && editing;
   const reportHtml = showReport ? (()=>{
     const rows = invoiceLotCoverageReport(editing.id, editing.goodsType);
@@ -2920,88 +2928,113 @@ function renderInvoiceLotManagerModal(editingId, opts){
     const totalVol = rows.reduce((sum,r)=>sum+r.volume,0);
     const totalCost = rows.reduce((sum,r)=>sum+r.cost,0);
     return `
-    <div class="card" style="margin-bottom:14px; background:var(--profit-bg, rgba(0,150,80,0.06));">
-      <div style="font-weight:700; margin-bottom:6px;">✅ Lô này đã che cho ${rows.length} ca — tổng ${totalVol.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối, ${fmtVND(totalCost)}</div>
-      ${rows.map(r=>`<div class="summary-row"><span>${formatDateVN(r.date)} — ${escapeHtml(r.driverName)} — ${escapeHtml(r.customerName)}</span><span class="val">${r.volume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối</span></div>`).join('')}
+    <div class="grid-table-wrap" style="margin-bottom:12px;">
+      <table class="grid-table">
+        <thead><tr><th colspan="3" style="background:var(--profit-bg, rgba(0,150,80,0.08));">✅ Lô này đã che cho ${rows.length} ca</th></tr>
+        <tr><th>Ngày</th><th>Tài Xế / Khách Hàng</th><th class="num">Khối Lượng</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr><td>${formatDateVN(r.date)}</td><td>${escapeHtml(r.driverName)} — ${escapeHtml(r.customerName)}</td><td class="num">${fmtQty(r.volume)} khối</td></tr>`).join('')}
+          <tr class="grid-total-row"><td colspan="2">TỔNG</td><td class="num">${fmtQty(totalVol)} khối · ${fmtVND(totalCost)}</td></tr>
+        </tbody>
+      </table>
     </div>`;
   })() : '';
-  const listHtml = state.invoiceLots.length ? [...state.invoiceLots]
-    .sort((a,b)=>(b.purchaseDate||'').localeCompare(a.purchaseDate||''))
-    .map(lot=>{
-      const ledger = buildInvoiceLotLedger(lot.goodsType);
-      const st = ledger.byLot[lot.id] || { total: Number(lot.totalVolume)||0, used:0, remaining: Number(lot.totalVolume)||0 };
-      return `
-    <div class="summary-row" style="align-items:center;">
-      <span><strong>${escapeHtml(lot.goodsType||'(chưa khai loại hàng)')}</strong> — ${formatDateVN(lot.purchaseDate)}${lot.sourceName?` — ${escapeHtml(lot.sourceName)}`:''}<br>
-        <span class="hint">${st.total.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối · đã dùng ${st.used.toLocaleString('vi-VN',{maximumFractionDigits:2})} · còn ${st.remaining.toLocaleString('vi-VN',{maximumFractionDigits:2})}</span></span>
-      <span>
-        <button class="btn btn-ghost btn-sm lotReportBtn" data-id="${lot.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Đã che ca nào?</button>
-        <button class="btn btn-ghost btn-sm lotEditBtn" data-id="${lot.id}" style="width:auto; padding:6px 10px; margin-right:6px;">Sửa</button>
-        <button class="btn btn-ghost btn-sm lotDelBtn" data-id="${lot.id}" style="width:auto; padding:6px 10px; color:var(--loss);">Xoá</button>
-      </span>
-    </div>`;}).join('') : '<div class="hint">Chưa có lô hoá đơn nào.</div>';
+  const sortedLots = [...state.invoiceLots].sort((a,b)=>(b.purchaseDate||'').localeCompare(a.purchaseDate||''));
+  const listHtml = sortedLots.length ? `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Loại Hàng</th><th>Ngày Mua / Nguồn</th><th class="num">Tổng Khối</th><th class="num">Đã Dùng</th><th class="num">Còn Lại</th><th>Hành Động</th></tr></thead>
+        <tbody>
+          ${sortedLots.map(lot=>{
+            const ledger = buildInvoiceLotLedger(lot.goodsType);
+            const st = ledger.byLot[lot.id] || { total: Number(lot.totalVolume)||0, used:0, remaining: Number(lot.totalVolume)||0 };
+            return `<tr>
+              <td><strong>${escapeHtml(lot.goodsType||'(chưa khai)')}</strong></td>
+              <td>${formatDateVN(lot.purchaseDate)}${lot.sourceName?`<br><span class="hint">${escapeHtml(lot.sourceName)}</span>`:''}</td>
+              <td class="num">${fmtQty(st.total)}</td>
+              <td class="num">${fmtQty(st.used)}</td>
+              <td class="num" style="font-weight:700; color:${st.remaining>0?'var(--profit)':'var(--ink-soft)'};">${fmtQty(st.remaining)}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn btn-ghost btn-sm lotReportBtn" data-id="${lot.id}" style="width:auto; padding:5px 8px; margin-right:4px;">Đã che ca nào?</button>
+                <button class="btn btn-ghost btn-sm lotEditBtn" data-id="${lot.id}" style="width:auto; padding:5px 8px; margin-right:4px;">Sửa</button>
+                <button class="btn btn-ghost btn-sm lotDelBtn" data-id="${lot.id}" style="width:auto; padding:5px 8px; color:var(--loss);">Xoá</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div class="hint">Chưa có lô hoá đơn nào.</div>';
 
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>📦 Kho Hoá Đơn Bù</h3>
-    ${reportHtml}
-    <div style="margin-bottom:14px;">${listHtml}</div>
-    <div class="formula-divider" style="margin:10px 0;"></div>
-    <h3>${editing?'Sửa Lô Hoá Đơn':'Mua Lô Hoá Đơn Mới'}</h3>
-    <div class="field">
-      <label>Loại hàng (VD Base A, Base B...)</label>
-      <input type="text" id="lot_goodsType" list="goodsTypesList" value="${escapeHtml(val(editing,'goodsType'))}">
-    </div>
-    <div class="field">
-      <label>Nguồn hoá đơn / bên bán (ghi chú, không bắt buộc đúng mỏ đã đăng ký)</label>
-      <input type="text" id="lot_source" value="${escapeHtml(val(editing,'sourceName'))}" placeholder="VD: anh Tuấn — Hà Nam">
-    </div>
-    <div class="field">
-      <label>Ngày mua</label>
-      <input type="date" id="lot_purchaseDate" value="${val(editing,'purchaseDate')}">
-    </div>
-    <div class="two-col">
-      <div class="field">
-        <label>Tổng khối lượng hoá đơn (khối)</label>
-        <input type="text" inputmode="decimal" id="lot_volume" placeholder="VD 50" value="${val(editing,'totalVolume')}">
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="lotMgrBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:12px;">📦 Kho Hoá Đơn Bù</h2>
+      ${reportHtml}
+      ${listHtml}
+    </section>
+    <section class="group">
+      <h3>${editing?'✏️ Sửa Lô Hoá Đơn':'+ Mua Lô Hoá Đơn Mới'}</h3>
+      <div class="card">
+        <div class="field">
+          <label>Loại hàng (VD Base A, Base B...)</label>
+          <input type="text" id="lot_goodsType" list="goodsTypesList" value="${escapeHtml(val(editing,'goodsType'))}">
+        </div>
+        <div class="field">
+          <label>Nguồn hoá đơn / bên bán (ghi chú, không bắt buộc đúng mỏ đã đăng ký)</label>
+          <input type="text" id="lot_source" value="${escapeHtml(val(editing,'sourceName'))}" placeholder="VD: anh Tuấn — Hà Nam">
+        </div>
+        <div class="field">
+          <label>Ngày mua</label>
+          <input type="date" id="lot_purchaseDate" value="${val(editing,'purchaseDate')}">
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>Tổng khối lượng hoá đơn (khối)</label>
+            <input type="text" inputmode="decimal" id="lot_volume" placeholder="VD 50" value="${val(editing,'totalVolume')}">
+          </div>
+          <div class="field">
+            <label>Đơn giá net/khối (chưa VAT — tự tính ra tổng)</label>
+            <input type="text" inputmode="decimal" id="lot_netPrice" placeholder="đ/khối">
+          </div>
+        </div>
+        <div class="field">
+          <label>Tổng giá trị hoá đơn (đã gồm VAT, đúng số chuyển khoản)</label>
+          <input type="text" inputmode="decimal" id="lot_value" placeholder="đ">
+        </div>
+        <div class="field">
+          <label>VAT suất trên hoá đơn (%)</label>
+          <input type="text" inputmode="decimal" id="lot_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
+        </div>
+        <div class="hint" style="margin-bottom:10px;">Gõ "Đơn giá net/khối" (giá chưa VAT) — app tự nhân ra "Tổng giá trị hoá đơn" = Khối lượng × Đơn giá net × (1 + VAT%). Chỉ để tính nhanh: nếu số thật trên hoá đơn/chuyển khoản lệch đi (làm tròn, chiết khấu...), Ông Chủ vẫn sửa tay thẳng ô "Tổng giá trị hoá đơn" — ô đó luôn là số cuối cùng được lưu lại.</div>
+        <div class="formula-divider" style="margin:12px 0;"></div>
+        <div style="font-weight:700; margin-bottom:6px;">Tiền Mặt Nhận Lại (bên bán trả lại mặt)</div>
+        <div class="two-col">
+          <div class="field">
+            <label>% nhận lại (trên tổng giá trị hoá đơn)</label>
+            <input type="text" inputmode="decimal" id="lot_cashReturnedPct" placeholder="VD 77">
+          </div>
+          <div class="field">
+            <label>Tiền mặt nhận lại thực tế (tự tính — sửa tay được)</label>
+            <input type="text" inputmode="decimal" id="lot_cashReturned" placeholder="đ">
+          </div>
+        </div>
+        <div class="summary-row total" style="margin-bottom:10px;">
+          <span>= Số Tiền Thật Phải Trả Đối Tác</span>
+          <span class="val" id="lot_realCostVal">0đ</span>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="lot_note" value="${escapeHtml(val(editing,'note'))}">
+        </div>
+        <div class="hint" style="margin-top:10px; margin-bottom:0;">Gõ % (hoặc sửa tay ô Tiền mặt nhận lại) — 2 ô này tự đồng bộ 2 chiều. "Số Tiền Thật Phải Trả Đối Tác" = Tổng giá trị hoá đơn − Tiền mặt nhận lại — đây mới là chi phí THẬT của lô, chia đều theo khối lượng khi rút dùng.</div>
       </div>
-      <div class="field">
-        <label>Đơn giá net/khối (chưa VAT — tự tính ra tổng)</label>
-        <input type="text" inputmode="decimal" id="lot_netPrice" placeholder="đ/khối">
-      </div>
-    </div>
-    <div class="field">
-      <label>Tổng giá trị hoá đơn (đã gồm VAT, đúng số chuyển khoản)</label>
-      <input type="text" inputmode="decimal" id="lot_value" placeholder="đ">
-    </div>
-    <div class="field">
-      <label>VAT suất trên hoá đơn (%)</label>
-      <input type="text" inputmode="decimal" id="lot_vat" placeholder="VD 10" value="${val(editing,'vatRatePercent')}">
-    </div>
-    <div class="hint" style="margin-bottom:10px;">Gõ "Đơn giá net/khối" (giá chưa VAT) — app tự nhân ra "Tổng giá trị hoá đơn" = Khối lượng × Đơn giá net × (1 + VAT%). Chỉ để tính nhanh: nếu số thật trên hoá đơn/chuyển khoản lệch đi (làm tròn, chiết khấu...), Ông Chủ vẫn sửa tay thẳng ô "Tổng giá trị hoá đơn" — ô đó luôn là số cuối cùng được lưu lại.</div>
-    <div class="formula-divider" style="margin:12px 0;"></div>
-    <div style="font-weight:700; margin-bottom:6px;">Tiền Mặt Nhận Lại (bên bán trả lại mặt)</div>
-    <div class="two-col">
-      <div class="field">
-        <label>% nhận lại (trên tổng giá trị hoá đơn)</label>
-        <input type="text" inputmode="decimal" id="lot_cashReturnedPct" placeholder="VD 77">
-      </div>
-      <div class="field">
-        <label>Tiền mặt nhận lại thực tế (tự tính — sửa tay được)</label>
-        <input type="text" inputmode="decimal" id="lot_cashReturned" placeholder="đ">
-      </div>
-    </div>
-    <div class="summary-row total" style="margin-bottom:10px;">
-      <span>= Số Tiền Thật Phải Trả Đối Tác</span>
-      <span class="val" id="lot_realCostVal">0đ</span>
-    </div>
-    <div class="field">
-      <label>Ghi chú</label>
-      <input type="text" id="lot_note" value="${escapeHtml(val(editing,'note'))}">
-    </div>
-    <div class="hint" style="margin-bottom:10px;">Gõ % (hoặc sửa tay ô Tiền mặt nhận lại) — 2 ô này tự đồng bộ 2 chiều. "Số Tiền Thật Phải Trả Đối Tác" = Tổng giá trị hoá đơn − Tiền mặt nhận lại — đây mới là chi phí THẬT của lô, chia đều theo khối lượng khi rút dùng.</div>
-    <button class="btn btn-accent" id="saveLotBtn">${editing?'💾 Lưu Thay Đổi':'+ Thêm Lô'}</button>
-  `);
+      <button class="btn btn-accent btn-block" id="saveLotBtn" style="margin-top:10px;">${editing?'💾 Lưu Thay Đổi':'+ Thêm Lô'}</button>
+    </section>
+  `;
+  document.getElementById('lotMgrBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   // ---- Đồng bộ 2 chiều % nhận lại ⇄ Tiền mặt nhận lại thực tế, cả 2 ô
   // tiền đều hiển thị dấu chấm ngăn cách hàng nghìn (yêu cầu Ông Chủ
   // 2026-08-10). Dùng biến cục bộ curTotalValue/curCashReturned làm nguồn
@@ -3715,7 +3748,7 @@ function renderCombinedStockDetailPage(goodsType, from, to){
   `;
   document.getElementById('combinedDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   document.querySelectorAll('[data-open-lot]').forEach(el=>{
-    el.addEventListener('click', ()=>{ renderInvoiceLotManagerModal(el.dataset.openLot); });
+    el.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(el.dataset.openLot); });
   });
   document.querySelectorAll('[data-open-mineinv]').forEach(el=>{
     el.addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(el.dataset.openMineinv, goodsType); });
@@ -12108,7 +12141,7 @@ function renderResults(){
   renderCustomerSupplierDebtOverview();
   renderInvoiceLotOverview();
   renderMonthlyInvoiceReconciliation();
-  document.getElementById('openInvoiceLotManagerBtn').addEventListener('click', ()=>renderInvoiceLotManagerModal(null));
+  document.getElementById('openInvoiceLotManagerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(null); });
 
   document.getElementById('res_thisMonth').addEventListener('click', ()=>{
     state.resultsRange = currentMonthRange(); state.resultsRoadFeeOverride=null; renderResults();
