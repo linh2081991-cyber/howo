@@ -228,7 +228,7 @@
      ::-webkit-date-and-time-value, CHỈ nhận được cỡ chữ từ 1 RULE CSS có
      chọn đúng pseudo-element đó (như 3 dòng ngay dưới đây), không bao giờ
      nhận từ thuộc tính style="" gắn trên input. */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; }
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; max-width:260px; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
   input[type=date]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
   /* input[type=month] (ô "Thêm Tháng Mới", "Tháng thưởng"...) TRƯỚC ĐÂY
@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-05 · #158';
+const APP_BUILD = '2026-09-07 · #159';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6148,7 +6148,7 @@ function renderShiftForm(){
 
   app.innerHTML = `
     <section class="group">
-      <h3>Thông Tin Ca</h3>
+      <h3>📋 Thông Tin Ca</h3>
       <div class="card">
         <div class="field">
           <label>Ngày</label>
@@ -6177,7 +6177,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Tài Xế</h3>
+      <h3>👤 Tài Xế</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
           <select id="f_driver">${driverOptions}</select>
@@ -6186,7 +6186,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Đồng Hồ Km</h3>
+      <h3>🛣️ Đồng Hồ Km</h3>
       <div class="card">
         <div class="two-col">
           <div class="field">
@@ -6208,7 +6208,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Nhiên Liệu</h3>
+      <h3>⛽ Nhiên Liệu</h3>
       <div class="card">
         <div class="two-col">
           <div class="field">
@@ -6235,13 +6235,13 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Công Trình Trong Ca</h3>
+      <h3>🏗️ Công Trình Trong Ca</h3>
       <div id="siteRowsWrap"></div>
       <button class="btn btn-ghost btn-block" id="addSiteBtn">+ Thêm Công Trình</button>
     </section>
 
     <section class="group">
-      <h3>Phụ Cấp Cố Định</h3>
+      <h3>💰 Phụ Cấp Cố Định</h3>
       <div class="card">
         <div class="field">
           <label>Lương cứng phân bổ</label>
@@ -6251,12 +6251,12 @@ function renderShiftForm(){
           <label>Tiền ăn</label>
           <input type="text" inputmode="decimal" id="f_food">
         </div>
-        <div class="hint">Tự tính theo tài xế & trạng thái ca. Có thể sửa tay nếu cần.</div>
+
       </div>
     </section>
 
     <section class="group">
-      <h3>Tiền Luật Phát Sinh</h3>
+      <h3>🚧 Tiền Luật Phát Sinh</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
           <label>Tiền luật phát sinh theo chuyến (đ)</label>
@@ -6267,7 +6267,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Chi Phí Phát Sinh</h3>
+      <h3>💸 Chi Phí Phát Sinh</h3>
       <div class="card">
         <div class="field">
           <label>Số tiền</label>
@@ -6281,20 +6281,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>💳 Phương Thức Tiền Dầu Đổ Thêm</h3>
-      <div class="card">
-        <div class="field" style="margin-bottom:0;">
-          <label>Tiền dầu đổ thêm (theo lít đổ) của CA NÀY trả bằng</label>
-          <select id="f_operatingCostMethod">
-            <option value="cash" ${(sh.operatingCostMethod||'cash')==='cash'?'selected':''}>💵 Tiền mặt (mặc định)</option>
-            <option value="bank" ${sh.operatingCostMethod==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
-          </select>
-        </div>
-      </div>
-    </section>
-
-    <section class="group">
-      <h3>Ứng Lương</h3>
+      <h3>💵 Ứng Lương</h3>
       <div class="card">
         <div class="field">
           <label>Số tiền ứng</label>
@@ -6308,7 +6295,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Ghi Chú Ca</h3>
+      <h3>📝 Ghi Chú Ca</h3>
       <div class="card">
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú (lưu ý, phát sinh trong ca nếu có)</label>
@@ -6318,7 +6305,7 @@ function renderShiftForm(){
     </section>
 
     <section class="group">
-      <h3>Tổng Kết Ca</h3>
+      <h3>📊 Tổng Kết Ca</h3>
       <div class="card" id="summaryCard"></div>
     </section>
 
@@ -6396,7 +6383,7 @@ function renderSiteRows(){
               <div class="field" style="margin-bottom:0;"><label>Đơn giá bán (đ/khối)</label><input type="text" inputmode="decimal" class="ctrip-money" data-idx="${i}" data-tidx="${ti}" data-field="sellUnitPrice" placeholder="0" value="${t.sellUnitPrice?toIntSafe(t.sellUnitPrice).toLocaleString('vi-VN'):''}"></div>
             </div>
             <div class="field" style="margin-top:8px; margin-bottom:0;">
-              <label>Loại hàng lúc Đổ (Bán) — CHỈ điền nếu khách nhận hàng ghi nhận KHÁC loại hàng lúc múc (VD múc Base A nhưng khách ghi Base B do chất lượng thực tế)</label>
+              <label>Loại hàng lúc đổ được ghi nhận thực tế (VD mua Base A nhưng khách ghi nhận Base B do chất lượng thực tế)</label>
               <input type="text" class="ctrip-text" data-idx="${i}" data-tidx="${ti}" data-field="sellGoodsType" list="goodsTypesList" placeholder="Để trống = giống lúc múc (${escapeHtml(t.goodsType||'chưa khai')})" value="${escapeHtml(t.sellGoodsType||'')}">
               ${t.sellGoodsType && normGoodsType(t.sellGoodsType)!==normGoodsType(t.goodsType) ? `<div class="hint" style="margin-top:4px; color:var(--accent); font-weight:700;">📌 Chuyến này mua ${escapeHtml(t.goodsType||'(chưa khai)')} nhưng bán ${escapeHtml(t.sellGoodsType)} — sổ kho/hoá đơn sẽ tính riêng 2 loại hàng này, không gộp chung</div>` : ''}
             </div>
@@ -7136,8 +7123,8 @@ function shiftFinancialSummaryHtml(sh){
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${hasCommercialCost ? `
     ${buyRelatedItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
-    <div class="summary-row total" style="font-size:15px;"><span style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
-    <div class="hint" style="margin:2px 0 0;">Tính theo doanh thu/giá vốn đã bóc VAT (sổ sách kế toán) — KHÁC với "Lãi Thực Nhận (Tiền Mặt)" ở từng công trình, vì số đó tính bằng tiền mặt thật đã trừ VAT thực nộp. 2 số có thể lệch nhau nếu công trình có hoá đơn bù hoặc VAT mua chưa khấu trừ được.</div>
+    <div class="summary-row total" style="font-size:15px;"><span style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">= LÃI GỘP MUA-BÁN</span><span class="val" style="color:${takeHomeSubtotal>=0?'var(--profit)':'var(--loss)'}">${takeHomeSubtotal>=0?'+':''}${fmtVND(takeHomeSubtotal)}</span></div>
+    <div class="hint" style="margin:2px 0 0;">Tính theo doanh thu/giá vốn đã bóc VAT</div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     ` : ''}
     ${operatingItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
@@ -7146,7 +7133,7 @@ function shiftFinancialSummaryHtml(sh){
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
     ${hasCommercialCost ? `
     <div class="summary-row total" style="font-size:17px; border-top:1.5px dashed var(--border);"><span style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">TIỀN THỰC ĐÚT TÚI (CẢ CA)</span><span class="val" style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">${cashPocketTotal>=0?'+':''}${fmtVND(cashPocketTotal)}</span></div>
-    <div class="hint" style="margin-top:2px;">Cơ sở tiền mặt (cash basis) — khác LỢI NHUẬN RÒNG ở trên (cơ sở dồn tích, đã bóc VAT) đúng phần VAT hoá đơn bù/VAT mua chưa khấu trừ.</div>
+
     ` : ''}
   `;
 }
@@ -7228,7 +7215,7 @@ function bindFormEvents(){
   attachMoneyInput(document.getElementById('f_food'), sh.foodAllowance, v=>{ sh.foodAllowance=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_incidental'), sh.incidentalCost, v=>{ sh.incidentalCost=v; updateSummary(); });
   attachMoneyInput(document.getElementById('f_roadFeeIncidental'), sh.roadFeeIncidental, v=>{ sh.roadFeeIncidental=v; updateSummary(); });
-  document.getElementById('f_operatingCostMethod').addEventListener('change', e=>{ sh.operatingCostMethod = e.target.value; });
+
   attachMoneyInput(document.getElementById('f_advance'), sh.advanceAmount, v=>{ sh.advanceAmount=v; updateSummary(); });
 
   document.getElementById('f_incidentalNotes').addEventListener('input', e=>{ sh.incidentalNotes=e.target.value; });
@@ -11876,7 +11863,7 @@ function renderResults(){
         <div class="summary-row"><span>Doanh thu</span><span class="val">${fmtVND(gTotal.revenue)}</span></div>
         <div class="summary-row"><span>− Giá vốn hàng mua (thương mại)</span><span class="val">${fmtVND(gTotal.materialCost)}</span></div>
         <div class="summary-row"><span>− Chi phí mua hoá đơn bù</span><span class="val">${fmtVND(gTotal.supplementCost)}</span></div>
-        <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN (SỔ SÁCH)</span><span class="val">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
+        <div class="summary-row total" style="font-size:16px;"><span>= LÃI GỘP MUA-BÁN</span><span class="val">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</span></div>
         <div class="summary-row" style="margin-top:6px;"><span>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, nhà, phát sinh, sửa chữa/khấu hao, luật đường)</span><span class="val">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee + houseRent + utilities)}</span></div>
         <button class="btn btn-ghost btn-sm" id="operatingCostDetailBtn" style="width:auto; padding:6px 12px; margin:0 0 6px;">🔍 Chi Tiết Từng Khoản</button>
         <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; font-weight:800;"><span style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)>=0?'var(--profit)':'var(--loss)'}">= Lợi nhuận gộp vận hành</span><span class="val" style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities)}</span></div>
