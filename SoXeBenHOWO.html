@@ -228,7 +228,7 @@
      ::-webkit-date-and-time-value, CHỈ nhận được cỡ chữ từ 1 RULE CSS có
      chọn đúng pseudo-element đó (như 3 dòng ngay dưới đây), không bao giờ
      nhận từ thuộc tính style="" gắn trên input. */
-  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; max-width:260px; }
+  input[type=date]{ -webkit-text-size-adjust:100%; text-align:left; height:44px; line-height:18px; font-size:14.5px; padding:0 12px; overflow:hidden; max-width:260px; min-width:0; }
   input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
   input[type=date]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
   /* input[type=month] (ô "Thêm Tháng Mới", "Tháng thưởng"...) TRƯỚC ĐÂY
@@ -529,7 +529,7 @@
      overflow:hidden (rule gốc) nên dù 2 cột hẹp lại, chữ dài nhất chỉ bị
      CẮT gọn theo khung, không bao giờ tràn — an toàn để thu nhỏ. */
   .date-range .field label{ font-weight:800; color:var(--ink); font-size:13px; margin-bottom:5px; }
-  .date-range input[type=date]{ height:44px; padding:0 12px; font-size:14.5px; }
+  .date-range input[type=date]{ height:44px; padding:0 12px; font-size:14.5px; width:100%; min-width:0; max-width:100%; }
   .date-range input[type=date]::-webkit-date-and-time-value{ text-align:left; margin:0; height:18px; font-size:14.5px; line-height:18px; }
   .date-range input[type=date]::-webkit-datetime-edit{ font-size:14.5px; line-height:18px; }
 
@@ -651,7 +651,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-07 · #159';
+const APP_BUILD = '2026-09-07 · #160';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -824,6 +824,11 @@ let state = {
   // {id, month:'YYYY-MM', rentAmount, utilitiesAmount}. Xem
   // houseRentForRange()/utilitiesForRange() + saveHousingUtilitiesByMonth().
   housingUtilitiesByMonth: [],
+  // CP Cầu Đường Theo Tháng (2026-09-07, Ông Chủ yêu cầu — "1 CP thật,
+  // không cố định, điền tay theo từng tháng") — CHUNG CÔNG TY, mirror
+  // NGUYÊN XI cơ chế housingUtilitiesByMonth ở trên. list dạng
+  // {id, month:'YYYY-MM', amount}. Xem tollFeeForRange() + saveTollFeeByMonth().
+  tollFeeByMonth: [],
   sitePayments: [], // {id, siteName, date, partnerName, customerId (mới — gắn đúng Khách Hàng nếu có), amount, notes} — money RECEIVED from a construction site's client
   // Khách Hàng (đối tác mua hàng) — khai 1 lần, dùng lại cho mọi công
   // trình thương mại bán cho đúng khách đó. holdbackPercent (2026-08-16):
@@ -1475,7 +1480,7 @@ function withTimeout(promise, ms=15000){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1494,6 +1499,9 @@ async function loadAll(){
       // nước không nhân theo số xe của công ty, khác Luật Đường/Bảo Hiểm/
       // Đăng Kiểm/Vay Ngân Hàng (các khoản đó mới đúng là theo từng xe).
       sharedDataRef('housingUtilitiesByMonth').get(),
+      // CP Cầu Đường Theo Tháng (2026-09-07) — CHUNG CÔNG TY, mirror
+      // NGUYÊN XI housingUtilitiesByMonth ở trên.
+      sharedDataRef('tollFeeByMonth').get(),
       sharedDataRef('suppliers').get(),
       sharedDataRef('customers').get(),
       sharedDataRef('supplierPayments').get(),
@@ -1518,6 +1526,7 @@ async function loadAll(){
     const bonusData = bonusSnap.exists ? bonusSnap.data() : null;
     const roadFeeData = roadFeeSnap.exists ? roadFeeSnap.data() : null;
     const housingUtilData = housingUtilSnap.exists ? housingUtilSnap.data() : null;
+    const tollFeeData = tollFeeSnap.exists ? tollFeeSnap.data() : null;
     state.drivers = dData && Array.isArray(dData.list) ? dData.list : [];
     state.shifts = sData && Array.isArray(sData.list) ? sData.list : [];
     state.repairs = rData && Array.isArray(rData.list) ? rData.list : [];
@@ -1529,6 +1538,7 @@ async function loadAll(){
     state.monthlyBonuses = bonusData && Array.isArray(bonusData.list) ? bonusData.list : [];
     state.roadFeeByMonth = roadFeeData && Array.isArray(roadFeeData.list) ? roadFeeData.list : [];
     state.housingUtilitiesByMonth = housingUtilData && Array.isArray(housingUtilData.list) ? housingUtilData.list : [];
+    state.tollFeeByMonth = tollFeeData && Array.isArray(tollFeeData.list) ? tollFeeData.list : [];
     const supplierData = supplierSnap.exists ? supplierSnap.data() : null;
     state.suppliers = supplierData && Array.isArray(supplierData.list) ? supplierData.list : [];
     const customerData = customerSnap.exists ? customerSnap.data() : null;
@@ -2105,6 +2115,7 @@ function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   // theo từng xe nên phải cộng dồn qua allVehiclesRoadFee).
   const houseRent = houseRentForRange(from, to);
   const utilities = utilitiesForRange(from, to);
+  const tollFee = tollFeeForRange(from, to);
   const fixedMonthly = companyWideCashFlowFixedMonthly(from, to);
   // SỬA 2026-08-23 (Ông Chủ báo thiếu — xác nhận Q2/Q3/Q4/Q5: đều là tiền
   // ngân hàng thật, đã ghi đủ trong app, chỉ chưa được cộng vào đây):
@@ -2125,8 +2136,8 @@ function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   const advanceCashOut = allShifts
     .filter(sh=>sh.date>=from && sh.date<=to)
     .reduce((s,sh)=>s+(Number(sh.advanceAmount)||0),0);
-  const total = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - houseRent - utilities - fixedMonthly - invoiceLotCashOut - advanceCashOut;
-  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, houseRent, utilities, fixedMonthly, invoiceLotCashOut, advanceCashOut, total };
+  const total = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - houseRent - utilities - tollFee - fixedMonthly - invoiceLotCashOut - advanceCashOut;
+  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, houseRent, utilities, tollFee, fixedMonthly, invoiceLotCashOut, advanceCashOut, total };
 }
 function computeCumulativeCompanyProfit(toOverride){
   return computeCumulativeCashFlowBreakdown(toOverride).total;
@@ -2241,6 +2252,13 @@ async function saveHousingUtilitiesByMonth(){
   try { await withTimeout(sharedDataRef('housingUtilitiesByMonth').set({ list: state.housingUtilitiesByMonth })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu tiền nhà/điện nước: ' + (e?.message || e)); return false; }
 }
+// SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không cố
+// định, điền tay theo từng tháng"): mirror NGUYÊN XI saveHousingUtilitiesByMonth()
+// ở trên — CHUNG CÔNG TY, dùng sharedDataRef.
+async function saveTollFeeByMonth(){
+  try { await withTimeout(sharedDataRef('tollFeeByMonth').set({ list: state.tollFeeByMonth })); return true; }
+  catch(e){ showToast('Lỗi lưu dữ liệu CP cầu đường: ' + (e?.message || e)); return false; }
+}
 // "2026-07" -> "7/2026" để hiện nhãn gọn cho từng dòng trong danh sách.
 function monthLabelVN(ym){
   const [y,m] = String(ym).split('-');
@@ -2320,6 +2338,16 @@ function utilitiesForRange(from, to){
   return fullMonthlyCostIfTouched(ym=>{
     const e = state.housingUtilitiesByMonth.find(x=>x.month===ym);
     return e ? (Number(e.utilitiesAmount)||0) : 0;
+  }, from, to);
+}
+// SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không cố
+// định, điền tay theo từng tháng, ngay trên CP cố định hàng tháng"):
+// mirror NGUYÊN XI houseRentForRange()/utilitiesForRange() ở trên —
+// CHUNG CÔNG TY, tháng nào không ghi = 0, không suy đoán/chia theo ngày.
+function tollFeeForRange(from, to){
+  return fullMonthlyCostIfTouched(ym=>{
+    const e = state.tollFeeByMonth.find(x=>x.month===ym);
+    return e ? (Number(e.amount)||0) : 0;
   }, from, to);
 }
 async function saveSitePayments(){
@@ -2499,6 +2527,7 @@ function exportBackupFile(){
     monthlyBonuses: state.monthlyBonuses,
     roadFeeByMonth: state.roadFeeByMonth,
     housingUtilitiesByMonth: state.housingUtilitiesByMonth,
+    tollFeeByMonth: state.tollFeeByMonth,
     driverAdvances: state.driverAdvances,
     driverExpenseReports: state.driverExpenseReports,
     settings: state.settings
@@ -2539,6 +2568,7 @@ async function handleRestoreFile(file){
     state.monthlyBonuses = Array.isArray(backup.monthlyBonuses) ? backup.monthlyBonuses : [];
     state.roadFeeByMonth = Array.isArray(backup.roadFeeByMonth) ? backup.roadFeeByMonth : [];
     state.housingUtilitiesByMonth = Array.isArray(backup.housingUtilitiesByMonth) ? backup.housingUtilitiesByMonth : [];
+    state.tollFeeByMonth = Array.isArray(backup.tollFeeByMonth) ? backup.tollFeeByMonth : [];
     state.driverAdvances = Array.isArray(backup.driverAdvances) ? backup.driverAdvances : [];
     state.driverExpenseReports = Array.isArray(backup.driverExpenseReports) ? backup.driverExpenseReports : [];
     if(backup.settings) state.settings = Object.assign(state.settings, backup.settings);
@@ -8766,10 +8796,11 @@ function computeHiringAdvisorMetrics(draft){
   // KHÔNG cộng dồn theo activeDrivers nữa.
   const currentMonthlyHouseRent = houseRentForRange(curMonthRangeForRoadFee.from, curMonthRangeForRoadFee.to);
   const currentMonthlyUtilities = utilitiesForRange(curMonthRangeForRoadFee.from, curMonthRangeForRoadFee.to);
+  const currentMonthlyTollFee = tollFeeForRange(curMonthRangeForRoadFee.from, curMonthRangeForRoadFee.to);
   // 2026-08-16: monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ Lãi)
   // — khớp đúng quy tắc otherFixedMonthly ở computePeriodSummary (~7850).
   const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
-  const currentFixedCost = currentMonthlySalary + currentMonthlyHouseRent + currentMonthlyUtilities + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
+  const currentFixedCost = currentMonthlySalary + currentMonthlyHouseRent + currentMonthlyUtilities + currentMonthlyTollFee + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   // ----- Kịch bản HIỆN TẠI (1 lái) — quy đổi nhịp độ thực tế trong khoảng
   // đã chọn ra 1 tháng chuẩn, để so sánh ngang hàng với kịch bản 2 lái -----
@@ -10907,16 +10938,17 @@ function computeBankBalanceReconciliation(){
   const roadFeeBank = roadFeeForRangeCompanyWide(from, today);
   const houseRentBank = houseRentForRange(from, today);
   const utilitiesBank = utilitiesForRange(from, today);
+  const tollFeeBank = tollFeeForRange(from, today);
   const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today);
   const invoiceLotBank = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today)
     .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - fixedMonthlyBank - invoiceLotBank;
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
-    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, fixedMonthlyBank, invoiceLotBank };
+    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -11274,6 +11306,7 @@ function computePeriodSummary(from, to){
   // đó CÓ bản theo từng xe nên phải tách 2 nhánh).
   const houseRent = houseRentForRange(from, to);
   const utilities = utilitiesForRange(from, to);
+  const tollFee = tollFeeForRange(from, to);
   // TÁCH RÕ 2 khái niệm (yêu cầu Ông Chủ 2026-08-15, đối chiếu đúng chuẩn
   // kế toán):
   //  - otherFixedMonthly (dùng cho LỢI NHUẬN THỰC TẾ + Điểm Hoà Vốn + Cảnh
@@ -11299,7 +11332,7 @@ function computePeriodSummary(from, to){
   const otherFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
   const otherFixedMonthlyForCashFlow = bankLoanRealCostForRange(state.settings.bankLoan, from, to)
     + fullMonthlyCostIfTouched(()=>insuranceAndRegistrationMonthly, from, to);
-  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - otherFixedMonthly;
+  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly;
   const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
   const citPeriodKey = `${from}_${to}`;
   const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey] || 0;
@@ -11326,8 +11359,8 @@ function computePeriodSummary(from, to){
     cashFlowRoadFee = roadFee;
     cashFlowFixedMonthly = otherFixedMonthlyForCashFlow;
   }
-  netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - cashFlowRepairTotal - cashFlowRoadFee - houseRent - utilities - cashFlowFixedMonthly;
-  return { from, to, inRange, gTotal, repairTotal, roadFee, houseRent, utilities, otherFixedMonthly, otherFixedMonthlyForCashFlow, finalNetProfit,
+  netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - cashFlowRepairTotal - cashFlowRoadFee - houseRent - utilities - tollFee - cashFlowFixedMonthly;
+  return { from, to, inRange, gTotal, repairTotal, roadFee, houseRent, utilities, tollFee, otherFixedMonthly, otherFixedMonthlyForCashFlow, finalNetProfit,
            vatPayableInRange, manualCitValue, cashIn, cashOutToSuppliers, operatingCashCost, netOperatingCashFlow,
            isCompanyWide, cashFlowRepairTotal, cashFlowRoadFee, cashFlowFixedMonthly };
 }
@@ -11728,6 +11761,7 @@ function renderResults(){
   // periodSummary không cần tính lại.
   const houseRent = periodSummary.houseRent;
   const utilities = periodSummary.utilities;
+  const tollFee = periodSummary.tollFee;
   // Chi phí cố định hàng tháng khác dùng cho LỢI NHUẬN THỰC TẾ (chuẩn kế
   // toán): khấu hao xe + LÃI VAY (không gồm gốc — gốc là trả nợ, không
   // phải chi phí) + bảo hiểm + đăng kiểm. Bản dùng cho Dòng Tiền Thuần
@@ -11738,7 +11772,7 @@ function renderResults(){
   // roadFee có thể bị Ông Chủ ghi đè riêng cho màn hình này (state.resultsRoadFeeOverride)
   // nên finalNetProfit tính lại tại đây thay vì lấy thẳng periodSummary.finalNetProfit,
   // để tôn trọng đúng giá trị đang hiển thị trên màn hình.
-  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - otherFixedMonthly;
+  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly;
   // Thuế TNDN dự kiến — ước tính tham khảo, tính trên đúng khoảng ngày
   // đang chọn (Ông Chủ đổi Từ ngày/Đến ngày thành đúng quý/năm cần xem là
   // ra số của mốc đó, không cần làm riêng từng mốc cố định). Không áp
@@ -14387,6 +14421,20 @@ function renderSettings(){
       </div>
     </section>
 
+    <!-- SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không
+    cố định, điền tay theo từng tháng, ngay trên CP cố định hàng tháng"):
+    mirror NGUYÊN XI khối "Tiền Thuê Nhà & Điện Nước Theo Tháng" ở trên —
+    CHUNG CÔNG TY, mỗi tháng điền tay 1 số duy nhất (khác Tiền Nhà/Điện
+    Nước có 2 ô, vì đây chỉ có đúng 1 khoản). -->
+    <section class="group">
+      <h3>🌉 CP Cầu Đường Theo Tháng</h3>
+      <div class="card" id="tollFeeMonthListWrap"></div>
+      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
+        <input type="month" id="tf_newMonth" style="flex:1;">
+        <button class="btn btn-ghost" id="addTollFeeMonthBtn">+ Thêm Tháng</button>
+      </div>
+    </section>
+
     <section class="group">
       <h3>Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
       <div class="card">
@@ -14769,6 +14817,46 @@ function renderSettings(){
     renderHousingUtilMonthList();
   });
 
+  // SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không cố
+  // định, điền tay theo từng tháng"): mirror NGUYÊN XI khối Tiền Thuê Nhà
+  // & Điện Nước ở trên, chỉ khác 1 ô/tháng thay vì 2 (không có sẵn dữ
+  // liệu cũ nào để tự đề xuất — Ông Chủ tự điền từ đầu).
+  const tfVals = {};
+  function renderTollFeeMonthList(){
+    const wrap = document.getElementById('tollFeeMonthListWrap');
+    if(!wrap) return;
+    const sorted = [...state.tollFeeByMonth].sort((a,b)=>b.month.localeCompare(a.month));
+    wrap.innerHTML = sorted.length ? sorted.map((e,i)=>`
+      <div style="${i===sorted.length-1?'':'border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px;'}">
+        <label style="font-weight:700; font-size:13.5px; display:block; margin-bottom:6px;">Tháng ${monthLabelVN(e.month)}
+          <button type="button" class="link-btn" data-del-tollfee="${e.id}" style="float:right; padding:0; color:var(--loss); font-weight:400;">Xoá</button>
+        </label>
+        <div class="field" style="margin-bottom:0;">
+          <label>Số Tiền Cầu Đường Tháng Này</label>
+          <input type="text" inputmode="decimal" id="tf_amount_${e.id}">
+        </div>
+      </div>`).join('') : '<div class="hint" style="margin:0;">Chưa có tháng nào — bấm "+ Thêm Tháng" bên dưới để bắt đầu.</div>';
+    sorted.forEach(e=>{
+      tfVals[e.id] = e.amount;
+      attachMoneyInput(document.getElementById(`tf_amount_${e.id}`), e.amount, v=>tfVals[e.id]=v);
+    });
+    document.querySelectorAll('[data-del-tollfee]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        state.tollFeeByMonth = state.tollFeeByMonth.filter(x=>x.id!==btn.dataset.delTollfee);
+        renderTollFeeMonthList();
+      });
+    });
+  }
+  renderTollFeeMonthList();
+  document.getElementById('addTollFeeMonthBtn').addEventListener('click', ()=>{
+    const picked = document.getElementById('tf_newMonth').value;
+    if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
+    if(state.tollFeeByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
+    state.tollFeeByMonth.push({ id: uid('tollfee'), month: picked, amount: 0 });
+    document.getElementById('tf_newMonth').value='';
+    renderTollFeeMonthList();
+  });
+
   const changeKeyBtn = document.getElementById('changeGeminiKeyBtn');
   if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
   const cancelKeyEditBtn = document.getElementById('cancelGeminiKeyEditBtn');
@@ -14798,6 +14886,8 @@ function renderSettings(){
       if(huVals[e.id]!==undefined){ e.rentAmount = huVals[e.id].rentAmount; e.utilitiesAmount = huVals[e.id].utilitiesAmount; }
     });
     if(!(await saveHousingUtilitiesByMonth())) return;
+    state.tollFeeByMonth.forEach(e=>{ if(tfVals[e.id]!==undefined) e.amount = tfVals[e.id]; });
+    if(!(await saveTollFeeByMonth())) return;
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
