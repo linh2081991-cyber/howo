@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-07 · #165';
+const APP_BUILD = '2026-09-07 · #166';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12374,28 +12374,53 @@ function openCustomerDetail(customerId){
         ${cus.address?`<div style="margin-top:2px; color:var(--ink-soft); font-size:13.5px;">${escapeHtml(cus.address)}</div>`:''}
       </div>
     </section>
+    ${goodsAllTime.totalTrips>0 ? `
     <section class="group">
-      <div class="card">
-        ${goodsAllTime.totalTrips>0 ? `
-        <div class="summary-row"><span>Tổng tiền hàng đã bán (chưa VAT)</span><span class="val">${fmtVND(goodsAllTime.totalNet)}</span></div>
-        <div class="summary-row"><span>+ VAT</span><span class="val">${fmtVND(goodsAllTime.totalVat)}</span></div>
-        ` : ''}
-        <div class="summary-row total"><span>= Phải thu (tổng)</span><span class="val">${fmtVND(debt.billed)}</span></div>
-        <div class="summary-row" style="margin-top:10px;"><span>Đã nhận (tổng)</span><span class="val">${fmtVND(debt.collected)}</span></div>
-        <div class="summary-row total"><span>CÒN NỢ</span><span class="val" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${fmtVND(debt.owed)}${debt.owed<0?' (khách tạm ứng dư)':''}</span></div>
-        ${holdbackPct>0 && debt.owed>0 ? `
-        <div class="formula-divider" style="margin:10px 0;"></div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Phân Bổ Còn Nợ</span>
-          <span style="font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:20px; background:var(--accent-soft); color:var(--accent); white-space:nowrap;">Giữ ${holdbackPct}% phần chưa xuất HĐ</span>
-        </div>
-        <div class="summary-row"><span>Tiền hàng CHƯA xuất hoá đơn (mọi thời điểm)</span><span class="val">${fmtVND(unInvoicedBilledAllTime)}</span></div>
-        <div class="hint" style="margin:-4px 0 8px;">Đang giữ hợp lệ = ${fmtVND(unInvoicedBilledAllTime)} × ${holdbackPct}% = ${fmtVND(legitimateHoldback)}${legitimateHoldback < unInvoicedBilledAllTime*holdbackPct/100 ? ' (đã kẹp lại bằng đúng CÒN NỢ)' : ''}</div>
-        <div class="summary-row"><span>Đang giữ hợp lệ</span><span class="val">${fmtVND(legitimateHoldback)}</span></div>
-        <div class="hint" style="margin:-4px 0 8px;">Cần đòi ngay = CÒN NỢ − Đang giữ hợp lệ = ${fmtVND(debt.owed)} − ${fmtVND(legitimateHoldback)} = ${fmtVND(dueNow)}</div>
-        <div class="summary-row"><span style="font-weight:700;">Cần đòi ngay</span><span class="val" style="font-weight:700; color:var(--loss);">${fmtVND(dueNow)}</span></div>
-        ` : ''}
+      <h3>💰 Tiền Hàng Đã Bán (chưa tính VAT)</h3>
+      <div class="card" style="text-align:center; padding:16px;">
+        <div style="font-size:28px; font-weight:800; color:var(--ink);">${fmtVND(goodsAllTime.totalNet)}</div>
       </div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Tổng tiền hàng đã bán (chưa VAT)</td><td class="num" style="font-weight:700;">${fmtVND(goodsAllTime.totalNet)}</td></tr>
+            <tr><td>+ VAT</td><td class="num">${fmtVND(goodsAllTime.totalVat)}</td></tr>
+            <tr class="grid-total-row"><td>= Phải thu (tổng)</td><td class="num">${fmtVND(debt.billed)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    ` : ''}
+    <section class="group">
+      <h3>🧾 Công Nợ Với Khách Hàng</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>= Phải thu (tổng)</td><td class="num" style="font-weight:700;">${fmtVND(debt.billed)}</td></tr>
+            <tr><td>Đã nhận (tổng)</td><td class="num">${fmtVND(debt.collected)}</td></tr>
+            <tr class="grid-total-row"><td>CÒN NỢ</td><td class="num" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${debt.owed>0 ? fmtVND(debt.owed) : `0đ (khách đang tạm ứng dư ${fmtVND(Math.abs(debt.owed))})`}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ${holdbackPct>0 && debt.owed>0 ? `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin:14px 0 8px;">
+        <span style="font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Phân Bổ Còn Nợ</span>
+        <span style="font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:20px; background:var(--accent-soft); color:var(--accent); white-space:nowrap;">Giữ ${holdbackPct}% phần chưa xuất HĐ</span>
+      </div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Tiền hàng CHƯA xuất hoá đơn (mọi thời điểm)</td><td class="num">${fmtVND(unInvoicedBilledAllTime)}</td></tr>
+            <tr><td style="padding-left:26px; color:var(--ink-soft);">↳ Đang giữ hợp lệ = ${fmtVND(unInvoicedBilledAllTime)} × ${holdbackPct}%${legitimateHoldback < unInvoicedBilledAllTime*holdbackPct/100 ? ' (đã kẹp lại bằng đúng CÒN NỢ)' : ''}</td><td class="num" style="color:var(--ink-soft);">${fmtVND(legitimateHoldback)}</td></tr>
+            <tr><td style="padding-left:26px; color:var(--ink-soft);">↳ Cần đòi ngay = CÒN NỢ − Đang giữ hợp lệ</td><td class="num" style="color:var(--ink-soft);">${fmtVND(debt.owed)} − ${fmtVND(legitimateHoldback)}</td></tr>
+            <tr class="grid-total-row"><td>Cần đòi ngay</td><td class="num" style="color:var(--loss);">${fmtVND(dueNow)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ` : ''}
       <button class="btn btn-accent btn-block" id="addCustomerPaymentBtn" style="margin-top:10px;">+ Ghi Nhận Khoản Đã Thu</button>
       <button class="btn btn-ghost btn-block" id="bulkTickSellInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Xuất</button>
     </section>
