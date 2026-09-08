@@ -667,7 +667,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #170';
+const APP_BUILD = '2026-09-08 · #171';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2070,11 +2070,15 @@ function roadFeeForRangeCompanyWide(from, to){
 /// Gộp Chi Phí Vận Hành (dầu/lương/ăn/nhà/phát sinh) của TẤT CẢ xe trong
 /// khoảng ngày — dùng sanitizeShiftForRevenue() y hệt bản 1 xe, để ca nào
 /// còn thiếu ODO/dầu của BẤT KỲ xe nào cũng không bị tính sai tiền dầu.
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ): đổi sang shiftOperatingCashCostReal()
+/// — dùng lít ĐỔ THẬT thay vì lít tiêu hao, để khớp đúng bản chất "tiền
+/// mặt thật" với computeBankBalanceReconciliation() (trước đây 2 chỗ này
+/// lệch nhau đúng phần chênh lệch lít đổ vs lít tiêu hao mỗi kỳ).
 function companyWideOperatingCashCost(from, to){
   let sum = 0;
   Object.values(state.allVehiclesShifts).forEach(list=>{
     list.forEach(sh=>{
-      if(sh.date>=from && sh.date<=to) sum += shiftOperatingCashCost(sanitizeShiftForRevenue(sh));
+      if(sh.date>=from && sh.date<=to) sum += shiftOperatingCashCostReal(sanitizeShiftForRevenue(sh));
     });
   });
   return sum;
@@ -5259,6 +5263,22 @@ function shiftNetProfit(sh){ return shiftTotalRevenue(sh) - shiftTotalCost(sh); 
 function shiftOperatingCashCost(sh){
   // SỬA 2026-08-31: bỏ housingAllocation — xem chú thích shiftTotalCost() ở trên.
   return shiftFuelCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
+       + (Number(sh.foodAllowance)||0) + (Number(sh.incidentalCost)||0)
+       + (Number(sh.roadFeeIncidental)||0);
+}
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — phát hiện qua audit đối chiếu "Tổng
+/// Kết Dòng Tiền" vs "Khớp Số Dư Ngân Hàng"): shiftOperatingCashCost() ở
+/// trên, DÙ TÊN CÓ CHỮ "Cash", vẫn tính tiền dầu theo shiftFuelCost() =
+/// lít TIÊU HAO (kế toán dồn tích) — ĐÚNG cho phần hiển thị breakdown ở
+/// tab Kết Quả (computeResultsGroup(), context dồn tích, KHÔNG ĐỔI), NHƯNG
+/// SAI bản chất khi bị dùng làm số "tiền mặt thật" ở companyWideOperatingCashCost()
+/// / computeCompanyCashFlowLedger() — 2 chỗ đó cần lít ĐỔ THẬT
+/// (shiftFuelRefillCost, y hệt cách computeBankBalanceReconciliation() đã
+/// làm đúng sẵn). Hàm mới này CHỈ thay đúng 1 dòng dầu, các khoản còn lại
+/// giữ y nguyên logic — dùng RIÊNG cho 2 chỗ tiền mặt, KHÔNG đụng
+/// shiftOperatingCashCost() gốc để không ảnh hưởng tab Kết Quả.
+function shiftOperatingCashCostReal(sh){
+  return shiftFuelRefillCost(sh) + shiftTotalTripWage(sh) + (Number(sh.baseSalaryAllocation)||0)
        + (Number(sh.foodAllowance)||0) + (Number(sh.incidentalCost)||0)
        + (Number(sh.roadFeeIncidental)||0);
 }
@@ -14310,7 +14330,7 @@ function renderCashFlowBreakdownDetailPage(){
     return row(p.date, sup?sup.name:'', p.amount, -1);
   }).join('');
   const operatingRows = shiftsInRange.map(sh=>{
-    const cost = shiftOperatingCashCost(sanitizeShiftForRevenue(sh));
+    const cost = shiftOperatingCashCostReal(sanitizeShiftForRevenue(sh));
     const vName = sh._vehicleId ? vehicleNameById(sh._vehicleId) : '';
     return row(sh.date, vName?`🚛 ${vName}`:'', cost, -1);
   }).join('');
