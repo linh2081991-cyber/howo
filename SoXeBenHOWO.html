@@ -667,7 +667,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #171';
+const APP_BUILD = '2026-09-08 · #172';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7205,20 +7205,23 @@ function shiftFinancialSummaryHtml(sh){
   ];
   // 2026-08-15: "TIỀN THỰC ĐÚT TÚI (CẢ CA)" — số CUỐI CÙNG tính hoàn toàn
   // bằng tiền mặt thật từ đầu tới cuối (không qua bước bóc VAT kế toán
-  // như LỢI NHUẬN RÒNG) — đã kiểm chứng khớp tuyệt đối với cách cộng trừ
-  // tiền mặt thô tay (Khách trả − Trả mỏ − VAT nộp − Mua hoá đơn bù − CP
-  // vận hành). Công trình thương mại lấy đúng siteCashTakeHome() (đã nét
-  // mua-bán-VAT-hoá đơn bù ra tiền mặt thật); công trình chở cước lấy
-  // đúng siteRevenue() (bản chất đã là tiền mặt thật, không có giá vốn
-  // hàng hoá tách riêng) — rồi trừ ĐÚNG shiftOperatingCashCost() (dầu/
-  // lương/ăn/nhà/phát sinh/luật — y hệt operatingItems ở trên, không tính
-  // theo cách khác). Với ca KHÔNG có công trình thương mại nào, số này
-  // luôn khớp tuyệt đối bằng LỢI NHUẬN RÒNG (đã kiểm chứng bằng toán học:
-  // materialCost=supplementCost=0 nên shiftTotalCost=shiftOperatingCashCost),
-  // nên chỉ hiện thêm dòng này khi CÓ công trình thương mại, tránh trùng lặp.
+  // như LỢI NHUẬN RÒNG). Công trình thương mại lấy đúng siteCashTakeHome()
+  // (đã nét mua-bán-VAT-hoá đơn bù ra tiền mặt thật); công trình chở cước
+  // lấy đúng siteRevenue() (bản chất đã là tiền mặt thật, không có giá vốn
+  // hàng hoá tách riêng) — rồi trừ shiftOperatingCashCostReal() (dầu/
+  // lương/ăn/nhà/phát sinh/luật).
+  // SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — cùng đợt sửa companyWideOperatingCashCost()):
+  // trước đây dòng này lỡ dùng shiftOperatingCashCost() (lít TIÊU HAO,
+  // dồn tích) nên với ca không có công trình thương mại, số này LUÔN khớp
+  // tuyệt đối bằng LỢI NHUẬN RÒNG một cách GIẢ TẠO (trùng công thức dầu,
+  // không phải vì bản chất tiền mặt = lợi nhuận). Giờ đổi đúng sang
+  // shiftOperatingCashCostReal() (lít ĐỔ THẬT) — số này có thể LỆCH NHẸ so
+  // với Lợi Nhuận Ròng nếu lít đổ ≠ lít tiêu hao trong đúng ca đó (ví dụ đổ
+  // dư/thiếu so với tiêu thụ thật), ĐÚNG bản chất "tiền mặt thật rời tay
+  // ngay hôm nay" — không còn là lỗi trùng công thức nữa.
   const cashPocketBySite = (sh.siteLogs||[]).reduce((sum,s)=>
     sum + (s.siteType==='commercial' ? siteCashTakeHome(s) : siteRevenue(s)), 0);
-  const cashPocketTotal = cashPocketBySite - shiftOperatingCashCost(sh);
+  const cashPocketTotal = cashPocketBySite - shiftOperatingCashCostReal(sh);
   return `
     <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
