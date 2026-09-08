@@ -667,7 +667,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #169';
+const APP_BUILD = '2026-09-08 · #170';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2163,14 +2163,19 @@ function computeCumulativeCompanyProfit(toOverride){
 /// SỬA 2026-09-08 (yêu cầu Ông Chủ): loại các khoản "🔄 Tiền đảo" khỏi
 /// Vốn Chủ Sở Hữu — đây là tiền công ty tự rút ra rồi nộp lại (đảo vòng
 /// để đủ vốn điều lệ trên giấy tờ), KHÔNG phải tiền mới thật sự đi vào
-/// công ty, nên không được cộng thêm vào tài sản ròng mỗi lần đảo. Số
-/// "Vốn Điều Lệ đã góp" (computeCharterCapitalStatus) KHÔNG đổi — vẫn
-/// cộng đủ mọi lần kể cả tiền đảo, vì đó là số khớp đúng sao kê ngân
-/// hàng dùng cho hồ sơ Sở KH-ĐT.
+/// công ty, nên không được cộng thêm vào tài sản ròng mỗi lần đảo. Áp
+/// dụng cho CẢ HAI chiều (Góp vào lẫn Rút ra) — nếu chỉ loại chiều Góp
+/// vào mà không loại chiều Rút ra tương ứng (rút tiền mặt nhập quỹ để
+/// chuẩn bị đảo lại), Vốn Chủ Sở Hữu sẽ bị trừ oan phần rút đó dù tiền
+/// chưa hề rời khỏi công ty. Số "Vốn Điều Lệ đã góp"
+/// (computeCharterCapitalStatus) KHÔNG đổi — vẫn cộng đủ mọi lần góp kể
+/// cả tiền đảo, vì đó là số khớp đúng sao kê ngân hàng dùng cho hồ sơ Sở
+/// KH-ĐT. Đối chiếu ngân hàng (bank reconciliation) cũng KHÔNG loại tiền
+/// đảo — vì đó là tiền THẬT có ra/vào tài khoản ngân hàng, cần khớp đủ.
 function computeOwnerEquity(){
   const initialInvestment = Number(state.equityProjectInfo.initialInvestment)||0;
   const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
   const cumulativeProfit = computeCumulativeCompanyProfit();
   const contributed = initialInvestment + contributedExtra;
   return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, equity: contributed - withdrawn + cumulativeProfit };
@@ -2178,8 +2183,9 @@ function computeOwnerEquity(){
 /// Dựng dãy [{month, equity, cumulativeProfit}] từ THÁNG BẮT ĐẦU DỰ ÁN
 /// tới THÁNG HIỆN TẠI — mỗi điểm là Vốn Chủ Sở Hữu "chốt" tại đúng ngày
 /// cuối tháng đó (hoặc hôm nay, nếu tháng đang xét chưa qua hết).
-/// SỬA 2026-09-08: cùng loại "🔄 Tiền đảo" như computeOwnerEquity(), để
-/// biểu đồ theo tháng khớp đúng với số Vốn Chủ Sở Hữu hiện tại ở trên.
+/// SỬA 2026-09-08: cùng loại "🔄 Tiền đảo" (cả 2 chiều) như
+/// computeOwnerEquity(), để biểu đồ theo tháng khớp đúng với số Vốn Chủ
+/// Sở Hữu hiện tại ở trên.
 function computeMonthlyEquityTimeline(){
   const allShifts = allShiftsCompanyWide();
   if(allShifts.length===0) return [];
@@ -2194,7 +2200,7 @@ function computeMonthlyEquityTimeline(){
     const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
     const snapshotDate = monthEnd < today ? monthEnd : today;
     const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
-    const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
     const cumulativeProfit = computeCumulativeCompanyProfit(snapshotDate);
     const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit;
     return { month: ym, equity, cumulativeProfit };
@@ -14022,7 +14028,7 @@ function renderCompanyDashboardPage(){
         </label>
         <label id="oe_recycledLabel" style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
           <input type="checkbox" id="oe_isRecycled" style="width:20px; height:20px; margin:0;">
-          <span style="font-size:14px;">🔄 Đây là tiền <b>đảo lại</b> (đã từng góp/rút trước đó, không phải tiền mới — VD: rút ra nhập quỹ rồi nộp lại ngân hàng để đủ vốn điều lệ trên giấy tờ)</span>
+          <span style="font-size:14px;">🔄 Đây là tiền <b>đảo lại</b> — công ty tự rút ra/nộp lại CÙNG một khoản tiền cũ, không phải tiền mới thật sự thêm/bớt (VD: rút tiền mặt nhập quỹ, rồi sau đó nộp lại ngân hàng để đủ vốn điều lệ trên giấy tờ). Tick ở CẢ HAI đầu của vòng đảo — cả lúc Rút ra lẫn lúc Góp lại — để Vốn Chủ Sở Hữu không bị cộng/trừ oan.</span>
         </label>
         <button class="btn btn-accent btn-block" id="oe_addBtn" style="margin-top:12px;">+ Ghi Khoản Này</button>
       </div>
@@ -14043,7 +14049,7 @@ function renderCompanyDashboardPage(){
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
               <span style="font-weight:800; white-space:nowrap; color:${e.type==='contribution'?'var(--profit)':'var(--loss)'};">${e.type==='contribution'?'+':'−'}${fmtVND(e.amount)}</span>
-              ${e.type==='contribution' ? `<button class="link-btn" data-toggle-recycled="${e.id}" style="padding:0; font-size:12px;">${e.isRecycled?'↩️ Bỏ đảo':'🔄 Đánh dấu đảo'}</button>` : ''}
+              <button class="link-btn" data-toggle-recycled="${e.id}" style="padding:0; font-size:12px;">${e.isRecycled?'↩️ Bỏ đảo':'🔄 Đánh dấu đảo'}</button>
               <button class="link-btn" data-del-equity="${e.id}" style="color:var(--loss); padding:0;">Xoá</button>
             </div>
           </div>`).join('')}
@@ -14083,9 +14089,12 @@ function renderCompanyDashboardPage(){
   const oeRecycledLabel = document.getElementById('oe_recycledLabel');
   const oeTypeSelect = document.getElementById('oe_type');
   const syncCharterLabelVisibility = () => {
-    const show = oeTypeSelect.value==='contribution';
-    oeCharterLabel.style.display = show ? 'flex' : 'none';
-    oeRecycledLabel.style.display = show ? 'flex' : 'none';
+    // "Vốn điều lệ" chỉ có nghĩa khi tiền ĐI VÀO (Góp vào) — giữ nguyên
+    // chỉ hiện cho contribution. "Tiền đảo" thì có nghĩa ở CẢ 2 chiều: vế
+    // Góp vào (nộp lại) LẪN vế Rút ra (rút tiền mặt nhập quỹ để chuẩn bị
+    // đảo) — nên hiện luôn, không phụ thuộc loại đang chọn.
+    oeCharterLabel.style.display = oeTypeSelect.value==='contribution' ? 'flex' : 'none';
+    oeRecycledLabel.style.display = 'flex';
   };
   syncCharterLabelVisibility();
   oeTypeSelect.addEventListener('change', syncCharterLabelVisibility);
@@ -14094,7 +14103,7 @@ function renderCompanyDashboardPage(){
     const type = document.getElementById('oe_type').value;
     const note = document.getElementById('oe_note').value.trim();
     const isCharterCapital = type==='contribution' && document.getElementById('oe_isCharterCapital').checked;
-    const isRecycled = type==='contribution' && document.getElementById('oe_isRecycled').checked;
+    const isRecycled = document.getElementById('oe_isRecycled').checked;
     const method = document.getElementById('oe_method').value;
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
     if(!oeAmountVal || oeAmountVal<=0){ showToast('Nhập số tiền trước đã.'); return; }
