@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #178';
+const APP_BUILD = '2026-09-08 · #179';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14377,6 +14377,107 @@ function renderLoanList(){
     btn.addEventListener('click', ()=>openLoanEditor(btn.dataset.id));
   });
 }
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "gọn gàng vào Linh Chí Thành, không
+/// cần nút bên Cài Đặt"): modal nhỏ sửa 3 số Chi Phí Cố Định Hàng Tháng
+/// (Khấu hao/Bảo hiểm/Đăng kiểm) — lưu ngay lập tức, KHÔNG còn qua nút
+/// "Lưu Cài Đặt" chung, và KHÔNG còn hiện 3 ô này ở Cài Đặt nữa.
+function openFixedCostsEditor(){
+  let depVal = Number(state.settings.monthlyVehicleDepreciation)||0;
+  let insVal = Number(state.settings.monthlyInsurance)||0;
+  let regVal = Number(state.settings.monthlyRegistrationFee)||0;
+  openModal(`
+    <h3>💰 Sửa Chi Phí Cố Định Hàng Tháng</h3>
+    <div class="field">
+      <label>Khấu hao xe dự kiến / tháng</label>
+      <input type="text" inputmode="decimal" id="fce_dep">
+    </div>
+    <div class="field">
+      <label>Bảo hiểm xe / tháng</label>
+      <input type="text" inputmode="decimal" id="fce_ins">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Đăng kiểm / Đăng ký / Phù hiệu vận tải / tháng</label>
+      <input type="text" inputmode="decimal" id="fce_reg">
+    </div>
+    <div class="hint" style="margin-top:8px;">Các khoản này (cùng Gốc+Lãi vay ngân hàng tính riêng ở mục Khoản Vay) đều trừ vào Lợi Nhuận Gộp để ra Lợi Nhuận Thực Tế Cuối Cùng, và cộng vào chi phí cố định khi tính Điểm Hoà Vốn — xem ở tab "Kết Quả".</div>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      <button class="btn btn-ghost" id="fce_cancelBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="fce_saveBtn">Lưu</button>
+    </div>
+  `);
+  attachMoneyInput(document.getElementById('fce_dep'), depVal, v=>depVal=v);
+  attachMoneyInput(document.getElementById('fce_ins'), insVal, v=>insVal=v);
+  attachMoneyInput(document.getElementById('fce_reg'), regVal, v=>regVal=v);
+  document.getElementById('fce_cancelBtn').addEventListener('click', closeModal);
+  document.getElementById('fce_saveBtn').addEventListener('click', async ()=>{
+    state.settings.monthlyVehicleDepreciation = depVal;
+    state.settings.monthlyInsurance = insVal;
+    state.settings.monthlyRegistrationFee = regVal;
+    if(!(await saveSettings())) return;
+    closeModal();
+    showToast('Đã lưu.');
+    saveMainScroll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  });
+}
+/// Thống kê khấu hao xe THEO TỪNG THÁNG, từ tháng bắt đầu dự án (hoặc ca
+/// đầu tiên nếu chưa khai Ngày Bắt Đầu Dự Án ở Thông Tin Dự Án) tới tháng
+/// hiện tại — dùng ĐÚNG mức khấu hao/tháng ĐANG khai báo hiện hành áp
+/// lùi cho mọi tháng. App KHÔNG lưu lịch sử đổi mức khấu hao qua từng
+/// giai đoạn (khác khoản vay có Lộ Trình Lãi Suất), nên nếu Ông Chủ từng
+/// đổi số này giữa chừng, các tháng cũ vẫn tính theo mức HIỆN TẠI — đây
+/// là số ước tính, không phải sổ sách kế toán khấu hao chính thức.
+function computeDepreciationMonthlyHistory(){
+  const monthlyRate = Number(state.settings.monthlyVehicleDepreciation)||0;
+  const allShifts = allShiftsCompanyWide();
+  const earliestShiftDate = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : null;
+  const startDate = state.equityProjectInfo.startDate || earliestShiftDate;
+  if(!startDate) return [];
+  const today = todayLocalDateStr();
+  if(startDate>today) return [];
+  const months = monthsBetween(startDate, today);
+  let cumulative = 0;
+  return months.map(ym=>{
+    cumulative += monthlyRate;
+    return { month: ym, amount: monthlyRate, cumulative };
+  });
+}
+/// Trang riêng "Chi Tiết Thu Hồi Khấu Hao" — mở từ Linh Chí Thành.
+function renderDepreciationDetailPage(){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const rows = computeDepreciationMonthlyHistory();
+  const monthlyRate = Number(state.settings.monthlyVehicleDepreciation)||0;
+  const totalSoFar = rows.length ? rows[rows.length-1].cumulative : 0;
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="depDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📊 Chi Tiết Thu Hồi Khấu Hao Xe</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Mức khấu hao hiện hành ${fmtVND(monthlyRate)}/tháng, áp lùi cho mọi tháng kể từ ngày bắt đầu dự án — nếu Ông Chủ từng đổi số này giữa chừng, các tháng cũ vẫn tính theo mức HIỆN TẠI (số ước tính, app không lưu lịch sử đổi mức).</div>
+      ${rows.length===0 ? '<div class="hint">Chưa có dữ liệu ca nào để tính — cần ít nhất 1 ca đã chạy hoặc đã khai Ngày Bắt Đầu Dự Án ở Thông Tin Dự Án.</div>' : `
+      <div class="card" style="margin-bottom:12px; border:1.5px solid var(--accent);">
+        <div class="summary-row total"><span>💰 Tổng khấu hao đã thu hồi (${rows.length} tháng)</span><span class="val">${fmtVND(totalSoFar)}</span></div>
+      </div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">Khấu Hao Tháng Đó</th><th class="num">Luỹ Kế</th></tr></thead>
+          <tbody>
+            ${[...rows].reverse().map(r=>`<tr>
+              <td>${monthLabelVN(r.month)}</td>
+              <td class="num">${fmtVND(r.amount)}</td>
+              <td class="num" style="font-weight:700;">${fmtVND(r.cumulative)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      `}
+    </section>
+  `;
+  document.getElementById('depDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+}
 
 function renderCompanyDashboardPage(){
   scrollMainToTop();
@@ -14692,7 +14793,10 @@ function renderCompanyDashboardPage(){
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Sửa số liệu tại ⚙️ Cài Đặt</div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="btn btn-ghost" id="editFixedCostsBtn" style="flex:1;">✏️ Sửa</button>
+        <button class="btn btn-ghost" id="depreciationDetailBtn" style="flex:1;">📊 Chi Tiết Thu Hồi Khấu Hao</button>
+      </div>
     </section>
 
     <section class="group">
@@ -14813,6 +14917,8 @@ function renderCompanyDashboardPage(){
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
   renderLoanList();
+  document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
+  document.getElementById('depreciationDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
   renderDocumentList();
   renderMaintenanceList();
 }
@@ -15251,26 +15357,6 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>💰 Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
-      <div class="card">
-        <div class="field">
-          <label>Khấu hao xe dự kiến / tháng</label>
-          <input type="text" inputmode="decimal" id="s_depreciation">
-        </div>
-        <div class="field">
-          <label>Bảo hiểm xe / tháng</label>
-          <input type="text" inputmode="decimal" id="s_insurance">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Đăng kiểm / Đăng ký / Phù hiệu vận tải / tháng</label>
-          <input type="text" inputmode="decimal" id="s_registration">
-        </div>
-        <div class="hint">Tất cả các khoản trên (kể cả sửa chữa/khấu hao phát sinh thực tế, và Gốc+Lãi vay ngân hàng tính tự động ở khối bên dưới) đều được trừ vào Lợi Nhuận Gộp để ra Lợi Nhuận Thực Tế Cuối Cùng, và được cộng vào chi phí cố định khi tính Điểm Hoà Vốn — xem ở tab "Kết Quả".</div>
-      </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem số liệu hiện tại tại 🏢 LINH CHÍ THÀNH</div>
-    </section>
-
-    <section class="group">
       <h3>🏦 Khoản Vay Ngân Hàng</h3>
       <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Mỗi khoản vay (vay mua xe, vay vốn lưu động...) tính RIÊNG, hoàn toàn độc lập với nhau.</div>
       <button class="btn btn-accent btn-block" id="addLoanBtn" style="font-size:15.5px; padding:14px;">🏦➕ Thêm Khoản Vay Mới</button>
@@ -15310,11 +15396,6 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:24px;">Lưu Cài Đặt</button>
   `;
 
-  const sVals = { depreciation: s.monthlyVehicleDepreciation||0, insurance: s.monthlyInsurance||0, registration: s.monthlyRegistrationFee||0 };
-  attachMoneyInput(document.getElementById('s_depreciation'), sVals.depreciation, v=>sVals.depreciation=v);
-  attachMoneyInput(document.getElementById('s_insurance'), sVals.insurance, v=>sVals.insurance=v);
-  attachMoneyInput(document.getElementById('s_registration'), sVals.registration, v=>sVals.registration=v);
-
   // SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — nhiều khoản vay riêng biệt): toàn
   // bộ logic loanDraft/renderLoanPreview/renderLoanFullSchedule/checklist
   // cũ (chỉ xử lý được đúng 1 khoản vay) đã CHUYỂN HẲN sang openLoanEditor()
@@ -15353,9 +15434,6 @@ function renderSettings(){
   if(cancelKeyEditBtn) cancelKeyEditBtn.addEventListener('click', ()=>{ showGeminiKeyInput = false; renderAll(); });
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
-    s.monthlyVehicleDepreciation = sVals.depreciation;
-    s.monthlyInsurance = sVals.insurance;
-    s.monthlyRegistrationFee = sVals.registration;
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
