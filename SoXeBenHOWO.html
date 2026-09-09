@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #176';
+const APP_BUILD = '2026-09-08 · #177';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2297,6 +2297,177 @@ async function saveTollFeeByMonth(){
 function monthLabelVN(ym){
   const [y,m] = String(ym).split('-');
   return `${Number(m)}/${y}`;
+}
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "nút thêm ở Cài Đặt, dữ liệu hiển
+/// thị ở Linh Chí Thành, mỗi dòng tự lưu riêng"): modal Thêm/Sửa DÙNG
+/// CHUNG cho Tiền Luật Đường & CP Cầu Đường Theo Tháng — cả 2 đều ĐÚNG 1
+/// ô số tiền/tháng, chỉ khác mảng dữ liệu + hàm lưu. kind: 'roadFee' |
+/// 'tollFee'. Lưu/Xoá xong gọi ĐÚNG saveFn riêng của loại đó ngay lập
+/// tức — không còn phụ thuộc nút "Lưu Cài Đặt" nữa.
+function openMonthlyAmountEditor(kind, id, presetMonth){
+  const cfg = kind==='roadFee'
+    ? { get list(){ return state.roadFeeByMonth; }, set list(v){ state.roadFeeByMonth=v; }, saveFn: saveRoadFeeByMonth, title:'Tiền Luật Đường', icon:'🚧', prefix:'roadfee' }
+    : { get list(){ return state.tollFeeByMonth; }, set list(v){ state.tollFeeByMonth=v; }, saveFn: saveTollFeeByMonth, title:'CP Cầu Đường', icon:'🌉', prefix:'tollfee' };
+  const existing = id ? cfg.list.find(e=>e.id===id) : null;
+  const draft = existing ? {...existing} : { id: uid(cfg.prefix), month: presetMonth || todayLocalDateStr().slice(0,7), amount: 0 };
+  let amountVal = draft.amount;
+  openModal(`
+    <h3>${cfg.icon} ${existing?'Sửa':'Thêm'} ${cfg.title} Theo Tháng</h3>
+    <div class="field">
+      <label>Tháng</label>
+      <input type="month" id="mae_month" value="${draft.month}" ${existing?'disabled':''}>
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Số tiền tháng này</label>
+      <input type="text" inputmode="decimal" id="mae_amount">
+    </div>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      ${existing ? '<button class="btn btn-danger" id="mae_delBtn">Xoá</button>' : ''}
+      <button class="btn btn-ghost" id="mae_cancelBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="mae_saveBtn">Lưu</button>
+    </div>
+  `);
+  attachMoneyInput(document.getElementById('mae_amount'), amountVal, v=>amountVal=v);
+  document.getElementById('mae_cancelBtn').addEventListener('click', closeModal);
+  const afterWrite = async (msg)=>{
+    closeModal();
+    showToast(msg);
+    saveMainScroll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  };
+  document.getElementById('mae_saveBtn').addEventListener('click', async ()=>{
+    const month = document.getElementById('mae_month').value;
+    if(!month){ showToast('Chọn tháng trước đã.'); return; }
+    if(!existing && cfg.list.some(e=>e.month===month)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
+    draft.month = month;
+    draft.amount = amountVal;
+    const idx = cfg.list.findIndex(e=>e.id===draft.id);
+    if(idx>=0) cfg.list[idx]=draft; else cfg.list.push(draft);
+    if(!(await cfg.saveFn())) return;
+    afterWrite(existing?'Đã lưu.':'Đã thêm.');
+  });
+  const delBtn = document.getElementById('mae_delBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá tháng này?')) return;
+    cfg.list = cfg.list.filter(e=>e.id!==draft.id);
+    if(!(await cfg.saveFn())) return;
+    afterWrite('Đã xoá.');
+  });
+}
+/// Modal Thêm/Sửa Tiền Thuê Nhà & Điện Nước Theo Tháng — cùng cơ chế
+/// openMonthlyAmountEditor() ở trên nhưng 2 ô/tháng thay vì 1.
+function openHousingUtilEditor(id, presetMonth){
+  const existing = id ? state.housingUtilitiesByMonth.find(e=>e.id===id) : null;
+  const draft = existing ? {...existing} : { id: uid('housingutil'), month: presetMonth || todayLocalDateStr().slice(0,7), rentAmount: 0, utilitiesAmount: 0 };
+  let rentVal = draft.rentAmount, utilVal = draft.utilitiesAmount;
+  openModal(`
+    <h3>🏠 ${existing?'Sửa':'Thêm'} Tiền Nhà & Điện Nước Theo Tháng</h3>
+    <div class="field">
+      <label>Tháng</label>
+      <input type="month" id="hue_month" value="${draft.month}" ${existing?'disabled':''}>
+    </div>
+    <div class="field">
+      <label>Tiền Thuê Nhà</label>
+      <input type="text" inputmode="decimal" id="hue_rent">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Tiền Điện Nước</label>
+      <input type="text" inputmode="decimal" id="hue_util">
+    </div>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      ${existing ? '<button class="btn btn-danger" id="hue_delBtn">Xoá</button>' : ''}
+      <button class="btn btn-ghost" id="hue_cancelBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="hue_saveBtn">Lưu</button>
+    </div>
+  `);
+  attachMoneyInput(document.getElementById('hue_rent'), rentVal, v=>rentVal=v);
+  attachMoneyInput(document.getElementById('hue_util'), utilVal, v=>utilVal=v);
+  document.getElementById('hue_cancelBtn').addEventListener('click', closeModal);
+  const afterWrite = async (msg)=>{
+    closeModal();
+    showToast(msg);
+    saveMainScroll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  };
+  document.getElementById('hue_saveBtn').addEventListener('click', async ()=>{
+    const month = document.getElementById('hue_month').value;
+    if(!month){ showToast('Chọn tháng trước đã.'); return; }
+    if(!existing && state.housingUtilitiesByMonth.some(e=>e.month===month)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
+    draft.month = month; draft.rentAmount = rentVal; draft.utilitiesAmount = utilVal;
+    const idx = state.housingUtilitiesByMonth.findIndex(e=>e.id===draft.id);
+    if(idx>=0) state.housingUtilitiesByMonth[idx]=draft; else state.housingUtilitiesByMonth.push(draft);
+    if(!(await saveHousingUtilitiesByMonth())) return;
+    afterWrite(existing?'Đã lưu.':'Đã thêm.');
+  });
+  const delBtn = document.getElementById('hue_delBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá tháng này?')) return;
+    state.housingUtilitiesByMonth = state.housingUtilitiesByMonth.filter(e=>e.id!==draft.id);
+    if(!(await saveHousingUtilitiesByMonth())) return;
+    afterWrite('Đã xoá.');
+  });
+}
+/// 3 bảng grid-table hiển thị trong Linh Chí Thành — gọi từ
+/// renderCompanyDashboardPage(). Đọc thẳng state, không tính lại gì.
+function renderRoadFeeMonthTable(){
+  const wrap = document.getElementById('roadFeeMonthListWrap');
+  if(!wrap) return;
+  const sorted = [...state.roadFeeByMonth].sort((a,b)=>b.month.localeCompare(a.month));
+  wrap.innerHTML = sorted.length===0 ? '<div class="hint" style="margin:0;">Chưa có tháng nào — bấm "🚧➕ Thêm Tháng" ở Cài Đặt để bắt đầu.</div>' : `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Tháng</th><th class="num">Số Tiền</th><th></th></tr></thead>
+        <tbody>${sorted.map(e=>`<tr>
+          <td>${monthLabelVN(e.month)}</td>
+          <td class="num">${fmtVND(e.amount)}</td>
+          <td><button class="btn btn-ghost btn-sm editRoadFeeMonthBtn" data-id="${e.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  wrap.querySelectorAll('.editRoadFeeMonthBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openMonthlyAmountEditor('roadFee', btn.dataset.id));
+  });
+}
+function renderTollFeeMonthTable(){
+  const wrap = document.getElementById('tollFeeMonthListWrap');
+  if(!wrap) return;
+  const sorted = [...state.tollFeeByMonth].sort((a,b)=>b.month.localeCompare(a.month));
+  wrap.innerHTML = sorted.length===0 ? '<div class="hint" style="margin:0;">Chưa có tháng nào — bấm "🌉➕ Thêm Tháng" ở Cài Đặt để bắt đầu.</div>' : `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Tháng</th><th class="num">Số Tiền</th><th></th></tr></thead>
+        <tbody>${sorted.map(e=>`<tr>
+          <td>${monthLabelVN(e.month)}</td>
+          <td class="num">${fmtVND(e.amount)}</td>
+          <td><button class="btn btn-ghost btn-sm editTollFeeMonthBtn" data-id="${e.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  wrap.querySelectorAll('.editTollFeeMonthBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openMonthlyAmountEditor('tollFee', btn.dataset.id));
+  });
+}
+function renderHousingUtilMonthTable(){
+  const wrap = document.getElementById('housingUtilMonthListWrap');
+  if(!wrap) return;
+  const sorted = [...state.housingUtilitiesByMonth].sort((a,b)=>b.month.localeCompare(a.month));
+  wrap.innerHTML = sorted.length===0 ? '<div class="hint" style="margin:0;">Chưa có tháng nào — bấm "🏠➕ Thêm Tháng" ở Cài Đặt để bắt đầu.</div>' : `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Tháng</th><th class="num">Thuê Nhà</th><th class="num">Điện Nước</th><th></th></tr></thead>
+        <tbody>${sorted.map(e=>`<tr>
+          <td>${monthLabelVN(e.month)}</td>
+          <td class="num">${fmtVND(e.rentAmount)}</td>
+          <td class="num">${fmtVND(e.utilitiesAmount)}</td>
+          <td><button class="btn btn-ghost btn-sm editHousingUtilMonthBtn" data-id="${e.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  wrap.querySelectorAll('.editHousingUtilMonthBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openHousingUtilEditor(btn.dataset.id));
+  });
 }
 // Liệt kê mọi tháng (dạng "YYYY-MM") mà khoảng ngày [from,to] có chạm
 // vào — dùng để cộng dồn đúng những tháng liên quan khi Ông Chủ lọc 1
@@ -14144,6 +14315,36 @@ function renderCompanyDashboardPage(){
     </section>
 
     <section class="group">
+      <h3>🚧 Tiền Luật Đường Theo Tháng</h3>
+      <div id="roadFeeMonthListWrap"></div>
+    </section>
+
+    <section class="group">
+      <h3>🏠 Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
+      <div id="housingUtilMonthListWrap"></div>
+    </section>
+
+    <section class="group">
+      <h3>🌉 CP Cầu Đường Theo Tháng</h3>
+      <div id="tollFeeMonthListWrap"></div>
+    </section>
+
+    <section class="group">
+      <h3>💰 Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền/Tháng</th></tr></thead>
+          <tbody>
+            <tr><td>🚚 Khấu hao xe dự kiến</td><td class="num">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</td></tr>
+            <tr><td>🛡️ Bảo hiểm xe</td><td class="num">${fmtVND(state.settings.monthlyInsurance||0)}</td></tr>
+            <tr><td>📋 Đăng kiểm/Đăng ký/Phù hiệu vận tải</td><td class="num">${fmtVND(state.settings.monthlyRegistrationFee||0)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px; text-align:center;">Sửa số liệu tại ⚙️ Cài Đặt</div>
+    </section>
+
+    <section class="group">
       <h3>📄 Giấy Tờ Xe & Tài Xế</h3>
       <div id="documentListWrap"></div>
     </section>
@@ -14257,6 +14458,9 @@ function renderCompanyDashboardPage(){
       restoreMainScroll();
     });
   });
+  renderRoadFeeMonthTable();
+  renderHousingUtilMonthTable();
+  renderTollFeeMonthTable();
   renderDocumentList();
   renderMaintenanceList();
 }
@@ -14664,20 +14868,20 @@ function renderSettings(){
 
     <section class="group">
       <h3>🚧 Tiền Luật Đường Theo Tháng</h3>
-      <div class="card" id="roadFeeMonthListWrap"></div>
-      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
+      <div style="display:flex; gap:8px;">
         <input type="month" id="rf_newMonth" style="flex:1;">
-        <button class="btn btn-ghost" id="addRoadFeeMonthBtn">+ Thêm Tháng</button>
+        <button class="btn btn-accent" id="addRoadFeeMonthBtn" style="font-weight:800; white-space:nowrap;">🚧➕ Thêm Tháng</button>
       </div>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
       <h3>🏠 Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
-      <div class="card" id="housingUtilMonthListWrap"></div>
-      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
+      <div style="display:flex; gap:8px;">
         <input type="month" id="hu_newMonth" style="flex:1;">
-        <button class="btn btn-ghost" id="addHousingUtilMonthBtn">+ Thêm Tháng</button>
+        <button class="btn btn-accent" id="addHousingUtilMonthBtn" style="font-weight:800; white-space:nowrap;">🏠➕ Thêm Tháng</button>
       </div>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <!-- SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không
@@ -14687,11 +14891,11 @@ function renderSettings(){
     Nước có 2 ô, vì đây chỉ có đúng 1 khoản). -->
     <section class="group">
       <h3>🌉 CP Cầu Đường Theo Tháng</h3>
-      <div class="card" id="tollFeeMonthListWrap"></div>
-      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:0;">
+      <div style="display:flex; gap:8px;">
         <input type="month" id="tf_newMonth" style="flex:1;">
-        <button class="btn btn-ghost" id="addTollFeeMonthBtn">+ Thêm Tháng</button>
+        <button class="btn btn-accent" id="addTollFeeMonthBtn" style="font-weight:800; white-space:nowrap;">🌉➕ Thêm Tháng</button>
       </div>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
@@ -14711,6 +14915,7 @@ function renderSettings(){
         </div>
         <div class="hint">Tất cả các khoản trên (kể cả sửa chữa/khấu hao phát sinh thực tế, và Gốc+Lãi vay ngân hàng tính tự động ở khối bên dưới) đều được trừ vào Lợi Nhuận Gộp để ra Lợi Nhuận Thực Tế Cuối Cùng, và được cộng vào chi phí cố định khi tính Điểm Hoà Vốn — xem ở tab "Kết Quả".</div>
       </div>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem số liệu hiện tại tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
@@ -14982,138 +15187,29 @@ function renderSettings(){
   renderLoanRateScheduleList();
   renderLoanPreview();
 
-  // Tiền Luật Đường Theo Tháng — luôn có sẵn 1 dòng cho tháng hiện tại để
-  // gõ ngay, không bắt Ông Chủ phải bấm "+ Thêm Tháng" trước. Giá trị gõ
-  // vào từng dòng chỉ nằm tạm ở đây (rfVals), chỉ thực sự lưu khi bấm
-  // "Lưu Cài Đặt" — giống hệt cách mọi ô khác trên màn Cài Đặt đang hoạt động.
-  const curYM = todayLocalDateStr().slice(0,7);
-  if(!state.roadFeeByMonth.some(e=>e.month===curYM)){
-    state.roadFeeByMonth.push({ id: uid('roadfee'), month: curYM, amount: 0 });
-  }
-  const rfVals = {};
-  function renderRoadFeeMonthList(){
-    const wrap = document.getElementById('roadFeeMonthListWrap');
-    if(!wrap) return;
-    const sorted = [...state.roadFeeByMonth].sort((a,b)=>b.month.localeCompare(a.month));
-    wrap.innerHTML = sorted.map((e,i)=>`
-      <div class="field" style="${i===sorted.length-1?'margin-bottom:0;':''}">
-        <label>Tiền Luật Tháng ${monthLabelVN(e.month)}
-          <button type="button" class="link-btn" data-del-roadfee="${e.id}" style="float:right; padding:0; color:var(--loss);">Xoá</button>
-        </label>
-        <input type="text" inputmode="decimal" id="rf_${e.id}">
-      </div>`).join('');
-    sorted.forEach(e=>{
-      rfVals[e.id] = e.amount;
-      attachMoneyInput(document.getElementById(`rf_${e.id}`), e.amount, v=>rfVals[e.id]=v);
-    });
-    document.querySelectorAll('[data-del-roadfee]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        state.roadFeeByMonth = state.roadFeeByMonth.filter(x=>x.id!==btn.dataset.delRoadfee);
-        renderRoadFeeMonthList();
-      });
-    });
-  }
-  renderRoadFeeMonthList();
+  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "nút thêm ở Cài Đặt, dữ liệu hiển
+  // thị ở Linh Chí Thành"): Tiền Luật Đường / Tiền Thuê Nhà & Điện Nước /
+  // CP Cầu Đường Theo Tháng KHÔNG còn gộp chung vào nút "Lưu Cài Đặt" nữa
+  // — mỗi tháng giờ tự lưu ngay lập tức qua modal riêng (openMonthlyAmountEditor()/
+  // openHousingUtilEditor()), y hệt cơ chế Giấy Tờ Xe/Bảo Dưỡng đã làm an
+  // toàn trước đó. Ở đây chỉ còn đúng 3 nút mở modal THÊM MỚI.
   document.getElementById('addRoadFeeMonthBtn').addEventListener('click', ()=>{
     const picked = document.getElementById('rf_newMonth').value;
     if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
-    if(state.roadFeeByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
-    state.roadFeeByMonth.push({ id: uid('roadfee'), month: picked, amount: 0 });
-    document.getElementById('rf_newMonth').value='';
-    renderRoadFeeMonthList();
+    if(state.roadFeeByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách — vào 🏢 LINH CHÍ THÀNH để sửa.'); return; }
+    openMonthlyAmountEditor('roadFee', null, picked);
   });
-
-  // Tiền Thuê Nhà & Điện Nước Theo Tháng (2026-08-31) — mirror Y HỆT cơ
-  // chế Tiền Luật Đường Theo Tháng ở trên, nhưng 2 ô/tháng (Thuê Nhà +
-  // Điện Nước) thay vì 1 ô, và CHUNG CÔNG TY (housingUtilitiesByMonth,
-  // sharedDataRef — không theo xe). Nếu tháng hiện tại chưa có dòng nào,
-  // tự đề xuất sẵn "Tiền Thuê Nhà" = tổng monthlyHousingBudget cũ của
-  // TẤT CẢ tài xế đang có (dữ liệu cũ vẫn còn trong hồ sơ tài xế dù
-  // không dùng để tính nữa) — đỡ Ông Chủ phải gõ lại từ đầu, sửa tay lại
-  // nếu không đúng.
-  if(!state.housingUtilitiesByMonth.some(e=>e.month===curYM)){
-    const suggestedRent = state.drivers.reduce((s,d)=>s+(Number(d.monthlyHousingBudget)||0),0);
-    state.housingUtilitiesByMonth.push({ id: uid('housingutil'), month: curYM, rentAmount: suggestedRent, utilitiesAmount: 0 });
-  }
-  const huVals = {};
-  function renderHousingUtilMonthList(){
-    const wrap = document.getElementById('housingUtilMonthListWrap');
-    if(!wrap) return;
-    const sorted = [...state.housingUtilitiesByMonth].sort((a,b)=>b.month.localeCompare(a.month));
-    wrap.innerHTML = sorted.map((e,i)=>`
-      <div style="${i===sorted.length-1?'':'border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px;'}">
-        <label style="font-weight:700; font-size:13.5px; display:block; margin-bottom:6px;">Tháng ${monthLabelVN(e.month)}
-          <button type="button" class="link-btn" data-del-housingutil="${e.id}" style="float:right; padding:0; color:var(--loss); font-weight:400;">Xoá</button>
-        </label>
-        <div class="field" style="margin-bottom:6px;">
-          <label>Tiền Thuê Nhà</label>
-          <input type="text" inputmode="decimal" id="hu_rent_${e.id}">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Tiền Điện Nước</label>
-          <input type="text" inputmode="decimal" id="hu_util_${e.id}">
-        </div>
-      </div>`).join('');
-    sorted.forEach(e=>{
-      huVals[e.id] = { rentAmount: e.rentAmount, utilitiesAmount: e.utilitiesAmount };
-      attachMoneyInput(document.getElementById(`hu_rent_${e.id}`), e.rentAmount, v=>huVals[e.id].rentAmount=v);
-      attachMoneyInput(document.getElementById(`hu_util_${e.id}`), e.utilitiesAmount, v=>huVals[e.id].utilitiesAmount=v);
-    });
-    document.querySelectorAll('[data-del-housingutil]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        state.housingUtilitiesByMonth = state.housingUtilitiesByMonth.filter(x=>x.id!==btn.dataset.delHousingutil);
-        renderHousingUtilMonthList();
-      });
-    });
-  }
-  renderHousingUtilMonthList();
   document.getElementById('addHousingUtilMonthBtn').addEventListener('click', ()=>{
     const picked = document.getElementById('hu_newMonth').value;
     if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
-    if(state.housingUtilitiesByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
-    state.housingUtilitiesByMonth.push({ id: uid('housingutil'), month: picked, rentAmount: 0, utilitiesAmount: 0 });
-    document.getElementById('hu_newMonth').value='';
-    renderHousingUtilMonthList();
+    if(state.housingUtilitiesByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách — vào 🏢 LINH CHÍ THÀNH để sửa.'); return; }
+    openHousingUtilEditor(null, picked);
   });
-
-  // SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không cố
-  // định, điền tay theo từng tháng"): mirror NGUYÊN XI khối Tiền Thuê Nhà
-  // & Điện Nước ở trên, chỉ khác 1 ô/tháng thay vì 2 (không có sẵn dữ
-  // liệu cũ nào để tự đề xuất — Ông Chủ tự điền từ đầu).
-  const tfVals = {};
-  function renderTollFeeMonthList(){
-    const wrap = document.getElementById('tollFeeMonthListWrap');
-    if(!wrap) return;
-    const sorted = [...state.tollFeeByMonth].sort((a,b)=>b.month.localeCompare(a.month));
-    wrap.innerHTML = sorted.length ? sorted.map((e,i)=>`
-      <div style="${i===sorted.length-1?'':'border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px;'}">
-        <label style="font-weight:700; font-size:13.5px; display:block; margin-bottom:6px;">Tháng ${monthLabelVN(e.month)}
-          <button type="button" class="link-btn" data-del-tollfee="${e.id}" style="float:right; padding:0; color:var(--loss); font-weight:400;">Xoá</button>
-        </label>
-        <div class="field" style="margin-bottom:0;">
-          <label>Số Tiền Cầu Đường Tháng Này</label>
-          <input type="text" inputmode="decimal" id="tf_amount_${e.id}">
-        </div>
-      </div>`).join('') : '<div class="hint" style="margin:0;">Chưa có tháng nào — bấm "+ Thêm Tháng" bên dưới để bắt đầu.</div>';
-    sorted.forEach(e=>{
-      tfVals[e.id] = e.amount;
-      attachMoneyInput(document.getElementById(`tf_amount_${e.id}`), e.amount, v=>tfVals[e.id]=v);
-    });
-    document.querySelectorAll('[data-del-tollfee]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        state.tollFeeByMonth = state.tollFeeByMonth.filter(x=>x.id!==btn.dataset.delTollfee);
-        renderTollFeeMonthList();
-      });
-    });
-  }
-  renderTollFeeMonthList();
   document.getElementById('addTollFeeMonthBtn').addEventListener('click', ()=>{
     const picked = document.getElementById('tf_newMonth').value;
     if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
-    if(state.tollFeeByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
-    state.tollFeeByMonth.push({ id: uid('tollfee'), month: picked, amount: 0 });
-    document.getElementById('tf_newMonth').value='';
-    renderTollFeeMonthList();
+    if(state.tollFeeByMonth.some(e=>e.month===picked)){ showToast('Tháng này đã có trong danh sách — vào 🏢 LINH CHÍ THÀNH để sửa.'); return; }
+    openMonthlyAmountEditor('tollFee', null, picked);
   });
 
   const changeKeyBtn = document.getElementById('changeGeminiKeyBtn');
@@ -15139,14 +15235,6 @@ function renderSettings(){
     recomputeBankLoanMonthlyPayment(); // ghi lại state.settings.monthlyLoanPayment từ bankLoan vừa nhập, đúng ngày hôm nay
     s.monthlyInsurance = sVals.insurance;
     s.monthlyRegistrationFee = sVals.registration;
-    state.roadFeeByMonth.forEach(e=>{ if(rfVals[e.id]!==undefined) e.amount = rfVals[e.id]; });
-    if(!(await saveRoadFeeByMonth())) return;
-    state.housingUtilitiesByMonth.forEach(e=>{
-      if(huVals[e.id]!==undefined){ e.rentAmount = huVals[e.id].rentAmount; e.utilitiesAmount = huVals[e.id].utilitiesAmount; }
-    });
-    if(!(await saveHousingUtilitiesByMonth())) return;
-    state.tollFeeByMonth.forEach(e=>{ if(tfVals[e.id]!==undefined) e.amount = tfVals[e.id]; });
-    if(!(await saveTollFeeByMonth())) return;
     const keyInput = document.getElementById('s_geminiKey');
     if(keyInput){
       const typedKey = keyInput.value.trim();
