@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #177';
+const APP_BUILD = '2026-09-08 · #178';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -796,8 +796,42 @@ function defaultSettingsShape(){
               monthlyVehicleDepreciation: 0,
               monthlyLoanPayment: 0,
               bankLoan: { principal: 0, termMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [] },
+              // SỬA 2026-09-08: KHÔNG đặt bankLoans:[] mặc định ở đây — vì
+              // Object.assign(defaults, dữ liệu đã lưu) chỉ ghi đè field
+              // NÀO CÓ trong dữ liệu đã lưu; dữ liệu cũ (trước tính năng
+              // nhiều khoản vay) không có field bankLoans, nên nếu đặt sẵn
+              // []  ở đây, migrateBankLoanToBankLoans() sẽ luôn thấy "đã có
+              // mảng rồi" (dù là mảng rỗng) và KHÔNG BAO GIỜ di trú khoản
+              // vay 555tr cũ nữa — mất trắng dữ liệu vay đang chạy thật.
+              // Để undefined, hàm di trú tự biết đây là lần đầu và xử lý
+              // đúng.
               monthlyInsurance: 0,
               monthlyRegistrationFee: 0 };
+}
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — yêu cầu Ông Chủ hỗ trợ NHIỀU khoản
+/// vay ngân hàng RIÊNG BIỆT, thay vì chỉ 1 khoản duy nhất như trước): di
+/// trú 1 LẦN DUY NHẤT, im lặng, KHÔNG mất số liệu — gọi ngay sau MỌI chỗ
+/// state.settings được nạp (tải trang, đổi xe, phục hồi backup). Nếu
+/// bankLoans (mảng mới) CHƯA từng có mà bankLoan (khoản vay cũ, 1 khoản)
+/// đã có số tiền vay > 0, biến nó thành phần tử đầu tiên. Nếu bankLoan cũ
+/// trống (chưa nhập gì) thì bankLoans bắt đầu rỗng — không tạo khoản vay
+/// rác. Không xoá field bankLoan cũ (giữ lại để rollback an toàn nếu cần,
+/// nhưng KHÔNG hàm nào khác còn đọc từ nó sau bản này).
+function migrateBankLoanToBankLoans(){
+  if(!state.settings) return;
+  if(Array.isArray(state.settings.bankLoans)) return; // đã di trú rồi
+  const old = state.settings.bankLoan;
+  if(old && Number(old.principal)>0){
+    state.settings.bankLoans = [{
+      id: uid('loan'), name: 'Khoản vay 1',
+      principal: old.principal, termMonths: old.termMonths,
+      disbursementDate: old.disbursementDate, dueDayOfMonth: old.dueDayOfMonth||20,
+      rateSchedule: Array.isArray(old.rateSchedule) ? old.rateSchedule : [],
+      paidMonths: Array.isArray(old.paidMonths) ? old.paidMonths : (old.lastPaidMonth ? [old.lastPaidMonth] : [])
+    }];
+  } else {
+    state.settings.bankLoans = [];
+  }
 }
 
 let state = {
@@ -1124,10 +1158,10 @@ function computeMaintenanceWarnings(){
 function computeAllWarnings(){
   const docs = computeDocumentWarnings();
   const maint = computeMaintenanceWarnings();
-  const loan = computeLoanDueWarning();
+  const loans = computeLoanDueWarnings();
   const invoices = computeInvoiceWarnings();
   const missingPickupDates = computeMissingPickupDateWarnings();
-  return { docs, maint, loan, invoices, missingPickupDates, total: docs.length + maint.length + (loan?1:0) + invoices.length + missingPickupDates.length };
+  return { docs, maint, loans, invoices, missingPickupDates, total: docs.length + maint.length + loans.length + invoices.length + missingPickupDates.length };
 }
 /// SỬA 2026-08-25 (Ông Chủ yêu cầu — mục C2): quét mọi chuyến thương mại
 /// đã chọn "Tài xế lấy hàng" khác tài xế ca (pickupDriverId) NHƯNG CHƯA
@@ -1241,20 +1275,28 @@ function openMissingPickupDateDetail(){
 // bấm "Đã Trả Tiền Ngân Hàng" cho đúng tháng đó. Số tiền hiển thị lấy đúng
 // TỔNG GỐC + LÃI của Công Cụ Tính Gốc + Lãi (không tính lại, không suy
 // diễn) — để Ông Chủ đối chiếu thẳng với thông báo ngân hàng.
-function computeLoanDueWarning(){
-  const loan = state.settings.bankLoan;
-  if(!loan) return null;
-  const amort = computeBankLoanAmortization(loan, new Date());
-  if(!amort.hasBasis || amort.isPaidOff) return null;
-  const curYM = todayLocalDateStr().slice(0,7);
-  if(loan.lastPaidMonth===curYM) return null; // đã bấm "Đã Trả Tiền Ngân Hàng" cho đúng tháng này rồi
-  const dueDay = Math.min(28, Math.max(1, Math.round(Number(loan.dueDayOfMonth)||20)));
-  const today = new Date(todayLocalDateStr()+'T00:00:00');
-  const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
-  const daysLeft = Math.round((dueDate-today)/86400000);
-  if(daysLeft>3) return null; // chưa tới mốc cảnh báo (ngày 17 nếu hạn là 20)
-  const dueDateStr = `${dueDate.getFullYear()}-${String(dueDate.getMonth()+1).padStart(2,'0')}-${String(dueDate.getDate()).padStart(2,'0')}`;
-  return { curYM, dueDateStr, amount: Math.round(amort.totalPaymentCurrent), urgency: urgencyFromDays(daysLeft, 3, 0) };
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — nhiều khoản vay riêng biệt): đổi
+/// từ trả về 1 cảnh báo duy nhất sang trả về MẢNG — mỗi khoản vay đang
+/// đến hạn/quá hạn tự có 1 dòng cảnh báo riêng, kèm đúng loanId để nút
+/// "Đã Trả Tiền Ngân Hàng" biết ghi nhận cho đúng khoản nào.
+function computeLoanDueWarnings(){
+  migrateBankLoanToBankLoans();
+  const loans = (state.settings && state.settings.bankLoans) || [];
+  const out = [];
+  loans.forEach(loan=>{
+    const amort = computeBankLoanAmortization(loan, new Date());
+    if(!amort.hasBasis || amort.isPaidOff) return;
+    const curYM = todayLocalDateStr().slice(0,7);
+    if(loan.lastPaidMonth===curYM) return; // đã bấm "Đã Trả Tiền Ngân Hàng" cho đúng tháng này rồi
+    const dueDay = Math.min(28, Math.max(1, Math.round(Number(loan.dueDayOfMonth)||20)));
+    const today = new Date(todayLocalDateStr()+'T00:00:00');
+    const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
+    const daysLeft = Math.round((dueDate-today)/86400000);
+    if(daysLeft>3) return; // chưa tới mốc cảnh báo (ngày 17 nếu hạn là 20)
+    const dueDateStr = `${dueDate.getFullYear()}-${String(dueDate.getMonth()+1).padStart(2,'0')}-${String(dueDate.getDate()).padStart(2,'0')}`;
+    out.push({ loanId: loan.id, loanName: loan.name||'Khoản vay', curYM, dueDateStr, amount: Math.round(amort.totalPaymentCurrent), urgency: urgencyFromDays(daysLeft, 3, 0) });
+  });
+  return out;
 }
 /// SỬA LỖI 2026-08-23 (Ông Chủ báo: bấm "Đã Trả Tiền Ngân Hàng" cho kỳ 2
 /// tháng 8/2026 nhưng "Số kỳ đã trả ngân hàng" ở Cài Đặt không nhích) —
@@ -1265,17 +1307,19 @@ function computeLoanDueWarning(){
 /// tăng "Số kỳ đã trả". Từ nay CẢ 2 nút dùng chung đúng 1 hàm này — không
 /// bao giờ lệch nhau nữa. KHÔNG đụng gì tới computeBankLoanAmortization
 /// (công thức Gốc+Lãi thật, tính theo lịch — frozen, không đổi).
-function setLoanPeriodPaid(ym, paid){
-  if(!state.settings.bankLoan) state.settings.bankLoan = {};
-  const bl = state.settings.bankLoan;
-  // Tương thích ngược: bản cũ chỉ có lastPaidMonth (1 kỳ) → gộp vào mảng.
-  if(!Array.isArray(bl.paidMonths)) bl.paidMonths = bl.lastPaidMonth ? [bl.lastPaidMonth] : [];
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — nhiều khoản vay riêng biệt): nhận
+/// thẳng object `loan` cần sửa (1 phần tử trong state.settings.bankLoans)
+/// thay vì luôn động vào state.settings.bankLoan (khoản duy nhất cũ).
+/// Logic đếm/set y hệt như trước, chỉ đổi phạm vi áp dụng.
+function setLoanPeriodPaid(loan, ym, paid){
+  if(!loan) return;
+  if(!Array.isArray(loan.paidMonths)) loan.paidMonths = loan.lastPaidMonth ? [loan.lastPaidMonth] : [];
   if(paid){
-    if(!bl.paidMonths.includes(ym)) bl.paidMonths.push(ym);
-    bl.lastPaidMonth = ym;
+    if(!loan.paidMonths.includes(ym)) loan.paidMonths.push(ym);
+    loan.lastPaidMonth = ym;
   } else {
-    bl.paidMonths = bl.paidMonths.filter(m=>m!==ym);
-    bl.lastPaidMonth = bl.paidMonths.length ? bl.paidMonths[bl.paidMonths.length-1] : null;
+    loan.paidMonths = loan.paidMonths.filter(m=>m!==ym);
+    loan.lastPaidMonth = loan.paidMonths.length ? loan.paidMonths[loan.paidMonths.length-1] : null;
   }
 }
 
@@ -1578,6 +1622,7 @@ async function loadAll(){
     const driverExpenseReportData = driverExpenseReportSnap.exists ? driverExpenseReportSnap.data() : null;
     state.driverExpenseReports = driverExpenseReportData && Array.isArray(driverExpenseReportData.list) ? driverExpenseReportData.list : [];
     if(stSnap.exists){ state.settings = Object.assign(state.settings, stSnap.data()); }
+    migrateBankLoanToBankLoans();
     if(companySettingsSnap.exists){
       const cs = companySettingsSnap.data();
       SHARED_SETTINGS_FIELDS.forEach(f=>{ if(cs[f]!==undefined) state.settings[f]=cs[f]; });
@@ -1729,6 +1774,7 @@ async function loadVehicleWorkingSet(vehicleId){
     // LẦN CUỐI bằng 4 field dùng chung mới nhất (giá dầu/VAT/CIT/API key).
     state.settings = defaultSettingsShape();
     if(stSnap.exists) state.settings = Object.assign(state.settings, stSnap.data());
+    migrateBankLoanToBankLoans();
     if(companySettingsSnap.exists){
       const cs = companySettingsSnap.data();
       SHARED_SETTINGS_FIELDS.forEach(f=>{ if(cs[f]!==undefined) state.settings[f]=cs[f]; });
@@ -2092,7 +2138,8 @@ function companyWideOperatingCashCost(from, to){
 function companyWideCashFlowFixedMonthly(from, to){
   let sum = 0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
-    sum += bankLoanRealCostForRange(s.bankLoan, from, to);
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    loans.forEach(loan=>{ sum += bankLoanRealCostForRange(loan, from, to); });
     const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
     sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, from, to);
   });
@@ -2777,6 +2824,7 @@ async function handleRestoreFile(file){
     state.driverAdvances = Array.isArray(backup.driverAdvances) ? backup.driverAdvances : [];
     state.driverExpenseReports = Array.isArray(backup.driverExpenseReports) ? backup.driverExpenseReports : [];
     if(backup.settings) state.settings = Object.assign(state.settings, backup.settings);
+    migrateBankLoanToBankLoans();
     const results = await Promise.all([
       saveDrivers(), saveShifts(), saveRepairs(), saveSitePayments(),
       saveDocuments(), saveMaintenanceSchedules(), saveSiteContracts(), saveSettings(),
@@ -5943,13 +5991,13 @@ function renderShiftList(){
           <span>🔧 ${escapeHtml(m.name)}</span>
           <span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span>
         </div>`).join('')}
-      ${warnings.loan ? `
+      ${warnings.loans.map(w=>`
         <div class="kv" style="padding:4px 0;">
-          <span>🏦 Lãi Ngân Hàng — ${fmtVND(warnings.loan.amount)} (hạn ${formatDateVN(warnings.loan.dueDateStr)})</span>
-          <span class="rating-badge ${warnings.loan.urgency.className}">${warnings.loan.urgency.label}</span>
+          <span>🏦 ${escapeHtml(w.loanName)} — ${fmtVND(w.amount)} (hạn ${formatDateVN(w.dueDateStr)})</span>
+          <span class="rating-badge ${w.urgency.className}">${w.urgency.label}</span>
         </div>
-        <button class="btn btn-ghost btn-sm" id="loanPaidBtn" style="margin-top:6px;">✅ Đã Trả Tiền Ngân Hàng</button>
-      ` : ''}
+        <button class="btn btn-ghost btn-sm loanPaidBtn" data-loan-id="${w.loanId}" data-ym="${w.curYM}" style="margin-top:6px; margin-bottom:6px;">✅ Đã Trả Tiền Ngân Hàng — ${escapeHtml(w.loanName)}</button>
+      `).join('')}
       ${warnings.invoices && warnings.invoices.length>0 ? `
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:10px 12px; background:#FFF3CD; border-radius:12px;">
           <span style="font-weight:700; font-size:13.5px; color:#8A6D00;">🧾 Chuyến Hàng Chưa Đủ Hóa Đơn (${warnings.invoices.length})</span>
@@ -6099,17 +6147,20 @@ function bindWarningsBanner(){
   if(pickupBtn) pickupBtn.addEventListener('click', openMissingPickupDateDetail);
   const btn = document.getElementById('warningsGoToSettingsBtn');
   if(btn) btn.addEventListener('click', ()=>{ state.currentTab='settings'; renderAll(); });
-  const loanBtn = document.getElementById('loanPaidBtn');
-  if(loanBtn) loanBtn.addEventListener('click', async ()=>{
-    const w = computeLoanDueWarning();
-    if(!w) return;
-    // SỬA 2026-08-23: trước đây chỉ set lastPaidMonth, không cộng vào
-    // paidMonths — khiến "Số kỳ đã trả ngân hàng" ở Cài Đặt bị kẹt dù đã
-    // bấm trả. Giờ dùng chung đúng 1 hàm với nút bên Cài Đặt.
-    setLoanPeriodPaid(w.curYM, true);
-    if(!(await saveSettings())) return;
-    showToast(`Đã ghi nhận trả kỳ này (tổng ${state.settings.bankLoan.paidMonths.length} kỳ đã trả).`);
-    renderAll();
+  document.querySelectorAll('.loanPaidBtn').forEach(loanBtn=>{
+    loanBtn.addEventListener('click', async ()=>{
+      const loan = (state.settings.bankLoans||[]).find(l=>l.id===loanBtn.dataset.loanId);
+      if(!loan) return;
+      const ym = loanBtn.dataset.ym;
+      // SỬA 2026-08-23: trước đây chỉ set lastPaidMonth, không cộng vào
+      // paidMonths — khiến "Số kỳ đã trả ngân hàng" ở Cài Đặt bị kẹt dù đã
+      // bấm trả. Giờ dùng chung đúng 1 hàm với nút bên trang Sửa Khoản Vay.
+      setLoanPeriodPaid(loan, ym, true);
+      recomputeBankLoanMonthlyPayment();
+      if(!(await saveSettings())) return;
+      showToast(`Đã ghi nhận trả kỳ này cho ${loan.name} (tổng ${loan.paidMonths.length} kỳ đã trả).`);
+      renderAll();
+    });
   });
 }
 // Bấm "+ Thêm Tháng Mới": đọc tháng đã chọn ở ô lịch Tháng/Năm (giống hệt
@@ -11618,7 +11669,7 @@ function computePeriodSummary(from, to){
   const insuranceAndRegistrationMonthly = (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const depreciationAndInterestMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0);
   const otherFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
-  const otherFixedMonthlyForCashFlow = bankLoanRealCostForRange(state.settings.bankLoan, from, to)
+  const otherFixedMonthlyForCashFlow = (state.settings.bankLoans||[]).reduce((sum,loan)=>sum+bankLoanRealCostForRange(loan, from, to), 0)
     + fullMonthlyCostIfTouched(()=>insuranceAndRegistrationMonthly, from, to);
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly;
   const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
@@ -13973,12 +14024,14 @@ function computeFullLoanSchedule(loan){
   for(let i=0;i<termMonths;i++) rows.push(computeLoanPeriod(loanForCalc, i, dueDates));
   return rows;
 }
-function loanPaidPeriodsCount(){
-  const bl = state.settings.bankLoan;
-  if(!bl) return 0;
-  if(Array.isArray(bl.paidMonths)) return bl.paidMonths.length;
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — nhiều khoản vay riêng biệt): nhận
+/// thẳng object `loan` cần đếm thay vì luôn đọc state.settings.bankLoan
+/// (khoản duy nhất cũ). Logic đếm giữ nguyên y hệt.
+function loanPaidPeriodsCount(loan){
+  if(!loan) return 0;
+  if(Array.isArray(loan.paidMonths)) return loan.paidMonths.length;
   // Tương thích ngược: bản cũ chỉ lưu lastPaidMonth (1 kỳ) → đếm là 1.
-  return bl.lastPaidMonth ? 1 : 0;
+  return loan.lastPaidMonth ? 1 : 0;
 }
 function computeBankLoanAmortization(loan, refDate){
   refDate = refDate || new Date();
@@ -14024,14 +14077,307 @@ function computeBankLoanAmortization(loan, refDate){
 // KHÔNG tự động lưu lên Cloud — việc lưu Cloud vẫn theo đúng cơ chế "bấm
 // Lưu Cài Đặt" như mọi trường khác trên tab này.
 function recomputeBankLoanMonthlyPayment(){
-  if(!state.settings || !state.settings.bankLoan) return;
-  const r = computeBankLoanAmortization(state.settings.bankLoan, new Date());
-  state.settings.monthlyLoanPayment = Math.round(r.totalPaymentCurrent); // Gốc+Lãi — dùng cho DÒNG TIỀN THUẦN (tiền mặt thật)
-  // Chỉ phần LÃI — dùng cho LỢI NHUẬN THỰC TẾ (đúng chuẩn kế toán: gốc vay
+  if(!state.settings) return;
+  migrateBankLoanToBankLoans();
+  const loans = state.settings.bankLoans || [];
+  let totalPayment = 0, totalInterest = 0;
+  loans.forEach(loan=>{
+    const r = computeBankLoanAmortization(loan, new Date());
+    totalPayment += r.totalPaymentCurrent;
+    totalInterest += r.monthlyInterestCurrent;
+  });
+  state.settings.monthlyLoanPayment = Math.round(totalPayment); // Gốc+Lãi TỔNG mọi khoản vay — dùng cho DÒNG TIỀN THUẦN (tiền mặt thật)
+  // Chỉ phần LÃI TỔNG mọi khoản vay — dùng cho LỢI NHUẬN THỰC TẾ (đúng chuẩn kế toán: gốc vay
   // là trả nợ/giảm nợ vay, KHÔNG phải chi phí làm giảm lợi nhuận; chỉ lãi
   // vay mới là chi phí thật) (yêu cầu Ông Chủ 2026-08-15).
-  state.settings.monthlyLoanInterest = Math.round(r.monthlyInterestCurrent);
+  state.settings.monthlyLoanInterest = Math.round(totalInterest);
 }
+/// SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — yêu cầu Ông Chủ hỗ trợ NHIỀU khoản
+/// vay ngân hàng RIÊNG BIỆT, mẫu hiển thị Y HỆT "Công Cụ Tính Gốc+Lãi"
+/// cũ vì Ông Chủ xác nhận đã rất rõ ràng minh bạch): trang Thêm/Sửa ĐÚNG
+/// 1 khoản vay — toàn bộ nội dung/công thức/thứ tự hiển thị giữ NGUYÊN
+/// XI bản cũ, chỉ khác đúng 1 điều: áp dụng cho 1 phần tử trong
+/// state.settings.bankLoans[] thay vì state.settings.bankLoan duy nhất,
+/// và Lưu/Xoá ngay lập tức — không còn qua nút "Lưu Cài Đặt" chung nữa.
+function openLoanEditor(loanId){
+  saveMainScroll();
+  const existing = loanId ? (state.settings.bankLoans||[]).find(l=>l.id===loanId) : null;
+  const draft = existing ? { ...existing, rateSchedule: [...(existing.rateSchedule||[])], paidMonths: [...(existing.paidMonths||[])] }
+    : { id: uid('loan'), name: '', principal: 0, termMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [], paidMonths: [] };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="loanEditorBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🏦 ${existing?'Sửa':'Thêm'} Khoản Vay Ngân Hàng</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định.</div>
+      <div class="card">
+        <div class="field">
+          <label>Tên khoản vay (VD "Vay mua xe 29E-691.12", "Vay vốn lưu động")</label>
+          <input type="text" id="loan_name" value="${escapeHtml(draft.name)}" placeholder="Đặt tên để dễ phân biệt các khoản vay">
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>Số tiền vay ngân hàng (đ)</label>
+            <input type="text" inputmode="decimal" id="loan_principal">
+          </div>
+          <div class="field">
+            <label>Thời hạn vay (tháng)</label>
+            <input type="number" inputmode="numeric" id="loan_term" value="${blankIfZero(draft.termMonths)}" placeholder="0">
+          </div>
+        </div>
+        <div class="field">
+          <label>Ngày giải ngân</label>
+          <input type="date" id="loan_date" value="${draft.disbursementDate||''}">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ngày đến hạn đóng lãi hàng tháng</label>
+          <input type="number" inputmode="numeric" min="1" max="28" id="loan_dueDay" value="${draft.dueDayOfMonth||20}">
+          <div class="hint">Mặc định 20 — đúng ngày ngân hàng đang áp dụng. App sẽ cảnh báo trước 3 ngày (từ ngày 17) ở tab Ca Làm Việc.</div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:8px;">
+        <div class="field" style="margin-bottom:4px;">
+          <label>Lộ Trình Lãi Suất (%/năm)</label>
+          <div class="hint">Ngân hàng thường đổi lãi theo từng giai đoạn (VD năm đầu 1 mức, năm 2 mức khác) — thêm 1 dòng mới mỗi khi có thông báo đổi lãi, các dòng cũ giữ nguyên để app tự biết mức nào áp dụng đúng thời điểm nào.</div>
+        </div>
+        <div id="loanRateScheduleListWrap"></div>
+        <div class="field" style="margin-top:10px;">
+          <label>Áp dụng từ ngày</label>
+          <input type="date" id="loanRateNewDate">
+        </div>
+        <div class="two-col" style="margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;">
+            <label>Mức lãi (%/năm)</label>
+            <input type="number" inputmode="decimal" id="loanRateNewValue" placeholder="VD 10.2">
+          </div>
+          <div class="field" style="margin-bottom:0; display:flex; flex-direction:column; justify-content:flex-end;">
+            <button class="btn btn-accent btn-block" id="addLoanRateBtn">+ Thêm Mức Lãi</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="loanAmortizationPreview" style="margin-top:8px;"></div>
+      <div class="card" id="loanFullScheduleWrap" style="margin-top:8px;"></div>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        ${existing ? '<button class="btn btn-danger" id="loanDelBtn">Xoá Khoản Vay</button>' : ''}
+        <button class="btn btn-ghost" id="loanCancelBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="loanSaveBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+  function renderLoanRateScheduleList(){
+    const wrap = document.getElementById('loanRateScheduleListWrap');
+    if(!wrap) return;
+    const sorted = [...draft.rateSchedule].sort((a,b)=>b.effectiveFrom.localeCompare(a.effectiveFrom));
+    wrap.innerHTML = sorted.length===0 ? `<div class="hint" style="margin:0;">Chưa có mức lãi nào — thêm ít nhất 1 dòng bên dưới (áp dụng từ đúng Ngày Giải Ngân).</div>` : sorted.map(r=>`
+      <div class="kv" style="padding:4px 0;">
+        <span>Từ ${formatDateVN(r.effectiveFrom)}: <strong>${Number(r.ratePercent).toFixed(2)}%/năm</strong></span>
+        <button type="button" class="link-btn" data-del-rate="${r.id}" style="padding:0; color:var(--loss);">Xoá</button>
+      </div>`).join('');
+    wrap.querySelectorAll('[data-del-rate]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        draft.rateSchedule = draft.rateSchedule.filter(r=>r.id!==btn.dataset.delRate);
+        renderLoanRateScheduleList();
+        renderLoanPreview();
+      });
+    });
+  }
+  function renderLoanPreview(){
+    const r = computeBankLoanAmortization(draft, new Date());
+    const wrap = document.getElementById('loanAmortizationPreview');
+    if(wrap){
+      if(!r.hasBasis){
+        wrap.innerHTML = `<div class="hint" style="margin:0;">Nhập đủ Số tiền vay, Thời hạn vay, Ngày giải ngân và ít nhất 1 mức lãi ở Lộ Trình Lãi Suất để app tự tính Gốc+Lãi hàng tháng theo dư nợ giảm dần.</div>`;
+      } else {
+        const schedule = computeFullLoanSchedule(draft);
+        const paidCount = loanPaidPeriodsCount(draft);
+        // "Đã trả" tính theo SỐ KỲ ÔNG CHỦ ĐÃ GHI NHẬN TRẢ (paidCount), không
+        // theo lịch — để nhất quán: đã bấm trả 1 kỳ thì lãi đã trả = lãi kỳ 1,
+        // dư nợ còn lại = dư nợ sau kỳ 1.
+        const interestPaidSoFar = schedule.filter(row=>row.periodIndex < paidCount).reduce((sum,row)=>sum+row.interest, 0);
+        const interestTotalLife = schedule.reduce((sum,row)=>sum+row.interest, 0);
+        const remainingByPaid = (paidCount>0 && schedule[paidCount-1]) ? schedule[paidCount-1].remainingBalanceAfter : r.remainingBalance;
+        wrap.innerHTML = `
+          <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${r.annualRatePercent.toFixed(2)}%/năm</span></div>
+          <div class="summary-row"><span>Số kỳ đã trả ngân hàng</span><span class="val">${paidCount} / ${r.termMonths} kỳ</span></div>
+          <div class="summary-row"><span>Dư nợ còn lại (sau ${paidCount} kỳ đã trả)</span><span class="val">${fmtVND(remainingByPaid)}</span></div>
+          ${r.isPaidOff ? `
+          <div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>
+          ` : `
+          <div class="summary-row"><span>Kỳ này (${r.daysInPeriod} ngày, hạn ${formatDateVN(`${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}-${String(r.dueDate.getDate()).padStart(2,'0')}`)})</span><span class="val"></span></div>
+          <div class="summary-row"><span>Gốc phải trả kỳ này</span><span class="val">${fmtVND(r.monthlyPrincipal)}</span></div>
+          <div class="summary-row"><span>Lãi phải trả kỳ này (dư nợ đầu kỳ × lãi suất × số ngày/365)</span><span class="val">${fmtVND(r.monthlyInterestCurrent)}</span></div>
+          <div class="formula-divider" style="margin:8px 0;"></div>
+          <div class="summary-row total"><span>TỔNG GỐC + LÃI PHẢI TRẢ KỲ NÀY</span><span class="val" style="font-weight:800;">${fmtVND(r.totalPaymentCurrent)}</span></div>
+          <div class="hint" style="margin-top:6px;">Số này cộng vào TỔNG "Gốc + lãi vay ngân hàng/tháng" của MỌI khoản vay — dùng cho toàn bộ app, tự đổi đúng theo từng kỳ thực tế (số ngày khác nhau mỗi tháng), Ông Chủ không cần vào đây sửa tay hàng tháng.</div>
+          `}
+          <div class="formula-divider" style="margin:10px 0;"></div>
+          <div class="summary-row"><span>💰 Tiền lãi đã trả tính đến nay (${paidCount} kỳ)</span><span class="val">${fmtVND(interestPaidSoFar)}</span></div>
+          <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
+          ${r.isPaidOff ? '' : `
+          <div class="formula-divider" style="margin:10px 0;"></div>
+          <div style="font-weight:700; font-size:13px; margin-bottom:2px;">✅ Xác Nhận Đã Trả Từng Kỳ</div>
+          <div id="loanPaidChecklistWrap">
+            ${(()=>{
+              const todayD = new Date(todayLocalDateStr()+'T00:00:00');
+              const nextUnpaidIdx = loanPaidPeriodsCount(draft);
+              // Luôn hiện thêm đúng 1 kỳ TIẾP THEO (ngay sau kỳ cuối đã
+              // tick) dù chưa tới hạn, để tick sớm được bất cứ lúc nào.
+              const duePeriods = schedule.filter(row=>row.dueDate<=todayD || row.periodIndex===nextUnpaidIdx);
+              if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
+              const paidSet = new Set(Array.isArray(draft.paidMonths)?draft.paidMonths:[]);
+              return duePeriods.map(row=>{
+                const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+                const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+                const checked = paidSet.has(ym);
+                const notYetDue = row.dueDate>todayD;
+                return `
+                <label class="summary-row" style="cursor:pointer; align-items:center;">
+                  <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)}${notYetDue?' <span style="color:var(--ink-soft); font-weight:400;">(chưa tới hạn)</span>':''} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
+                  <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px; margin-left:10px;">
+                </label>`;
+              }).join('');
+            })()}
+          </div>
+          `}
+        `;
+        wrap.querySelectorAll('.loan-period-paid-chk').forEach(chk=>{
+          chk.addEventListener('change', async ()=>{
+            setLoanPeriodPaid(draft, chk.dataset.ym, chk.checked);
+            recomputeBankLoanMonthlyPayment();
+            renderLoanPreview();
+            // Chỉ lưu ngay xuống Cloud nếu khoản vay này ĐÃ TỒN TẠI (đang
+            // sửa lại) — y hệt hành vi cũ (tick là lưu ngay, không cần bấm
+            // Lưu). Khoản vay MỚI (chưa từng bấm Lưu lần nào) thì tick
+            // trước cũng chỉ giữ tạm trong nháp, đợi bấm Lưu bên dưới —
+            // tránh tạo ra 1 khoản vay rác chỉ có tick mà chưa đủ số tiền
+            // vay/thời hạn nếu Ông Chủ thoát ngang giữa chừng.
+            if(existing){
+              const idx = state.settings.bankLoans.findIndex(l=>l.id===draft.id);
+              if(idx>=0) state.settings.bankLoans[idx] = draft;
+              const ok = await saveSettings();
+              showToast(ok ? `Đã ghi nhận trả kỳ hạn tháng ${monthLabelVN(chk.dataset.ym)} (tổng ${draft.paidMonths.length} kỳ đã trả).` : 'Lưu thất bại — xem lý do lỗi ở thông báo trước đó, thử lại.');
+            }
+          });
+        });
+      }
+    }
+    renderLoanFullSchedule();
+  }
+  function renderLoanFullSchedule(){
+    const wrap = document.getElementById('loanFullScheduleWrap');
+    if(!wrap) return;
+    const rows = computeFullLoanSchedule(draft);
+    if(rows.length===0){ wrap.innerHTML = ''; return; }
+    const nextUnpaidIndex = loanPaidPeriodsCount(draft); // kỳ đã tick 0..N-1 → kỳ tiếp theo cần đóng là đúng index này
+    wrap.innerHTML = `
+      <h3 style="margin-top:0;">📅 Lịch Trả Nợ Chi Tiết Từng Tháng</h3>
+      <div class="hint" style="margin-bottom:10px;">Đủ ${rows.length} kỳ suốt vòng đời khoản vay — dòng tô đậm là kỳ TIẾP THEO cần đóng (theo đúng các kỳ đã tick ở khối "Xác Nhận Đã Trả Từng Kỳ" phía trên).</div>
+      <div style="max-height:340px; overflow-y:auto;">
+        ${rows.map(row=>{
+          const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+          const isCurrent = row.periodIndex===nextUnpaidIndex;
+          return `
+          <div class="kv" style="padding:6px 0; ${isCurrent?'font-weight:800; color:var(--accent);':''}">
+            <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} (${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm)</span>
+            <span class="val">${fmtVND(row.total)}</span>
+          </div>
+          <div class="hint" style="margin:0 0 6px; ${isCurrent?'font-weight:800;':''}">Gốc ${fmtVND(row.monthlyPrincipal)} + Lãi ${fmtVND(row.interest)} · Dư nợ sau kỳ: ${fmtVND(row.remainingBalanceAfter)}</div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+  attachMoneyInput(document.getElementById('loan_principal'), draft.principal, v=>{ draft.principal=v; renderLoanPreview(); });
+  document.getElementById('loan_term').addEventListener('input', e=>{ draft.termMonths = Number(e.target.value)||0; renderLoanPreview(); });
+  document.getElementById('loan_dueDay').addEventListener('input', e=>{ draft.dueDayOfMonth = Number(e.target.value)||20; });
+  document.getElementById('loan_date').addEventListener('change', e=>{
+    draft.disbursementDate = e.target.value || null;
+    renderLoanPreview();
+  });
+  document.getElementById('addLoanRateBtn').addEventListener('click', ()=>{
+    const d = document.getElementById('loanRateNewDate').value;
+    const v = Number(document.getElementById('loanRateNewValue').value);
+    if(!d){ showToast('Chọn ngày áp dụng trước đã.'); return; }
+    if(!(v>=0)){ showToast('Nhập đúng mức lãi (%/năm).'); return; }
+    draft.rateSchedule.push({ id: uid('loanrate'), effectiveFrom: d, ratePercent: v });
+    document.getElementById('loanRateNewDate').value='';
+    document.getElementById('loanRateNewValue').value='';
+    renderLoanRateScheduleList();
+    renderLoanPreview();
+  });
+  const goBack = ()=>{ renderAll(); restoreMainScroll(); };
+  document.getElementById('loanEditorBackBtn').addEventListener('click', goBack);
+  document.getElementById('loanCancelBtn').addEventListener('click', goBack);
+  document.getElementById('loanSaveBtn').addEventListener('click', async ()=>{
+    draft.name = document.getElementById('loan_name').value.trim() || `Khoản vay ${(state.settings.bankLoans||[]).length+1}`;
+    if(!(draft.principal>0)){ showToast('Nhập số tiền vay trước đã.'); return; }
+    if(!(draft.termMonths>0)){ showToast('Nhập thời hạn vay trước đã.'); return; }
+    if(!draft.disbursementDate){ showToast('Chọn ngày giải ngân trước đã.'); return; }
+    if(!Array.isArray(state.settings.bankLoans)) state.settings.bankLoans = [];
+    const idx = state.settings.bankLoans.findIndex(l=>l.id===draft.id);
+    if(idx>=0) state.settings.bankLoans[idx] = draft; else state.settings.bankLoans.push(draft);
+    recomputeBankLoanMonthlyPayment();
+    if(!(await saveSettings())) return;
+    showToast(existing ? 'Đã lưu khoản vay.' : 'Đã thêm khoản vay mới.');
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  });
+  const delBtn = document.getElementById('loanDelBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(!confirm(`Xoá khoản vay "${draft.name}"? Không thể hoàn tác.`)) return;
+    state.settings.bankLoans = (state.settings.bankLoans||[]).filter(l=>l.id!==draft.id);
+    recomputeBankLoanMonthlyPayment();
+    if(!(await saveSettings())) return;
+    showToast('Đã xoá khoản vay.');
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  });
+  renderLoanRateScheduleList();
+  renderLoanPreview();
+}
+/// Danh sách khoản vay ngân hàng hiển thị trong Linh Chí Thành — mỗi
+/// khoản 1 dòng tóm tắt (dư nợ còn lại, kỳ này, đã trả bao nhiêu kỳ),
+/// cộng 1 dòng TỔNG gộp mọi khoản. Bấm "Sửa" mở lại đúng openLoanEditor().
+function renderLoanList(){
+  const wrap = document.getElementById('loanListWrap');
+  if(!wrap) return;
+  migrateBankLoanToBankLoans();
+  const loans = state.settings.bankLoans || [];
+  if(loans.length===0){
+    wrap.innerHTML = '<div class="hint" style="margin:0;">Chưa có khoản vay nào — bấm "🏦➕ Thêm Khoản Vay Mới" ở Cài Đặt để bắt đầu.</div>';
+    return;
+  }
+  const totalThisPeriod = loans.reduce((sum,loan)=>{
+    const r = computeBankLoanAmortization(loan, new Date());
+    return sum + (r.hasBasis && !r.isPaidOff ? r.totalPaymentCurrent : 0);
+  }, 0);
+  wrap.innerHTML = `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Khoản Vay</th><th class="num">Dư Nợ Còn Lại</th><th class="num">Kỳ Này</th><th>Đã Trả</th><th></th></tr></thead>
+        <tbody>
+          ${loans.map(loan=>{
+            const r = computeBankLoanAmortization(loan, new Date());
+            const paidCount = loanPaidPeriodsCount(loan);
+            return `<tr>
+              <td><strong>${escapeHtml(loan.name||'Khoản vay')}</strong></td>
+              <td class="num">${r.hasBasis ? fmtVND(r.remainingBalance) : '—'}</td>
+              <td class="num">${r.hasBasis ? (r.isPaidOff?'Đã hết nợ ✅':fmtVND(r.totalPaymentCurrent)) : '—'}</td>
+              <td>${r.hasBasis ? `${paidCount}/${r.termMonths} kỳ` : '—'}</td>
+              <td><button class="btn btn-ghost btn-sm editLoanBtn" data-id="${loan.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
+            </tr>`;
+          }).join('')}
+          <tr class="grid-total-row"><td colspan="2" style="text-align:left;">TỔNG Gốc+Lãi/Tháng (kỳ hiện tại, mọi khoản)</td><td class="num">${fmtVND(totalThisPeriod)}</td><td></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>`;
+  wrap.querySelectorAll('.editLoanBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openLoanEditor(btn.dataset.id));
+  });
+}
+
 function renderCompanyDashboardPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
@@ -14330,6 +14676,11 @@ function renderCompanyDashboardPage(){
     </section>
 
     <section class="group">
+      <h3>🏦 Khoản Vay Ngân Hàng</h3>
+      <div id="loanListWrap"></div>
+    </section>
+
+    <section class="group">
       <h3>💰 Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -14461,6 +14812,7 @@ function renderCompanyDashboardPage(){
   renderRoadFeeMonthTable();
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
+  renderLoanList();
   renderDocumentList();
   renderMaintenanceList();
 }
@@ -14919,51 +15271,10 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>🏦 Công Cụ Tính Gốc + Lãi Vay Ngân Hàng Tự Động (Dư Nợ Giảm Dần)</h3>
-      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định.</div>
-      <div class="card">
-        <div class="two-col">
-          <div class="field">
-            <label>Số tiền vay ngân hàng (đ)</label>
-            <input type="text" inputmode="decimal" id="s_loanPrincipal">
-          </div>
-          <div class="field">
-            <label>Thời hạn vay (tháng)</label>
-            <input type="number" inputmode="numeric" id="s_loanTerm" value="${blankIfZero(state.settings.bankLoan&&state.settings.bankLoan.termMonths)}" placeholder="0">
-          </div>
-        </div>
-        <div class="field">
-          <label>Ngày giải ngân</label>
-          <input type="date" id="s_loanDate" value="${(state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||''}">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Ngày đến hạn đóng lãi hàng tháng</label>
-          <input type="number" inputmode="numeric" min="1" max="28" id="s_loanDueDay" value="${state.settings.bankLoan&&state.settings.bankLoan.dueDayOfMonth || 20}">
-          <div class="hint">Mặc định 20 — đúng ngày ngân hàng đang áp dụng. App sẽ cảnh báo trước 3 ngày (từ ngày 17) ở tab Ca Làm Việc.</div>
-        </div>
-      </div>
-      <div class="card" style="margin-top:8px;">
-        <div class="field" style="margin-bottom:4px;">
-          <label>Lộ Trình Lãi Suất (%/năm)</label>
-          <div class="hint">Ngân hàng thường đổi lãi theo từng giai đoạn (VD năm đầu 1 mức, năm 2 mức khác) — thêm 1 dòng mới mỗi khi có thông báo đổi lãi, các dòng cũ giữ nguyên để app tự biết mức nào áp dụng đúng thời điểm nào.</div>
-        </div>
-        <div id="loanRateScheduleListWrap"></div>
-        <div class="field" style="margin-top:10px;">
-          <label>Áp dụng từ ngày</label>
-          <input type="date" id="loanRateNewDate">
-        </div>
-        <div class="two-col" style="margin-bottom:0;">
-          <div class="field" style="margin-bottom:0;">
-            <label>Mức lãi (%/năm)</label>
-            <input type="number" inputmode="decimal" id="loanRateNewValue" placeholder="VD 10.2">
-          </div>
-          <div class="field" style="margin-bottom:0; display:flex; flex-direction:column; justify-content:flex-end;">
-            <button class="btn btn-accent btn-block" id="addLoanRateBtn">+ Thêm Mức Lãi</button>
-          </div>
-        </div>
-      </div>
-      <div class="card" id="loanAmortizationPreview" style="margin-top:8px;"></div>
-      <div class="card" id="loanFullScheduleWrap" style="margin-top:8px;"></div>
+      <h3>🏦 Khoản Vay Ngân Hàng</h3>
+      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Mỗi khoản vay (vay mua xe, vay vốn lưu động...) tính RIÊNG, hoàn toàn độc lập với nhau.</div>
+      <button class="btn btn-accent btn-block" id="addLoanBtn" style="font-size:15.5px; padding:14px;">🏦➕ Thêm Khoản Vay Mới</button>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách + chi tiết từng khoản tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
@@ -15004,188 +15315,12 @@ function renderSettings(){
   attachMoneyInput(document.getElementById('s_insurance'), sVals.insurance, v=>sVals.insurance=v);
   attachMoneyInput(document.getElementById('s_registration'), sVals.registration, v=>sVals.registration=v);
 
-  // ---- Công Cụ Tính Gốc + Lãi Vay Ngân Hàng Tự Động — xem trước trực
-  // tiếp (gõ tới đâu tính tới đó), chỉ thực sự lưu khi bấm "Lưu Cài Đặt".
-  // rateSchedule thay cho 1 ô lãi suất cố định cũ — nếu Ông Chủ đã từng lưu
-  // annualRatePercent kiểu cũ mà chưa có rateSchedule, tự "di cư" số đó
-  // thành dòng đầu tiên (áp dụng từ đúng Ngày Giải Ngân) để không mất số
-  // liệu đã nhập trước đây.
-  const legacyRate = (state.settings.bankLoan&&state.settings.bankLoan.annualRatePercent)||0;
-  const legacyDisbursement = (state.settings.bankLoan&&state.settings.bankLoan.disbursementDate)||null;
-  const existingSchedule = (state.settings.bankLoan&&state.settings.bankLoan.rateSchedule) || [];
-  const loanDraft = {
-    principal: (s.bankLoan&&s.bankLoan.principal)||0,
-    termMonths: (s.bankLoan&&s.bankLoan.termMonths)||0,
-    disbursementDate: (s.bankLoan&&s.bankLoan.disbursementDate)||null,
-    dueDayOfMonth: (s.bankLoan&&s.bankLoan.dueDayOfMonth)||20,
-    lastPaidMonth: (s.bankLoan&&s.bankLoan.lastPaidMonth)||null,
-    rateSchedule: existingSchedule.length>0 ? [...existingSchedule]
-      : (legacyRate>0 && legacyDisbursement ? [{id: uid('loanrate'), effectiveFrom: legacyDisbursement, ratePercent: legacyRate}] : [])
-  };
-  function renderLoanRateScheduleList(){
-    const wrap = document.getElementById('loanRateScheduleListWrap');
-    if(!wrap) return;
-    const sorted = [...loanDraft.rateSchedule].sort((a,b)=>b.effectiveFrom.localeCompare(a.effectiveFrom));
-    wrap.innerHTML = sorted.length===0 ? `<div class="hint" style="margin:0;">Chưa có mức lãi nào — thêm ít nhất 1 dòng bên dưới (áp dụng từ đúng Ngày Giải Ngân).</div>` : sorted.map(r=>`
-      <div class="kv" style="padding:4px 0;">
-        <span>Từ ${formatDateVN(r.effectiveFrom)}: <strong>${Number(r.ratePercent).toFixed(2)}%/năm</strong></span>
-        <button type="button" class="link-btn" data-del-rate="${r.id}" style="padding:0; color:var(--loss);">Xoá</button>
-      </div>`).join('');
-    wrap.querySelectorAll('[data-del-rate]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        loanDraft.rateSchedule = loanDraft.rateSchedule.filter(r=>r.id!==btn.dataset.delRate);
-        renderLoanRateScheduleList();
-        renderLoanPreview();
-      });
-    });
-  }
-  function renderLoanPreview(){
-    const r = computeBankLoanAmortization(loanDraft, new Date());
-    const wrap = document.getElementById('loanAmortizationPreview');
-    if(wrap){
-      if(!r.hasBasis){
-        wrap.innerHTML = `<div class="hint" style="margin:0;">Nhập đủ Số tiền vay, Thời hạn vay, Ngày giải ngân và ít nhất 1 mức lãi ở Lộ Trình Lãi Suất để app tự tính Gốc+Lãi hàng tháng theo dư nợ giảm dần.</div>`;
-      } else {
-        const schedule = computeFullLoanSchedule(loanDraft);
-        const paidCount = loanPaidPeriodsCount();
-        // "Đã trả" tính theo SỐ KỲ ÔNG CHỦ ĐÃ GHI NHẬN TRẢ (paidCount), không
-        // theo lịch — để nhất quán: đã bấm trả 1 kỳ thì lãi đã trả = lãi kỳ 1,
-        // dư nợ còn lại = dư nợ sau kỳ 1.
-        const interestPaidSoFar = schedule.filter(row=>row.periodIndex < paidCount).reduce((sum,row)=>sum+row.interest, 0);
-        const interestTotalLife = schedule.reduce((sum,row)=>sum+row.interest, 0);
-        const remainingByPaid = (paidCount>0 && schedule[paidCount-1]) ? schedule[paidCount-1].remainingBalanceAfter : r.remainingBalance;
-        wrap.innerHTML = `
-          <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${r.annualRatePercent.toFixed(2)}%/năm</span></div>
-          <div class="summary-row"><span>Số kỳ đã trả ngân hàng</span><span class="val">${paidCount} / ${r.termMonths} kỳ</span></div>
-          <div class="summary-row"><span>Dư nợ còn lại (sau ${paidCount} kỳ đã trả)</span><span class="val">${fmtVND(remainingByPaid)}</span></div>
-          ${r.isPaidOff ? `
-          <div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>
-          ` : `
-          <div class="summary-row"><span>Kỳ này (${r.daysInPeriod} ngày, hạn ${formatDateVN(`${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}-${String(r.dueDate.getDate()).padStart(2,'0')}`)})</span><span class="val"></span></div>
-          <div class="summary-row"><span>Gốc phải trả kỳ này</span><span class="val">${fmtVND(r.monthlyPrincipal)}</span></div>
-          <div class="summary-row"><span>Lãi phải trả kỳ này (dư nợ đầu kỳ × lãi suất × số ngày/365)</span><span class="val">${fmtVND(r.monthlyInterestCurrent)}</span></div>
-          <div class="formula-divider" style="margin:8px 0;"></div>
-          <div class="summary-row total"><span>TỔNG GỐC + LÃI PHẢI TRẢ KỲ NÀY</span><span class="val" style="font-weight:800;">${fmtVND(r.totalPaymentCurrent)}</span></div>
-          <div class="hint" style="margin-top:6px;">Số này tự động dùng làm "Gốc + lãi vay ngân hàng/tháng" cho toàn bộ app — sẽ tự đổi đúng theo từng kỳ thực tế (số ngày khác nhau mỗi tháng), Ông Chủ không cần vào đây sửa tay hàng tháng.</div>
-          `}
-          <div class="formula-divider" style="margin:10px 0;"></div>
-          <div class="summary-row"><span>💰 Tiền lãi đã trả tính đến nay (${paidCount} kỳ)</span><span class="val">${fmtVND(interestPaidSoFar)}</span></div>
-          <div class="summary-row"><span>💰 Tổng tiền lãi phải trả suốt ${r.termMonths} tháng vay</span><span class="val">${fmtVND(interestTotalLife)}</span></div>
-          ${r.isPaidOff ? '' : `
-          <div class="formula-divider" style="margin:10px 0;"></div>
-          <div style="font-weight:700; font-size:13px; margin-bottom:2px;">✅ Xác Nhận Đã Trả Từng Kỳ</div>
-          <div id="loanPaidChecklistWrap">
-            ${(()=>{
-              const todayD = new Date(todayLocalDateStr()+'T00:00:00');
-              const nextUnpaidIdx = loanPaidPeriodsCount();
-              // SỬA 2026-08-23 (Ông Chủ hỏi: "kỳ 3 phải xử lý thế nào để app
-              // hiểu là đã đóng") — trước đây CHỈ hiện kỳ đã QUA hạn
-              // (dueDate<=hôm nay), nên nếu đóng tiền sớm trước ngày đến
-              // hạn thì chưa tick được. Giờ luôn hiện thêm đúng 1 kỳ TIẾP
-              // THEO (ngay sau kỳ cuối đã tick) dù chưa tới hạn, để tick
-              // sớm được bất cứ lúc nào.
-              const duePeriods = schedule.filter(row=>row.dueDate<=todayD || row.periodIndex===nextUnpaidIdx);
-              if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
-              const paidSet = new Set((state.settings.bankLoan&&Array.isArray(state.settings.bankLoan.paidMonths))?state.settings.bankLoan.paidMonths:[]);
-              return duePeriods.map(row=>{
-                const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
-                const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-                const checked = paidSet.has(ym);
-                const notYetDue = row.dueDate>todayD;
-                return `
-                <label class="summary-row" style="cursor:pointer; align-items:center;">
-                  <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)}${notYetDue?' <span style="color:var(--ink-soft); font-weight:400;">(chưa tới hạn)</span>':''} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
-                  <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px; margin-left:10px;">
-                </label>`;
-              }).join('');
-            })()}
-          </div>
-          `}
-        `;
-      }
-    }
-    renderLoanFullSchedule();
-  }
-  // Ghi nhận / bỏ ghi nhận trả ngân hàng THEO TỪNG KỲ — dùng event
-  // delegation gắn 1 LẦN trên document (không gắn lại mỗi lần render) để
-  // luôn bấm được dù được vẽ lại bất cứ lúc nào, tránh lỗi timing khiến
-  // bấm không phản hồi. SỬA 2026-08-23: đổi từ "1 nút = tháng hiện tại"
-  // sang "tick từng ô = đúng kỳ đó" (data-ym lấy từ NGÀY ĐẾN HẠN thật của
-  // kỳ, không phải ngày hôm nay) — cho phép sửa lại bất kỳ kỳ cũ nào đã lỡ
-  // quên tick, đúng lỗi Ông Chủ báo "trả kỳ 2 rồi mà số vẫn ở 1/60".
-  if(!window.__loanPaidDelegationBound){
-    window.__loanPaidDelegationBound = true;
-    document.addEventListener('change', async (e)=>{
-      const chk = e.target.closest && e.target.closest('.loan-period-paid-chk');
-      if(!chk) return;
-      const ym = chk.dataset.ym;
-      const paid = chk.checked;
-      setLoanPeriodPaid(ym, paid);
-      const bl = state.settings.bankLoan;
-      if(state.currentTab==='settings') renderAll();
-      else if(state.currentTab==='shifts') renderShiftList();
-      // 2026-08-22 (Ông Chủ báo — số liệu liên quan ngân hàng không cập
-      // nhật realtime): 2 nhánh trên chỉ phủ đúng 2 tab, còn Kết Quả Kinh
-      // Doanh (Gốc+lãi vay hàng tháng là 1 phần chi phí cố định) và các
-      // tab khác không được vẽ lại — gọi thêm renderAll() KHÔNG ĐIỀU KIỆN
-      // để chắc chắn tab đang mở (bất kỳ tab nào) luôn phản ánh đúng ngay.
-      else renderAll();
-      const ok = await saveSettings();
-      showToast(ok ? (paid ? `Đã ghi nhận trả kỳ hạn tháng ${monthLabelVN(ym)} (tổng ${bl.paidMonths.length} kỳ đã trả).` : `Đã bỏ ghi nhận kỳ hạn tháng ${monthLabelVN(ym)}.`) : 'Lưu thất bại — xem lý do lỗi ở thông báo trước đó, thử lại.');
-    });
-  }
-  // Lịch trả nợ chi tiết TỪNG KỲ suốt vòng đời khoản vay — dùng đúng
-  // computeFullLoanSchedule() (cùng công thức, không tính lại kiểu khác) để
-  // không bao giờ lệch với số "kỳ này" ở trên. SỬA 2026-08-23 (Ông Chủ báo:
-  // tick trả kỳ 2 rồi mà dòng tô đậm vẫn đứng ở kỳ 2, không nhảy sang kỳ
-  // 3): trước đây tô đậm theo THÁNG DƯƠNG LỊCH hôm nay (còn nguyên cả
-  // tháng 8 dù đã tick xong) — giờ đổi sang tô đậm đúng KỲ TIẾP THEO CẦN
-  // ĐÓNG, bám theo số kỳ đã tick (loanPaidPeriodsCount()), tick xong kỳ nào
-  // là dòng tô đậm nhảy ngay sang kỳ sau, không cần chờ qua tháng.
-  function renderLoanFullSchedule(){
-    const wrap = document.getElementById('loanFullScheduleWrap');
-    if(!wrap) return;
-    const rows = computeFullLoanSchedule(loanDraft);
-    if(rows.length===0){ wrap.innerHTML = ''; return; }
-    const nextUnpaidIndex = loanPaidPeriodsCount(); // kỳ đã tick 0..N-1 → kỳ tiếp theo cần đóng là đúng index này
-    wrap.innerHTML = `
-      <h3 style="margin-top:0;">📅 Lịch Trả Nợ Chi Tiết Từng Tháng</h3>
-      <div class="hint" style="margin-bottom:10px;">Đủ ${rows.length} kỳ suốt vòng đời khoản vay — dòng tô đậm là kỳ TIẾP THEO cần đóng (theo đúng các kỳ đã tick ở khối "Xác Nhận Đã Trả Từng Kỳ" phía trên).</div>
-      <div style="max-height:340px; overflow-y:auto;">
-        ${rows.map(row=>{
-          const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-          const isCurrent = row.periodIndex===nextUnpaidIndex;
-          return `
-          <div class="kv" style="padding:6px 0; ${isCurrent?'font-weight:800; color:var(--accent);':''}">
-            <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} (${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm)</span>
-            <span class="val">${fmtVND(row.total)}</span>
-          </div>
-          <div class="hint" style="margin:0 0 6px; ${isCurrent?'font-weight:800;':''}">Gốc ${fmtVND(row.monthlyPrincipal)} + Lãi ${fmtVND(row.interest)} · Dư nợ sau kỳ: ${fmtVND(row.remainingBalanceAfter)}</div>
-          `;
-        }).join('')}
-      </div>
-    `;
-  }
-  attachMoneyInput(document.getElementById('s_loanPrincipal'), loanDraft.principal, v=>{ loanDraft.principal=v; renderLoanPreview(); });
-  document.getElementById('s_loanTerm').addEventListener('input', e=>{ loanDraft.termMonths = Number(e.target.value)||0; renderLoanPreview(); });
-  document.getElementById('s_loanDueDay').addEventListener('input', e=>{ loanDraft.dueDayOfMonth = Number(e.target.value)||20; });
-  document.getElementById('s_loanDate').addEventListener('change', e=>{
-    loanDraft.disbursementDate = e.target.value || null;
-    renderLoanPreview();
-  });
-  document.getElementById('addLoanRateBtn').addEventListener('click', ()=>{
-    const d = document.getElementById('loanRateNewDate').value;
-    const v = Number(document.getElementById('loanRateNewValue').value);
-    if(!d){ showToast('Chọn ngày áp dụng trước đã.'); return; }
-    if(!(v>=0)){ showToast('Nhập đúng mức lãi (%/năm).'); return; }
-    loanDraft.rateSchedule.push({ id: uid('loanrate'), effectiveFrom: d, ratePercent: v });
-    document.getElementById('loanRateNewDate').value='';
-    document.getElementById('loanRateNewValue').value='';
-    renderLoanRateScheduleList();
-    renderLoanPreview();
-  });
-  renderLoanRateScheduleList();
-  renderLoanPreview();
+  // SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — nhiều khoản vay riêng biệt): toàn
+  // bộ logic loanDraft/renderLoanPreview/renderLoanFullSchedule/checklist
+  // cũ (chỉ xử lý được đúng 1 khoản vay) đã CHUYỂN HẲN sang openLoanEditor()
+  // — trang riêng, tự lưu ngay khi bấm Lưu, không còn phụ thuộc nút "Lưu
+  // Cài Đặt" nữa. Ở đây chỉ còn đúng nút mở trang Thêm Khoản Vay Mới.
+  document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
 
   // SỬA 2026-09-08 (yêu cầu Ông Chủ — "nút thêm ở Cài Đặt, dữ liệu hiển
   // thị ở Linh Chí Thành"): Tiền Luật Đường / Tiền Thuê Nhà & Điện Nước /
@@ -15219,20 +15354,6 @@ function renderSettings(){
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
     s.monthlyVehicleDepreciation = sVals.depreciation;
-    // SỬA 2026-08-23 (Ông Chủ báo — trả kỳ 2 tháng 8/2026 rồi mà "Số kỳ đã
-    // trả ngân hàng" không lên): loanDraft (bản nháp form) KHÔNG có field
-    // paidMonths — trước đây dựng lại s.bankLoan hoàn toàn từ loanDraft ở
-    // đây khiến paidMonths bị XOÁ MẤT mỗi lần bấm "Lưu Cài Đặt", dù chỉ
-    // sửa 1 ô bất kỳ (VD tiền bảo hiểm) không liên quan gì tới khoản vay.
-    // Giữ nguyên đúng paidMonths hiện có (nguồn thật là state.settings.bankLoan,
-    // luôn được setLoanPeriodPaid() cập nhật real-time) — không lấy từ loanDraft.
-    const existingPaidMonths = (s.bankLoan && Array.isArray(s.bankLoan.paidMonths)) ? s.bankLoan.paidMonths
-      : (s.bankLoan && s.bankLoan.lastPaidMonth ? [s.bankLoan.lastPaidMonth] : []);
-    s.bankLoan = { principal: loanDraft.principal, termMonths: loanDraft.termMonths,
-                   disbursementDate: loanDraft.disbursementDate, dueDayOfMonth: loanDraft.dueDayOfMonth,
-                   lastPaidMonth: loanDraft.lastPaidMonth, rateSchedule: loanDraft.rateSchedule,
-                   paidMonths: existingPaidMonths };
-    recomputeBankLoanMonthlyPayment(); // ghi lại state.settings.monthlyLoanPayment từ bankLoan vừa nhập, đúng ngày hôm nay
     s.monthlyInsurance = sVals.insurance;
     s.monthlyRegistrationFee = sVals.registration;
     const keyInput = document.getElementById('s_geminiKey');
