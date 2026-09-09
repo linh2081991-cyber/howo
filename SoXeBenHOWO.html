@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #179';
+const APP_BUILD = '2026-09-08 · #180';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14778,7 +14778,9 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>🏦 Khoản Vay Ngân Hàng</h3>
+      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Mỗi khoản vay (vay mua xe, vay vốn lưu động...) tính RIÊNG, hoàn toàn độc lập với nhau.</div>
       <div id="loanListWrap"></div>
+      <button class="btn btn-accent btn-block" id="addLoanBtn" style="margin-top:10px; font-size:15.5px; padding:14px;">🏦➕ Thêm Khoản Vay Mới</button>
     </section>
 
     <section class="group">
@@ -14917,6 +14919,7 @@ function renderCompanyDashboardPage(){
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
   renderLoanList();
+  document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
   document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
   document.getElementById('depreciationDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
   renderDocumentList();
@@ -15314,13 +15317,13 @@ function renderSettings(){
     <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
-      <button class="btn btn-accent btn-block" id="addDocumentBtn" style="font-size:15.5px; padding:14px;">📄➕ Thêm Giấy Tờ Mới</button>
+      <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:800;">📄➕ Thêm Giấy Tờ Mới</button>
       <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <button class="btn btn-accent btn-block" id="addMaintenanceBtn" style="font-size:15.5px; padding:14px;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
+      <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:800;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
       <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
@@ -15357,13 +15360,6 @@ function renderSettings(){
     </section>
 
     <section class="group">
-      <h3>🏦 Khoản Vay Ngân Hàng</h3>
-      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Mỗi khoản vay (vay mua xe, vay vốn lưu động...) tính RIÊNG, hoàn toàn độc lập với nhau.</div>
-      <button class="btn btn-accent btn-block" id="addLoanBtn" style="font-size:15.5px; padding:14px;">🏦➕ Thêm Khoản Vay Mới</button>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách + chi tiết từng khoản tại 🏢 LINH CHÍ THÀNH</div>
-    </section>
-
-    <section class="group">
       <h3>⚙️ Chính Sách Chi Phí Theo Trạng Thái Ca</h3>
       <div class="card">
         ${STATUS_OPTIONS.map(st=>renderPolicyBlock(st)).join('<div style="height:14px"></div>')}
@@ -15396,12 +15392,10 @@ function renderSettings(){
     <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:24px;">Lưu Cài Đặt</button>
   `;
 
-  // SỬA 2026-09-08 (OK, BẮT ĐẦU XỬ LÝ — nhiều khoản vay riêng biệt): toàn
-  // bộ logic loanDraft/renderLoanPreview/renderLoanFullSchedule/checklist
-  // cũ (chỉ xử lý được đúng 1 khoản vay) đã CHUYỂN HẲN sang openLoanEditor()
-  // — trang riêng, tự lưu ngay khi bấm Lưu, không còn phụ thuộc nút "Lưu
-  // Cài Đặt" nữa. Ở đây chỉ còn đúng nút mở trang Thêm Khoản Vay Mới.
-  document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
+  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "toàn bộ khoản vay ngân hàng là
+  // phần tài chính công ty, chuyển hẳn vào Linh Chí Thành, không phải cài
+  // đặt"): nút "Thêm Khoản Vay Mới" đã CHUYỂN HẲN sang renderCompanyDashboardPage()
+  // — Cài Đặt không còn dấu vết gì của mục này nữa.
 
   // SỬA 2026-09-08 (yêu cầu Ông Chủ — "nút thêm ở Cài Đặt, dữ liệu hiển
   // thị ở Linh Chí Thành"): Tiền Luật Đường / Tiền Thuê Nhà & Điện Nước /
