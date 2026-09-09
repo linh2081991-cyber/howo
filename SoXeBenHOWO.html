@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #175';
+const APP_BUILD = '2026-09-08 · #176';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13328,28 +13328,40 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
 }
 
 // ---- Documents (vehicle + driver paperwork) list & editor ----
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "dữ liệu đã thêm phải hiển thị
+/// trong Linh Chí Thành, kẻ ô sạch đẹp"): đổi từ list "card" rời rạc
+/// sang 1 bảng grid-table duy nhất. Hàm này giờ được gọi từ
+/// renderCompanyDashboardPage() (KHÔNG còn gọi từ renderSettings() nữa)
+/// — nút "+ Thêm Giấy Tờ" vẫn nằm ở Cài Đặt như cũ, chỉ có PHẦN HIỂN THỊ
+/// danh sách chuyển qua đây. openDocumentEditor() giữ nguyên không đổi
+/// (renderAll() sau khi lưu tự quay đúng về màn đang đứng).
 function renderDocumentList(){
   const wrap = document.getElementById('documentListWrap');
   if(!wrap) return;
   if(state.documents.length===0){
-    wrap.innerHTML = '<div class="hint" style="margin-bottom:10px;">Chưa có giấy tờ nào được nhập.</div>';
+    wrap.innerHTML = '<div class="hint" style="margin:0 0 10px;">Chưa có giấy tờ nào được nhập — bấm "+ Thêm Giấy Tờ" ở Cài Đặt để bắt đầu.</div>';
     return;
   }
   const sorted = [...state.documents].sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate));
-  wrap.innerHTML = sorted.map(doc=>{
-    const daysLeft = daysUntilLocal(doc.expiryDate);
-    const urgency = urgencyFromDays(daysLeft, 30, 7);
-    const driverName = doc.scope==='driver' ? (driverById(doc.driverId)?.name || '(tài xế đã xoá)') : null;
-    return `
-      <div class="card" data-id="${doc.id}" style="padding:12px 14px;">
-        <div class="driver-row">
-          <strong>${escapeHtml(doc.type)}${driverName?' — '+escapeHtml(driverName):''}</strong>
-          <button class="link-btn editDocumentBtn" data-id="${doc.id}">Sửa</button>
-        </div>
-        <div class="hint">Hết hạn: ${formatDateVN(doc.expiryDate)} · <span class="rating-badge ${urgency.className}">${urgency.label}</span></div>
-        ${doc.notes ? `<div class="hint">${escapeHtml(doc.notes)}</div>` : ''}
-      </div>`;
-  }).join('');
+  wrap.innerHTML = `
+    <div class="grid-table-wrap">
+      <table class="grid-table">
+        <thead><tr><th>Giấy Tờ</th><th>Hết Hạn</th><th>Trạng Thái</th><th></th></tr></thead>
+        <tbody>
+          ${sorted.map(doc=>{
+            const daysLeft = daysUntilLocal(doc.expiryDate);
+            const urgency = urgencyFromDays(daysLeft, 30, 7);
+            const driverName = doc.scope==='driver' ? (driverById(doc.driverId)?.name || '(tài xế đã xoá)') : null;
+            return `<tr data-id="${doc.id}">
+              <td><strong>${escapeHtml(doc.type)}</strong>${driverName?`<br><span class="hint" style="margin:0;">${escapeHtml(driverName)}</span>`:''}${doc.notes?`<br><span class="hint" style="margin:0;">${escapeHtml(doc.notes)}</span>`:''}</td>
+              <td>${formatDateVN(doc.expiryDate)}</td>
+              <td><span class="rating-badge ${urgency.className}">${urgency.label}</span></td>
+              <td><button class="btn btn-ghost btn-sm editDocumentBtn" data-id="${doc.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
   wrap.querySelectorAll('.editDocumentBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>openDocumentEditor(btn.dataset.id));
   });
@@ -13442,27 +13454,32 @@ function openDocumentEditor(id){
 }
 
 // ---- Maintenance schedules (distance-based) list & editor ----
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — cùng đợt với renderDocumentList()):
+/// đổi sang grid-table, gọi từ renderCompanyDashboardPage() thay vì
+/// renderSettings(). Nút "+ Thêm Hạng Mục Bảo Dưỡng" vẫn ở Cài Đặt.
 function renderMaintenanceList(){
   const wrap = document.getElementById('maintenanceListWrap');
   if(!wrap) return;
   const odoHeader = `<div class="stat-highlight"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>`;
   if(state.maintenanceSchedules.length===0){
-    wrap.innerHTML = odoHeader + '<div class="hint" style="margin-top:10px;">Chưa có hạng mục bảo dưỡng nào.</div>';
+    wrap.innerHTML = odoHeader + '<div class="hint" style="margin-top:10px;">Chưa có hạng mục bảo dưỡng nào — bấm "+ Thêm Hạng Mục Bảo Dưỡng" ở Cài Đặt để bắt đầu.</div>';
     return;
   }
   const statuses = state.maintenanceSchedules.map(computeMaintenanceStatus).sort((a,b)=>a.kmRemaining-b.kmRemaining);
-  wrap.innerHTML = odoHeader + statuses.map(m=>`
-    <div class="card" data-id="${m.id}" style="padding:12px 14px; margin-top:10px;">
-      <div class="driver-row">
-        <strong>${escapeHtml(m.name)}</strong>
-        <button class="link-btn editMaintenanceBtn" data-id="${m.id}">Sửa</button>
-      </div>
-      <div class="hint">Chu kỳ ${m.intervalKm.toLocaleString('vi-VN')}km · Làm gần nhất ở Km ${Number(m.lastDoneOdo).toLocaleString('vi-VN')} (${formatDateVN(m.lastDoneDate)}) · <span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span></div>
-      ${m.predictedDueDate ? `<div class="hint">📅 Dự kiến đến hạn: <strong>${formatDateVN(m.predictedDueDate)}</strong> (bình quân xe chạy thực tế ~${m.avgKmPerDay.toLocaleString('vi-VN')} km/ngày)</div>` : ''}
-      ${m.notes ? `<div class="hint">${escapeHtml(m.notes)}</div>` : ''}
-      ${(m.history&&m.history.length>0) ? `<div class="hint">🕘 Đã làm ${m.history.length} lần trước đó — xem trong "Sửa"</div>` : ''}
-    </div>
-  `).join('');
+  wrap.innerHTML = odoHeader + `
+    <div class="grid-table-wrap" style="margin-top:10px;">
+      <table class="grid-table">
+        <thead><tr><th>Hạng Mục</th><th>Làm Gần Nhất</th><th>Trạng Thái</th><th></th></tr></thead>
+        <tbody>
+          ${statuses.map(m=>`<tr data-id="${m.id}">
+            <td><strong>${escapeHtml(m.name)}</strong><br><span class="hint" style="margin:0;">Chu kỳ ${m.intervalKm.toLocaleString('vi-VN')}km${m.notes?` · ${escapeHtml(m.notes)}`:''}</span></td>
+            <td>Km ${Number(m.lastDoneOdo).toLocaleString('vi-VN')}<br><span class="hint" style="margin:0;">${formatDateVN(m.lastDoneDate)}</span>${(m.history&&m.history.length>0)?`<br><span class="hint" style="margin:0;">🕘 ${m.history.length} lần trước</span>`:''}</td>
+            <td><span class="rating-badge ${m.urgency.className}">${m.urgency.label}</span>${m.predictedDueDate?`<br><span class="hint" style="margin:0;">📅 ${formatDateVN(m.predictedDueDate)}</span>`:''}</td>
+            <td><button class="btn btn-ghost btn-sm editMaintenanceBtn" data-id="${m.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
   wrap.querySelectorAll('.editMaintenanceBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>openMaintenanceEditor(btn.dataset.id));
   });
@@ -14125,6 +14142,16 @@ function renderCompanyDashboardPage(){
           </div>`).join('')}
       </div>
     </section>
+
+    <section class="group">
+      <h3>📄 Giấy Tờ Xe & Tài Xế</h3>
+      <div id="documentListWrap"></div>
+    </section>
+
+    <section class="group">
+      <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
+      <div id="maintenanceListWrap"></div>
+    </section>
   `;
   document.getElementById('companyDashBackBtn').addEventListener('click', ()=>{
     state.showCompanyDashboard = false;
@@ -14230,6 +14257,8 @@ function renderCompanyDashboardPage(){
       restoreMainScroll();
     });
   });
+  renderDocumentList();
+  renderMaintenanceList();
 }
 /// Gộp CẢ 3 nguồn tiền vào/ra CỦA CÔNG TY thành 1 danh sách duy nhất,
 /// sắp theo ngày gần nhất trước (yêu cầu Ông Chủ 2026-08-19: "luồng tiền
@@ -14623,14 +14652,14 @@ function renderSettings(){
     <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
-      <div id="documentListWrap"></div>
-      <button class="btn btn-ghost btn-block" id="addDocumentBtn">+ Thêm Giấy Tờ</button>
+      <button class="btn btn-accent btn-block" id="addDocumentBtn" style="font-size:15.5px; padding:14px;">📄➕ Thêm Giấy Tờ Mới</button>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <div id="maintenanceListWrap"></div>
-      <button class="btn btn-ghost btn-block" id="addMaintenanceBtn">+ Thêm Hạng Mục Bảo Dưỡng</button>
+      <button class="btn btn-accent btn-block" id="addMaintenanceBtn" style="font-size:15.5px; padding:14px;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
+      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
@@ -15140,8 +15169,6 @@ function renderSettings(){
   });
 
   document.getElementById('exportBtn').addEventListener('click', exportCSV);
-  renderDocumentList();
-  renderMaintenanceList();
   document.getElementById('addDocumentBtn').addEventListener('click', ()=>openDocumentEditor(null));
   document.getElementById('addMaintenanceBtn').addEventListener('click', ()=>openMaintenanceEditor(null));
   document.getElementById('backupBtn').addEventListener('click', exportBackupFile);
