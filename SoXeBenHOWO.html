@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #174';
+const APP_BUILD = '2026-09-08 · #175';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9492,6 +9492,13 @@ function computeAppraisalMetrics(p){
 /// and returns there via renderAll()+restoreMainScroll(), matching every
 /// other full-screen drill-down in the app (openPartnerDetail, etc).
 function renderProjectAppraisal(){
+  // SỬA 2026-09-08 (PHÁT HIỆN MỚI trong đợt audit đa xe, báo cáo thêm cho
+  // Ông Chủ — không nằm trong 2 lỗi đã duyệt ban đầu): màn "Thẩm Định Dự
+  // Án" có nút "Cập nhật thông số" gọi thẳng saveSettings() (giá dầu/VAT
+  // mô phỏng) — dính ĐÚNG lỗi ghi đè Xe #1 y hệt Cài Đặt nếu có ≥2 xe và
+  // đang ở "LINH CHÍ THÀNH". Thêm lá chắn y hệt. Với Ông Chủ hiện tại
+  // (đúng 1 xe), không đổi gì hành vi app đang chạy.
+  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
   scrollMainToTop();
   state.strategyView = 'appraisal';
   const app = document.getElementById('app');
@@ -11842,6 +11849,14 @@ function generateInsights({gDay, gNight, gTotal, finalNetProfit, repairTotal, ro
 }
 
 function renderResults(){
+  // SỬA 2026-09-08 (audit đa xe, yêu cầu Ông Chủ): thêm đúng lá chắn y
+  // hệt renderShiftList()/renderDrivers() đã có sẵn — trước đây tab này
+  // THIẾU chặn, nên khi có ≥2 xe và đang ở "LINH CHÍ THÀNH" (chưa chọn xe
+  // cụ thể), tab sẽ âm thầm hiện lại dữ liệu CŨ (xe vừa xem trước đó) mà
+  // không báo gì. Với Ông Chủ hiện tại (đúng 1 xe), activeVehicleIdForEditing()
+  // LUÔN trả về đúng xe đó (xem chú thích hàm này) — lá chắn này không
+  // bao giờ kích hoạt, KHÔNG đổi gì hành vi app đang chạy.
+  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
   const app=document.getElementById('app');
   if(!state.resultsRange) state.resultsRange = currentMonthRange();
   const { from, to } = state.resultsRange;
@@ -14562,6 +14577,17 @@ function renderCharterCapitalDetailPage(){
   document.getElementById('charterDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 function renderSettings(){
+  // SỬA 2026-09-08 (audit đa xe, yêu cầu Ông Chủ — LỖI NGHIÊM TRỌNG NHẤT
+  // phát hiện được): thiếu lá chắn này là lỗ hổng nguy hiểm nhất trong
+  // đợt audit — vehicleDataRef(null,'settings') tự quy về ĐÚNG PATH GỐC
+  // của Xe #1 (xem chú thích vehicleDataRef()), nên nếu có ≥2 xe, đang ở
+  // "LINH CHÍ THÀNH", mà lỡ vào được màn này rồi bấm Lưu — sẽ ghi đè
+  // THẲNG vào dữ liệu Cài Đặt THẬT của Xe #1 (29E-691.12). Thêm đúng lá
+  // chắn y hệt renderShiftList()/renderDrivers() để chặn từ gốc. Với Ông
+  // Chủ hiện tại (đúng 1 xe), activeVehicleIdForEditing() LUÔN trả về
+  // đúng xe đó — lá chắn này không bao giờ kích hoạt, KHÔNG đổi gì hành
+  // vi app đang chạy hôm nay.
+  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
   const app=document.getElementById('app');
   const s = state.settings;
   const hasGeminiKey = !!(s.geminiApiKey || '').trim();
