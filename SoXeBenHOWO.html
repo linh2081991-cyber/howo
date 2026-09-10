@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #180';
+const APP_BUILD = '2026-09-08 · #181';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14494,12 +14494,12 @@ function renderCompanyDashboardPage(){
   // đối), màu sắc phản ánh đúng lợi/hại cho Ông Chủ.
   const custOwed = debtSummary.totalCustomerOwed;
   const custDebtLine = custOwed>=0
-    ? { label:'Khách hàng còn nợ Ông Chủ', value:custOwed, color:'var(--profit)' }
-    : { label:'Ông Chủ đang tạm ứng dư cho khách hàng', value:-custOwed, color:'var(--loss)' };
+    ? { label:'Khách hàng đang nợ Ông Chủ', value:custOwed, color:'var(--profit)' }
+    : { label:'Ông Chủ đang nợ khách hàng (khách trả dư)', value:-custOwed, color:'var(--loss)' };
   const supOwed = debtSummary.totalSupplierOwed;
   const supDebtLine = supOwed>=0
-    ? { label:'Ông Chủ còn nợ nhà cung cấp', value:supOwed, color:'var(--loss)' }
-    : { label:'Nhà cung cấp đang giữ tiền Ông Chủ tạm ứng dư', value:-supOwed, color:'var(--profit)' };
+    ? { label:'Ông Chủ đang nợ nhà cung cấp', value:supOwed, color:'var(--loss)' }
+    : { label:'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)', value:-supOwed, color:'var(--profit)' };
   const bankRecon = computeBankBalanceReconciliation();
 
   let roiHtml = '';
@@ -14612,15 +14612,14 @@ function renderCompanyDashboardPage(){
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Công Nợ Hiện Tại (Toàn Công Ty)</div>
         <div class="grid-table-wrap" style="margin-bottom:8px;">
           <table class="grid-table">
-            <thead><tr><th>Đối tượng</th><th class="num">Số tiền</th></tr></thead>
+            <thead><tr><th>Đối tượng</th><th class="num">Số tiền</th><th></th></tr></thead>
             <tbody>
-              <tr><td>${custDebtLine.label}</td><td class="num" style="color:${custDebtLine.color};">${fmtVND(custDebtLine.value)}</td></tr>
-              <tr><td>${supDebtLine.label}</td><td class="num" style="color:${supDebtLine.color};">${fmtVND(supDebtLine.value)}</td></tr>
+              <tr><td>${custDebtLine.label}</td><td class="num" style="color:${custDebtLine.color};">${fmtVND(custDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
+              <tr><td>${supDebtLine.label}</td><td class="num" style="color:${supDebtLine.color};">${fmtVND(supDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
             </tbody>
           </table>
         </div>
-        <div class="hint" style="margin-top:6px;">Màu XANH = tiền Ông Chủ sẽ nhận thêm hoặc đang được giữ hộ (có lợi). Màu ĐỎ = tiền Ông Chủ còn phải trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản).</div>
-        <button class="btn btn-ghost btn-block" id="debtDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Theo Từng Khách/Nhà Cung Cấp</button>
+        <div class="hint" style="margin-top:6px;">Màu XANH = tiền Ông Chủ sẽ nhận thêm hoặc đang được giữ hộ (có lợi). Màu ĐỎ = tiền Ông Chủ còn phải trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản). Bấm 🔍 để xem rõ từng khách/nhà cung cấp.</div>
       </div>
 
       <div class="card" style="margin-top:12px; border:1.5px solid var(--accent);">
@@ -14741,24 +14740,8 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>📜 Lịch Sử Góp/Rút</h3>
-      <div class="card" style="padding:0; overflow:hidden;" id="oe_listWrap">
-        ${sorted.length===0 ? '<div class="hint" style="padding:14px;">Chưa có khoản góp/rút nào.</div>' : sorted.map(e=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">${(e.method||'bank')==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</span></div>
-              <div style="margin-top:3px; display:flex; gap:6px; flex-wrap:wrap;">
-                ${e.isCharterCapital ? `<span style="background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:800; padding:2px 8px; border-radius:20px;">📜 Vốn điều lệ</span>` : ''}
-                ${e.isRecycled ? `<span style="background:var(--bg); color:var(--ink-soft); border:1px solid var(--border); font-size:11px; font-weight:800; padding:2px 8px; border-radius:20px;">🔄 Tiền đảo</span>` : ''}
-              </div>
-              ${e.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.note)}</div>` : ''}
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-weight:800; white-space:nowrap; color:${e.type==='contribution'?'var(--profit)':'var(--loss)'};">${e.type==='contribution'?'+':'−'}${fmtVND(e.amount)}</span>
-              <button class="link-btn" data-toggle-recycled="${e.id}" style="padding:0; font-size:12px;">${e.isRecycled?'↩️ Bỏ đảo':'🔄 Đánh dấu đảo'}</button>
-              <button class="link-btn" data-del-equity="${e.id}" style="color:var(--loss); padding:0;">Xoá</button>
-            </div>
-          </div>`).join('')}
-      </div>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">${sorted.length===0 ? 'Chưa có khoản góp/rút nào.' : `${sorted.length} khoản đã ghi nhận, gần nhất ${formatDateVN(sorted[0].date)}.`}</div>
+      <button class="btn btn-ghost btn-block" id="equityHistoryDetailBtn">📋 Chi Tiết — Toàn Bộ Lịch Sử Góp/Rút</button>
     </section>
 
     <section class="group">
@@ -14817,7 +14800,9 @@ function renderCompanyDashboardPage(){
     restoreMainScroll();
   });
   document.getElementById('cashFlowLedgerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
-  document.getElementById('debtDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(); });
+  document.querySelectorAll('.debtDetailBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(); });
+  });
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const bankReconDetailBtn = document.getElementById('bankReconDetailBtn');
   if(bankReconDetailBtn) bankReconDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
@@ -14869,28 +14854,7 @@ function renderCompanyDashboardPage(){
     renderCompanyDashboardPage();
     restoreMainScroll();
   });
-  document.querySelectorAll('[data-del-equity]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
-      if(!(await saveOwnerEquityEntries())) return;
-      showToast('Đã xoá.');
-      saveMainScroll();
-      renderCompanyDashboardPage();
-      restoreMainScroll();
-    });
-  });
-  document.querySelectorAll('[data-toggle-recycled]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const entry = state.ownerEquityEntries.find(e=>e.id===btn.dataset.toggleRecycled);
-      if(!entry) return;
-      entry.isRecycled = !entry.isRecycled;
-      if(!(await saveOwnerEquityEntries())) return;
-      showToast(entry.isRecycled ? 'Đã đánh dấu là tiền đảo — không tính vào Vốn Chủ Sở Hữu nữa.' : 'Đã bỏ đánh dấu đảo — tính lại vào Vốn Chủ Sở Hữu.');
-      saveMainScroll();
-      renderCompanyDashboardPage();
-      restoreMainScroll();
-    });
-  });
+  document.getElementById('equityHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderEquityHistoryDetailPage(); });
   let bbcBalanceVal = 0;
   attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
   document.getElementById('bbc_addBtn').addEventListener('click', async ()=>{
@@ -14989,6 +14953,66 @@ function renderCompanyCashFlowLedgerPage(){
 /// Chi Tiết Công Nợ — liệt kê TỪNG khách hàng/nhà cung cấp đang còn nợ
 /// (owed khác 0), bấm vào từng dòng mở đúng trang chi tiết đối tác đã có
 /// sẵn (openCustomerDetail/openSupplierDetail — không viết lại logic).
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "thay vì hiển thị cả loạt thì cho 1
+/// nút chi tiết, bảng kẻ ô"): trang riêng liệt kê TOÀN BỘ Lịch Sử Góp/Rút
+/// — trước đây hiện thẳng từng khoản ngay trên Linh Chí Thành (rất dài
+/// khi nhiều khoản), giờ chỉ còn 1 dòng tóm tắt + nút mở trang này.
+function renderEquityHistoryDetailPage(){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const sorted = [...state.ownerEquityEntries].sort((a,b)=>b.date.localeCompare(a.date));
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="equityHistoryBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📜 Chi Tiết Lịch Sử Góp/Rút</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${sorted.length} khoản, mới nhất lên đầu.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Loại</th><th>Phương Thức</th><th>Nhãn</th><th class="num">Số Tiền</th><th></th></tr></thead>
+          <tbody>
+            ${sorted.length===0 ? '<tr><td colspan="6" class="hint" style="padding:14px;">Chưa có khoản góp/rút nào.</td></tr>' : sorted.map(e=>`
+              <tr>
+                <td>${formatDateVN(e.date)}</td>
+                <td>${e.type==='contribution'?'⬆️ Góp vào':'⬇️ Rút ra'}</td>
+                <td>${(e.method||'bank')==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</td>
+                <td>
+                  ${e.isCharterCapital ? `<span style="background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:800; padding:2px 8px; border-radius:20px; white-space:nowrap;">📜 Vốn điều lệ</span>` : ''}
+                  ${e.isRecycled ? `<span style="background:var(--bg); color:var(--ink-soft); border:1px solid var(--border); font-size:11px; font-weight:800; padding:2px 8px; border-radius:20px; white-space:nowrap;">🔄 Tiền đảo</span>` : ''}
+                  ${e.note ? `<div class="hint" style="margin:2px 0 0;">${escapeHtml(e.note)}</div>` : ''}
+                </td>
+                <td class="num" style="font-weight:800; color:${e.type==='contribution'?'var(--profit)':'var(--loss)'};">${e.type==='contribution'?'+':'−'}${fmtVND(e.amount)}</td>
+                <td style="white-space:nowrap;">
+                  <button class="link-btn" data-toggle-recycled="${e.id}" style="padding:0; font-size:12px; display:block;">${e.isRecycled?'↩️ Bỏ đảo':'🔄 Đánh dấu đảo'}</button>
+                  <button class="link-btn" data-del-equity="${e.id}" style="color:var(--loss); padding:0; display:block; margin-top:4px;">Xoá</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+  document.getElementById('equityHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.querySelectorAll('[data-del-equity]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
+      if(!(await saveOwnerEquityEntries())) return;
+      showToast('Đã xoá.');
+      renderEquityHistoryDetailPage();
+    });
+  });
+  document.querySelectorAll('[data-toggle-recycled]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const entry = state.ownerEquityEntries.find(e=>e.id===btn.dataset.toggleRecycled);
+      if(!entry) return;
+      entry.isRecycled = !entry.isRecycled;
+      if(!(await saveOwnerEquityEntries())) return;
+      showToast(entry.isRecycled ? 'Đã đánh dấu là tiền đảo — không tính vào Vốn Chủ Sở Hữu nữa.' : 'Đã bỏ đánh dấu đảo — tính lại vào Vốn Chủ Sở Hữu.');
+      renderEquityHistoryDetailPage();
+    });
+  });
+}
 function renderDebtDetailPage(){
   scrollMainToTop();
   const customersWithDebt = state.customers.map(c=>({...c, debt: computeCustomerDebt(c.id)})).filter(c=>Math.abs(c.debt.owed)>0.5);
@@ -15001,33 +15025,37 @@ function renderDebtDetailPage(){
     <section class="group">
       <h2 style="margin-bottom:2px;">🤝 Công Nợ Chi Tiết</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Theo từng khách hàng / nhà cung cấp (toàn công ty) — bấm vào từng dòng để xem chi tiết giao dịch.</div>
-      <h3>💳 Khách Hàng Còn Nợ</h3>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${customersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có khách hàng nào còn nợ.</div>' : customersWithDebt.map(c=>{
-          const isOwedByThem = c.debt.owed>=0;
-          return `
-          <div class="driver-row" data-open-customer="${c.id}" style="padding:12px 14px; border-bottom:1px solid var(--border); cursor:pointer;">
-            <div>
-              <div style="font-weight:700;">${escapeHtml(c.name)}</div>
-              <div class="hint" style="margin-top:2px;">${isOwedByThem?'Khách hàng còn nợ':'Ông Chủ tạm ứng dư cho khách'}</div>
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:${isOwedByThem?'var(--profit)':'var(--loss)'};">${fmtVND(Math.abs(c.debt.owed))}</span>
-          </div>`;
-        }).join('')}
+      <h3>💳 Khách Hàng</h3>
+      <div class="grid-table-wrap" style="margin-bottom:16px;">
+        <table class="grid-table">
+          <thead><tr><th>Khách Hàng</th><th>Chiều</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${customersWithDebt.length===0 ? '<tr><td colspan="3" class="hint" style="padding:14px;">Không có khách hàng nào còn nợ/dư.</td></tr>' : customersWithDebt.map(c=>{
+              const isOwedByThem = c.debt.owed>=0;
+              return `<tr data-open-customer="${c.id}" style="cursor:pointer;">
+                <td><strong>${escapeHtml(c.name)}</strong></td>
+                <td>${isOwedByThem?'Nợ Ông Chủ':'Ông Chủ nợ (khách trả dư)'}</td>
+                <td class="num" style="font-weight:800; color:${isOwedByThem?'var(--profit)':'var(--loss)'};">${fmtVND(Math.abs(c.debt.owed))}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
-      <h3 style="margin-top:16px;">💳 Nhà Cung Cấp Còn Nợ</h3>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${suppliersWithDebt.length===0 ? '<div class="hint" style="padding:14px;">Không có nhà cung cấp nào còn nợ.</div>' : suppliersWithDebt.map(s=>{
-          const weOweThem = s.debt.owed>=0;
-          return `
-          <div class="driver-row" data-open-supplier="${s.id}" style="padding:12px 14px; border-bottom:1px solid var(--border); cursor:pointer;">
-            <div>
-              <div style="font-weight:700;">${escapeHtml(s.name)}</div>
-              <div class="hint" style="margin-top:2px;">${weOweThem?'Ông Chủ còn nợ':'Nhà cung cấp giữ tiền tạm ứng dư'}</div>
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:${weOweThem?'var(--loss)':'var(--profit)'};">${fmtVND(Math.abs(s.debt.owed))}</span>
-          </div>`;
-        }).join('')}
+      <h3>💳 Nhà Cung Cấp</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Nhà Cung Cấp</th><th>Chiều</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${suppliersWithDebt.length===0 ? '<tr><td colspan="3" class="hint" style="padding:14px;">Không có nhà cung cấp nào còn nợ/dư.</td></tr>' : suppliersWithDebt.map(s=>{
+              const weOweThem = s.debt.owed>=0;
+              return `<tr data-open-supplier="${s.id}" style="cursor:pointer;">
+                <td><strong>${escapeHtml(s.name)}</strong></td>
+                <td>${weOweThem?'Ông Chủ nợ':'Nhà cung cấp nợ (đã ứng dư)'}</td>
+                <td class="num" style="font-weight:800; color:${weOweThem?'var(--loss)':'var(--profit)'};">${fmtVND(Math.abs(s.debt.owed))}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
     </section>
   `;
