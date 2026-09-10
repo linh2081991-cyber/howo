@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #182';
+const APP_BUILD = '2026-09-08 · #183';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13114,20 +13114,20 @@ function openSupplierDetail(supplierId){
     </section>
     <section class="group">
       <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-        <span>Lịch Sử Đã Trả</span>
-        ${payments.length>0?`<span style="font-size:14px; font-weight:800; color:var(--loss);">Tổng: −${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</span>`:''}
+        <span>Lịch Sử Giao Dịch</span>
+        ${payments.length>0?(()=>{ const net=payments.reduce((s,p)=>s+(Number(p.amount)||0),0); return `<span style="font-size:14px; font-weight:800; color:${net>=0?'var(--loss)':'var(--profit)'};">Ròng: ${net>=0?'−':'+'}${fmtVND(Math.abs(net))}</span>`; })():''}
       </h3>
-      ${payments.length===0?'<div class="hint">Chưa có khoản trả nào.</div>':`
+      ${payments.length===0?'<div class="hint">Chưa có giao dịch nào.</div>':`
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            ${payments.map(p=>`
+            ${payments.map(p=>{ const isRefund = Number(p.amount)<0; return `
             <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openSupplierPaymentEditor('${p.id}','${supplierId}')">
               <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
-              <td>${p.notes?escapeHtml(p.notes):'—'}</td>
-              <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(p.amount)}</td>
-            </tr>`).join('')}
+              <td>${isRefund?'⬇️ Mỏ hoàn tiền':'⬆️ Đã trả'}${p.notes?' · '+escapeHtml(p.notes):''}</td>
+              <td class="num" style="color:${isRefund?'var(--profit)':'var(--loss)'}; font-weight:700;">${isRefund?'+':'−'}${fmtVND(Math.abs(p.amount))}</td>
+            </tr>`; }).join('')}
           </tbody>
         </table>
       </div>`}
@@ -13158,20 +13158,36 @@ function openSupplierPaymentEditor(id, supplierId){
   const existing = id ? state.supplierPayments.find(p=>p.id===id) : null;
   const sid = supplierId || (existing && existing.supplierId);
   const sup = supplierById(sid);
-  const draft = existing ? {...existing} : { id: uid('spay'), supplierId: sid, date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
+  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "bank tiền cho mỏ định lấy hàng,
+  // không lấy nữa, mỏ đã hoàn lại tiền"): thêm loại giao dịch "Mỏ hoàn
+  // tiền lại" — lưu amount ÂM trong CHÍNH state.supplierPayments (không
+  // tạo bảng riêng), vì MỌI công thức liên quan (computeSupplierDebt(),
+  // Dòng Tiền Thuần, Khớp Số Dư Ngân Hàng...) đều chỉ CỘNG DỒN mảng này —
+  // 1 khoản âm tự động trừ đúng vào "Đã trả", tự khớp lại "CÒN NỢ MỎ" và
+  // tự cộng đúng lại vào số dư ngân hàng app tính, không cần sửa thêm bất
+  // kỳ công thức nào khác.
+  const isRefundExisting = existing && Number(existing.amount)<0;
+  const draft = existing ? {...existing, amount: Math.abs(existing.amount)} : { id: uid('spay'), supplierId: sid, date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
   if(!draft.method) draft.method = 'bank'; // khoản cũ trước khi có trường này -> mặc định NGÂN HÀNG, giữ đúng hành vi cũ
   const goBack = () => { openSupplierDetail(draft.supplierId); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
-      <h3>💵 ${existing?'Sửa':'Ghi Nhận'} Khoản Đã Trả Cho Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
+      <h3>💵 ${existing?'Sửa':'Ghi Nhận'} Giao Dịch Với Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
       <div class="card">
         <div class="field">
-          <label>Ngày chuyển tiền</label>
+          <label>Loại giao dịch</label>
+          <div class="seg" id="sp2_type">
+            <button data-val="pay" class="${isRefundExisting?'':'active'}">⬆️ Đã trả cho mỏ</button>
+            <button data-val="refund" class="${isRefundExisting?'active':''}">⬇️ Mỏ hoàn tiền lại</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Ngày</label>
           <input type="date" id="sp2_date" value="${draft.date}">
         </div>
         <div class="field">
-          <label>Số tiền đã chuyển</label>
+          <label>Số tiền</label>
           <input type="text" inputmode="decimal" id="sp2_amount">
         </div>
         <div class="field">
@@ -13183,7 +13199,7 @@ function openSupplierPaymentEditor(id, supplierId){
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Nội dung / ghi chú</label>
-          <input type="text" id="sp2_notes" value="${escapeHtml(draft.notes)}">
+          <input type="text" id="sp2_notes" value="${escapeHtml(draft.notes)}" placeholder="VD: Mỏ hoàn tiền do không lấy hàng">
         </div>
       </div>
       <div style="display:flex; gap:10px; margin-top:10px;">
@@ -13193,21 +13209,30 @@ function openSupplierPaymentEditor(id, supplierId){
       </div>
     </section>
   `;
+  let txnType = isRefundExisting ? 'refund' : 'pay';
+  document.querySelectorAll('#sp2_type button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      txnType = btn.dataset.val;
+      document.querySelectorAll('#sp2_type button').forEach(b=>b.classList.toggle('active', b===btn));
+    });
+  });
   attachMoneyInput(document.getElementById('sp2_amount'), draft.amount, v=>draft.amount=v);
   document.getElementById('saveSupPaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('sp2_date').value || draft.date;
     draft.notes = document.getElementById('sp2_notes').value.trim();
     draft.method = document.getElementById('sp2_method').value;
+    if(!(Math.abs(draft.amount)>0)){ showToast('Nhập số tiền trước đã.'); return; }
+    draft.amount = txnType==='refund' ? -Math.abs(draft.amount) : Math.abs(draft.amount);
     const idx = state.supplierPayments.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.supplierPayments[idx]=draft; else state.supplierPayments.push(draft);
     if(!(await saveSupplierPayments())) return;
-    showToast('Đã lưu khoản đã trả mỏ.');
+    showToast(txnType==='refund' ? 'Đã ghi nhận khoản mỏ hoàn tiền.' : 'Đã lưu khoản đã trả mỏ.');
     goBack();
   });
   document.getElementById('cancelSupPaymentBtn').addEventListener('click', goBack);
   const delBtn = document.getElementById('delSupPaymentBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
-    if(confirm('Xoá khoản đã trả này?')){
+    if(confirm('Xoá giao dịch này?')){
       state.supplierPayments = state.supplierPayments.filter(p=>p.id!==draft.id);
       if(!(await saveSupplierPayments())) return;
       showToast('Đã xoá.');
@@ -14933,7 +14958,13 @@ function computeCompanyCashFlowLedger(){
   });
   state.supplierPayments.forEach(p=>{
     const supplier = state.suppliers.find(s=>s.id===p.supplierId);
-    entries.push({ date:p.date, category:'Trả nhà cung cấp (mỏ)', amount:Number(p.amount)||0, sign:-1,
+    // SỬA 2026-09-08 (hỗ trợ khoản "Mỏ hoàn tiền lại" — amount có thể ÂM):
+    // trước đây gán cứng sign:-1 và dùng thẳng p.amount (giả định luôn
+    // dương) — nếu p.amount âm (hoàn tiền), hiển thị sẽ bị 2 dấu trừ chồng
+    // nhau. Giờ tính đúng chiều tiền mặt thật (cashEffect) rồi mới tách
+    // amount/sign từ đó, luôn đúng dù dương hay âm.
+    const cashEffect = -(Number(p.amount)||0); // trả tiền (p.amount dương) => tiền mặt RA (âm); mỏ hoàn tiền (p.amount âm) => tiền mặt VÀO (dương)
+    entries.push({ date:p.date, category: cashEffect>=0?'Mỏ hoàn tiền':'Trả nhà cung cấp (mỏ)', amount:Math.abs(cashEffect), sign: cashEffect>=0?1:-1,
       desc: supplier ? supplier.name : (p.notes||''), id:p.id, method: p.method||'bank' });
   });
   state.ownerEquityEntries.forEach(e=>{
