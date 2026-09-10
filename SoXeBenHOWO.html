@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #185';
+const APP_BUILD = '2026-09-08 · #186';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14988,10 +14988,25 @@ function renderCompanyCashFlowLedgerPage(){
   const totalContributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const totalToSuppliersNet = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const totalWithdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "chia riêng khách hàng thương mại
+  // và khách hàng chạy cước"): 2 loại này TÁCH BIỆT NHAU NGAY TỪ Ở KHÂU
+  // NHẬP LIỆU — khách thương mại (mua/bán vật liệu) luôn gắn customerId
+  // (chọn từ danh sách "Khách Hàng" có sẵn, ví dụ Đàm Vương Gia), còn
+  // khách chạy cước (chở thuê đơn thuần, tính theo tấn/khối × đơn giá,
+  // không có giá vốn hàng hoá) chỉ gắn siteName/partnerName (tên công
+  // trình tự gõ, không qua danh sách khách hàng). Tách đúng theo field
+  // này, không suy đoán qua tên.
+  const commercialPayments = state.sitePayments.filter(p=>p.customerId).map(p=>{
+    const cus = customerById(p.customerId);
+    return { date:p.date, amount:Number(p.amount)||0, sign:1, desc: cus?cus.name:'(khách đã xoá)', method:p.method||'bank' };
+  });
+  const cargoPayments = state.sitePayments.filter(p=>!p.customerId).map(p=>
+    ({ date:p.date, amount:Number(p.amount)||0, sign:1, desc: p.partnerName || p.siteName || '', method:p.method||'bank' }));
   const groups = [
     { title: '🏦 Ông Chủ Góp Vốn Vào Công Ty', rows: entries.filter(e=>e.category==='Góp vốn'), color: 'var(--profit)' },
     { title: '⬇️ Ông Chủ Rút Vốn Ra Khỏi Công Ty', rows: entries.filter(e=>e.category==='Rút vốn'), color: 'var(--loss)' },
-    { title: '💰 Khách Hàng Trả Tiền', rows: entries.filter(e=>e.category==='Khách hàng trả'), color: 'var(--profit)' },
+    { title: '🏪 Khách Hàng Thương Mại Trả Tiền', rows: commercialPayments, color: 'var(--profit)' },
+    { title: '🚚 Khách Hàng Chạy Cước Trả Tiền', rows: cargoPayments, color: 'var(--profit)' },
     { title: '⛏️ Giao Dịch Với Mỏ (Trả Tiền / Mỏ Hoàn Lại)', rows: entries.filter(e=>e.category==='Trả nhà cung cấp (mỏ)' || e.category==='Mỏ hoàn tiền'), color: null },
   ];
   const groupTableHtml = g => {
@@ -15026,12 +15041,14 @@ function renderCompanyCashFlowLedgerPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📋 Sao Kê Toàn Bộ Dòng Tiền</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách trả + Tiền trả nhà cung cấp + Góp/Rút Vốn Chủ Sở Hữu — chia thành 4 bảng riêng theo đúng khu vực bên dưới, mỗi bảng có dòng TỔNG. 🏦 = chuyển khoản ngân hàng, 💵 = tiền mặt.</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách trả + Tiền trả nhà cung cấp + Góp/Rút Vốn Chủ Sở Hữu — chia thành 5 bảng riêng theo đúng khu vực bên dưới, mỗi bảng có dòng TỔNG. 🏦 = chuyển khoản ngân hàng, 💵 = tiền mặt.</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Tổng Quan 4 Khu Vực</th><th class="num">Số Tiền</th></tr></thead>
+          <thead><tr><th>Tổng Quan Các Khu Vực</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>💰 Khách hàng đã trả</td><td class="num" style="color:var(--profit);">+${fmtVND(totalFromCustomers)}</td></tr>
+            <tr><td>🏪 Khách hàng thương mại trả</td><td class="num" style="color:var(--profit);">+${fmtVND(commercialPayments.reduce((s,p)=>s+p.amount,0))}</td></tr>
+            <tr><td>🚚 Khách hàng chạy cước trả</td><td class="num" style="color:var(--profit);">+${fmtVND(cargoPayments.reduce((s,p)=>s+p.amount,0))}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= 💰 Khách hàng đã trả (tổng)</td><td class="num">+${fmtVND(totalFromCustomers)}</td></tr>
             <tr><td>🏦 Ông Chủ góp vốn</td><td class="num" style="color:var(--profit);">+${fmtVND(totalContributed)}</td></tr>
             <tr><td>⛏️ Đã trả nhà cung cấp (mỏ), đã trừ phần mỏ hoàn lại</td><td class="num" style="color:${totalToSuppliersNet>=0?'var(--loss)':'var(--profit)'};">${totalToSuppliersNet>=0?'−':'+'}${fmtVND(Math.abs(totalToSuppliersNet))}</td></tr>
             <tr><td>⬇️ Ông Chủ đã rút vốn</td><td class="num" style="color:var(--loss);">−${fmtVND(totalWithdrawn)}</td></tr>
