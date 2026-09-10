@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #191';
+const APP_BUILD = '2026-09-08 · #192';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14396,6 +14396,60 @@ function openLoanEditor(loanId){
 /// Danh sách khoản vay ngân hàng hiển thị trong Linh Chí Thành — mỗi
 /// khoản 1 dòng tóm tắt (dư nợ còn lại, kỳ này, đã trả bao nhiêu kỳ),
 /// cộng 1 dòng TỔNG gộp mọi khoản. Bấm "Sửa" mở lại đúng openLoanEditor().
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "cho nút chi tiết cách tính, để tao
+/// hiểu tao cần bn tháng để hoà vốn"): modal giải thích từng bước công
+/// thức "Hiệu Quả Đầu Tư" — dùng lại NGUYÊN các số đã tính sẵn
+/// (computeOwnerEquity(), computeRecentMonthlyRate()), không tính công
+/// thức mới, chỉ trình bày lại từng bước cho rõ.
+function openROICalculationDetail(){
+  const eq = computeOwnerEquity();
+  const timeline = computeMonthlyEquityTimeline();
+  const recentRate3 = computeRecentMonthlyRate(timeline, 3);
+  const recentRate6 = computeRecentMonthlyRate(timeline, 6);
+  const totalCapital = eq.initialInvestment + eq.contributedExtra;
+  const recoveredPercent = totalCapital>0 ? Math.max(0, Math.min(100, (eq.cumulativeProfit/totalCapital)*100)) : 0;
+  const remainingToRecover = totalCapital - eq.cumulativeProfit;
+  const sameWindowNote = (recentRate3!==null && recentRate6!==null && recentRate3===recentRate6)
+    ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${timeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
+    : '';
+  openModal(`
+    <h3>📖 Chi Tiết Cách Tính — Hiệu Quả Đầu Tư</h3>
+    <div class="field">
+      <label style="font-weight:800;">1. Đã thu hồi được (%)</label>
+      <div class="hint" style="margin:0;">= Lợi nhuận luỹ kế ÷ Tổng vốn đã bỏ vào × 100%</div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Lợi nhuận luỹ kế (tiền mặt, từ đầu dự án)</td><td class="num">${fmtVND(eq.cumulativeProfit)}</td></tr>
+            <tr><td>÷ Tổng vốn đã bỏ vào (mua xe ${fmtVND(eq.initialInvestment)} + góp thêm ${fmtVND(eq.contributedExtra)})</td><td class="num">${fmtVND(totalCapital)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Đã thu hồi được</td><td class="num">${recoveredPercent.toFixed(1)}%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="field">
+      <label style="font-weight:800;">2. Tốc độ thu hồi TB 3/6 tháng gần nhất</label>
+      <div class="hint" style="margin:0;">= (Vốn Chủ Sở Hữu tháng gần nhất − Vốn Chủ Sở Hữu N tháng trước) ÷ N tháng — lấy đúng từ biểu đồ "Biến Động Vốn Chủ Sở Hữu Theo Tháng" bên dưới.</div>
+      ${sameWindowNote}
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label style="font-weight:800;">3. Dự kiến còn bao nhiêu tháng để hoà vốn</label>
+      <div class="hint" style="margin:0;">= (Tổng vốn đã bỏ vào − Lợi nhuận luỹ kế) ÷ Tốc độ thu hồi TB 3 tháng gần nhất</div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Còn thiếu để thu hồi đủ vốn</td><td class="num">${remainingToRecover>0?fmtVND(remainingToRecover):'Đã đủ ✅'}</td></tr>
+            <tr><td>÷ Tốc độ thu hồi TB 3 tháng/tháng</td><td class="num">${recentRate3!==null?fmtVND(recentRate3):'Chưa đủ dữ liệu'}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Số tháng còn lại (ước tính)</td><td class="num">${(recentRate3!==null && recentRate3>0 && remainingToRecover>0)?`~${Math.ceil(remainingToRecover/recentRate3)} tháng`:(remainingToRecover<=0?'Đã đủ ✅':'Chưa đủ dữ liệu')}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px;">Đây là ước tính DỰA THEO NHỊP GẦN NHẤT, không phải cam kết — nếu sản lượng/chi phí thay đổi, số tháng này sẽ tự cập nhật lại theo đúng nhịp mới mỗi lần Ông Chủ mở lại trang này.</div>
+    </div>
+    <button class="btn btn-accent btn-block" id="roiCalcCloseBtn" style="margin-top:14px;">Đã Hiểu</button>
+  `);
+  document.getElementById('roiCalcCloseBtn').addEventListener('click', closeModal);
+}
 function renderLoanList(){
   const wrap = document.getElementById('loanListWrap');
   if(!wrap) return;
@@ -14814,11 +14868,18 @@ function renderCompanyDashboardPage(){
   const bankRecon = computeBankBalanceReconciliation();
 
   let roiHtml = '';
-  if(eq.initialInvestment>0){
-    const recoveredPercent = Math.max(0, Math.min(100, (eq.cumulativeProfit/eq.initialInvestment)*100));
-    const remainingToRecover = eq.initialInvestment - eq.cumulativeProfit;
+  // SỬA 2026-09-08 (Ông Chủ yêu cầu "logic lại" — phát hiện qua audit:
+  // trước đây mẫu số chỉ dùng eq.initialInvestment (1,83 tỷ, riêng tiền
+  // xe), trong khi khối "Báo Cáo Kinh Doanh Tổng Hợp" dùng ĐÚNG
+  // initialInvestment + contributedExtra (2,49 tỷ, gồm cả tiền mặt góp
+  // thêm) — 2 chỗ lệch mẫu số ra 2% khác nhau cho cùng 1 câu hỏi. Đổi về
+  // ĐÚNG 1 mẫu số duy nhất, khớp Báo Cáo Kinh Doanh.
+  const totalCapitalForROI = eq.initialInvestment + eq.contributedExtra;
+  if(totalCapitalForROI>0){
+    const recoveredPercent = Math.max(0, Math.min(100, (eq.cumulativeProfit/totalCapitalForROI)*100));
+    const remainingToRecover = totalCapitalForROI - eq.cumulativeProfit;
     let breakEvenLine;
-    if(eq.cumulativeProfit>=eq.initialInvestment){
+    if(eq.cumulativeProfit>=totalCapitalForROI){
       breakEvenLine = `<span style="color:var(--profit);">ĐÃ THU HỒI ĐỦ VỐN ✅</span>`;
     } else if(recentRate3!==null && recentRate3>0){
       breakEvenLine = `còn ~${Math.ceil(remainingToRecover/recentRate3)} tháng (theo nhịp 3 tháng gần nhất)`;
@@ -14828,13 +14889,14 @@ function renderCompanyDashboardPage(){
     roiHtml = `
     <div class="card" style="margin-top:14px;">
       <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🎯 Hiệu Quả Đầu Tư</div>
-      <div class="summary-row"><span>Đã thu hồi được</span><span class="val" style="font-weight:800;">${recoveredPercent.toFixed(1)}% vốn đầu tư ban đầu</span></div>
+      <div class="summary-row"><span>Đã thu hồi được</span><span class="val" style="font-weight:800;">${recoveredPercent.toFixed(1)}% tổng vốn đã bỏ vào</span></div>
       <div style="background:var(--border); height:8px; border-radius:4px; overflow:hidden; margin:8px 0 12px 0;">
         <div style="background:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
       </div>
       <div class="summary-row"><span>Tốc độ thu hồi TB 3 tháng gần nhất</span><span class="val">${recentRate3!==null?(recentRate3>=0?'+':'')+fmtVND(recentRate3)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
       <div class="summary-row"><span>Tốc độ thu hồi TB 6 tháng gần nhất</span><span class="val">${recentRate6!==null?(recentRate6>=0?'+':'')+fmtVND(recentRate6)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
       <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
+      <button class="btn btn-ghost btn-block" id="roiCalcDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
     </div>`;
   }
 
@@ -14927,8 +14989,8 @@ function renderCompanyDashboardPage(){
           <table class="grid-table">
             <thead><tr><th>Đối tượng</th><th class="num">Số tiền</th><th></th></tr></thead>
             <tbody>
-              <tr><td>${custDebtLine.label}</td><td class="num" style="color:${custDebtLine.color};">${fmtVND(custDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
-              <tr><td>${supDebtLine.label}</td><td class="num" style="color:${supDebtLine.color};">${fmtVND(supDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
+              <tr><td>${custDebtLine.label}</td><td class="num" style="color:${custDebtLine.color};">${fmtVND(custDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" data-filter="customer" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
+              <tr><td>${supDebtLine.label}</td><td class="num" style="color:${supDebtLine.color};">${fmtVND(supDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" data-filter="supplier" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
             </tbody>
           </table>
         </div>
@@ -15114,7 +15176,7 @@ function renderCompanyDashboardPage(){
   });
   document.getElementById('cashFlowLedgerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
   document.querySelectorAll('.debtDetailBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(); });
+    btn.addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(btn.dataset.filter); });
   });
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const bankReconDetailBtn = document.getElementById('bankReconDetailBtn');
@@ -15203,6 +15265,8 @@ function renderCompanyDashboardPage(){
     restoreMainScroll();
   });
   document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
+  const roiCalcDetailBtn = document.getElementById('roiCalcDetailBtn');
+  if(roiCalcDetailBtn) roiCalcDetailBtn.addEventListener('click', openROICalculationDetail);
   document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
   document.getElementById('depreciationDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
   renderDocumentList();
@@ -15386,18 +15450,30 @@ function renderEquityHistoryDetailPage(){
     });
   });
 }
-function renderDebtDetailPage(){
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "click kính lúp muốn biết rõ khách
+/// và nhà cung cấp RIÊNG NHAU, chi tiết, không như bảng gộp chung cũ"):
+/// thêm tham số filterType ('customer'|'supplier'|undefined). Có filter
+/// → CHỈ hiện đúng 1 bên; nếu bên đó chỉ có ĐÚNG 1 đối tác đang nợ/dư →
+/// nhảy THẲNG vào trang chi tiết giao dịch của đối tác đó luôn (khỏi phải
+/// bấm thêm 1 lần qua trang danh sách chỉ có 1 dòng). Không filter (gọi
+/// từ nơi khác, không đổi) → vẫn hiện đủ cả 2 bên như cũ.
+function renderDebtDetailPage(filterType){
   scrollMainToTop();
   const customersWithDebt = state.customers.map(c=>({...c, debt: computeCustomerDebt(c.id)})).filter(c=>Math.abs(c.debt.owed)>0.5);
   const suppliersWithDebt = state.suppliers.map(s=>({...s, debt: computeSupplierDebt(s.id)})).filter(s=>Math.abs(s.debt.owed)>0.5);
+  if(filterType==='customer' && customersWithDebt.length===1){ openCustomerDetail(customersWithDebt[0].id); return; }
+  if(filterType==='supplier' && suppliersWithDebt.length===1){ openSupplierDetail(suppliersWithDebt[0].id); return; }
+  const showCustomers = filterType!=='supplier';
+  const showSuppliers = filterType!=='customer';
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="debtDetailBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
-      <h2 style="margin-bottom:2px;">🤝 Công Nợ Chi Tiết</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Theo từng khách hàng / nhà cung cấp (toàn công ty) — bấm vào từng dòng để xem chi tiết giao dịch.</div>
+      <h2 style="margin-bottom:2px;">🤝 Công Nợ Chi Tiết${filterType==='customer'?' — Khách Hàng':filterType==='supplier'?' — Nhà Cung Cấp':''}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Bấm vào từng dòng để xem đầy đủ lịch sử giao dịch của đúng đối tác đó.</div>
+      ${showCustomers?`
       <h3>💳 Khách Hàng</h3>
       <div class="grid-table-wrap" style="margin-bottom:16px;">
         <table class="grid-table">
@@ -15413,7 +15489,8 @@ function renderDebtDetailPage(){
             }).join('')}
           </tbody>
         </table>
-      </div>
+      </div>`:''}
+      ${showSuppliers?`
       <h3>💳 Nhà Cung Cấp</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -15429,7 +15506,7 @@ function renderDebtDetailPage(){
             }).join('')}
           </tbody>
         </table>
-      </div>
+      </div>`:''}
     </section>
   `;
   document.getElementById('debtDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
