@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #183';
+const APP_BUILD = '2026-09-08 · #185';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13174,6 +13174,7 @@ function openSupplierPaymentEditor(id, supplierId){
   app.innerHTML = `
     <section class="group">
       <h3>💵 ${existing?'Sửa':'Ghi Nhận'} Giao Dịch Với Mỏ — ${escapeHtml(sup?sup.name:'')}</h3>
+      ${existing ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:12px; font-weight:600;">⚠️ Đang SỬA đúng giao dịch có sẵn ngày ${formatDateVN(existing.date)} — đổi "Loại giao dịch" ở đây sẽ THAY THẾ giao dịch này, KHÔNG tạo thêm giao dịch mới. Nếu mỏ hoàn tiền cho 1 khoản đã trả trước đó, đừng sửa dòng này — bấm Huỷ rồi vào nút "+ Ghi Nhận Khoản Đã Bank Cho Mỏ" ở trang trước để thêm 1 giao dịch hoàn tiền RIÊNG, giữ nguyên giao dịch gốc.</div>` : ''}
       <div class="card">
         <div class="field">
           <label>Loại giao dịch</label>
@@ -14974,13 +14975,50 @@ function computeCompanyCashFlowLedger(){
   entries.sort((a,b)=> b.date===a.date ? 0 : (b.date>a.date?1:-1));
   return entries;
 }
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "lập bảng kê chia ô khoa học, sắp
+/// xếp rõ theo khu vực: cái nào bank vào công ty, cái nào khách trả, cái
+/// nào bank mỏ..."): tách 1 danh sách dài chung thành 4 bảng RIÊNG theo
+/// đúng 4 nhóm, mỗi bảng có dòng TỔNG riêng — dùng lại NGUYÊN
+/// computeCompanyCashFlowLedger() (không tính lại công thức nào), chỉ
+/// nhóm lại cách hiển thị.
 function renderCompanyCashFlowLedgerPage(){
   scrollMainToTop();
   const entries = computeCompanyCashFlowLedger();
   const totalFromCustomers = state.sitePayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const totalContributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const totalToSuppliers = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const totalToSuppliersNet = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const totalWithdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const groups = [
+    { title: '🏦 Ông Chủ Góp Vốn Vào Công Ty', rows: entries.filter(e=>e.category==='Góp vốn'), color: 'var(--profit)' },
+    { title: '⬇️ Ông Chủ Rút Vốn Ra Khỏi Công Ty', rows: entries.filter(e=>e.category==='Rút vốn'), color: 'var(--loss)' },
+    { title: '💰 Khách Hàng Trả Tiền', rows: entries.filter(e=>e.category==='Khách hàng trả'), color: 'var(--profit)' },
+    { title: '⛏️ Giao Dịch Với Mỏ (Trả Tiền / Mỏ Hoàn Lại)', rows: entries.filter(e=>e.category==='Trả nhà cung cấp (mỏ)' || e.category==='Mỏ hoàn tiền'), color: null },
+  ];
+  const groupTableHtml = g => {
+    const total = g.rows.reduce((s,e)=>s+(e.sign>0?1:-1)*e.amount, 0);
+    return `
+    <section class="group">
+      <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+        <span>${g.title}</span>
+        <span style="font-size:14px; font-weight:800; color:${g.color || (total>=0?'var(--profit)':'var(--loss)')};">${total>=0?'+':'−'}${fmtVND(Math.abs(total))}</span>
+      </h3>
+      ${g.rows.length===0 ? '<div class="hint">Chưa có giao dịch nào.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Nội Dung</th><th>Phương Thức</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${g.rows.map(e=>`<tr>
+              <td>${formatDateVN(e.date)}</td>
+              <td>${e.desc?escapeHtml(e.desc):'—'}${e.category==='Mỏ hoàn tiền'?' <span class="hint" style="margin:0;">(hoàn tiền)</span>':''}</td>
+              <td>${e.method==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</td>
+              <td class="num" style="font-weight:700; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</td>
+            </tr>`).join('')}
+            <tr class="grid-total-row"><td colspan="3" style="text-align:left;">TỔNG ${g.title.replace(/^[^\s]+\s/,'')}</td><td class="num">${total>=0?'+':'−'}${fmtVND(Math.abs(total))}</td></tr>
+          </tbody>
+        </table>
+      </div>`}
+    </section>`;
+  };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -14988,26 +15026,20 @@ function renderCompanyCashFlowLedgerPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📋 Sao Kê Toàn Bộ Dòng Tiền</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách trả + Tiền trả nhà cung cấp + Góp/Rút Vốn Chủ Sở Hữu — mỗi dòng ghi rõ 🏦 chuyển khoản ngân hàng hay 💵 tiền mặt — cập nhật real-time đúng dữ liệu Ông Chủ đã nhập trên app, sắp theo ngày gần nhất trước.</div>
-      <div class="card">
-        <div class="summary-row"><span>Khách hàng đã trả</span><span class="val" style="color:var(--profit);">+${fmtVND(totalFromCustomers)}</span></div>
-        <div class="summary-row"><span>Ông Chủ góp vốn</span><span class="val" style="color:var(--profit);">+${fmtVND(totalContributed)}</span></div>
-        <div class="summary-row"><span>Đã trả nhà cung cấp (mỏ)</span><span class="val" style="color:var(--loss);">−${fmtVND(totalToSuppliers)}</span></div>
-        <div class="summary-row"><span>Ông Chủ đã rút vốn</span><span class="val" style="color:var(--loss);">−${fmtVND(totalWithdrawn)}</span></div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách trả + Tiền trả nhà cung cấp + Góp/Rút Vốn Chủ Sở Hữu — chia thành 4 bảng riêng theo đúng khu vực bên dưới, mỗi bảng có dòng TỔNG. 🏦 = chuyển khoản ngân hàng, 💵 = tiền mặt.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tổng Quan 4 Khu Vực</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>💰 Khách hàng đã trả</td><td class="num" style="color:var(--profit);">+${fmtVND(totalFromCustomers)}</td></tr>
+            <tr><td>🏦 Ông Chủ góp vốn</td><td class="num" style="color:var(--profit);">+${fmtVND(totalContributed)}</td></tr>
+            <tr><td>⛏️ Đã trả nhà cung cấp (mỏ), đã trừ phần mỏ hoàn lại</td><td class="num" style="color:${totalToSuppliersNet>=0?'var(--loss)':'var(--profit)'};">${totalToSuppliersNet>=0?'−':'+'}${fmtVND(Math.abs(totalToSuppliersNet))}</td></tr>
+            <tr><td>⬇️ Ông Chủ đã rút vốn</td><td class="num" style="color:var(--loss);">−${fmtVND(totalWithdrawn)}</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
-    <section class="group">
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có giao dịch nào.</div>' : entries.map(e=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">${e.method==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</span></div>
-              ${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
-          </div>`).join('')}
-      </div>
-    </section>
+    ${groups.map(groupTableHtml).join('')}
   `;
   document.getElementById('ledgerBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
