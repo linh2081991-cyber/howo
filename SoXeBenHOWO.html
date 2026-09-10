@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #190';
+const APP_BUILD = '2026-09-08 · #191';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14484,6 +14484,12 @@ function openFixedCostsEditor(){
 /// giai đoạn (khác khoản vay có Lộ Trình Lãi Suất), nên nếu Ông Chủ từng
 /// đổi số này giữa chừng, các tháng cũ vẫn tính theo mức HIỆN TẠI — đây
 /// là số ước tính, không phải sổ sách kế toán khấu hao chính thức.
+/// SỬA 2026-09-08 (Ông Chủ báo lỗi — "tháng 9 chưa vận hành hết, chưa
+/// thể tính đủ 1 tháng khấu hao"): CHỈ tính khấu hao cho THÁNG ĐÃ HOÀN
+/// TẤT (đã qua hết ngày cuối tháng đó) — tháng đang chạy dở (tháng chứa
+/// "hôm nay") KHÔNG được tính vào luỹ kế, vì xe chưa thật sự dùng hết
+/// tháng đó. Tự động cộng thêm đúng 1 tháng ngay khi tháng đó kết thúc
+/// (đầu tháng sau, do luôn đọc lại "hôm nay" real-time mỗi lần tính).
 function computeDepreciationMonthlyHistory(){
   const monthlyRate = Number(state.settings.monthlyVehicleDepreciation)||0;
   const allShifts = allShiftsCompanyWide();
@@ -14492,7 +14498,8 @@ function computeDepreciationMonthlyHistory(){
   if(!startDate) return [];
   const today = todayLocalDateStr();
   if(startDate>today) return [];
-  const months = monthsBetween(startDate, today);
+  const currentMonthStr = today.slice(0,7); // "YYYY-MM" của tháng đang chạy dở, chưa hoàn tất
+  const months = monthsBetween(startDate, today).filter(ym => ym < currentMonthStr);
   let cumulative = 0;
   return months.map(ym=>{
     cumulative += monthlyRate;
@@ -14512,7 +14519,7 @@ function renderDepreciationDetailPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📊 Chi Tiết Thu Hồi Khấu Hao Xe</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Mức khấu hao hiện hành ${fmtVND(monthlyRate)}/tháng, áp lùi cho mọi tháng kể từ ngày bắt đầu dự án — nếu Ông Chủ từng đổi số này giữa chừng, các tháng cũ vẫn tính theo mức HIỆN TẠI (số ước tính, app không lưu lịch sử đổi mức).</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Mức khấu hao hiện hành ${fmtVND(monthlyRate)}/tháng, áp lùi cho mọi THÁNG ĐÃ HOÀN TẤT kể từ ngày bắt đầu dự án — tháng đang chạy dở (chưa qua hết ngày cuối tháng) CHƯA được tính, sẽ tự cộng thêm đúng lúc tháng đó kết thúc. Nếu Ông Chủ từng đổi số này giữa chừng, các tháng cũ vẫn tính theo mức HIỆN TẠI (số ước tính, app không lưu lịch sử đổi mức).</div>
       ${rows.length===0 ? '<div class="hint">Chưa có dữ liệu ca nào để tính — cần ít nhất 1 ca đã chạy hoặc đã khai Ngày Bắt Đầu Dự Án ở Thông Tin Dự Án.</div>' : `
       <div class="card" style="margin-bottom:12px; border:1.5px solid var(--accent);">
         <div class="summary-row total"><span>💰 Tổng khấu hao đã thu hồi (${rows.length} tháng)</span><span class="val">${fmtVND(totalSoFar)}</span></div>
@@ -14661,13 +14668,7 @@ function renderBusinessReportPage(from, to){
           </table>
         </div>
         <div style="font-weight:900; font-size:26px; color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.trueProfitAfterDepreciation/r.totalCapitalIn*100).toFixed(1) : '0'}% ${r.trueProfitAfterDepreciation>=0?'lãi':'lỗ'} THẬT trên vốn</div>
-        <div class="hint" style="margin-top:6px;">Trả lời đúng câu: "Bỏ ra ${fmtVND(r.totalCapitalIn)} vào dự án xe, tính cả việc xe cũ đi, tao lãi/lỗ THẬT bao nhiêu?" — khấu hao KHÔNG phải tiền mặt rời túi, nhưng LÀ giá trị tài sản mất đi thật, nên phải trừ mới ra đúng lãi kinh tế thật.</div>
-      </div>
-
-      <div class="card" style="margin-top:12px; background:var(--bg);">
-        <div style="font-weight:700; font-size:12.5px; color:var(--ink-soft);">Tham khảo — Dòng tiền ròng riêng trong kỳ đang lọc (${formatDateVN(r.from)} → ${formatDateVN(r.to)})</div>
-        <div style="font-weight:800; font-size:18px; color:${r.cashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:4px;">${r.cashFlow.total>=0?'+':''}${fmtVND(r.cashFlow.total)}</div>
-        <div class="hint" style="margin-top:6px;">⚠️ Số này KHÔNG phải lãi/lỗ thật của đúng kỳ này — khách hàng và nhà cung cấp (mọi đối tác, kể cả đối tác phát sinh sau này) thường thanh toán/giao hàng GỐI ĐẦU qua lại giữa các kỳ (hợp đồng chưa kết thúc): tiền khách trả kỳ này có thể là cho công nợ từ kỳ trước, tiền trả đối tác kỳ này có thể là ứng trước cho hàng chưa nhận. Vì vậy KHÔNG dùng số này để đánh giá lãi/lỗ của riêng kỳ — chỉ dùng để tham khảo dòng tiền ra/vào thực tế. Số đáng tin cậy duy nhất là "TOÀN BỘ QUÁ TRÌNH" ở trên, vì càng cộng dồn dài hạn thì độ lệch thời điểm gối đầu càng tự triệt tiêu.</div>
+        <div class="hint" style="margin-top:6px;">Trả lời đúng câu: "Bỏ ra ${fmtVND(r.totalCapitalIn)} vào dự án xe, tính cả việc xe cũ đi, Ông Chủ lãi/lỗ THẬT bao nhiêu?" — khấu hao KHÔNG phải tiền mặt rời túi, nhưng LÀ giá trị tài sản mất đi thật, nên phải trừ mới ra đúng lãi kinh tế thật.</div>
       </div>
     </section>
 
