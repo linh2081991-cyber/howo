@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #181';
+const APP_BUILD = '2026-09-08 · #182';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2276,7 +2276,10 @@ function renderEquityTimelineChartSVG(timeline){
   const minV = Math.min(0, ...values);
   const maxV = Math.max(0, ...values);
   const range = (maxV-minV) || 1;
-  const chartH = 190, padL=8, padR=8, padT=20, padB=26;
+  // SỬA 2026-09-08 (cùng lỗi Ông Chủ báo ở biểu đồ Chi Phí/Km — nhãn số bị
+  // chấm che ở đỉnh cao nhất): tăng padT, bỏ logic "trên/dưới tuỳ vị trí",
+  // LUÔN đặt nhãn phía trên chấm với đủ khoảng trống.
+  const chartH = 190, padL=8, padR=8, padT=30, padB=26;
   const innerH = chartH - padT - padB;
   const stepX = 56;
   const chartW = Math.max(300, padL+padR+stepX*(timeline.length-1));
@@ -2287,8 +2290,7 @@ function renderEquityTimelineChartSVG(timeline){
   const areaPoints = `${xFor(0)},${zeroY} ${points} ${xFor(timeline.length-1)},${zeroY}`;
   const dots = timeline.map((t,i)=>`<circle cx="${xFor(i)}" cy="${yFor(t.equity)}" r="3.5" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" stroke="var(--surface)" stroke-width="1.5"></circle>`).join('');
   const valueLabels = timeline.map((t,i)=>{
-    const above = yFor(t.equity) > padT+12;
-    return `<text x="${xFor(i)}" y="${above?yFor(t.equity)-8:yFor(t.equity)+14}" font-size="9" text-anchor="middle" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" font-weight="700">${fmtShortVND(t.equity)}</text>`;
+    return `<text x="${xFor(i)}" y="${yFor(t.equity)-9}" font-size="9" text-anchor="middle" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" font-weight="700">${fmtShortVND(t.equity)}</text>`;
   }).join('');
   const monthLabels = timeline.map((t,i)=>`<text x="${xFor(i)}" y="${chartH-8}" font-size="9.5" text-anchor="middle" fill="var(--ink-soft)">${monthShortLabel(t.month)}</text>`).join('');
   return `
@@ -3586,8 +3588,14 @@ function renderMonthlyInvoiceReconciliation(){
         <div style="font-weight:800; font-size:15.5px;">${monthLabel(m.yearMonth)}</div>
         <div style="font-weight:800; font-size:12.5px; padding:3px 10px; border-radius:20px; background:${m.fullyClosed?'var(--profit-soft)':'var(--loss-soft)'}; color:${m.fullyClosed?'var(--profit)':'var(--loss)'};">${m.fullyClosed?'✅ ĐÃ CHỐT ĐỦ 2 ĐẦU':'⏳ CÒN THIẾU CHỨNG TỪ'}</div>
       </div>
-      <div class="summary-row"><span>🧑‍💼 Bán — Đã xuất hoá đơn</span><span class="val" style="color:${m.sellDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.sellInvoicedTrips}/${m.sellTotalTrips} chuyến${m.sellDone?' ✓':''}</span></div>
-      <div class="summary-row"><span>🏔️ Mua — Đủ chứng từ (đã tick tay hoặc đã bù kho)</span><span class="val" style="color:${m.buyDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.buyDocumentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}/${m.buyTotalVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${m.buyDone?' ✓':''}</span></div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>🧑‍💼 Bán — Đã xuất hoá đơn</td><td class="num" style="color:${m.sellDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.sellInvoicedTrips}/${m.sellTotalTrips} chuyến${m.sellDone?' ✓':''}</td></tr>
+            <tr><td>🏔️ Mua — Đủ chứng từ (tick tay/bù kho)</td><td class="num" style="color:${m.buyDone?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.buyDocumentedVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})}/${m.buyTotalVolume.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối${m.buyDone?' ✓':''}</td></tr>
+          </tbody>
+        </table>
+      </div>
       ${!m.fullyClosed ? `<button class="btn btn-ghost btn-sm monthReconDetailBtn" data-ym="${m.yearMonth}" style="width:auto; padding:6px 12px; margin-top:8px;">📋 Xem Chi Tiết Còn Thiếu</button>` : ''}
     </div>`).join('');
   wrap.querySelectorAll('.monthReconDetailBtn').forEach(btn=>{
@@ -10986,7 +10994,13 @@ function renderInvoiceLotGapDiagnosisPage(from, to){
 function renderCostPerKmChartSVG(buckets){
   const validValues = buckets.filter(b=>b.totalKm>0).map(b=>b.costPerKm);
   const maxV = Math.max(1, ...validValues);
-  const chartH = 190, padL=8, padR=8, padT=20, padB=26;
+  // SỬA 2026-09-08 (Ông Chủ báo lỗi — nhãn số "31k/81k/75k" bị chấm tròn
+  // che mất ở đỉnh cao nhất): tăng padT (khoảng trống trên cùng) để LUÔN
+  // đủ chỗ đặt nhãn PHÍA TRÊN chấm, kể cả với điểm cao nhất của biểu đồ —
+  // bỏ hẳn logic "trên/dưới tuỳ vị trí" cũ (logic đó chính là nguyên nhân
+  // gây đè, vì điểm cao nhất luôn rơi vào nhánh "dưới" rồi lại chưa đủ
+  // khoảng trống phía trên viewBox để hiện đúng).
+  const chartH = 190, padL=8, padR=8, padT=30, padB=26;
   const innerH = chartH - padT - padB;
   const stepX = 56;
   const chartW = Math.max(300, padL+padR+stepX*(buckets.length-1));
@@ -11012,8 +11026,7 @@ function renderCostPerKmChartSVG(buckets){
   const dots = buckets.map((b,i)=> b.totalKm>0 ? `<circle cx="${xFor(i)}" cy="${yFor(b.costPerKm)}" r="3.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"></circle>` : '').join('');
   const valueLabels = buckets.map((b,i)=>{
     if(b.totalKm<=0) return '';
-    const above = yFor(b.costPerKm) > padT+12;
-    return `<text x="${xFor(i)}" y="${above?yFor(b.costPerKm)-8:yFor(b.costPerKm)+14}" font-size="9" text-anchor="middle" fill="var(--accent)" font-weight="700">${fmtShortVND(b.costPerKm)}</text>`;
+    return `<text x="${xFor(i)}" y="${yFor(b.costPerKm)-9}" font-size="9" text-anchor="middle" fill="var(--accent)" font-weight="700">${fmtShortVND(b.costPerKm)}</text>`;
   }).join('');
   const noDataMarks = buckets.map((b,i)=> b.totalKm<=0 ? `<text x="${xFor(i)}" y="${baseY+4}" font-size="12" text-anchor="middle" fill="var(--ink-soft)">—</text>` : '').join('');
   const monthLabels = buckets.map((b,i)=>`<text x="${xFor(i)}" y="${chartH-8}" font-size="9.5" text-anchor="middle" fill="var(--ink-soft)">${b.label}</text>`).join('');
@@ -12321,13 +12334,20 @@ function renderResults(){
         </div>`;
       })()}
 
-      <div class="card">
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu) = <strong>${fmtVND(breakEven.fixedCost)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường phát sinh/ca) = <strong>${fmtVND(breakEvenPureOperatingVariable)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Giá vốn hàng mua-bán thương mại trong kỳ (tiền mua vật liệu từ mỏ) = <strong>${fmtVND(breakEvenMaterialCost)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink-soft); margin-top:6px;">→ Tổng chi phí biến đổi thực tế = <strong>${fmtVND(breakEven.variableCost)}</strong></div>
-        <div class="formula-divider" style="margin:10px 0;"></div>
-        <div style="font-weight:800; font-size:15.5px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi) = ${fmtVND(breakEven.grossProfit)}</div>
+      <div class="grid-table-wrap" style="margin-bottom:10px;">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu)</td><td class="num">${fmtVND(breakEven.fixedCost)}</td></tr>
+            <tr><td>Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường phát sinh/ca)</td><td class="num">${fmtVND(breakEvenPureOperatingVariable)}</td></tr>
+            <tr><td>Giá vốn hàng mua-bán thương mại trong kỳ (tiền mua vật liệu từ mỏ)</td><td class="num">${fmtVND(breakEvenMaterialCost)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">→ Tổng chi phí biến đổi thực tế</td><td class="num">${fmtVND(breakEven.variableCost)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="text-align:center; border:1.5px solid ${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'};">
+        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi)</div>
+        <div style="font-weight:800; font-size:22px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}; margin-top:4px;">${fmtVND(breakEven.grossProfit)}</div>
       </div>
 
       <div class="card" style="margin-top:10px;">
@@ -12364,10 +12384,20 @@ function renderResults(){
         <button data-val="30" class="${monthlyProjection.marginWindowDays===30?'active':''}">Bình quân 30 ngày gần nhất</button>
       </div>
 
-      <div class="card" style="margin-top:10px;">
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink);">Tổng chi phí cố định cả tháng (lương cứng ${fmtVND(monthlyProjection.monthlySalary)} + tiền nhà ${fmtVND(monthlyProjection.monthlyHousing)} + tiền ăn ${fmtVND(monthlyProjection.monthlyFood)} + luật đường tháng này ${fmtVND(monthlyProjection.monthlyRoadFee)} + khấu hao/vay/bảo hiểm/đăng kiểm ${fmtVND(monthlyProjection.otherFixedMonthly)}) = <strong>${fmtVND(monthlyProjection.fixedCost)}</strong></div>
-        <div class="hint" style="line-height:1.7; font-size:13.5px; color:var(--ink); margin-top:6px;">Lấy từ số THÁNG gốc trong hồ sơ tài xế đang hoạt động — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
+      <div class="grid-table-wrap" style="margin-top:10px;">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Mục Cố Định Cả Tháng</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Lương cứng</td><td class="num">${fmtVND(monthlyProjection.monthlySalary)}</td></tr>
+            <tr><td>Tiền nhà</td><td class="num">${fmtVND(monthlyProjection.monthlyHousing)}</td></tr>
+            <tr><td>Tiền ăn</td><td class="num">${fmtVND(monthlyProjection.monthlyFood)}</td></tr>
+            <tr><td>Luật đường tháng này</td><td class="num">${fmtVND(monthlyProjection.monthlyRoadFee)}</td></tr>
+            <tr><td>Khấu hao/vay/bảo hiểm/đăng kiểm</td><td class="num">${fmtVND(monthlyProjection.otherFixedMonthly)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Tổng chi phí cố định cả tháng</td><td class="num">${fmtVND(monthlyProjection.fixedCost)}</td></tr>
+          </tbody>
+        </table>
       </div>
+      <div class="hint" style="margin-top:6px;">Lấy từ số THÁNG gốc trong hồ sơ tài xế đang hoạt động — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
 
       <div class="card" style="margin-top:10px;">
         ${monthlyProjection.breakEvenTrips===null ? `<div class="hint">${escapeHtml(monthlyProjection.note)}</div>` : `
@@ -15345,13 +15375,17 @@ function renderSettings(){
     <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
-      <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:800;">📄➕ Thêm Giấy Tờ Mới</button>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:800;">📄➕ Thêm Giấy Tờ Mới</button>
+      </div>
       <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:800;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:800;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
+      </div>
       <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
