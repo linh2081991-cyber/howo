@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #186';
+const APP_BUILD = '2026-09-08 · #187';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14535,6 +14535,205 @@ function renderDepreciationDetailPage(){
   document.getElementById('depDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
 }
 
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "1 mục báo cáo kinh doanh, đủ dữ
+/// liệu để hiểu toàn bộ dự án, tra soát từng giai đoạn, hiểu tình hình
+/// kinh doanh, cần lưu tâm gì, chiến lược tiếp theo"): gộp lại TOÀN BỘ
+/// các hàm tính đã có sẵn, ĐÃ ĐƯỢC KIỂM CHỨNG qua nhiều đợt audit trước
+/// (không tính lại công thức nào mới) thành 1 báo cáo tổng hợp DUY NHẤT,
+/// lọc được theo bất kỳ khoảng ngày nào. Phần "Cần Lưu Tâm"/"Gợi Ý" là
+/// NHẬN ĐỊNH DỰA TRÊN NGƯỠNG SỐ HỌC đơn giản (if/else), KHÔNG dùng AI —
+/// đúng nguyên tắc "mọi phép tính đều JS xác định" đã áp dụng xuyên suốt
+/// app.
+function computeBusinessReport(from, to){
+  const allShifts = allShiftsCompanyWide();
+  const inRange = allShifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const cashFlow = computeCumulativeCashFlowBreakdown(to, from);
+  const breakEven = computeBreakEvenDetailed(inRange, cashFlow.roadFee, cashFlow.repairTotal,
+    cashFlow.fixedMonthly, cashFlow.houseRent, cashFlow.utilities);
+  const commercialPaymentsInRange = state.sitePayments.filter(p=>p.customerId && p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const cargoPaymentsInRange = state.sitePayments.filter(p=>!p.customerId && p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const equity = computeOwnerEquity();
+  const charterStatus = computeCharterCapitalStatus();
+  const debtSummary = computeAllPartnersDebtSummary();
+  const bankRecon = computeBankBalanceReconciliation();
+  const warnings = computeAllWarnings();
+  const daysInRange = Math.max(1, Math.round((new Date(to)-new Date(from))/86400000)+1);
+  const avgTripsPerDay = breakEven.totalTrips / daysInRange;
+
+  // ---- Nhận định / Gợi ý (ngưỡng số học đơn giản, không AI) ----
+  const notes = [];
+  if(cashFlow.total>=0) notes.push({ ok:true, text:`✅ Dòng tiền THẬT trong kỳ đang DƯƠNG ${fmtVND(cashFlow.total)} — tiền mặt/ngân hàng công ty đang tăng ròng trong giai đoạn này.` });
+  else notes.push({ ok:false, text:`⚠️ Dòng tiền THẬT trong kỳ đang ÂM ${fmtVND(Math.abs(cashFlow.total))} — tiền ra nhiều hơn tiền vào giai đoạn này, cần xem lại chi phí hoặc tăng sản lượng/thu hồi công nợ.` });
+
+  if(breakEven.breakEvenTrips!==null){
+    if(breakEven.actualTrips>=breakEven.breakEvenTrips) notes.push({ ok:true, text:`✅ Đã vượt điểm hoà vốn kỳ này: chạy ${breakEven.actualTrips}/${breakEven.breakEvenTrips} chuyến cần để hoà vốn (dư ${breakEven.actualTrips-breakEven.breakEvenTrips} chuyến).` });
+    else notes.push({ ok:false, text:`⚠️ Chưa đạt điểm hoà vốn kỳ này: mới ${breakEven.actualTrips}/${breakEven.breakEvenTrips} chuyến cần — còn thiếu ${breakEven.breakEvenTrips-breakEven.actualTrips} chuyến để hết lỗ chi phí cố định.` });
+  } else if(breakEven.note) notes.push({ ok:false, text:`⚠️ ${breakEven.note}` });
+
+  if(equity.equity>=equity.initialInvestment) notes.push({ ok:true, text:`✅ Vốn Chủ Sở Hữu hiện tại (${fmtVND(equity.equity)}) đang CAO HƠN vốn đầu tư ban đầu (${fmtVND(equity.initialInvestment)}) — dự án đang tích luỹ lời so với lúc bỏ vốn.` });
+  else notes.push({ ok:false, text:`⚠️ Vốn Chủ Sở Hữu hiện tại (${fmtVND(equity.equity)}) đang THẤP HƠN vốn đầu tư ban đầu (${fmtVND(equity.initialInvestment)}) — xe đang "ăn" ngược vào vốn gốc, cần theo dõi sát.` });
+
+  const custRevShareOfDebt = commercialPaymentsInRange+cargoPaymentsInRange>0 ? debtSummary.totalCustomerOwed/(commercialPaymentsInRange+cargoPaymentsInRange) : 0;
+  if(debtSummary.totalCustomerOwed>0.5){
+    if(custRevShareOfDebt>0.5) notes.push({ ok:false, text:`⚠️ Khách hàng đang nợ ${fmtVND(debtSummary.totalCustomerOwed)} — cao so với doanh thu thu về trong kỳ, nên đôn đốc thu hồi sớm để không thiếu tiền mặt vận hành.` });
+    else notes.push({ ok:null, text:`ℹ️ Khách hàng đang nợ ${fmtVND(debtSummary.totalCustomerOwed)} — trong ngưỡng bình thường so với doanh thu kỳ.` });
+  }
+  if(debtSummary.totalSupplierOwed>0.5) notes.push({ ok:null, text:`ℹ️ Đang còn nợ nhà cung cấp ${fmtVND(debtSummary.totalSupplierOwed)} — cần chuẩn bị dòng tiền để thanh toán đúng hạn, tránh gián đoạn nguồn hàng.` });
+
+  if(!charterStatus.isPastDeadline && charterStatus.remaining>0 && charterStatus.daysUntilDeadline!==null && charterStatus.daysUntilDeadline<=30)
+    notes.push({ ok:false, text:`⚠️ Còn thiếu ${fmtVND(charterStatus.remaining)} vốn điều lệ, hạn góp đủ chỉ còn ${charterStatus.daysUntilDeadline} ngày — cần góp bù sớm.` });
+  if(charterStatus.isPastDeadline) notes.push({ ok:false, text:`⚠️ ĐÃ QUÁ HẠN góp đủ vốn điều lệ — rủi ro pháp lý, cần xử lý ngay hoặc liên hệ kế toán/tư vấn pháp lý.` });
+
+  if(!bankRecon) notes.push({ ok:null, text:`ℹ️ Chưa khai báo mốc chốt Khớp Số Dư Ngân Hàng lần nào — nên khai 1 lần theo đúng sao kê thật để bắt đầu đối chiếu.` });
+
+  if(warnings.total>0) notes.push({ ok:false, text:`⚠️ Đang có ${warnings.total} cảnh báo cần xử lý (giấy tờ sắp hết hạn/bảo dưỡng đến hạn/khoản vay đến hạn/hoá đơn thiếu/thiếu ngày lấy hàng) — xem chi tiết ở khối "Cần Lưu Tâm" bên dưới.` });
+  else notes.push({ ok:true, text:`✅ Không có cảnh báo vận hành nào đang treo (giấy tờ/bảo dưỡng/khoản vay/hoá đơn đều ổn).` });
+
+  return { from, to, daysInRange, inRange, cashFlow, breakEven, commercialPaymentsInRange, cargoPaymentsInRange,
+    avgTripsPerDay, equity, charterStatus, debtSummary, bankRecon, warnings, notes };
+}
+
+function renderBusinessReportPage(from, to){
+  scrollMainToTop();
+  const r = computeBusinessReport(from, to);
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="bizReportBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp toàn bộ dữ liệu Dòng Tiền, Kết Quả, Vốn, Công Nợ, Cảnh Báo đã có sẵn trong app thành 1 báo cáo — chọn giai đoạn bất kỳ để tra soát.</div>
+      <div class="seg" id="bizReportPreset">
+        <button data-val="month">Tháng này</button>
+        <button data-val="all">Từ đầu dự án</button>
+        <button data-val="custom">Tuỳ chỉnh</button>
+      </div>
+      <div class="two-col" style="margin-top:10px;">
+        <div class="field"><label>Từ ngày</label><input type="date" id="bizFrom" value="${from}"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="bizTo" value="${to}"></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="bizApplyBtn">Xem Báo Cáo Giai Đoạn Này</button>
+    </section>
+
+    <section class="group">
+      <h3>🚚 I. Tổng Quan Hoạt Động (${formatDateVN(r.from)} → ${formatDateVN(r.to)}, ${r.daysInRange} ngày)</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Chỉ Số</th><th class="num">Giá Trị</th></tr></thead>
+          <tbody>
+            <tr><td>Số chuyến đã chạy</td><td class="num">${r.breakEven.totalTrips} chuyến</td></tr>
+            <tr><td>Bình quân chuyến/ngày</td><td class="num">${r.avgTripsPerDay.toFixed(1)} chuyến/ngày</td></tr>
+            <tr><td>Doanh thu thương mại</td><td class="num">${fmtVND(r.commercialPaymentsInRange)}</td></tr>
+            <tr><td>Doanh thu chạy cước</td><td class="num">${fmtVND(r.cargoPaymentsInRange)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng doanh thu kế toán trong kỳ</td><td class="num">${fmtVND(r.breakEven.totalRevenue)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>⚖️ II. Điểm Hoà Vốn Trong Kỳ</h3>
+      ${r.breakEven.note ? `<div class="hint">${escapeHtml(r.breakEven.note)}</div>` : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Tổng chi phí cố định trong kỳ</td><td class="num">${fmtVND(r.breakEven.fixedCost)}</td></tr>
+            <tr><td>Tổng chi phí biến đổi trong kỳ</td><td class="num">${fmtVND(r.breakEven.variableCost)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">LỢI NHUẬN GỘP (Doanh thu − Biến đổi)</td><td class="num" style="color:${r.breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(r.breakEven.grossProfit)}</td></tr>
+            <tr><td>Số chuyến tối thiểu để hoà vốn</td><td class="num">${r.breakEven.breakEvenTrips} chuyến</td></tr>
+            <tr><td>Thực tế đã chạy</td><td class="num" style="color:${r.breakEven.actualTrips>=r.breakEven.breakEvenTrips?'var(--profit)':'var(--loss)'}; font-weight:700;">${r.breakEven.actualTrips} chuyến</td></tr>
+          </tbody>
+        </table>
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>📒 III. Dòng Tiền Thật Trong Kỳ</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>+ Tiền khách chuyển vào</td><td class="num" style="color:var(--profit);">+${fmtVND(r.cashFlow.cashIn)}</td></tr>
+            <tr><td>− Tiền chuyển cho mỏ</td><td class="num">−${fmtVND(r.cashFlow.cashOutToSuppliers)}</td></tr>
+            <tr><td>− Chi phí vận hành (dầu/lương/ăn/phát sinh)</td><td class="num">−${fmtVND(r.cashFlow.operatingCashCost)}</td></tr>
+            <tr><td>− Sửa chữa</td><td class="num">−${fmtVND(r.cashFlow.repairTotal)}</td></tr>
+            <tr><td>− Luật đường + Nhà/điện + Cầu đường</td><td class="num">−${fmtVND(r.cashFlow.roadFee+r.cashFlow.houseRent+r.cashFlow.utilities+r.cashFlow.tollFee)}</td></tr>
+            <tr><td>− Cố định (khấu hao/vay/bảo hiểm/đăng kiểm)</td><td class="num">−${fmtVND(r.cashFlow.fixedMonthly)}</td></tr>
+            <tr><td>− Mua Lô Hoá Đơn Bù</td><td class="num">−${fmtVND(r.cashFlow.invoiceLotCashOut)}</td></tr>
+            <tr><td>− Tạm ứng lương tài xế</td><td class="num">−${fmtVND(r.cashFlow.advanceCashOut)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= DÒNG TIỀN THẬT RÒNG TRONG KỲ</td><td class="num" style="color:${r.cashFlow.total>=0?'var(--profit)':'var(--loss)'}">${r.cashFlow.total>=0?'+':''}${fmtVND(r.cashFlow.total)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🏦 IV. Vốn & Vốn Điều Lệ (Tính Đến Hôm Nay)</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Vốn Chủ Sở Hữu hiện tại</td><td class="num" style="font-weight:800; color:${r.equity.equity>=0?'var(--profit)':'var(--loss)'}">${fmtVND(r.equity.equity)}</td></tr>
+            <tr><td>Vốn điều lệ đã đăng ký</td><td class="num">${fmtVND(r.charterStatus.registered)}</td></tr>
+            <tr><td>Vốn điều lệ đã góp</td><td class="num">${fmtVND(r.charterStatus.contributed)}</td></tr>
+            <tr><td>Còn thiếu vốn điều lệ</td><td class="num" style="color:${r.charterStatus.remaining>0?'var(--loss)':'var(--profit)'};">${r.charterStatus.remaining>0?fmtVND(r.charterStatus.remaining):'Đã góp đủ ✅'}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🤝 V. Công Nợ Hiện Tại</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Đối Tượng</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Khách hàng còn nợ / (Ông Chủ nợ khách nếu âm)</td><td class="num" style="color:${r.debtSummary.totalCustomerOwed>=0?'var(--profit)':'var(--loss)'};">${fmtVND(r.debtSummary.totalCustomerOwed)}</td></tr>
+            <tr><td>Ông Chủ còn nợ nhà cung cấp / (họ nợ lại nếu âm)</td><td class="num" style="color:${r.debtSummary.totalSupplierOwed<=0?'var(--profit)':'var(--loss)'};">${fmtVND(r.debtSummary.totalSupplierOwed)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ${r.bankRecon ? `
+      <div class="hint" style="margin-top:8px;">🏦 Khớp Số Dư Ngân Hàng — mốc chốt ${formatDateVN(r.bankRecon.checkpoint.date)}: ${fmtVND(r.bankRecon.checkpoint.balance)} → Số dư app tính hôm nay: <strong>${fmtVND(r.bankRecon.computedBalance)}</strong>.</div>
+      ` : `<div class="hint" style="margin-top:8px;">Chưa khai báo mốc chốt Khớp Số Dư Ngân Hàng nào.</div>`}
+    </section>
+
+    <section class="group">
+      <h3>🔎 VI. Cần Lưu Tâm / Nhận Định</h3>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${r.notes.map(n=>`<div style="padding:12px 14px; border-bottom:1px solid var(--border); color:${n.ok===true?'var(--profit)':n.ok===false?'var(--loss)':'var(--ink)'};">${escapeHtml(n.text)}</div>`).join('')}
+      </div>
+      ${r.warnings.total>0 ? `
+      <div class="hint" style="margin-top:8px;">Chi tiết ${r.warnings.total} cảnh báo: ${r.warnings.docs.length} giấy tờ, ${r.warnings.maint.length} bảo dưỡng, ${r.warnings.loans.length} khoản vay đến hạn, ${r.warnings.invoices.length} hoá đơn, ${r.warnings.missingPickupDates.length} thiếu ngày lấy hàng — xem chi tiết ngay ở tab "Ca Làm Việc".</div>
+      ` : ''}
+    </section>
+  `;
+  document.getElementById('bizReportBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('bizApplyBtn').addEventListener('click', ()=>{
+    const f = document.getElementById('bizFrom').value;
+    const t = document.getElementById('bizTo').value;
+    if(!f || !t){ showToast('Chọn đủ Từ ngày và Đến ngày.'); return; }
+    if(f>t){ showToast('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
+    saveMainScroll();
+    renderBusinessReportPage(f, t);
+    restoreMainScroll();
+  });
+  document.querySelectorAll('#bizReportPreset button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); saveMainScroll(); renderBusinessReportPage(mr.from, mr.to); restoreMainScroll(); }
+      else if(btn.dataset.val==='all'){
+        const allShifts = allShiftsCompanyWide();
+        const earliest = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : todayLocalDateStr();
+        const start = state.equityProjectInfo.startDate || earliest;
+        saveMainScroll(); renderBusinessReportPage(start, todayLocalDateStr()); restoreMainScroll();
+      }
+      // 'custom' chỉ cần focus vào 2 ô ngày có sẵn, không cần xử lý gì thêm
+    });
+  });
+}
+
 function renderCompanyDashboardPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
@@ -14591,6 +14790,8 @@ function renderCompanyDashboardPage(){
     <section class="group">
       <h2 style="margin-bottom:2px;">🏢 LINH CHÍ THÀNH</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Dự Án Đầu Tư Xe — Toàn Công Ty, không tách riêng theo xe</div>
+
+      <button class="btn btn-accent btn-block" id="openBizReportBtn" style="font-size:15.5px; padding:14px; margin-bottom:14px;">📊➕ Báo Cáo Kinh Doanh Tổng Hợp</button>
 
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
@@ -14939,6 +15140,12 @@ function renderCompanyDashboardPage(){
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
   renderLoanList();
+  document.getElementById('openBizReportBtn').addEventListener('click', ()=>{
+    const mr = currentMonthRange();
+    saveMainScroll();
+    renderBusinessReportPage(mr.from, mr.to);
+    restoreMainScroll();
+  });
   document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
   document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
   document.getElementById('depreciationDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
