@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #188';
+const APP_BUILD = '2026-09-08 · #189';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14569,8 +14569,8 @@ function computeBusinessReport(from, to){
 
   // ---- Nhận định / Gợi ý (ngưỡng số học đơn giản, không AI) ----
   const notes = [];
-  if(cashFlow.total>=0) notes.push({ ok:true, text:`✅ Dòng tiền THẬT trong kỳ đang DƯƠNG ${fmtVND(cashFlow.total)} — tiền mặt/ngân hàng công ty đang tăng ròng trong giai đoạn này.` });
-  else notes.push({ ok:false, text:`⚠️ Dòng tiền THẬT trong kỳ đang ÂM ${fmtVND(Math.abs(cashFlow.total))} — tiền ra nhiều hơn tiền vào giai đoạn này, cần xem lại chi phí hoặc tăng sản lượng/thu hồi công nợ.` });
+  if(allTimeCashFlow.total>=0) notes.push({ ok:true, text:`✅ Cộng dồn CẢ QUÁ TRÌNH đang LÃI THẬT ${fmtVND(allTimeCashFlow.total)} so với tổng vốn đã bỏ vào — đây là số đáng tin cậy nhất, không bị lệch bởi gối đầu thanh toán.` });
+  else notes.push({ ok:false, text:`⚠️ Cộng dồn CẢ QUÁ TRÌNH đang LỖ THẬT ${fmtVND(Math.abs(allTimeCashFlow.total))} so với tổng vốn đã bỏ vào — cần xem lại chi phí hoặc tăng sản lượng dài hạn.` });
 
   if(breakEven.breakEvenTrips!==null){
     if(breakEven.actualTrips>=breakEven.breakEvenTrips) notes.push({ ok:true, text:`✅ Đã vượt điểm hoà vốn kỳ này: chạy ${breakEven.actualTrips}/${breakEven.breakEvenTrips} chuyến cần để hoà vốn (dư ${breakEven.actualTrips-breakEven.breakEvenTrips} chuyến).` });
@@ -14623,12 +14623,9 @@ function renderBusinessReportPage(from, to){
     </section>
 
     <section class="group">
-      <h3>💰 TỔNG KẾT — Tiền Thật Kiếm Được</h3>
-      <div class="card" style="text-align:center; border:1.5px solid ${r.cashFlow.total>=0?'var(--profit)':'var(--loss)'};">
-        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">Tiền thật kiếm được TRONG KỲ NÀY (${formatDateVN(r.from)} → ${formatDateVN(r.to)})</div>
-        <div style="font-weight:900; font-size:26px; color:${r.cashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:4px;">${r.cashFlow.total>=0?'+':''}${fmtVND(r.cashFlow.total)}</div>
-      </div>
-      <div class="card" style="text-align:center; margin-top:10px; border:1.5px solid ${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'};">
+      <h3>💰 TỔNG KẾT — Lãi/Lỗ Thật Cả Quá Trình</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Số DUY NHẤT đáng tin cậy để biết "bỏ ra hơn 2 tỷ thì lãi/lỗ bao nhiêu" — cộng dồn từ ngày đầu dự án tới hôm nay, không phụ thuộc kỳ đang lọc phía trên.</div>
+      <div class="card" style="text-align:center; border:2px solid ${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">TOÀN BỘ QUÁ TRÌNH — từ ${r.allTimeCashFlow.from?formatDateVN(r.allTimeCashFlow.from):'(chưa có dữ liệu)'} tới hôm nay</div>
         <div class="grid-table-wrap" style="margin-top:10px; text-align:left;">
           <table class="grid-table">
@@ -14638,8 +14635,14 @@ function renderBusinessReportPage(from, to){
             </tbody>
           </table>
         </div>
-        <div style="font-weight:900; font-size:22px; color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.allTimeCashFlow.total/r.totalCapitalIn*100).toFixed(1) : '0'}% ${r.allTimeCashFlow.total>=0?'lãi':'lỗ'} trên vốn đã bỏ ra</div>
+        <div style="font-weight:900; font-size:26px; color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.allTimeCashFlow.total/r.totalCapitalIn*100).toFixed(1) : '0'}% ${r.allTimeCashFlow.total>=0?'lãi':'lỗ'} trên vốn đã bỏ ra</div>
         <div class="hint" style="margin-top:6px;">Bỏ ra ${fmtVND(r.totalCapitalIn)} → hiện ${r.allTimeCashFlow.total>=0?'đã thu lại thêm':'đang thiếu hụt'} ${fmtVND(Math.abs(r.allTimeCashFlow.total))} tiền mặt thật (chưa tính giá trị xe còn lại).</div>
+      </div>
+
+      <div class="card" style="margin-top:12px; background:var(--bg);">
+        <div style="font-weight:700; font-size:12.5px; color:var(--ink-soft);">Tham khảo — Dòng tiền ròng riêng trong kỳ đang lọc (${formatDateVN(r.from)} → ${formatDateVN(r.to)})</div>
+        <div style="font-weight:800; font-size:18px; color:${r.cashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:4px;">${r.cashFlow.total>=0?'+':''}${fmtVND(r.cashFlow.total)}</div>
+        <div class="hint" style="margin-top:6px;">⚠️ Số này KHÔNG phải lãi/lỗ thật của đúng kỳ này — khách hàng và nhà cung cấp (mọi đối tác, kể cả đối tác phát sinh sau này) thường thanh toán/giao hàng GỐI ĐẦU qua lại giữa các kỳ (hợp đồng chưa kết thúc): tiền khách trả kỳ này có thể là cho công nợ từ kỳ trước, tiền trả đối tác kỳ này có thể là ứng trước cho hàng chưa nhận. Vì vậy KHÔNG dùng số này để đánh giá lãi/lỗ của riêng kỳ — chỉ dùng để tham khảo dòng tiền ra/vào thực tế. Số đáng tin cậy duy nhất là "TOÀN BỘ QUÁ TRÌNH" ở trên, vì càng cộng dồn dài hạn thì độ lệch thời điểm gối đầu càng tự triệt tiêu.</div>
       </div>
     </section>
 
@@ -14678,6 +14681,7 @@ function renderBusinessReportPage(from, to){
 
     <section class="group">
       <h3>📒 III. Dòng Tiền Thật Trong Kỳ</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Chi tiết từng khoản của số "Tham khảo" ở trên — xem khối "TOÀN BỘ QUÁ TRÌNH" phía trên để đánh giá lãi/lỗ thật, không dùng riêng bảng này.</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
