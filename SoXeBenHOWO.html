@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #194';
+const APP_BUILD = '2026-09-08 · #195';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -993,14 +993,25 @@ function saveMainScroll(){
 /// 1 setTimeout dự phòng — nếu lớp nào đó chưa đủ trễ, lớp sau vẫn áp
 /// dụng lại đúng giá trị đã lưu, đảm bảo chắc chắn khôi phục đúng vị trí
 /// dù thiết bị/trình duyệt có độ trễ vẽ khác nhau.
+/// SỬA 2026-09-08 (Ông Chủ báo — "quay lại từ 1 trang chi tiết bị giật 1
+/// lần"): 3 lớp an toàn cũ (2x rAF + 2 setTimeout) tuy ĐẢM BẢO cuối cùng
+/// luôn về ĐÚNG vị trí, nhưng người dùng vẫn NHÌN THẤY quá trình nhảy từ
+/// đầu trang (0) tới vị trí đã lưu — đúng là 1 cú "giật" dù kết quả cuối
+/// đúng. Sửa triệt để: ẨN hẳn nội dung (#app, cũng chính là <main>) trong
+/// suốt lúc đang canh lại vị trí, CHỈ hiện lại sau khi lớp CUỐI CÙNG (chắc
+/// chắn nhất) đã áp dụng xong — mắt người không còn thấy bước nhảy nào,
+/// chỉ thấy trang "xuất hiện" thẳng đúng ngay vị trí cũ.
 function restoreMainScroll(){
+  const appEl = document.getElementById('app');
+  if(appEl) appEl.style.visibility = 'hidden';
   const apply = () => {
     const el = getActualScrollEl();
     if(el) el.scrollTop = savedMainScrollTop;
   };
+  const reveal = () => { if(appEl) appEl.style.visibility = ''; };
   requestAnimationFrame(()=>requestAnimationFrame(apply));
   setTimeout(apply, 60);
-  setTimeout(apply, 200);
+  setTimeout(()=>{ apply(); reveal(); }, 200);
 }
 // SỬA 2026-08-27 (Ông Chủ báo — bấm "Xem Chi Tiết Vận Hành" từ vị trí
 // cuộn sâu trong trang tài xế, màn mới lại hiện đúng ngay khúc cuối thay
@@ -15697,78 +15708,104 @@ function renderDebtDetailPage(filterType){
 /// con số "Lợi Nhuận Luỹ Kế" ở Tổng Kết Dòng Tiền, theo từng nhóm (tiền
 /// khách/tiền mỏ/từng ca vận hành/từng khoản sửa chữa) — minh bạch tuyệt
 /// đối, không phải 1 số gộp không rõ nguồn gốc.
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "tất cả các mục áp dụng: Tên +Số
+/// tiền, cho nút kính lúp, click vào hiện bảng kẻ ô chi tiết minh bạch"):
+/// mỗi nhóm (khách/mỏ/xe/hạng mục sửa chữa/nguồn hoá đơn bù/tài xế) giờ
+/// CHỈ hiện 1 dòng tóm tắt + nút 🔍 — bấm mới mở đúng danh sách giao dịch
+/// của riêng nhóm đó. Dữ liệu nhóm tính TƯƠI MỖI LẦN thông qua
+/// computeCashFlowGroupRows() (không cache), đúng yêu cầu "luôn cập nhật
+/// real-time".
+function computeCashFlowGroupRows(category){
+  const breakdown = computeCumulativeCashFlowBreakdown();
+  const from = breakdown.from, to = breakdown.to;
+  if(!from) return [];
+  switch(category){
+    case 'customer':
+      return state.sitePayments.filter(p=>p.date>=from&&p.date<=to).map(p=>{
+        const cus = p.customerId ? customerById(p.customerId) : null;
+        return { date:p.date, amount:Number(p.amount)||0, key: cus?`🏪 ${cus.name}`:`🚚 ${p.partnerName||p.siteName||'(Chưa đặt tên công trình)'}` };
+      });
+    case 'supplier':
+      return state.supplierPayments.filter(p=>p.date>=from&&p.date<=to).map(p=>{
+        const sup = state.suppliers.find(s=>s.id===p.supplierId);
+        return { date:p.date, amount:Number(p.amount)||0, key: sup?sup.name:'(Nhà cung cấp đã xoá)' };
+      });
+    case 'operating':
+      return allShiftsCompanyWide().filter(sh=>sh.date>=from&&sh.date<=to).map(sh=>{
+        const cost = shiftOperatingCashCostReal(sanitizeShiftForRevenue(sh));
+        const vName = sh._vehicleId ? vehicleNameById(sh._vehicleId) : 'Xe chính';
+        return { date:sh.date, amount:cost, key: `🚛 ${vName}` };
+      });
+    case 'repair':
+      return repairsInRangeCompanyWide(from,to).map(r=>({ date:r.date, amount:Number(r.amount)||0, key: r.item||'(Không rõ hạng mục)' }));
+    case 'invoiceLot':
+      return state.invoiceLots.filter(l=>l.purchaseDate>=from&&l.purchaseDate<=to).map(l=>({ date:l.purchaseDate, amount: Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)), key: `${l.sourceName||'(Không rõ nguồn)'}${l.goodsType?' — '+l.goodsType:''}` }));
+    case 'advance':
+      return allShiftsCompanyWide().filter(sh=>sh.date>=from&&sh.date<=to && (Number(sh.advanceAmount)||0)>0).map(sh=>{
+        const driver = driverById(sh.driverId);
+        return { date:sh.date, amount:Number(sh.advanceAmount)||0, key: driver?driver.name:(sh.driverNameSnapshot||'(Không rõ tài xế)') };
+      });
+    default: return [];
+  }
+}
+const CASH_FLOW_GROUP_LABELS = { customer:'💵 Tiền Khách Chuyển Vào', supplier:'⛰️ Tiền Chuyển Cho Mỏ', operating:'⛽ Chi Phí Vận Hành', repair:'🔧 Sửa Chữa', invoiceLot:'📦 Mua Lô Hoá Đơn Bù', advance:'💵 Tạm Ứng Lương Tài Xế' };
+const CASH_FLOW_GROUP_SIGN = { customer:1, supplier:-1, operating:-1, repair:-1, invoiceLot:-1, advance:-1 };
+function groupedCashFlowSummaryHtml(category){
+  const rows = computeCashFlowGroupRows(category);
+  const sign = CASH_FLOW_GROUP_SIGN[category];
+  const groups = {};
+  rows.forEach(r=>{ if(!groups[r.key]) groups[r.key]=[]; groups[r.key].push(r); });
+  const keys = Object.keys(groups).sort((a,b)=>groups[b].reduce((s,r)=>s+r.amount,0)-groups[a].reduce((s,r)=>s+r.amount,0));
+  if(keys.length===0) return '<div class="hint" style="padding:14px;">Không có khoản nào trong khoảng này.</div>';
+  return `
+  <div class="grid-table-wrap">
+    <table class="grid-table">
+      <tbody>
+        ${keys.map(k=>{
+          const total = groups[k].reduce((s,r)=>s+r.amount,0);
+          return `<tr>
+            <td><strong>${escapeHtml(k)}</strong></td>
+            <td class="num" style="color:${sign>0?'var(--profit)':'var(--loss)'}; font-weight:800;">${sign>0?'+':'−'}${fmtVND(total)}</td>
+            <td><button class="btn btn-ghost btn-sm cashFlowGroupDetailBtn" data-category="${category}" data-key="${escapeHtml(k)}" style="width:auto; padding:5px 10px;">🔍</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+function openCashFlowGroupDetail(category, key){
+  scrollMainToTop();
+  const sign = CASH_FLOW_GROUP_SIGN[category];
+  const rows = computeCashFlowGroupRows(category).filter(r=>r.key===key).sort((a,b)=>b.date.localeCompare(a.date));
+  const total = rows.reduce((s,r)=>s+r.amount,0);
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="cfGroupDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">${CASH_FLOW_GROUP_LABELS[category]||''}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${escapeHtml(key)} — ${rows.length} khoản, mới nhất lên đầu.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${rows.map(r=>`<tr><td>${formatDateVN(r.date)}</td><td class="num" style="color:${sign>0?'var(--profit)':'var(--loss)'}; font-weight:700;">${sign>0?'+':'−'}${fmtVND(r.amount)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">TỔNG</td><td class="num">${sign>0?'+':'−'}${fmtVND(total)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+  document.getElementById('cfGroupDetailBackBtn').addEventListener('click', ()=>{ renderCashFlowBreakdownDetailPage(); restoreMainScroll(); });
+}
 function renderCashFlowBreakdownDetailPage(){
   scrollMainToTop();
   const breakdown = computeCumulativeCashFlowBreakdown();
   const from = breakdown.from, to = breakdown.to;
-  const sitePaymentsInRange = from ? state.sitePayments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
-  const supplierPaymentsInRange = from ? state.supplierPayments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
-  const shiftsInRange = from ? allShiftsCompanyWide().filter(sh=>sh.date>=from && sh.date<=to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
-  const repairsInRangeList = from ? repairsInRangeCompanyWide(from, to).sort((a,b)=>b.date.localeCompare(a.date)) : [];
-  // SỬA 2026-08-23 (Ông Chủ báo thiếu — Q2/Q3): thêm danh sách chi tiết
-  // từng lô hoá đơn bù đã mua + từng lần tạm ứng lương, khớp đúng 2 khoản
-  // mới thêm vào computeCumulativeCashFlowBreakdown().
-  const invoiceLotsInRange = from ? state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=to).sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)) : [];
-  const advancesInRange = from ? shiftsInRange.filter(sh=>(Number(sh.advanceAmount)||0)>0) : [];
-
-  const row = (dateStr, label, amount, sign) => `
-    <div class="driver-row" style="padding:10px 14px; border-bottom:1px solid var(--border);">
-      <div><div style="font-weight:700;">${formatDateVN(dateStr)}</div>${label?`<div class="hint" style="margin-top:2px;">${escapeHtml(label)}</div>`:''}</div>
-      <span style="font-weight:800; white-space:nowrap; color:${sign>0?'var(--profit)':'var(--loss)'};">${sign>0?'+':'−'}${fmtVND(amount)}</span>
-    </div>`;
-  const section = (title, total, rowsHtml) => `
-    <h3 style="margin-top:16px;">${title} <span style="font-weight:400; font-size:13px; color:${total>=0?'var(--profit)':'var(--loss)'};">(${fmtVND(total)})</span></h3>
-    <div class="card" style="padding:0; overflow:hidden;">
-      ${rowsHtml || '<div class="hint" style="padding:14px;">Không có khoản nào trong khoảng này.</div>'}
-    </div>`;
-  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "lập bảng chia theo đúng từng nhà
-  // cung cấp, khách hàng"): nhóm các khoản cùng 1 đối tác lại thành 1 khối
-  // riêng có dòng TỔNG của đúng đối tác đó, thay vì liệt kê phẳng theo
-  // ngày như cũ — nhóm theo TÊN đối tác đã suy ra sẵn ở mỗi dòng.
-  const byPartnerHtml = (rowsWithPartner, sign) => {
-    const groups = {};
-    rowsWithPartner.forEach(r=>{
-      const key = r.partner || '(Không rõ đối tác)';
-      if(!groups[key]) groups[key] = [];
-      groups[key].push(r);
-    });
-    const partnerNames = Object.keys(groups).sort((a,b)=>{
-      const totalA = groups[a].reduce((s,r)=>s+r.amount,0);
-      const totalB = groups[b].reduce((s,r)=>s+r.amount,0);
-      return totalB-totalA;
-    });
-    if(partnerNames.length===0) return '';
-    return partnerNames.map(name=>{
-      const rows = groups[name];
-      const total = rows.reduce((s,r)=>s+r.amount,0);
-      return `
-      <div style="padding:10px 14px; background:var(--bg); font-weight:800; display:flex; justify-content:space-between; border-bottom:1px solid var(--border);">
-        <span>${escapeHtml(name)}</span>
-        <span style="color:${sign>0?'var(--profit)':'var(--loss)'};">${sign>0?'+':'−'}${fmtVND(total)}</span>
-      </div>
-      ${rows.map(r=>row(r.date, null, r.amount, sign)).join('')}`;
-    }).join('');
-  };
-  const sitePaymentRows = byPartnerHtml(sitePaymentsInRange.map(p=>{
-    const cus = p.customerId ? customerById(p.customerId) : null;
-    return { date:p.date, amount:p.amount, partner: cus ? `🏪 ${cus.name}` : `🚚 ${p.partnerName || p.siteName || '(Chưa đặt tên công trình)'}` };
-  }), 1);
-  const supplierPaymentRows = byPartnerHtml(supplierPaymentsInRange.map(p=>{
-    const sup = state.suppliers.find(s=>s.id===p.supplierId);
-    return { date:p.date, amount:p.amount, partner: sup ? sup.name : '(Nhà cung cấp đã xoá)' };
-  }), -1);
-  const operatingRows = shiftsInRange.map(sh=>{
-    const cost = shiftOperatingCashCostReal(sanitizeShiftForRevenue(sh));
-    const vName = sh._vehicleId ? vehicleNameById(sh._vehicleId) : '';
-    return row(sh.date, vName?`🚛 ${vName}`:'', cost, -1);
-  }).join('');
-  const repairRows = repairsInRangeList.map(r=>row(r.date, r.item||'', r.amount, -1)).join('');
-  const invoiceLotRows = invoiceLotsInRange.map(l=>row(l.purchaseDate, `${l.sourceName||''} — ${l.goodsType||''}`.trim().replace(/^—\s*/,''), Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)), -1)).join('');
-  const advanceRows = advancesInRange.map(sh=>{
-    const driver = driverById(sh.driverId);
-    const vName = sh._vehicleId ? vehicleNameById(sh._vehicleId) : '';
-    return row(sh.date, `${driver?driver.name:(sh.driverNameSnapshot||'')}${vName?' · 🚛 '+vName:''}${sh.advanceRecipientName?' ('+escapeHtml(sh.advanceRecipientName)+')':''}`, sh.advanceAmount, -1);
-  }).join('');
+  const section = (title, total, bodyHtml) => `
+    <h3 style="margin-top:16px;">${title} <span style="font-weight:900; font-size:15px; color:${total>=0?'var(--profit)':'var(--loss)'};">${total>=0&&title.includes('+')?'+':''}${fmtVND(total)}</span></h3>
+    ${bodyHtml}`;
 
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -15777,22 +15814,52 @@ function renderCashFlowBreakdownDetailPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📒 Chi Tiết Lợi Nhuận Luỹ Kế</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay — 2 khối tiền khách/tiền mỏ đã nhóm riêng theo từng đối tác.`:'Chưa có dữ liệu'}</div>
-      ${section('💵 + Tiền khách chuyển vào', breakdown.cashIn, sitePaymentRows)}
-      ${section('⛰️ − Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, supplierPaymentRows)}
-      ${section('⛽ − Chi phí vận hành (theo từng ca)', -breakdown.operatingCashCost, operatingRows)}
-      ${section('🔧 − Sửa chữa', -breakdown.repairTotal, repairRows)}
-      ${section('📦 − Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, invoiceLotRows)}
-      ${section('💵 − Tạm ứng lương tài xế', -breakdown.advanceCashOut, advanceRows)}
-      <h3 style="margin-top:16px;">🚧 − Luật đường + Gốc/Lãi vay + Bảo hiểm + Đăng kiểm</h3>
-      <div class="card">
-        <div class="summary-row"><span>Luật đường (đủ nguyên tháng nào có chạm tới)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.roadFee)}</span></div>
-        <div class="summary-row"><span>Gốc+Lãi vay (đúng từng kỳ thật đã/đang tới hạn) + Bảo hiểm + Đăng kiểm (đủ nguyên tháng, tất cả xe)</span><span class="val" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</span></div>
-        <div class="hint" style="margin-top:6px;">2 khoản này lấy từ Cài Đặt/Lịch Trả Nợ của từng xe (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở Cài Đặt → từng xe.</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay — mỗi mục nhóm theo đối tác/hạng mục, bấm 🔍 xem chi tiết từng khoản.`:'Chưa có dữ liệu'}</div>
+      ${section('💵 + Tiền khách chuyển vào', breakdown.cashIn, groupedCashFlowSummaryHtml('customer'))}
+      ${section('⛰️ − Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, groupedCashFlowSummaryHtml('supplier'))}
+      ${section('⛽ − Chi phí vận hành', -breakdown.operatingCashCost, groupedCashFlowSummaryHtml('operating'))}
+      ${section('🔧 − Sửa chữa', -breakdown.repairTotal, groupedCashFlowSummaryHtml('repair'))}
+      ${section('📦 − Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, groupedCashFlowSummaryHtml('invoiceLot'))}
+      ${section('💵 − Tạm ứng lương tài xế', -breakdown.advanceCashOut, groupedCashFlowSummaryHtml('advance'))}
+      <h3 style="margin-top:16px;">🚧 − Luật Đường + Nhà/Điện + Cầu Đường + Gốc/Lãi Vay + Bảo Hiểm + Đăng Kiểm</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Luật đường</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.roadFee)}</td></tr>
+            <tr><td>Thuê nhà</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.houseRent)}</td></tr>
+            <tr><td>Điện nước</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.utilities)}</td></tr>
+            <tr><td>Cầu đường</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.tollFee)}</td></tr>
+            <tr><td>Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">5 khoản này lấy từ Cài Đặt/Linh Chí Thành theo tháng (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở đúng mục tương ứng.</div>
+    </section>
+
+    <section class="group">
+      <h3>🧮 Cách Tính Ra Lãi/Lỗ Tiền Mặt Tính Đến Hôm Nay</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Cộng đúng 8 khoản ở trên, tính lại MỖI LẦN mở trang này — luôn khớp dữ liệu mới nhất.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>+ Tiền khách chuyển vào</td><td class="num" style="color:var(--profit);">+${fmtVND(breakdown.cashIn)}</td></tr>
+            <tr><td>− Tiền chuyển cho mỏ</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.cashOutToSuppliers)}</td></tr>
+            <tr><td>− Chi phí vận hành</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.operatingCashCost)}</td></tr>
+            <tr><td>− Sửa chữa</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.repairTotal)}</td></tr>
+            <tr><td>− Luật đường + Nhà/Điện + Cầu đường</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.roadFee+breakdown.houseRent+breakdown.utilities+breakdown.tollFee)}</td></tr>
+            <tr><td>− Gốc+Lãi vay + Bảo hiểm + Đăng kiểm</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</td></tr>
+            <tr><td>− Mua Lô Hoá Đơn Bù</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.invoiceLotCashOut)}</td></tr>
+            <tr><td>− Tạm ứng lương tài xế</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.advanceCashOut)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= ${breakdown.total>=0?'Lãi':'Lỗ'} tiền mặt tính đến hôm nay</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
   `;
   document.getElementById('cashFlowDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.querySelectorAll('.cashFlowGroupDetailBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ saveMainScroll(); openCashFlowGroupDetail(btn.dataset.category, btn.dataset.key); });
+  });
 }
 /// Chi Tiết Khớp Ngân Hàng — lọc lại đúng Sao Kê Toàn Bộ Dòng Tiền
 /// (computeCompanyCashFlowLedger) CHỈ những giao dịch SAU mốc chốt gần
@@ -16002,17 +16069,15 @@ function renderSettings(){
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
       <div style="display:flex; justify-content:flex-end;">
-        <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:800;">📄➕ Thêm Giấy Tờ Mới</button>
+        <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:800; width:50%; white-space:normal; line-height:1.3;">📄➕ Thêm Giấy Tờ Mới</button>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
       <div style="display:flex; justify-content:flex-end;">
-        <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:800;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
+        <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:800; width:50%; white-space:normal; line-height:1.3;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
@@ -16021,7 +16086,6 @@ function renderSettings(){
         <input type="month" id="rf_newMonth" style="flex:1;">
         <button class="btn btn-accent" id="addRoadFeeMonthBtn" style="font-weight:800; white-space:nowrap;">🚧➕ Thêm Tháng</button>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
@@ -16030,7 +16094,6 @@ function renderSettings(){
         <input type="month" id="hu_newMonth" style="flex:1;">
         <button class="btn btn-accent" id="addHousingUtilMonthBtn" style="font-weight:800; white-space:nowrap;">🏠➕ Thêm Tháng</button>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <!-- SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không
@@ -16044,7 +16107,6 @@ function renderSettings(){
         <input type="month" id="tf_newMonth" style="flex:1;">
         <button class="btn btn-accent" id="addTollFeeMonthBtn" style="font-weight:800; white-space:nowrap;">🌉➕ Thêm Tháng</button>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:center;">Xem toàn bộ danh sách tại 🏢 LINH CHÍ THÀNH</div>
     </section>
 
     <section class="group">
