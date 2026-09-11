@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #193';
+const APP_BUILD = '2026-09-08 · #194';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14835,6 +14835,43 @@ function renderBusinessReportPage(from, to){
     <section class="group">
       <h2 style="margin-bottom:2px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp toàn bộ dữ liệu Dòng Tiền, Kết Quả, Vốn, Công Nợ, Cảnh Báo đã có sẵn trong app thành 1 báo cáo — chọn giai đoạn bất kỳ để tra soát.</div>
+    </section>
+
+    <section class="group">
+      <h3>💰 Tổng Kết — Lãi/Lỗ Thật Cả Quá Trình</h3>
+      <div class="card" style="text-align:center; border:2px solid ${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'};">
+        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">Tiền Mặt Thật (từ ${r.allTimeCashFlow.from?formatDateVN(r.allTimeCashFlow.from):'(chưa có dữ liệu)'} tới hôm nay)</div>
+        <div class="grid-table-wrap" style="margin-top:10px; text-align:left;">
+          <table class="grid-table">
+            <tbody>
+              <tr><td>Tổng vốn đã bỏ vào (mua xe + góp thêm)</td><td class="num">${fmtVND(r.totalCapitalIn)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">${r.allTimeCashFlow.total>=0?'Lãi':'Lỗ'} tiền mặt tính đến hôm nay</td><td class="num" style="color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}">${r.allTimeCashFlow.total>=0?'+':''}${fmtVND(r.allTimeCashFlow.total)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-weight:900; font-size:24px; color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.allTimeCashFlow.total/r.totalCapitalIn*100).toFixed(1) : '0'}% trên vốn</div>
+        <div class="hint" style="margin-top:6px;">Trả lời: "Tiền mặt/ngân hàng công ty đang nhiều hơn hay ít hơn lúc bỏ vào?" — CHƯA tính xe đang cũ đi.</div>
+        <button class="btn btn-ghost btn-block" id="bizCashDetailBtn" style="margin-top:10px;">📋 Chi Tiết Cách Tính — Theo Từng Ngày</button>
+      </div>
+
+      <div class="card" style="text-align:center; margin-top:12px; border:2px solid ${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; background:var(--accent-soft);">
+        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">Lãi/Lỗ Thật Sự (đã trừ hao mòn xe)</div>
+        <div class="grid-table-wrap" style="margin-top:10px; text-align:left;">
+          <table class="grid-table">
+            <tbody>
+              <tr><td>Lãi/lỗ tiền mặt (ở trên)</td><td class="num" style="color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}">${r.allTimeCashFlow.total>=0?'+':''}${fmtVND(r.allTimeCashFlow.total)}</td></tr>
+              <tr><td>− Khấu hao luỹ kế (xe đã cũ đi bao nhiêu)</td><td class="num" style="color:var(--loss);">−${fmtVND(r.cumulativeDepreciation)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= ${r.trueProfitAfterDepreciation>=0?'Lãi':'Lỗ'} Thật Sự (đã trừ hao mòn)</td><td class="num" style="color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}">${r.trueProfitAfterDepreciation>=0?'+':''}${fmtVND(r.trueProfitAfterDepreciation)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-weight:900; font-size:26px; color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.trueProfitAfterDepreciation/r.totalCapitalIn*100).toFixed(1) : '0'}% ${r.trueProfitAfterDepreciation>=0?'lãi':'lỗ'} thật trên vốn</div>
+        <div class="hint" style="margin-top:6px;">Trả lời đúng câu: "Bỏ ra ${fmtVND(r.totalCapitalIn)} vào dự án xe, tính cả việc xe cũ đi, Ông Chủ lãi/lỗ thật bao nhiêu?" — khấu hao không phải tiền mặt rời túi, nhưng là giá trị tài sản mất đi thật, nên phải trừ mới ra đúng lãi kinh tế thật.</div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📅 Tra Soát Theo Giai Đoạn</h3>
       <div class="seg" id="bizReportPreset">
         <button data-val="month">Tháng này</button>
         <button data-val="all">Từ đầu dự án</button>
@@ -14844,39 +14881,6 @@ function renderBusinessReportPage(from, to){
         <div class="field"><label>Đến ngày</label><input type="date" id="bizTo" value="${to}"></div>
       </div>
       <button class="btn btn-accent btn-block" id="bizApplyBtn">Xem Báo Cáo Giai Đoạn Này</button>
-    </section>
-
-    <section class="group">
-      <h3>💰 TỔNG KẾT — Lãi/Lỗ Thật Cả Quá Trình</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">2 góc nhìn khác nhau, cả 2 đều đúng — dùng đúng góc phù hợp với câu hỏi đang cần trả lời.</div>
-      <div class="card" style="text-align:center; border:2px solid ${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'};">
-        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">GÓC 1 — TIỀN MẶT THẬT (từ ${r.allTimeCashFlow.from?formatDateVN(r.allTimeCashFlow.from):'(chưa có dữ liệu)'} tới hôm nay)</div>
-        <div class="grid-table-wrap" style="margin-top:10px; text-align:left;">
-          <table class="grid-table">
-            <tbody>
-              <tr><td>Tổng vốn đã bỏ vào (mua xe + góp thêm)</td><td class="num">${fmtVND(r.totalCapitalIn)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">${r.allTimeCashFlow.total>=0?'LÃI':'LỖ'} tiền mặt tính đến hôm nay</td><td class="num" style="color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}">${r.allTimeCashFlow.total>=0?'+':''}${fmtVND(r.allTimeCashFlow.total)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div style="font-weight:900; font-size:24px; color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.allTimeCashFlow.total/r.totalCapitalIn*100).toFixed(1) : '0'}% trên vốn</div>
-        <div class="hint" style="margin-top:6px;">Trả lời: "Tiền mặt/ngân hàng công ty đang nhiều hơn hay ít hơn lúc bỏ vào?" — CHƯA tính xe đang cũ đi.</div>
-      </div>
-
-      <div class="card" style="text-align:center; margin-top:12px; border:2px solid ${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; background:var(--accent-soft);">
-        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">GÓC 2 — LÃI THẬT SỰ (đã trừ hao mòn xe)</div>
-        <div class="grid-table-wrap" style="margin-top:10px; text-align:left;">
-          <table class="grid-table">
-            <tbody>
-              <tr><td>Lãi/lỗ tiền mặt (Góc 1 ở trên)</td><td class="num" style="color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}">${r.allTimeCashFlow.total>=0?'+':''}${fmtVND(r.allTimeCashFlow.total)}</td></tr>
-              <tr><td>− Khấu hao luỹ kế (xe đã cũ đi bao nhiêu)</td><td class="num" style="color:var(--loss);">−${fmtVND(r.cumulativeDepreciation)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= LÃI THẬT SỰ (đã trừ hao mòn)</td><td class="num" style="color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}">${r.trueProfitAfterDepreciation>=0?'+':''}${fmtVND(r.trueProfitAfterDepreciation)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div style="font-weight:900; font-size:26px; color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.trueProfitAfterDepreciation/r.totalCapitalIn*100).toFixed(1) : '0'}% ${r.trueProfitAfterDepreciation>=0?'lãi':'lỗ'} THẬT trên vốn</div>
-        <div class="hint" style="margin-top:6px;">Trả lời đúng câu: "Bỏ ra ${fmtVND(r.totalCapitalIn)} vào dự án xe, tính cả việc xe cũ đi, Ông Chủ lãi/lỗ THẬT bao nhiêu?" — khấu hao KHÔNG phải tiền mặt rời túi, nhưng LÀ giá trị tài sản mất đi thật, nên phải trừ mới ra đúng lãi kinh tế thật.</div>
-      </div>
     </section>
 
     <section class="group">
@@ -14975,6 +14979,7 @@ function renderBusinessReportPage(from, to){
     </section>
   `;
   document.getElementById('bizReportBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('bizCashDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   document.getElementById('bizApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('bizFrom').value;
     const t = document.getElementById('bizTo').value;
