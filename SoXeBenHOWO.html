@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #192';
+const APP_BUILD = '2026-09-08 · #193';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12672,6 +12672,94 @@ function renderMonthLedgerDetailModal(m, customerName){
     </div>`}
   `);
 }
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — Ảnh 4: "cho nút chi tiết, giữ
+/// nguyên cấu trúc, thêm kính lúp tìm ngày, thêm Tháng này, thêm Từ ngày
+/// tới ngày"): trang riêng cho "Chi Tiết Giao Dịch (Thương Mại)" — dùng
+/// lại NGUYÊN partnerTransactionTableHtml() (không đổi cấu trúc bảng),
+/// chỉ thêm bộ lọc ngày linh hoạt phía trên.
+function renderCustomerTransactionDetailPage(customerId, filterFrom, filterTo){
+  scrollMainToTop();
+  const cus = customerById(customerId);
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="custTxnBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📋 Chi Tiết Giao Dịch — ${escapeHtml(cus?cus.name:'')}</h2>
+      <div class="field">
+        <label>🔍 Tìm nhanh 1 ngày</label>
+        <input type="date" id="custTxnSearchDate">
+      </div>
+      <div class="seg" id="custTxnPreset" style="margin-top:8px;">
+        <button data-val="month">Tháng này</button>
+        <button data-val="all">Xem Tất Cả</button>
+      </div>
+      <div class="two-col" style="margin-top:10px;">
+        <div class="field"><label>Từ ngày</label><input type="date" id="custTxnFrom" value="${filterFrom||''}"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="custTxnTo" value="${filterTo||''}"></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="custTxnApplyBtn">Xem Theo Khoảng Này</button>
+    </section>
+    <section class="group">
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)${filterFrom?` — ${formatDateVN(filterFrom)} → ${formatDateVN(filterTo)}`:''}</h3>
+      ${partnerTransactionTableHtml(customerId, 'customer', filterFrom, filterTo)}
+    </section>
+  `;
+  document.getElementById('custTxnBackBtn').addEventListener('click', ()=>{ openCustomerDetail(customerId); restoreMainScroll(); });
+  document.getElementById('custTxnSearchDate').addEventListener('change', e=>{
+    const d = e.target.value;
+    if(!d) return;
+    saveMainScroll(); renderCustomerTransactionDetailPage(customerId, d, d); restoreMainScroll();
+  });
+  document.getElementById('custTxnApplyBtn').addEventListener('click', ()=>{
+    const f = document.getElementById('custTxnFrom').value;
+    const t = document.getElementById('custTxnTo').value;
+    saveMainScroll(); renderCustomerTransactionDetailPage(customerId, f||undefined, t||undefined); restoreMainScroll();
+  });
+  document.querySelectorAll('#custTxnPreset button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#custTxnPreset button').forEach(b=>b.classList.toggle('active', b===btn));
+      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); showToast('Đang xem: Tháng này.'); saveMainScroll(); renderCustomerTransactionDetailPage(customerId, mr.from, mr.to); restoreMainScroll(); }
+      else { showToast('Đang xem: Tất cả.'); saveMainScroll(); renderCustomerTransactionDetailPage(customerId, undefined, undefined); restoreMainScroll(); }
+    });
+  });
+}
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — Ảnh 5: "cũng thêm nút chi tiết, giữ
+/// nguyên cấu trúc hiển thị"): trang riêng cho "Lịch Sử Đã Thu" — bảng
+/// giữ NGUYÊN cấu trúc cũ, chỉ chuyển ra trang riêng.
+function renderCustomerPaymentHistoryPage(customerId){
+  scrollMainToTop();
+  const cus = customerById(customerId);
+  const payments = state.sitePayments.filter(p=>p.customerId===customerId).sort((a,b)=>b.date.localeCompare(a.date));
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="custPayHistBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📋 Lịch Sử Đã Thu — ${escapeHtml(cus?cus.name:'')}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${payments.length} khoản, mới nhất lên đầu.</div>
+      ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':`
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${payments.map(p=>`
+            <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openCustomerPaymentEditor('${p.id}','${customerId}')">
+              <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
+              <td>${p.notes?escapeHtml(p.notes):'—'}</td>
+              <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px; text-align:right; font-weight:800; color:var(--profit);">Tổng: +${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</div>
+      `}
+    </section>
+  `;
+  document.getElementById('custPayHistBackBtn').addEventListener('click', ()=>{ openCustomerDetail(customerId); restoreMainScroll(); });
+}
 function openCustomerDetail(customerId){
   scrollMainToTop();
   saveMainScroll();
@@ -12833,28 +12921,16 @@ function openCustomerDetail(customerId){
       ${supplierGoodsBreakdownHtml(goodsForDisplay, 'Có VAT (Thực Thu)', 'khối')}
     </section>
     <section class="group">
-      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)${range?` — ${formatDateVN(range.from)} → ${formatDateVN(range.to)}`:''}</h3>
-      ${partnerTransactionTableHtml(customerId, 'customer', range?range.from:undefined, range?range.to:undefined)}
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Toàn bộ chuyến hàng theo từng ngày, kèm trạng thái xuất hoá đơn.</div>
+      <button class="btn btn-ghost btn-block" id="custTxnDetailBtn">📋 Chi Tiết Giao Dịch</button>
     </section>
     <section class="group">
       <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
         <span>Lịch Sử Đã Thu</span>
         ${payments.length>0?`<span style="font-size:14px; font-weight:800; color:var(--profit);">Tổng: +${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</span>`:''}
       </h3>
-      ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':`
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            ${payments.map(p=>`
-            <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openCustomerPaymentEditor('${p.id}','${customerId}')">
-              <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
-              <td>${p.notes?escapeHtml(p.notes):'—'}</td>
-              <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(p.amount)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`}
+      <button class="btn btn-ghost btn-block" id="custPaymentHistoryDetailBtn">📋 Chi Tiết Lịch Sử Đã Thu</button>
     </section>
   `;
   // 2026-08-16 (yêu cầu Ông Chủ): trang Chi Tiết Khách Hàng trước đây GIỮ
@@ -12871,6 +12947,8 @@ function openCustomerDetail(customerId){
     restoreMainScroll();
   });
   document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openCustomerPaymentEditor(null, customerId); });
+  document.getElementById('custTxnDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCustomerTransactionDetailPage(customerId); });
+  document.getElementById('custPaymentHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCustomerPaymentHistoryPage(customerId); });
   document.getElementById('bulkTickSellInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(customerId, 'sell'));
   document.querySelectorAll('.monthLedgerDetailBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -12997,6 +13075,91 @@ function openBulkInvoiceTickModal(partyId, kind){
   document.getElementById('bulkUntickBtn').addEventListener('click', ()=>doBulk(false));
 }
 
+/// Đồng bộ y hệt bên Khách Hàng — trang riêng "Chi Tiết Giao Dịch" cho
+/// Nhà Cung Cấp, cùng bộ lọc kính lúp tìm ngày + Tháng này + Từ ngày tới
+/// ngày.
+function renderSupplierTransactionDetailPage(supplierId, filterFrom, filterTo){
+  scrollMainToTop();
+  const sup = supplierById(supplierId);
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="supTxnBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📋 Chi Tiết Giao Dịch — ${escapeHtml(sup?sup.name:'')}</h2>
+      <div class="field">
+        <label>🔍 Tìm nhanh 1 ngày</label>
+        <input type="date" id="supTxnSearchDate">
+      </div>
+      <div class="seg" id="supTxnPreset" style="margin-top:8px;">
+        <button data-val="month">Tháng này</button>
+        <button data-val="all">Xem Tất Cả</button>
+      </div>
+      <div class="two-col" style="margin-top:10px;">
+        <div class="field"><label>Từ ngày</label><input type="date" id="supTxnFrom" value="${filterFrom||''}"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="supTxnTo" value="${filterTo||''}"></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="supTxnApplyBtn">Xem Theo Khoảng Này</button>
+    </section>
+    <section class="group">
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)${filterFrom?` — ${formatDateVN(filterFrom)} → ${formatDateVN(filterTo)}`:''}</h3>
+      ${partnerTransactionTableHtml(supplierId, 'supplier', filterFrom, filterTo)}
+    </section>
+  `;
+  document.getElementById('supTxnBackBtn').addEventListener('click', ()=>{ openSupplierDetail(supplierId); restoreMainScroll(); });
+  document.getElementById('supTxnSearchDate').addEventListener('change', e=>{
+    const d = e.target.value;
+    if(!d) return;
+    saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, d, d); restoreMainScroll();
+  });
+  document.getElementById('supTxnApplyBtn').addEventListener('click', ()=>{
+    const f = document.getElementById('supTxnFrom').value;
+    const t = document.getElementById('supTxnTo').value;
+    saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, f||undefined, t||undefined); restoreMainScroll();
+  });
+  document.querySelectorAll('#supTxnPreset button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#supTxnPreset button').forEach(b=>b.classList.toggle('active', b===btn));
+      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); showToast('Đang xem: Tháng này.'); saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, mr.from, mr.to); restoreMainScroll(); }
+      else { showToast('Đang xem: Tất cả.'); saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, undefined, undefined); restoreMainScroll(); }
+    });
+  });
+}
+/// Đồng bộ y hệt bên Khách Hàng — trang riêng "Lịch Sử Giao Dịch" cho Nhà
+/// Cung Cấp, giữ nguyên cấu trúc bảng (kể cả nhãn "Mỏ hoàn tiền").
+function renderSupplierPaymentHistoryPage(supplierId){
+  scrollMainToTop();
+  const sup = supplierById(supplierId);
+  const payments = state.supplierPayments.filter(p=>p.supplierId===supplierId).sort((a,b)=>b.date.localeCompare(a.date));
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="supPayHistBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📋 Lịch Sử Giao Dịch — ${escapeHtml(sup?sup.name:'')}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${payments.length} giao dịch, mới nhất lên đầu.</div>
+      ${payments.length===0?'<div class="hint">Chưa có giao dịch nào.</div>':`
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${payments.map(p=>{ const isRefund = Number(p.amount)<0; return `
+            <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openSupplierPaymentEditor('${p.id}','${supplierId}')">
+              <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
+              <td>${isRefund?'⬇️ Mỏ hoàn tiền':'⬆️ Đã trả'}${p.notes?' · '+escapeHtml(p.notes):''}</td>
+              <td class="num" style="color:${isRefund?'var(--profit)':'var(--loss)'}; font-weight:700;">${isRefund?'+':'−'}${fmtVND(Math.abs(p.amount))}</td>
+            </tr>`; }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px; text-align:right; font-weight:800;">${(()=>{ const net=payments.reduce((s,p)=>s+(Number(p.amount)||0),0); return `<span style="color:${net>=0?'var(--loss)':'var(--profit)'};">Ròng: ${net>=0?'−':'+'}${fmtVND(Math.abs(net))}</span>`; })()}</div>
+      `}
+    </section>
+  `;
+  document.getElementById('supPayHistBackBtn').addEventListener('click', ()=>{ openSupplierDetail(supplierId); restoreMainScroll(); });
+}
 function openSupplierDetail(supplierId){
   scrollMainToTop();
   saveMainScroll();
@@ -13109,28 +13272,16 @@ function openSupplierDetail(supplierId){
       ${supplierGoodsBreakdownHtml(goodsForDisplay)}
     </section>
     <section class="group">
-      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)${range?` — ${formatDateVN(range.from)} → ${formatDateVN(range.to)}`:''}</h3>
-      ${partnerTransactionTableHtml(supplierId, 'supplier', range?range.from:undefined, range?range.to:undefined)}
+      <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Toàn bộ chuyến hàng theo từng ngày, kèm trạng thái xuất hoá đơn.</div>
+      <button class="btn btn-ghost btn-block" id="supTxnDetailBtn">📋 Chi Tiết Giao Dịch</button>
     </section>
     <section class="group">
       <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
         <span>Lịch Sử Giao Dịch</span>
         ${payments.length>0?(()=>{ const net=payments.reduce((s,p)=>s+(Number(p.amount)||0),0); return `<span style="font-size:14px; font-weight:800; color:${net>=0?'var(--loss)':'var(--profit)'};">Ròng: ${net>=0?'−':'+'}${fmtVND(Math.abs(net))}</span>`; })():''}
       </h3>
-      ${payments.length===0?'<div class="hint">Chưa có giao dịch nào.</div>':`
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            ${payments.map(p=>{ const isRefund = Number(p.amount)<0; return `
-            <tr class="grid-clickable-row" data-id="${p.id}" onclick="saveMainScroll(); openSupplierPaymentEditor('${p.id}','${supplierId}')">
-              <td>${formatDateVN(p.date)} <span style="font-size:12px;">${(p.method||'bank')==='cash'?'💵':'🏦'}</span></td>
-              <td>${isRefund?'⬇️ Mỏ hoàn tiền':'⬆️ Đã trả'}${p.notes?' · '+escapeHtml(p.notes):''}</td>
-              <td class="num" style="color:${isRefund?'var(--profit)':'var(--loss)'}; font-weight:700;">${isRefund?'+':'−'}${fmtVND(Math.abs(p.amount))}</td>
-            </tr>`; }).join('')}
-          </tbody>
-        </table>
-      </div>`}
+      <button class="btn btn-ghost btn-block" id="supPaymentHistoryDetailBtn">📋 Chi Tiết Lịch Sử Giao Dịch</button>
     </section>
   `;
   getActualScrollEl().scrollTop = 0;
@@ -13139,6 +13290,8 @@ function openSupplierDetail(supplierId){
     restoreMainScroll();
   });
   document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openSupplierPaymentEditor(null, supplierId); });
+  document.getElementById('supTxnDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderSupplierTransactionDetailPage(supplierId); });
+  document.getElementById('supPaymentHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderSupplierPaymentHistoryPage(supplierId); });
   document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId, 'buy'));
   document.getElementById('sup_rangeApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('sup_rangeFrom').value;
@@ -14833,11 +14986,21 @@ function renderBusinessReportPage(from, to){
   });
   document.querySelectorAll('#bizReportPreset button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); saveMainScroll(); renderBusinessReportPage(mr.from, mr.to); restoreMainScroll(); }
-      else if(btn.dataset.val==='all'){
+      // SỬA 2026-09-08 (Ông Chủ báo "nút không hoạt động, click không
+      // nhận"): trước đây bấm vẫn ĐÚNG re-render lại đúng giai đoạn, chỉ
+      // là KHÔNG có phản hồi trực quan nào (không đổi màu nút, không
+      // thông báo) — nên cảm giác như bấm không ăn dù thực ra có chạy.
+      // Thêm class active + toast xác nhận để chắc chắn thấy rõ đã bấm.
+      document.querySelectorAll('#bizReportPreset button').forEach(b=>b.classList.toggle('active', b===btn));
+      if(btn.dataset.val==='month'){
+        const mr=currentMonthRange();
+        showToast('Đang xem: Tháng này.');
+        saveMainScroll(); renderBusinessReportPage(mr.from, mr.to); restoreMainScroll();
+      } else if(btn.dataset.val==='all'){
         const allShifts = allShiftsCompanyWide();
         const earliest = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : todayLocalDateStr();
         const start = state.equityProjectInfo.startDate || earliest;
+        showToast('Đang xem: Từ đầu dự án tới hôm nay.');
         saveMainScroll(); renderBusinessReportPage(start, todayLocalDateStr()); restoreMainScroll();
       }
     });
@@ -15233,6 +15396,14 @@ function renderCompanyDashboardPage(){
   let bbcBalanceVal = 0;
   attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
   document.getElementById('bbc_addBtn').addEventListener('click', async ()=>{
+    // SỬA 2026-09-08 (Ông Chủ báo — thoát ra màn hình chạy lên đầu thay vì
+    // ở lại đúng khu vực): bàn phím ảo (iOS) vẫn đang mở lúc bấm nút này
+    // (vừa gõ xong ô Số Dư) — nếu lưu vị trí cuộn NGAY LÚC bàn phím còn
+    // che 1 phần màn hình, vị trí lưu được sẽ SAI so với lúc bàn phím đã
+    // đóng hẳn (layout đổi khác khi bàn phím biến mất). Ép đóng bàn phím
+    // (blur) TRƯỚC KHI lưu vị trí cuộn, để màn hình ổn định đúng trạng
+    // thái cuối cùng trước khi ghi nhớ.
+    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const date = document.getElementById('bbc_date').value;
     const note = document.getElementById('bbc_note').value.trim();
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
@@ -15545,12 +15716,42 @@ function renderCashFlowBreakdownDetailPage(){
     <div class="card" style="padding:0; overflow:hidden;">
       ${rowsHtml || '<div class="hint" style="padding:14px;">Không có khoản nào trong khoảng này.</div>'}
     </div>`;
-
-  const sitePaymentRows = sitePaymentsInRange.map(p=>row(p.date, p.partnerName||p.siteName||'', p.amount, 1)).join('');
-  const supplierPaymentRows = supplierPaymentsInRange.map(p=>{
+  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "lập bảng chia theo đúng từng nhà
+  // cung cấp, khách hàng"): nhóm các khoản cùng 1 đối tác lại thành 1 khối
+  // riêng có dòng TỔNG của đúng đối tác đó, thay vì liệt kê phẳng theo
+  // ngày như cũ — nhóm theo TÊN đối tác đã suy ra sẵn ở mỗi dòng.
+  const byPartnerHtml = (rowsWithPartner, sign) => {
+    const groups = {};
+    rowsWithPartner.forEach(r=>{
+      const key = r.partner || '(Không rõ đối tác)';
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    const partnerNames = Object.keys(groups).sort((a,b)=>{
+      const totalA = groups[a].reduce((s,r)=>s+r.amount,0);
+      const totalB = groups[b].reduce((s,r)=>s+r.amount,0);
+      return totalB-totalA;
+    });
+    if(partnerNames.length===0) return '';
+    return partnerNames.map(name=>{
+      const rows = groups[name];
+      const total = rows.reduce((s,r)=>s+r.amount,0);
+      return `
+      <div style="padding:10px 14px; background:var(--bg); font-weight:800; display:flex; justify-content:space-between; border-bottom:1px solid var(--border);">
+        <span>${escapeHtml(name)}</span>
+        <span style="color:${sign>0?'var(--profit)':'var(--loss)'};">${sign>0?'+':'−'}${fmtVND(total)}</span>
+      </div>
+      ${rows.map(r=>row(r.date, null, r.amount, sign)).join('')}`;
+    }).join('');
+  };
+  const sitePaymentRows = byPartnerHtml(sitePaymentsInRange.map(p=>{
+    const cus = p.customerId ? customerById(p.customerId) : null;
+    return { date:p.date, amount:p.amount, partner: cus ? `🏪 ${cus.name}` : `🚚 ${p.partnerName || p.siteName || '(Chưa đặt tên công trình)'}` };
+  }), 1);
+  const supplierPaymentRows = byPartnerHtml(supplierPaymentsInRange.map(p=>{
     const sup = state.suppliers.find(s=>s.id===p.supplierId);
-    return row(p.date, sup?sup.name:'', p.amount, -1);
-  }).join('');
+    return { date:p.date, amount:p.amount, partner: sup ? sup.name : '(Nhà cung cấp đã xoá)' };
+  }), -1);
   const operatingRows = shiftsInRange.map(sh=>{
     const cost = shiftOperatingCashCostReal(sanitizeShiftForRevenue(sh));
     const vName = sh._vehicleId ? vehicleNameById(sh._vehicleId) : '';
@@ -15571,7 +15772,7 @@ function renderCashFlowBreakdownDetailPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📒 Chi Tiết Lợi Nhuận Luỹ Kế</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay`:'Chưa có dữ liệu'}</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay — 2 khối tiền khách/tiền mỏ đã nhóm riêng theo từng đối tác.`:'Chưa có dữ liệu'}</div>
       ${section('💵 + Tiền khách chuyển vào', breakdown.cashIn, sitePaymentRows)}
       ${section('⛰️ − Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, supplierPaymentRows)}
       ${section('⛽ − Chi phí vận hành (theo từng ca)', -breakdown.operatingCashCost, operatingRows)}
