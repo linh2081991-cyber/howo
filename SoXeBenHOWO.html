@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #200';
+const APP_BUILD = '2026-09-08 · #201';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14669,9 +14669,32 @@ function openROICalculationDetail(){
   const sameWindowNote = (recentRate3!==null && recentRate6!==null && recentRate3===recentRate6)
     ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${accrualTimeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
     : '';
+  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "trang ngoài hiện tổng quan, bấm
+  // chi tiết mới hiện đủ những con số cần quan tâm tháng 7,8... và số
+  // tổng rõ ràng"): tách LỢI NHUẬN THỰC TẾ CỘNG DỒN theo từng tháng
+  // (delta giữa 2 mốc liền kề trong accrualTimeline đã có sẵn), hiện
+  // thành bảng riêng NGAY ĐẦU modal, có dòng TỔNG rõ ràng.
+  const monthlyBreakdown = accrualTimeline.map((t,i)=>({
+    month: t.month,
+    amount: t.cumulativeProfit - (i>0 ? accrualTimeline[i-1].cumulativeProfit : 0),
+    isPartial: t.snapshotDate < `${t.month}-${String(daysInMonth(`${t.month}-01`)).padStart(2,'0')}`
+  }));
   openModal(`
     <h3>📖 Chi Tiết Cách Tính — Hiệu Quả Đầu Tư</h3>
     <div class="hint" style="margin-top:0;">Dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) — KHÔNG dùng tiền mặt, vì tiền mặt trừ nhầm gốc vay ngân hàng như 1 khoản chi phí (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
+    <div class="field">
+      <label style="font-weight:800;">0. Lợi Nhuận Thực Tế từng tháng</label>
+      <div class="hint" style="margin:0;">Cộng dồn = tổng các tháng bên dưới, đúng bằng số ở mục 1.</div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">Lợi Nhuận Thực Tế</th></tr></thead>
+          <tbody>
+            ${monthlyBreakdown.map(m=>`<tr><td>${monthLabelVN(m.month)}${m.isPartial?' (chưa hết tháng)':''}</td><td class="num" style="color:${m.amount>=0?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.amount>=0?'+':''}${fmtVND(m.amount)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">TỔNG CỘNG DỒN</td><td class="num" style="color:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}">${accrualProfit.netProfit>=0?'+':''}${fmtVND(accrualProfit.netProfit)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
     <div class="field">
       <label style="font-weight:800;">1. Đã thu hồi được (%)</label>
       <div class="hint" style="margin:0;">= Lợi Nhuận Thực Tế cộng dồn ÷ Tổng vốn đã bỏ vào × 100%</div>
@@ -14687,7 +14710,15 @@ function openROICalculationDetail(){
     </div>
     <div class="field">
       <label style="font-weight:800;">2. Tốc độ thu hồi TB 3/6 tháng gần nhất</label>
-      <div class="hint" style="margin:0;">= (Lợi Nhuận Thực Tế cộng dồn hôm nay − đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua giữa 2 mốc đó (quy đổi ra tháng, ÷30,44) — KHÔNG đếm khống tháng đang chạy dở (chưa hết ngày) thành nguyên 1 tháng, để không pha loãng sai tốc độ thật.</div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Tốc độ TB 3 tháng gần nhất</td><td class="num">${recentRate3!==null?(recentRate3>=0?'+':'')+fmtVND(recentRate3)+'/tháng':'Chưa đủ dữ liệu'}</td></tr>
+            <tr><td>Tốc độ TB 6 tháng gần nhất</td><td class="num">${recentRate6!==null?(recentRate6>=0?'+':'')+fmtVND(recentRate6)+'/tháng':'Chưa đủ dữ liệu'}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">= (Lợi Nhuận Thực Tế cộng dồn hôm nay − đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua giữa 2 mốc đó (quy đổi ra tháng, ÷30,44) — KHÔNG đếm khống tháng đang chạy dở (chưa hết ngày) thành nguyên 1 tháng, để không pha loãng sai tốc độ thật.</div>
       ${sameWindowNote}
       ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:8px 10px; border-radius:8px; margin-top:6px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu, độ tin cậy còn thấp — chưa nên dùng riêng số này để quyết định đầu tư mở rộng.</div>` : ''}
     </div>
@@ -15186,11 +15217,8 @@ function renderCompanyDashboardPage(){
       <div style="background:var(--border); height:8px; border-radius:4px; overflow:hidden; margin:8px 0 12px 0;">
         <div style="background:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
       </div>
-      ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu (tháng gần nhất CHƯA kết thúc), và các tháng đã qua đang biến động mạnh (có tháng lỗ, có tháng lãi) — tốc độ và số tháng dự kiến bên dưới CHỈ mang tính tham khảo ban đầu, ĐỘ TIN CẬY CÒN THẤP. Chưa nên dùng riêng số này để quyết định mua thêm xe/mở rộng — cần theo dõi thêm vài tháng nữa cho ổn định.</div>` : ''}
-      <div class="summary-row"><span>Tốc độ thu hồi TB 3 tháng gần nhất</span><span class="val">${recentRate3!==null?(recentRate3>=0?'+':'')+fmtVND(recentRate3)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
-      <div class="hint" style="margin:2px 0 0;">Tính bằng: (Lợi Nhuận Thực Tế cộng dồn hôm nay − đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua (quy đổi tháng) — không đếm khống tháng đang chạy dở thành nguyên 1 tháng.</div>
-      <div class="summary-row"><span>Tốc độ thu hồi TB 6 tháng gần nhất</span><span class="val">${recentRate6!==null?(recentRate6>=0?'+':'')+fmtVND(recentRate6)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
-      <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
+      ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu (tháng gần nhất CHƯA kết thúc), và các tháng đã qua đang biến động mạnh (có tháng lỗ, có tháng lãi) — số dự kiến bên dưới CHỈ mang tính tham khảo ban đầu, ĐỘ TIN CẬY CÒN THẤP. Chưa nên dùng riêng số này để quyết định mua thêm xe/mở rộng — cần theo dõi thêm vài tháng nữa cho ổn định.</div>` : ''}
+      <div class="summary-row" style="padding-top:2px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
       <button class="btn btn-ghost btn-block" id="roiCalcDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
     </div>`;
   }
@@ -16244,7 +16272,7 @@ function renderSettings(){
       <h3>🚧 Tiền Luật Đường Theo Tháng</h3>
       <div style="display:flex; gap:8px;">
         <input type="month" id="rf_newMonth" style="flex:1;">
-        <button class="btn btn-accent" id="addRoadFeeMonthBtn" style="font-weight:800; white-space:nowrap;">🚧➕ Thêm Tháng</button>
+        <button class="btn btn-accent" id="addRoadFeeMonthBtn" style="font-weight:700;">Thêm Tháng</button>
       </div>
     </section>
 
@@ -16252,7 +16280,7 @@ function renderSettings(){
       <h3>🏠 Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
       <div style="display:flex; gap:8px;">
         <input type="month" id="hu_newMonth" style="flex:1;">
-        <button class="btn btn-accent" id="addHousingUtilMonthBtn" style="font-weight:800; white-space:nowrap;">🏠➕ Thêm Tháng</button>
+        <button class="btn btn-accent" id="addHousingUtilMonthBtn" style="font-weight:700;">Thêm Tháng</button>
       </div>
     </section>
 
@@ -16265,7 +16293,7 @@ function renderSettings(){
       <h3>🌉 CP Cầu Đường Theo Tháng</h3>
       <div style="display:flex; gap:8px;">
         <input type="month" id="tf_newMonth" style="flex:1;">
-        <button class="btn btn-accent" id="addTollFeeMonthBtn" style="font-weight:800; white-space:nowrap;">🌉➕ Thêm Tháng</button>
+        <button class="btn btn-accent" id="addTollFeeMonthBtn" style="font-weight:700;">Thêm Tháng</button>
       </div>
     </section>
 
