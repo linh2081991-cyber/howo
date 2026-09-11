@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #195';
+const APP_BUILD = '2026-09-08 · #196';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2290,7 +2290,7 @@ function renderEquityTimelineChartSVG(timeline){
   // SỬA 2026-09-08 (cùng lỗi Ông Chủ báo ở biểu đồ Chi Phí/Km — nhãn số bị
   // chấm che ở đỉnh cao nhất): tăng padT, bỏ logic "trên/dưới tuỳ vị trí",
   // LUÔN đặt nhãn phía trên chấm với đủ khoảng trống.
-  const chartH = 190, padL=8, padR=8, padT=30, padB=26;
+  const chartH = 190, padL=8, padR=8, padT=36, padB=26;
   const innerH = chartH - padT - padB;
   const stepX = 56;
   const chartW = Math.max(300, padL+padR+stepX*(timeline.length-1));
@@ -2301,7 +2301,7 @@ function renderEquityTimelineChartSVG(timeline){
   const areaPoints = `${xFor(0)},${zeroY} ${points} ${xFor(timeline.length-1)},${zeroY}`;
   const dots = timeline.map((t,i)=>`<circle cx="${xFor(i)}" cy="${yFor(t.equity)}" r="3.5" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" stroke="var(--surface)" stroke-width="1.5"></circle>`).join('');
   const valueLabels = timeline.map((t,i)=>{
-    return `<text x="${xFor(i)}" y="${yFor(t.equity)-9}" font-size="9" text-anchor="middle" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" font-weight="700">${fmtShortVND(t.equity)}</text>`;
+    return `<text x="${xFor(i)}" y="${yFor(t.equity)-13}" font-size="9" text-anchor="middle" fill="${t.equity>=0?'var(--profit)':'var(--loss)'}" font-weight="700">${fmtShortVND(t.equity)}</text>`;
   }).join('');
   const monthLabels = timeline.map((t,i)=>`<text x="${xFor(i)}" y="${chartH-8}" font-size="9.5" text-anchor="middle" fill="var(--ink-soft)">${monthShortLabel(t.month)}</text>`).join('');
   return `
@@ -11011,7 +11011,7 @@ function renderCostPerKmChartSVG(buckets){
   // bỏ hẳn logic "trên/dưới tuỳ vị trí" cũ (logic đó chính là nguyên nhân
   // gây đè, vì điểm cao nhất luôn rơi vào nhánh "dưới" rồi lại chưa đủ
   // khoảng trống phía trên viewBox để hiện đúng).
-  const chartH = 190, padL=8, padR=8, padT=30, padB=26;
+  const chartH = 190, padL=8, padR=8, padT=36, padB=26;
   const innerH = chartH - padT - padB;
   const stepX = 56;
   const chartW = Math.max(300, padL+padR+stepX*(buckets.length-1));
@@ -11037,7 +11037,7 @@ function renderCostPerKmChartSVG(buckets){
   const dots = buckets.map((b,i)=> b.totalKm>0 ? `<circle cx="${xFor(i)}" cy="${yFor(b.costPerKm)}" r="3.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"></circle>` : '').join('');
   const valueLabels = buckets.map((b,i)=>{
     if(b.totalKm<=0) return '';
-    return `<text x="${xFor(i)}" y="${yFor(b.costPerKm)-9}" font-size="9" text-anchor="middle" fill="var(--accent)" font-weight="700">${fmtShortVND(b.costPerKm)}</text>`;
+    return `<text x="${xFor(i)}" y="${yFor(b.costPerKm)-13}" font-size="9" text-anchor="middle" fill="var(--accent)" font-weight="700">${fmtShortVND(b.costPerKm)}</text>`;
   }).join('');
   const noDataMarks = buckets.map((b,i)=> b.totalKm<=0 ? `<text x="${xFor(i)}" y="${baseY+4}" font-size="12" text-anchor="middle" fill="var(--ink-soft)">—</text>` : '').join('');
   const monthLabels = buckets.map((b,i)=>`<text x="${xFor(i)}" y="${chartH-8}" font-size="9.5" text-anchor="middle" fill="var(--ink-soft)">${b.label}</text>`).join('');
@@ -11648,8 +11648,7 @@ function supplierGoodsBreakdownHtml(b, cashColLabel, unitLabel='tấn'){
           </tr>
         </tbody>
       </table>
-    </div>
-    ${showInvoiceCol ? `<div class="hint" style="margin-top:8px;">"HĐ Mỏ Thực Trả" = Khối Lượng × ${b.invoicedPct}% (đúng tỉ lệ hoá đơn đã cấu hình riêng cho nhà cung cấp này, ở mục Nhà Cung Cấp) — số ${unitLabel} mỏ dự kiến phải xuất hoá đơn cho đúng khoảng ngày đang xem, dùng để đối chiếu trực tiếp với hoá đơn thật mỏ gửi. Đổi nhà cung cấp khác sẽ tự áp đúng % của mỏ đó.</div>` : ''}`;
+    </div>`;
 }
 /// Tổng hợp các số của 1 kỳ (từ/đến ngày) — ĐÚNG các công thức renderResults()
 /// đang dùng, tách riêng ra đây để dùng chung cho cả màn Kết Quả lẫn file
@@ -12752,6 +12751,10 @@ function renderCustomerPaymentHistoryPage(customerId){
       <h2 style="margin-bottom:2px;">📋 Lịch Sử Đã Thu — ${escapeHtml(cus?cus.name:'')}</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${payments.length} khoản, mới nhất lên đầu.</div>
       ${payments.length===0?'<div class="hint">Chưa có khoản thu nào.</div>':`
+      <div class="card" style="text-align:center; padding:16px; margin-bottom:12px;">
+        <div class="hint" style="margin:0;">Tổng đã thu</div>
+        <div style="font-size:28px; font-weight:800; color:var(--profit);">+${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</div>
+      </div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
@@ -12765,7 +12768,6 @@ function renderCustomerPaymentHistoryPage(customerId){
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:right; font-weight:800; color:var(--profit);">Tổng: +${fmtVND(payments.reduce((s,p)=>s+(Number(p.amount)||0),0))}</div>
       `}
     </section>
   `;
@@ -13152,6 +13154,10 @@ function renderSupplierPaymentHistoryPage(supplierId){
       <h2 style="margin-bottom:2px;">📋 Lịch Sử Giao Dịch — ${escapeHtml(sup?sup.name:'')}</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${payments.length} giao dịch, mới nhất lên đầu.</div>
       ${payments.length===0?'<div class="hint">Chưa có giao dịch nào.</div>':`
+      <div class="card" style="text-align:center; padding:16px; margin-bottom:12px;">
+        <div class="hint" style="margin:0;">Ròng đã trả (đã trừ phần mỏ hoàn lại)</div>
+        <div style="font-size:28px; font-weight:800;">${(()=>{ const net=payments.reduce((s,p)=>s+(Number(p.amount)||0),0); return `<span style="color:${net>=0?'var(--loss)':'var(--profit)'};">${net>=0?'−':'+'}${fmtVND(Math.abs(net))}</span>`; })()}</div>
+      </div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
@@ -13165,7 +13171,6 @@ function renderSupplierPaymentHistoryPage(supplierId){
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:8px; text-align:right; font-weight:800;">${(()=>{ const net=payments.reduce((s,p)=>s+(Number(p.amount)||0),0); return `<span style="color:${net>=0?'var(--loss)':'var(--profit)'};">Ròng: ${net>=0?'−':'+'}${fmtVND(Math.abs(net))}</span>`; })()}</div>
       `}
     </section>
   `;
@@ -13220,7 +13225,7 @@ function openSupplierDetail(supplierId){
     </section>
     ${goodsAllTime.totalTrips>0 ? `
     <section class="group">
-      <h3>💰 Tiền Hàng Đã Lấy (chưa tính VAT)</h3>
+      <h3>💰 Tổng Tiền Hàng Đã Lấy</h3>
       <div class="card" style="text-align:center; padding:16px;">
         <div style="font-size:28px; font-weight:800; color:var(--ink);">${fmtVND(goodsAllTime.totalNet)}</div>
       </div>
@@ -13234,7 +13239,6 @@ function openSupplierDetail(supplierId){
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:10px;">💡 100% tiền hàng luôn phải trả đủ cho mỏ (tiền hàng thật, không phụ thuộc hoá đơn) — CHỈ CÓ phần VAT là bị giới hạn đúng ${goodsAllTime.invoicedPct}% (tỉ lệ hoá đơn mỏ thực xuất), và phần "chưa xuất hoá đơn" thì VAT tạm chưa ghi nhận (đúng nguyên tắc chỉ ghi nhận khi đã có hoá đơn thật).</div>
     </section>
     ` : ''}
     <section class="group">
@@ -13243,14 +13247,13 @@ function openSupplierDetail(supplierId){
         <table class="grid-table">
           <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>= Phải trả (tổng)</td><td class="num" style="font-weight:700;">${fmtVND(debt.payable)}</td></tr>
-            <tr><td>Đã trả (tổng — đã bank cho mỏ)</td><td class="num">${fmtVND(debt.paid)}</td></tr>
+            <tr><td>Tổng phải trả</td><td class="num" style="font-weight:700;">${fmtVND(debt.payable)}</td></tr>
+            <tr><td>Tổng Ông Chủ đã bank cho mỏ</td><td class="num" style="font-weight:800;">${fmtVND(debt.paid)}</td></tr>
             <tr class="grid-total-row"><td>CÒN NỢ MỎ</td><td class="num" style="color:${debt.owed>0?'var(--loss)':'var(--profit)'}">${debt.owed>0 ? fmtVND(debt.owed) : `0đ (đang tạm ứng dư ${fmtVND(Math.abs(debt.owed))})`}</td></tr>
             <tr class="grid-total-row"><td>Còn phải nộp thêm (để mỏ xuất đủ hoá đơn ${goodsAllTime.invoicedPct}% cho phần CHƯA xuất)</td><td class="num" style="color:${owedForInvoiceAllTime>0?'var(--loss)':'var(--profit)'}">${owedForInvoiceAllTime>0 ? fmtVND(owedForInvoiceAllTime) : `0đ (đã đủ — dư ${fmtVND(Math.abs(owedForInvoiceAllTime))})`}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:8px;">"Còn phải nộp thêm" = CÒN NỢ MỎ (ở trên, đã đúng 100% gốc + ${goodsAllTime.invoicedPct}% VAT của phần đã xuất) + Phần VAT còn thiếu của phần CHƯA xuất (= Tiền hàng CHƯA xuất × ${goodsAllTime.invoicedPct}% × %VAT, tính riêng từng chuyến). Tự cập nhật ngay khi có chuyến hàng mới hoặc khi mỏ xuất thêm hoá đơn.</div>
       <button class="btn btn-accent btn-block" id="addSupplierPaymentBtn" style="margin-top:12px;">+ Ghi Nhận Khoản Đã Bank Cho Mỏ</button>
       <button class="btn btn-ghost btn-block" id="bulkTickInvoiceBtn" style="margin-top:8px;">✅ Tick Hàng Loạt Hoá Đơn Đã Nhận</button>
     </section>
