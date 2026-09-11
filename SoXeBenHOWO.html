@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #198';
+const APP_BUILD = '2026-09-08 · #200';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2156,6 +2156,48 @@ function companyWideCashFlowFixedMonthly(from, to){
   });
   return sum;
 }
+/// SỬA 2026-09-08 (Ông Chủ phát hiện — "trừ nhầm cả gốc vay ngân hàng như
+/// chi phí"): bản ACCRUAL đúng chuẩn kế toán của hàm trên — GỐC vay
+/// KHÔNG phải chi phí (chỉ là chuyển tiền mặt thành giảm nợ, không đổi
+/// tài sản ròng), chỉ có LÃI vay mới là chi phí thật, cộng với khấu hao
+/// (hao mòn tài sản thật) + bảo hiểm + đăng kiểm. Dùng cho MỌI phép tính
+/// LỢI NHUẬN/ĐIỂM HOÀ VỐN — KHÔNG dùng cho dòng tiền/khớp ngân hàng (2
+/// mục đích khác nhau, hàm companyWideCashFlowFixedMonthly() ở trên vẫn
+/// giữ nguyên, đúng vai trò của nó, không đổi).
+function companyWideAccrualFixedMonthly(from, to){
+  let sum = 0;
+  Object.values(state.allVehiclesSettings).forEach(s=>{
+    const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0);
+    const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+    sum += fullMonthlyCostIfTouched(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
+  });
+  return sum;
+}
+/// LỢI NHUẬN THỰC TẾ CỘNG DỒN TOÀN CÔNG TY — dùng lại NGUYÊN
+/// computeBreakEvenDetailed() (công thức accrual đã đóng băng, y hệt tab
+/// Kết Quả), chỉ đổi tham số chi phí cố định sang bản ACCRUAL đúng ở
+/// trên, cộng thêm Cầu Đường (khoản duy nhất computeBreakEvenDetailed()
+/// không nhận tham số riêng). Đây là số ĐÚNG CHUẨN để trả lời "bỏ vốn ra
+/// tao lãi/lỗ thật bao nhiêu" — đã trừ khấu hao, KHÔNG trừ nhầm gốc vay.
+function computeCumulativeAccrualProfit(toOverride){
+  const allShifts = allShiftsCompanyWide();
+  const empty = { from:null, to:null, grossProfit:0, fixedCost:0, tollFee:0, netProfit:0 };
+  if(allShifts.length===0) return empty;
+  const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
+  const from = state.equityProjectInfo.startDate || earliestShiftDate;
+  const to = toOverride || todayLocalDateStr();
+  if(from>to) return { ...empty, from, to };
+  const inRange = allShifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const roadFee = roadFeeForRangeCompanyWide(from, to);
+  const houseRent = houseRentForRange(from, to);
+  const utilities = utilitiesForRange(from, to);
+  const tollFee = tollFeeForRange(from, to);
+  const repairTotal = repairsInRangeCompanyWide(from, to).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const accrualFixedMonthly = companyWideAccrualFixedMonthly(from, to);
+  const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal, accrualFixedMonthly, houseRent, utilities);
+  const netProfit = breakEven.grossProfit - breakEven.fixedCost - tollFee;
+  return { from, to, grossProfit: breakEven.grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, netProfit };
+}
 // ================= 2026-08-15/18: SỔ VỐN CHỦ SỞ HỮU + DỰ ÁN ĐẦU TƯ XE =================
 /// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
 /// ĐẦU DỰ ÁN (state.equityProjectInfo.startDate, Ông Chủ tự điền — nếu để
@@ -2275,6 +2317,31 @@ function computeMonthlyEquityTimeline(){
     const cumulativeProfit = computeCumulativeCompanyProfit(snapshotDate);
     const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit;
     return { month: ym, equity, cumulativeProfit, snapshotDate };
+  });
+}
+/// SỬA 2026-09-08 (Ông Chủ phát hiện — "Hiệu Quả Đầu Tư không nên dùng
+/// tiền mặt vì trừ nhầm gốc vay"): bản ACCRUAL song song với
+/// computeMonthlyEquityTimeline() ở trên — dùng
+/// computeCumulativeAccrualProfit() (đã trừ đúng khấu hao, KHÔNG trừ gốc
+/// vay) thay vì computeCumulativeCompanyProfit() (tiền mặt). CHỈ dùng
+/// cho "Hiệu Quả Đầu Tư" (tốc độ thu hồi/số tháng dự kiến) — biểu đồ
+/// "Biến Động Vốn Chủ Sở Hữu Theo Tháng" vẫn giữ nguyên bản tiền mặt cũ
+/// (đã báo Ông Chủ: sửa hẳn "Vốn Chủ Sở Hữu" cần xây thêm sổ dư nợ vay
+/// còn lại như 1 khoản nợ, việc lớn hơn, để xử lý riêng nếu cần).
+function computeMonthlyAccrualProfitTimeline(){
+  const allShifts = allShiftsCompanyWide();
+  if(allShifts.length===0) return [];
+  const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
+  const startDate = state.equityProjectInfo.startDate || earliestShiftDate;
+  const today = todayLocalDateStr();
+  if(startDate>today) return [];
+  const months = monthsBetween(startDate, today);
+  return months.map(ym=>{
+    const dim = daysInMonth(`${ym}-01`);
+    const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
+    const snapshotDate = monthEnd < today ? monthEnd : today;
+    const cumulativeProfit = computeCumulativeAccrualProfit(snapshotDate).netProfit;
+    return { month: ym, cumulativeProfit, snapshotDate };
   });
 }
 /// Tốc độ thu hồi vốn trung bình mỗi tháng, tính từ CHÊNH LỆCH LỢI NHUẬN
@@ -14592,24 +14659,26 @@ function openLoanEditor(loanId){
 /// thức mới, chỉ trình bày lại từng bước cho rõ.
 function openROICalculationDetail(){
   const eq = computeOwnerEquity();
-  const timeline = computeMonthlyEquityTimeline();
-  const recentRate3 = computeRecentMonthlyRate(timeline, 3);
-  const recentRate6 = computeRecentMonthlyRate(timeline, 6);
+  const accrualProfit = computeCumulativeAccrualProfit();
+  const accrualTimeline = computeMonthlyAccrualProfitTimeline();
+  const recentRate3 = computeRecentMonthlyRate(accrualTimeline, 3);
+  const recentRate6 = computeRecentMonthlyRate(accrualTimeline, 6);
   const totalCapital = eq.initialInvestment + eq.contributedExtra;
-  const recoveredPercent = totalCapital>0 ? Math.max(0, Math.min(100, (eq.cumulativeProfit/totalCapital)*100)) : 0;
-  const remainingToRecover = totalCapital - eq.cumulativeProfit;
+  const recoveredPercent = totalCapital>0 ? Math.max(0, Math.min(100, (accrualProfit.netProfit/totalCapital)*100)) : 0;
+  const remainingToRecover = totalCapital - accrualProfit.netProfit;
   const sameWindowNote = (recentRate3!==null && recentRate6!==null && recentRate3===recentRate6)
-    ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${timeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
+    ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${accrualTimeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
     : '';
   openModal(`
     <h3>📖 Chi Tiết Cách Tính — Hiệu Quả Đầu Tư</h3>
+    <div class="hint" style="margin-top:0;">Dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) — KHÔNG dùng tiền mặt, vì tiền mặt trừ nhầm gốc vay ngân hàng như 1 khoản chi phí (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
     <div class="field">
       <label style="font-weight:800;">1. Đã thu hồi được (%)</label>
-      <div class="hint" style="margin:0;">= Lợi nhuận luỹ kế ÷ Tổng vốn đã bỏ vào × 100%</div>
+      <div class="hint" style="margin:0;">= Lợi Nhuận Thực Tế cộng dồn ÷ Tổng vốn đã bỏ vào × 100%</div>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <tbody>
-            <tr><td>Lợi nhuận luỹ kế (tiền mặt, từ đầu dự án)</td><td class="num">${fmtVND(eq.cumulativeProfit)}</td></tr>
+            <tr><td>Lợi Nhuận Thực Tế cộng dồn (từ đầu dự án, đã trừ khấu hao)</td><td class="num">${fmtVND(accrualProfit.netProfit)}</td></tr>
             <tr><td>÷ Tổng vốn đã bỏ vào (mua xe ${fmtVND(eq.initialInvestment)} + góp thêm ${fmtVND(eq.contributedExtra)})</td><td class="num">${fmtVND(totalCapital)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Đã thu hồi được</td><td class="num">${recoveredPercent.toFixed(1)}%</td></tr>
           </tbody>
@@ -14618,13 +14687,13 @@ function openROICalculationDetail(){
     </div>
     <div class="field">
       <label style="font-weight:800;">2. Tốc độ thu hồi TB 3/6 tháng gần nhất</label>
-      <div class="hint" style="margin:0;">= (Lợi nhuận luỹ kế hôm nay − Lợi nhuận luỹ kế đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua giữa 2 mốc đó (quy đổi ra tháng, ÷30,44) — KHÔNG đếm khống tháng đang chạy dở (chưa hết ngày) thành nguyên 1 tháng, để không pha loãng sai tốc độ thật.</div>
+      <div class="hint" style="margin:0;">= (Lợi Nhuận Thực Tế cộng dồn hôm nay − đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua giữa 2 mốc đó (quy đổi ra tháng, ÷30,44) — KHÔNG đếm khống tháng đang chạy dở (chưa hết ngày) thành nguyên 1 tháng, để không pha loãng sai tốc độ thật.</div>
       ${sameWindowNote}
-      ${timeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:8px 10px; border-radius:8px; margin-top:6px; font-weight:600;">⚠️ Mới có ${timeline.length} tháng dữ liệu, độ tin cậy còn thấp — chưa nên dùng riêng số này để quyết định đầu tư mở rộng.</div>` : ''}
+      ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:8px 10px; border-radius:8px; margin-top:6px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu, độ tin cậy còn thấp — chưa nên dùng riêng số này để quyết định đầu tư mở rộng.</div>` : ''}
     </div>
     <div class="field" style="margin-bottom:0;">
       <label style="font-weight:800;">3. Dự kiến còn bao nhiêu tháng để hoà vốn</label>
-      <div class="hint" style="margin:0;">= (Tổng vốn đã bỏ vào − Lợi nhuận luỹ kế) ÷ Tốc độ thu hồi TB 3 tháng gần nhất</div>
+      <div class="hint" style="margin:0;">= (Tổng vốn đã bỏ vào − Lợi Nhuận Thực Tế cộng dồn) ÷ Tốc độ thu hồi TB 3 tháng gần nhất</div>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <tbody>
@@ -14799,8 +14868,17 @@ function computeBusinessReport(from, to){
   const allShifts = allShiftsCompanyWide();
   const inRange = allShifts.filter(sh=>sh.date>=from && sh.date<=to);
   const cashFlow = computeCumulativeCashFlowBreakdown(to, from);
-  const breakEven = computeBreakEvenDetailed(inRange, cashFlow.roadFee, cashFlow.repairTotal,
-    cashFlow.fixedMonthly, cashFlow.houseRent, cashFlow.utilities);
+  // SỬA 2026-09-08 (Ông Chủ phát hiện — "trừ nhầm gốc vay như chi phí"):
+  // trước đây dùng cashFlow.fixedMonthly (bản TIỀN MẶT, gồm cả GỐC vay)
+  // cho tính Điểm Hoà Vốn/Lợi Nhuận — SAI, vì đây là phép tính ACCRUAL,
+  // gốc vay không phải chi phí. Đổi sang companyWideAccrualFixedMonthly()
+  // (chỉ LÃI vay + khấu hao), và cộng thêm Cầu Đường (khoản
+  // computeBreakEvenDetailed() không có tham số riêng, phải cộng ngoài).
+  const accrualFixedMonthly = companyWideAccrualFixedMonthly(from, to);
+  const breakEvenRaw = computeBreakEvenDetailed(inRange, cashFlow.roadFee, cashFlow.repairTotal,
+    accrualFixedMonthly, cashFlow.houseRent, cashFlow.utilities);
+  const breakEven = { ...breakEvenRaw, fixedCost: breakEvenRaw.fixedCost + cashFlow.tollFee };
+  if(breakEven.marginPerTrip>0) breakEven.breakEvenTrips = Math.ceil(breakEven.fixedCost/breakEven.marginPerTrip);
   const commercialPaymentsInRange = state.sitePayments.filter(p=>p.customerId && p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cargoPaymentsInRange = state.sitePayments.filter(p=>!p.customerId && p.date>=from && p.date<=to).reduce((s,p)=>s+(Number(p.amount)||0),0);
   const equity = computeOwnerEquity();
@@ -14811,14 +14889,16 @@ function computeBusinessReport(from, to){
   // (không truyền from/to riêng, tự lấy đúng Ngày Bắt Đầu Dự Án).
   const allTimeCashFlow = computeCumulativeCashFlowBreakdown();
   const totalCapitalIn = equity.initialInvestment + equity.contributedExtra;
-  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "khấu hao không phải lãi, trừ đi để
-  // biết lãi thật"): dùng lại NGUYÊN computeDepreciationMonthlyHistory()
-  // (đã có sẵn, không tính công thức mới) — cộng dồn khấu hao TỪ ĐÚNG
-  // Ngày Bắt Đầu Dự Án tới hôm nay, y hệt mốc "từ" của allTimeCashFlow,
-  // để 2 số cộng trừ với nhau cho đúng cùng 1 khoảng thời gian.
-  const depreciationHistory = computeDepreciationMonthlyHistory();
-  const cumulativeDepreciation = depreciationHistory.length ? depreciationHistory[depreciationHistory.length-1].cumulative : 0;
-  const trueProfitAfterDepreciation = allTimeCashFlow.total - cumulativeDepreciation;
+  // SỬA 2026-09-08 (Ông Chủ phát hiện lỗi — "trừ nhầm gốc vay ngân hàng
+  // như 1 khoản chi phí"): TRƯỚC ĐÂY tính "lãi thật" bằng cách lấy dòng
+  // tiền mặt (allTimeCashFlow.total, đã lỡ trừ GỐC vay — SAI, gốc vay
+  // không phải chi phí) rồi trừ thêm khấu hao — ra số SAI vì cộng dồn 2
+  // lỗi khác chiều nhau. Đổi hẳn sang computeCumulativeAccrualProfit() —
+  // dùng ĐÚNG công thức accrual y hệt tab Kết Quả (đã trừ khấu hao ĐÚNG
+  // 1 lần, CHỈ trừ LÃI vay, không đụng gốc) — đây mới là số ĐÚNG CHUẨN
+  // trả lời "lãi/lỗ thật" khi bỏ vốn ra.
+  const cumulativeAccrual = computeCumulativeAccrualProfit();
+  const trueProfitAfterDepreciation = cumulativeAccrual.netProfit;
   const charterStatus = computeCharterCapitalStatus();
   const debtSummary = computeAllPartnersDebtSummary();
   const bankRecon = computeBankBalanceReconciliation();
@@ -14828,10 +14908,10 @@ function computeBusinessReport(from, to){
 
   // ---- Nhận định / Gợi ý (ngưỡng số học đơn giản, không AI) ----
   const notes = [];
-  if(allTimeCashFlow.total>=0) notes.push({ ok:true, text:`✅ Cộng dồn CẢ QUÁ TRÌNH đang LÃI TIỀN MẶT ${fmtVND(allTimeCashFlow.total)} so với tổng vốn đã bỏ vào — số này không bị lệch bởi gối đầu thanh toán, nhưng CHƯA trừ hao mòn xe.` });
+  if(allTimeCashFlow.total>=0) notes.push({ ok:true, text:`✅ Cộng dồn CẢ QUÁ TRÌNH đang LÃI TIỀN MẶT ${fmtVND(allTimeCashFlow.total)} so với tổng vốn đã bỏ vào — số này không bị lệch bởi gối đầu thanh toán, nhưng chỉ phản ánh dòng tiền, chưa phải lãi/lỗ kế toán thật.` });
   else notes.push({ ok:false, text:`⚠️ Cộng dồn CẢ QUÁ TRÌNH đang LỖ TIỀN MẶT ${fmtVND(Math.abs(allTimeCashFlow.total))} so với tổng vốn đã bỏ vào — cần xem lại chi phí hoặc tăng sản lượng dài hạn.` });
-  if(trueProfitAfterDepreciation>=0) notes.push({ ok:true, text:`✅ Sau khi trừ hao mòn xe (${fmtVND(cumulativeDepreciation)} luỹ kế), LÃI THẬT SỰ vẫn đang DƯƠNG ${fmtVND(trueProfitAfterDepreciation)} — dự án đang thật sự có lời, không chỉ nhờ tiền mặt chưa tính hao mòn.` });
-  else notes.push({ ok:false, text:`⚠️ Sau khi trừ hao mòn xe (${fmtVND(cumulativeDepreciation)} luỹ kế), LÃI THẬT SỰ đang ÂM ${fmtVND(Math.abs(trueProfitAfterDepreciation))} — dù tiền mặt có thể vẫn dương, thực chất dự án đang lỗ khi tính đủ cả phần xe hao mòn, cần xem lại chiến lược dài hạn.` });
+  if(trueProfitAfterDepreciation>=0) notes.push({ ok:true, text:`✅ LỢI NHUẬN THỰC TẾ cộng dồn (đã trừ khấu hao, không trừ nhầm gốc vay) vẫn đang DƯƠNG ${fmtVND(trueProfitAfterDepreciation)} — dự án đang thật sự có lời đúng chuẩn kế toán.` });
+  else notes.push({ ok:false, text:`⚠️ LỢI NHUẬN THỰC TẾ cộng dồn (đã trừ khấu hao, không trừ nhầm gốc vay) đang ÂM ${fmtVND(Math.abs(trueProfitAfterDepreciation))} — dự án đang lỗ thật khi tính đủ chuẩn kế toán, cần xem lại chiến lược dài hạn.` });
 
   if(breakEven.breakEvenTrips!==null){
     if(breakEven.actualTrips>=breakEven.breakEvenTrips) notes.push({ ok:true, text:`✅ Đã vượt điểm hoà vốn kỳ này: chạy ${breakEven.actualTrips}/${breakEven.breakEvenTrips} chuyến cần để hoà vốn (dư ${breakEven.actualTrips-breakEven.breakEvenTrips} chuyến).` });
@@ -14858,7 +14938,7 @@ function computeBusinessReport(from, to){
   else notes.push({ ok:true, text:`✅ Không có cảnh báo vận hành nào đang treo (giấy tờ/bảo dưỡng/khoản vay/hoá đơn đều ổn).` });
 
   return { from, to, daysInRange, inRange, cashFlow, breakEven, commercialPaymentsInRange, cargoPaymentsInRange,
-    avgTripsPerDay, equity, allTimeCashFlow, totalCapitalIn, cumulativeDepreciation, trueProfitAfterDepreciation, charterStatus, debtSummary, bankRecon, warnings, notes };
+    avgTripsPerDay, equity, allTimeCashFlow, totalCapitalIn, cumulativeAccrual, trueProfitAfterDepreciation, charterStatus, debtSummary, bankRecon, warnings, notes };
 }
 
 function renderBusinessReportPage(from, to){
@@ -14892,18 +14972,18 @@ function renderBusinessReportPage(from, to){
       </div>
 
       <div class="card" style="text-align:center; margin-top:12px; border:2px solid ${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; background:var(--accent-soft);">
-        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">Lãi/Lỗ Thật Sự (đã trừ hao mòn xe)</div>
+        <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">Lợi Nhuận Thực Tế (chuẩn kế toán, đã trừ khấu hao)</div>
         <div class="grid-table-wrap" style="margin-top:10px; text-align:left;">
           <table class="grid-table">
             <tbody>
-              <tr><td>Lãi/lỗ tiền mặt (ở trên)</td><td class="num" style="color:${r.allTimeCashFlow.total>=0?'var(--profit)':'var(--loss)'}">${r.allTimeCashFlow.total>=0?'+':''}${fmtVND(r.allTimeCashFlow.total)}</td></tr>
-              <tr><td>− Khấu hao luỹ kế (xe đã cũ đi bao nhiêu)</td><td class="num" style="color:var(--loss);">−${fmtVND(r.cumulativeDepreciation)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= ${r.trueProfitAfterDepreciation>=0?'Lãi':'Lỗ'} Thật Sự (đã trừ hao mòn)</td><td class="num" style="color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}">${r.trueProfitAfterDepreciation>=0?'+':''}${fmtVND(r.trueProfitAfterDepreciation)}</td></tr>
+              <tr><td>Lợi nhuận gộp cộng dồn (Doanh thu − Chi phí biến đổi)</td><td class="num" style="color:${r.cumulativeAccrual.grossProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(r.cumulativeAccrual.grossProfit)}</td></tr>
+              <tr><td>− Chi phí cố định cộng dồn (gồm khấu hao + LÃI vay, không gồm gốc vay)</td><td class="num" style="color:var(--loss);">−${fmtVND(r.cumulativeAccrual.fixedCost)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= ${r.trueProfitAfterDepreciation>=0?'Lãi':'Lỗ'} Thực Tế cộng dồn</td><td class="num" style="color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}">${r.trueProfitAfterDepreciation>=0?'+':''}${fmtVND(r.trueProfitAfterDepreciation)}</td></tr>
             </tbody>
           </table>
         </div>
         <div style="font-weight:900; font-size:26px; color:${r.trueProfitAfterDepreciation>=0?'var(--profit)':'var(--loss)'}; margin-top:10px;">${r.totalCapitalIn>0 ? (r.trueProfitAfterDepreciation/r.totalCapitalIn*100).toFixed(1) : '0'}% ${r.trueProfitAfterDepreciation>=0?'lãi':'lỗ'} thật trên vốn</div>
-        <div class="hint" style="margin-top:6px;">Trả lời đúng câu: "Bỏ ra ${fmtVND(r.totalCapitalIn)} vào dự án xe, tính cả việc xe cũ đi, Ông Chủ lãi/lỗ thật bao nhiêu?" — khấu hao không phải tiền mặt rời túi, nhưng là giá trị tài sản mất đi thật, nên phải trừ mới ra đúng lãi kinh tế thật.</div>
+        <div class="hint" style="margin-top:6px;">Trả lời đúng câu: "Bỏ ra ${fmtVND(r.totalCapitalIn)} vào dự án xe, Ông Chủ lãi/lỗ thật bao nhiêu?" — đúng chuẩn kế toán: đã trừ khấu hao (hao mòn tài sản thật) và lãi vay, KHÔNG trừ gốc vay (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
       </div>
     </section>
 
@@ -15054,8 +15134,13 @@ function renderCompanyDashboardPage(){
   const eq = computeOwnerEquity();
   const charterStatus = computeCharterCapitalStatus();
   const timeline = computeMonthlyEquityTimeline();
-  const recentRate3 = computeRecentMonthlyRate(timeline, 3);
-  const recentRate6 = computeRecentMonthlyRate(timeline, 6);
+  // SỬA 2026-09-08 (Ông Chủ phát hiện lỗi — "trừ nhầm gốc vay"): tốc độ
+  // thu hồi vốn giờ tính theo TIMELINE ACCRUAL riêng (đã trừ khấu hao,
+  // KHÔNG trừ gốc vay) — KHÁC với `timeline` ở trên (tiền mặt, vẫn giữ
+  // nguyên CHỈ để vẽ biểu đồ "Biến Động Vốn Chủ Sở Hữu", chưa sửa).
+  const accrualTimeline = computeMonthlyAccrualProfitTimeline();
+  const recentRate3 = computeRecentMonthlyRate(accrualTimeline, 3);
+  const recentRate6 = computeRecentMonthlyRate(accrualTimeline, 6);
   const sorted = [...state.ownerEquityEntries].sort((a,b)=>b.date.localeCompare(a.date));
   const breakdown = computeCumulativeCashFlowBreakdown();
   const debtSummary = computeAllPartnersDebtSummary();
@@ -15073,18 +15158,20 @@ function renderCompanyDashboardPage(){
   const bankRecon = computeBankBalanceReconciliation();
 
   let roiHtml = '';
-  // SỬA 2026-09-08 (Ông Chủ yêu cầu "logic lại" — phát hiện qua audit:
-  // trước đây mẫu số chỉ dùng eq.initialInvestment (1,83 tỷ, riêng tiền
-  // xe), trong khi khối "Báo Cáo Kinh Doanh Tổng Hợp" dùng ĐÚNG
-  // initialInvestment + contributedExtra (2,49 tỷ, gồm cả tiền mặt góp
-  // thêm) — 2 chỗ lệch mẫu số ra 2% khác nhau cho cùng 1 câu hỏi. Đổi về
-  // ĐÚNG 1 mẫu số duy nhất, khớp Báo Cáo Kinh Doanh.
+  // SỬA 2026-09-08 (Ông Chủ phát hiện lỗi — "Hiệu Quả Đầu Tư không nên
+  // dùng số tiền mặt vì trừ nhầm gốc vay ngân hàng như 1 khoản chi phí,
+  // gốc vay KHÔNG làm giảm vốn thật — chỉ chuyển tiền mặt thành giảm
+  // nợ"): đổi hẳn từ eq.cumulativeProfit (tiền mặt) sang
+  // computeCumulativeAccrualProfit().netProfit (đúng chuẩn kế toán — đã
+  // trừ khấu hao, CHỈ trừ LÃI vay, không trừ gốc) — đây mới là số ĐÚNG
+  // trả lời "bỏ vốn ra tao lãi/lỗ thật bao nhiêu".
+  const accrualProfit = computeCumulativeAccrualProfit();
   const totalCapitalForROI = eq.initialInvestment + eq.contributedExtra;
   if(totalCapitalForROI>0){
-    const recoveredPercent = Math.max(0, Math.min(100, (eq.cumulativeProfit/totalCapitalForROI)*100));
-    const remainingToRecover = totalCapitalForROI - eq.cumulativeProfit;
+    const recoveredPercent = Math.max(0, Math.min(100, (accrualProfit.netProfit/totalCapitalForROI)*100));
+    const remainingToRecover = totalCapitalForROI - accrualProfit.netProfit;
     let breakEvenLine;
-    if(eq.cumulativeProfit>=totalCapitalForROI){
+    if(accrualProfit.netProfit>=totalCapitalForROI){
       breakEvenLine = `<span style="color:var(--profit);">ĐÃ THU HỒI ĐỦ VỐN ✅</span>`;
     } else if(recentRate3!==null && recentRate3>0){
       breakEvenLine = `còn ~${Math.ceil(remainingToRecover/recentRate3)} tháng (theo nhịp 3 tháng gần nhất)`;
@@ -15094,13 +15181,14 @@ function renderCompanyDashboardPage(){
     roiHtml = `
     <div class="card" style="margin-top:14px;">
       <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🎯 Hiệu Quả Đầu Tư</div>
+      <div class="hint" style="margin:0 0 8px;">Dùng đúng Lợi Nhuận Thực Tế (đã trừ khấu hao, KHÔNG trừ gốc vay ngân hàng — vì gốc vay không phải chi phí, chỉ là chuyển tiền mặt thành giảm nợ).</div>
       <div class="summary-row"><span>Đã thu hồi được</span><span class="val" style="font-weight:800;">${recoveredPercent.toFixed(1)}% tổng vốn đã bỏ vào</span></div>
       <div style="background:var(--border); height:8px; border-radius:4px; overflow:hidden; margin:8px 0 12px 0;">
-        <div style="background:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
+        <div style="background:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
       </div>
-      ${timeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;">⚠️ Mới có ${timeline.length} tháng dữ liệu (tháng gần nhất CHƯA kết thúc), và các tháng đã qua đang biến động mạnh (có tháng lỗ, có tháng lãi) — tốc độ và số tháng dự kiến bên dưới CHỈ mang tính tham khảo ban đầu, ĐỘ TIN CẬY CÒN THẤP. Chưa nên dùng riêng số này để quyết định mua thêm xe/mở rộng — cần theo dõi thêm vài tháng nữa cho ổn định.</div>` : ''}
+      ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu (tháng gần nhất CHƯA kết thúc), và các tháng đã qua đang biến động mạnh (có tháng lỗ, có tháng lãi) — tốc độ và số tháng dự kiến bên dưới CHỈ mang tính tham khảo ban đầu, ĐỘ TIN CẬY CÒN THẤP. Chưa nên dùng riêng số này để quyết định mua thêm xe/mở rộng — cần theo dõi thêm vài tháng nữa cho ổn định.</div>` : ''}
       <div class="summary-row"><span>Tốc độ thu hồi TB 3 tháng gần nhất</span><span class="val">${recentRate3!==null?(recentRate3>=0?'+':'')+fmtVND(recentRate3)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
-      <div class="hint" style="margin:2px 0 0;">Tính bằng: (Lợi nhuận luỹ kế hôm nay − Lợi nhuận luỹ kế đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua (quy đổi tháng) — không đếm khống tháng đang chạy dở thành nguyên 1 tháng.</div>
+      <div class="hint" style="margin:2px 0 0;">Tính bằng: (Lợi Nhuận Thực Tế cộng dồn hôm nay − đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua (quy đổi tháng) — không đếm khống tháng đang chạy dở thành nguyên 1 tháng.</div>
       <div class="summary-row"><span>Tốc độ thu hồi TB 6 tháng gần nhất</span><span class="val">${recentRate6!==null?(recentRate6>=0?'+':'')+fmtVND(recentRate6)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
       <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
       <button class="btn btn-ghost btn-block" id="roiCalcDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
@@ -16141,14 +16229,14 @@ function renderSettings(){
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
       <div style="display:flex; justify-content:flex-end;">
-        <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:800; width:50%; white-space:normal; line-height:1.3;">📄➕ Thêm Giấy Tờ Mới</button>
+        <button class="btn btn-accent" id="addDocumentBtn" style="font-weight:700; font-size:13.5px; width:50%; white-space:normal; line-height:1.3;">Thêm Giấy Tờ Mới</button>
       </div>
     </section>
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
       <div style="display:flex; justify-content:flex-end;">
-        <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:800; width:50%; white-space:normal; line-height:1.3;">🔧➕ Thêm Hạng Mục Bảo Dưỡng</button>
+        <button class="btn btn-accent" id="addMaintenanceBtn" style="font-weight:700; font-size:13.5px; width:50%; white-space:normal; line-height:1.3;">Thêm Hạng Mục Bảo Dưỡng</button>
       </div>
     </section>
 
