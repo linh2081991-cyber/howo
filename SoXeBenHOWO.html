@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #196';
+const APP_BUILD = '2026-09-08 · #198';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2239,7 +2239,17 @@ function computeOwnerEquity(){
   const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
   const cumulativeProfit = computeCumulativeCompanyProfit();
   const contributed = initialInvestment + contributedExtra;
-  return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, equity: contributed - withdrawn + cumulativeProfit };
+  // SỬA 2026-09-08 (Ông Chủ hỏi — "góp 1 tỷ, rút 570tr, sao góp thêm thật
+  // vẫn là 660tr?"): thêm tổng THÔ (gồm cả tiền đảo) + tổng tiền đảo mỗi
+  // chiều, để màn hình hiển thị GIẢI THÍCH RÕ vì sao 2 số lệch nhau —
+  // KHÔNG đổi công thức contributedExtra/withdrawn ở trên (vẫn đúng, chỉ
+  // đang thiếu phần diễn giải minh bạch).
+  const contributedRaw = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnRaw = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const contributedRecycled = contributedRaw - contributedExtra;
+  const withdrawnRecycled = withdrawnRaw - withdrawn;
+  return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, equity: contributed - withdrawn + cumulativeProfit,
+    contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled };
 }
 /// Dựng dãy [{month, equity, cumulativeProfit}] từ THÁNG BẮT ĐẦU DỰ ÁN
 /// tới THÁNG HIỆN TẠI — mỗi điểm là Vốn Chủ Sở Hữu "chốt" tại đúng ngày
@@ -2264,17 +2274,29 @@ function computeMonthlyEquityTimeline(){
     const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
     const cumulativeProfit = computeCumulativeCompanyProfit(snapshotDate);
     const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit;
-    return { month: ym, equity, cumulativeProfit };
+    return { month: ym, equity, cumulativeProfit, snapshotDate };
   });
 }
 /// Tốc độ thu hồi vốn trung bình mỗi tháng, tính từ CHÊNH LỆCH LỢI NHUẬN
 /// LUỸ KẾ trong `windowMonths` tháng gần nhất.
+/// SỬA 2026-09-08 (Ông Chủ phát hiện — "tháng 7 lỗ, tháng 8 lãi, tháng 9
+/// chưa xong, căn cứ nào ra được số này?"): lỗi thật sự tìm thấy — trước
+/// đây chia deltaProfit cho SỐ MỐC THÁNG (window.length-1, ví dụ "2"),
+/// KHÔNG PHẢI số tháng THẬT đã trôi qua. Khi điểm cuối cùng là THÁNG
+/// ĐANG CHẠY DỞ (chưa hết ngày, ví dụ đang giữa tháng 9), đếm nguyên "1
+/// tháng" cho quãng đó là SAI — làm mẫu số bị thổi phồng, khiến tốc độ
+/// thu hồi bị pha loãng thấp hơn thực tế, kéo theo "còn bao nhiêu tháng"
+/// bị phóng đại sai lệch nghiêm trọng. Sửa đúng: chia cho SỐ NGÀY THẬT đã
+/// trôi qua giữa điểm đầu và điểm cuối cửa sổ, quy đổi ra tháng (÷30.44).
 function computeRecentMonthlyRate(timeline, windowMonths){
   if(timeline.length<2) return null;
   const window = timeline.slice(-Math.min(windowMonths+1, timeline.length));
   if(window.length<2) return null;
   const deltaProfit = window[window.length-1].cumulativeProfit - window[0].cumulativeProfit;
-  return deltaProfit / (window.length-1);
+  const daysElapsed = (new Date(window[window.length-1].snapshotDate+'T00:00:00') - new Date(window[0].snapshotDate+'T00:00:00')) / 86400000;
+  const monthsElapsed = daysElapsed / 30.44;
+  if(monthsElapsed<=0) return null;
+  return deltaProfit / monthsElapsed;
 }
 function monthShortLabel(ym){
   const [y,m] = ym.split('-');
@@ -14596,8 +14618,9 @@ function openROICalculationDetail(){
     </div>
     <div class="field">
       <label style="font-weight:800;">2. Tốc độ thu hồi TB 3/6 tháng gần nhất</label>
-      <div class="hint" style="margin:0;">= (Vốn Chủ Sở Hữu tháng gần nhất − Vốn Chủ Sở Hữu N tháng trước) ÷ N tháng — lấy đúng từ biểu đồ "Biến Động Vốn Chủ Sở Hữu Theo Tháng" bên dưới.</div>
+      <div class="hint" style="margin:0;">= (Lợi nhuận luỹ kế hôm nay − Lợi nhuận luỹ kế đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua giữa 2 mốc đó (quy đổi ra tháng, ÷30,44) — KHÔNG đếm khống tháng đang chạy dở (chưa hết ngày) thành nguyên 1 tháng, để không pha loãng sai tốc độ thật.</div>
       ${sameWindowNote}
+      ${timeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:8px 10px; border-radius:8px; margin-top:6px; font-weight:600;">⚠️ Mới có ${timeline.length} tháng dữ liệu, độ tin cậy còn thấp — chưa nên dùng riêng số này để quyết định đầu tư mở rộng.</div>` : ''}
     </div>
     <div class="field" style="margin-bottom:0;">
       <label style="font-weight:800;">3. Dự kiến còn bao nhiêu tháng để hoà vốn</label>
@@ -15075,7 +15098,9 @@ function renderCompanyDashboardPage(){
       <div style="background:var(--border); height:8px; border-radius:4px; overflow:hidden; margin:8px 0 12px 0;">
         <div style="background:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
       </div>
+      ${timeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;">⚠️ Mới có ${timeline.length} tháng dữ liệu (tháng gần nhất CHƯA kết thúc), và các tháng đã qua đang biến động mạnh (có tháng lỗ, có tháng lãi) — tốc độ và số tháng dự kiến bên dưới CHỈ mang tính tham khảo ban đầu, ĐỘ TIN CẬY CÒN THẤP. Chưa nên dùng riêng số này để quyết định mua thêm xe/mở rộng — cần theo dõi thêm vài tháng nữa cho ổn định.</div>` : ''}
       <div class="summary-row"><span>Tốc độ thu hồi TB 3 tháng gần nhất</span><span class="val">${recentRate3!==null?(recentRate3>=0?'+':'')+fmtVND(recentRate3)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
+      <div class="hint" style="margin:2px 0 0;">Tính bằng: (Lợi nhuận luỹ kế hôm nay − Lợi nhuận luỹ kế đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua (quy đổi tháng) — không đếm khống tháng đang chạy dở thành nguyên 1 tháng.</div>
       <div class="summary-row"><span>Tốc độ thu hồi TB 6 tháng gần nhất</span><span class="val">${recentRate6!==null?(recentRate6>=0?'+':'')+fmtVND(recentRate6)+'/tháng':'Chưa đủ dữ liệu'}</span></div>
       <div class="summary-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
       <button class="btn btn-ghost btn-block" id="roiCalcDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
@@ -15124,17 +15149,40 @@ function renderCompanyDashboardPage(){
 
       <div class="grid-table-wrap" style="margin-top:12px; margin-bottom:8px;">
         <table class="grid-table">
-          <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+          <thead><tr><th style="color:var(--ink); font-weight:800;">Khoản mục</th><th class="num" style="color:var(--ink); font-weight:800;">Số tiền</th></tr></thead>
           <tbody>
             <tr><td>Vốn đầu tư ban đầu (mua xe)</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
-            <tr><td>+ Đã góp thêm sau này</td><td class="num" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</td></tr>
-            <tr><td>− Đã rút ra</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</td></tr>
+            <tr><td>+ Đã góp thêm sau này (tiền thật)</td><td class="num" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</td></tr>
+            <tr><td>− Đã rút ra (tiền thật)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">+ Lợi nhuận luỹ kế</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">Vốn đầu tư ban đầu + Đã góp thêm − Đã rút + Lợi nhuận luỹ kế (Dòng Tiền Thuần cộng dồn từ ngày bắt đầu dự án tới hôm nay). Số DƯƠNG = xe đang giữ/sinh thêm đúng phần đó cho Ông Chủ. Số ÂM = xe đang "ăn" vào đúng phần vốn đã bỏ vào, dù từng kỳ riêng lẻ vẫn có lãi.</div>
-      <button class="btn btn-ghost btn-block" id="cashFlowLedgerBtn" style="margin-top:10px;">📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra</button>
+      ${(eq.contributedRecycled>0.5 || eq.withdrawnRecycled>0.5) ? `
+      <div class="card" style="margin-bottom:8px;">
+        <div style="font-weight:800; font-size:12.5px; margin-bottom:8px;">🔄 Vì sao "tiền thật" ở trên KHÁC với tổng góp/rút trong Sao Kê?</div>
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <tbody>
+              <tr><td>Tổng đã góp (kể cả tiền đảo, khớp Sao Kê)</td><td class="num">${fmtVND(eq.contributedRaw)}</td></tr>
+              <tr><td>− Trong đó là tiền đảo (không phải tiền mới)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.contributedRecycled)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= Đã góp thêm THẬT (dùng ở bảng trên)</td><td class="num" style="color:var(--profit);">${fmtVND(eq.contributedExtra)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-table-wrap" style="margin-top:10px;">
+          <table class="grid-table">
+            <tbody>
+              <tr><td>Tổng đã rút (kể cả tiền đảo, khớp Sao Kê)</td><td class="num">${fmtVND(eq.withdrawnRaw)}</td></tr>
+              <tr><td>− Trong đó là tiền đảo (rút ra rồi góp lại ngay)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawnRecycled)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= Đã rút THẬT (dùng ở bảng trên)</td><td class="num" style="color:var(--loss);">${fmtVND(eq.withdrawn)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="hint" style="margin-top:8px;">"Tiền đảo" = những lần Ông Chủ chuyển tiền vào rồi rút ra (hoặc ngược lại) chỉ để đủ hồ sơ Vốn Điều Lệ trên giấy tờ, KHÔNG phải tiền mới bỏ thêm vào công ty hay tiền rút thật ra khỏi công ty — nên KHÔNG tính vào Vốn Chủ Sở Hữu thật, dù vẫn hiện đủ trong Sao Kê Toàn Bộ Dòng Tiền (vì đó là tiền ngân hàng thật đã di chuyển).</div>
+      </div>
+      ` : ''}
+      <button class="btn btn-ghost btn-block" id="cashFlowLedgerBtn" style="margin-top:2px;">📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra</button>
 
       ${roiHtml}
 
@@ -15501,6 +15549,7 @@ function computeCompanyCashFlowLedger(){
 function renderCompanyCashFlowLedgerPage(){
   scrollMainToTop();
   const entries = computeCompanyCashFlowLedger();
+  const cashFlowBreakdown = computeCumulativeCashFlowBreakdown();
   const totalFromCustomers = state.sitePayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const totalContributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const totalToSuppliersNet = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
@@ -15569,6 +15618,26 @@ function renderCompanyCashFlowLedgerPage(){
             <tr><td>🏦 Ông Chủ góp vốn</td><td class="num" style="color:var(--profit);">+${fmtVND(totalContributed)}</td></tr>
             <tr><td>⛏️ Đã trả nhà cung cấp (mỏ), đã trừ phần mỏ hoàn lại</td><td class="num" style="color:${totalToSuppliersNet>=0?'var(--loss)':'var(--profit)'};">${totalToSuppliersNet>=0?'−':'+'}${fmtVND(Math.abs(totalToSuppliersNet))}</td></tr>
             <tr><td>⬇️ Ông Chủ đã rút vốn</td><td class="num" style="color:var(--loss);">−${fmtVND(totalWithdrawn)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🧮 Cách Tính Ra Lợi Nhuận Luỹ Kế</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Tính lại MỖI LẦN mở trang này — luôn khớp dữ liệu mới nhất.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>+ Tiền khách chuyển vào</td><td class="num" style="color:var(--profit);">+${fmtVND(cashFlowBreakdown.cashIn)}</td></tr>
+            <tr><td>− Tiền chuyển cho mỏ</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.cashOutToSuppliers)}</td></tr>
+            <tr><td>− Chi phí vận hành</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.operatingCashCost)}</td></tr>
+            <tr><td>− Sửa chữa</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.repairTotal)}</td></tr>
+            <tr><td>− Luật đường + Nhà/Điện + Cầu đường</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.roadFee+cashFlowBreakdown.houseRent+cashFlowBreakdown.utilities+cashFlowBreakdown.tollFee)}</td></tr>
+            <tr><td>− Gốc+Lãi vay + Bảo hiểm + Đăng kiểm</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.fixedMonthly)}</td></tr>
+            <tr><td>− Mua Lô Hoá Đơn Bù</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.invoiceLotCashOut)}</td></tr>
+            <tr><td>− Tạm ứng lương tài xế</td><td class="num" style="color:var(--loss);">−${fmtVND(cashFlowBreakdown.advanceCashOut)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= ${cashFlowBreakdown.total>=0?'Lãi':'Lỗ'} tiền mặt tính đến hôm nay (Lợi Nhuận Luỹ Kế)</td><td class="num" style="color:${cashFlowBreakdown.total>=0?'var(--profit)':'var(--loss)'}">${cashFlowBreakdown.total>=0?'+':''}${fmtVND(cashFlowBreakdown.total)}</td></tr>
           </tbody>
         </table>
       </div>
