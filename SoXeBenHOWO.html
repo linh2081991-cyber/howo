@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #204';
+const APP_BUILD = '2026-09-08 · #205';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14692,6 +14692,8 @@ function openLoanEditor(loanId){
 /// (computeOwnerEquity(), computeRecentMonthlyRate()), không tính công
 /// thức mới, chỉ trình bày lại từng bước cho rõ.
 function openROICalculationDetail(){
+  saveMainScroll();
+  scrollMainToTop();
   const eq = computeOwnerEquity();
   const accrualProfit = computeCumulativeAccrualProfit();
   const accrualTimeline = computeMonthlyAccrualProfitTimeline();
@@ -14703,22 +14705,27 @@ function openROICalculationDetail(){
   const sameWindowNote = (recentRate3!==null && recentRate6!==null && recentRate3===recentRate6)
     ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${accrualTimeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
     : '';
-  // SỬA 2026-09-08 LẦN 2 (Ông Chủ hỏi tiếp — "tính dựa trên dữ liệu nào,
-  // tab Kết Quả không thấy"): accrualTimeline giờ đã tính TRỰC TIẾP từng
-  // tháng (không suy ra bằng phép trừ nữa) — dùng thẳng luôn, và hiện đủ
-  // Doanh thu/Lợi nhuận gộp/Chi phí cố định để đối chiếu 1-1 với tab Kết
-  // Quả khi Ông Chủ tự chọn đúng tháng đó.
   const monthlyBreakdown = accrualTimeline.map(t=>({
     month: t.month, amount: t.monthlyProfit, totalRevenue: t.totalRevenue,
     grossProfit: t.grossProfit, fixedCost: t.fixedCost,
     isPartial: t.snapshotDate < `${t.month}-${String(daysInMonth(`${t.month}-01`)).padStart(2,'0')}`
   }));
-  openModal(`
-    <h3>📖 Chi Tiết Cách Tính — Hiệu Quả Đầu Tư</h3>
-    <div class="hint" style="margin-top:0;">Dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) — KHÔNG dùng tiền mặt, vì tiền mặt trừ nhầm gốc vay ngân hàng như 1 khoản chi phí (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
-    <div class="field">
-      <label style="font-weight:800;">0. Lợi Nhuận Thực Tế từng tháng</label>
-      <div class="hint" style="margin:0;">Mỗi tháng tính ĐỘC LẬP (đúng từ ngày 1 tới cuối tháng đó, hoặc hôm nay nếu chưa hết) — Y HỆT cách tab Kết Quả tính khi tự chọn đúng tháng đó, nên đối chiếu được trực tiếp từng dòng.</div>
+  // SỬA 2026-09-08 LẦN 4 (yêu cầu Ông Chủ — "cho trang này thành 1 trang
+  // sạch đẹp, rõ ràng"): chuyển hẳn từ modal (cửa sổ nhỏ, bảng bị cắt chữ
+  // 2 bên) sang TRANG RIÊNG toàn màn hình, giống mọi trang chi tiết khác
+  // trong app — bảng đủ chỗ hiện hết, không còn bị che số.
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="roiCalcBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📖 Chi Tiết Cách Tính — Hiệu Quả Đầu Tư</h2>
+      <div class="hint" style="margin-top:0;">Dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) — KHÔNG dùng tiền mặt, vì tiền mặt trừ nhầm gốc vay ngân hàng như 1 khoản chi phí (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
+    </section>
+    <section class="group">
+      <h3>0. Lợi Nhuận Thực Tế từng tháng</h3>
+      <div class="hint" style="margin-top:0;">Mỗi tháng tính ĐỘC LẬP (đúng từ ngày 1 tới cuối tháng đó, hoặc hôm nay nếu chưa hết) — Y HỆT cách tab Kết Quả tính khi tự chọn đúng tháng đó, nên đối chiếu được trực tiếp từng dòng.</div>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <thead><tr><th>Tháng</th><th class="num">Doanh thu</th><th class="num">LN Gộp</th><th class="num">CP Cố Định</th><th class="num">LN Thực Tế</th></tr></thead>
@@ -14735,20 +14742,10 @@ function openROICalculationDetail(){
         </table>
       </div>
       <div class="hint" style="margin-top:8px;">So sánh trực tiếp: vào tab Kết Quả → chọn đúng tháng này → xem dòng "Tổng doanh thu" và "LỢI NHUẬN THỰC TẾ" — phải khớp đúng 2 cột tương ứng ở bảng trên. Nếu lệch, chụp cả 2 màn hình gửi lại để tra tiếp.</div>
-    </div>
-    <div class="field" style="display:none;">
-      <div class="grid-table-wrap" style="margin-top:8px;">
-        <table class="grid-table">
-          <thead><tr><th>Tháng</th><th class="num">Lợi Nhuận Thực Tế</th></tr></thead>
-          <tbody>
-            <tr class="grid-total-row"><td style="text-align:left;">TỔNG CỘNG DỒN</td><td class="num" style="color:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}">${accrualProfit.netProfit>=0?'+':''}${fmtVND(accrualProfit.netProfit)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="field">
-      <label style="font-weight:800;">1. Đã thu hồi được (%)</label>
-      <div class="hint" style="margin:0;">= Lợi Nhuận Thực Tế cộng dồn ÷ Tổng vốn đã bỏ vào × 100%</div>
+    </section>
+    <section class="group">
+      <h3>1. Đã thu hồi được (%)</h3>
+      <div class="hint" style="margin-top:0;">= Lợi Nhuận Thực Tế cộng dồn ÷ Tổng vốn đã bỏ vào × 100%</div>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <tbody>
@@ -14758,9 +14755,9 @@ function openROICalculationDetail(){
           </tbody>
         </table>
       </div>
-    </div>
-    <div class="field">
-      <label style="font-weight:800;">2. Tốc độ thu hồi TB 3/6 tháng gần nhất</label>
+    </section>
+    <section class="group">
+      <h3>2. Tốc độ thu hồi TB 3/6 tháng gần nhất</h3>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <tbody>
@@ -14772,10 +14769,10 @@ function openROICalculationDetail(){
       <div class="hint" style="margin-top:6px;">= (Lợi Nhuận Thực Tế cộng dồn hôm nay − đầu cửa sổ) ÷ SỐ NGÀY THẬT đã trôi qua giữa 2 mốc đó (quy đổi ra tháng, ÷30,44) — KHÔNG đếm khống tháng đang chạy dở (chưa hết ngày) thành nguyên 1 tháng, để không pha loãng sai tốc độ thật.</div>
       ${sameWindowNote}
       ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:8px 10px; border-radius:8px; margin-top:6px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu, độ tin cậy còn thấp — chưa nên dùng riêng số này để quyết định đầu tư mở rộng.</div>` : ''}
-    </div>
-    <div class="field" style="margin-bottom:0;">
-      <label style="font-weight:800;">3. Dự kiến còn bao nhiêu tháng để hoà vốn</label>
-      <div class="hint" style="margin:0;">= (Tổng vốn đã bỏ vào − Lợi Nhuận Thực Tế cộng dồn) ÷ Tốc độ thu hồi TB 3 tháng gần nhất</div>
+    </section>
+    <section class="group">
+      <h3>3. Dự kiến còn bao nhiêu tháng để hoà vốn</h3>
+      <div class="hint" style="margin-top:0;">= (Tổng vốn đã bỏ vào − Lợi Nhuận Thực Tế cộng dồn) ÷ Tốc độ thu hồi TB 3 tháng gần nhất</div>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <tbody>
@@ -14786,10 +14783,9 @@ function openROICalculationDetail(){
         </table>
       </div>
       <div class="hint" style="margin-top:8px;">Đây là ước tính DỰA THEO NHỊP GẦN NHẤT, không phải cam kết — nếu sản lượng/chi phí thay đổi, số tháng này sẽ tự cập nhật lại theo đúng nhịp mới mỗi lần Ông Chủ mở lại trang này.</div>
-    </div>
-    <button class="btn btn-accent btn-block" id="roiCalcCloseBtn" style="margin-top:14px;">Đã Hiểu</button>
-  `);
-  document.getElementById('roiCalcCloseBtn').addEventListener('click', closeModal);
+    </section>
+  `;
+  document.getElementById('roiCalcBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 function renderLoanList(){
   const wrap = document.getElementById('loanListWrap');
