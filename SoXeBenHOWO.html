@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #206';
+const APP_BUILD = '2026-09-08 · #207';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2212,7 +2212,24 @@ function computeCumulativeAccrualProfit(toOverride, fromOverride){
   // LUÔN trừ khoản này cùng với Giá vốn hàng mua. Cộng thêm ở đây, đúng
   // 1 lần, không đụng gì tới computeBreakEvenDetailed() gốc (vẫn dùng cho
   // Điểm Hoà Vốn theo đúng mục đích riêng của nó, không đổi).
-  const invoiceSupplementCost = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  // SỬA 2026-09-08 LẦN 5 (Ông Chủ đối chiếu tiếp — bảng debug lộ ra CẢ 3
+  // THÁNG ĐỀU RA 0đ): bắt được lỗi thật SÂU HƠN — shiftInvoiceSupplementCost()
+  // → siteInvoiceLotBreakdown() → siteGoodsTypeGroups() → findSiteLogContext()
+  // tìm lại ca chứa đúng site log bằng SO KHỚP THAM CHIẾU OBJECT
+  // (indexOf), và CHỈ tìm trong allShiftsForLedger() = state.shifts (xe
+  // đang mở). `inRange` ở trên tới từ allShiftsCompanyWide(), đi qua 1
+  // lớp Object.assign() sao chép qua allVehiclesShifts — nếu lớp cache
+  // này không còn giữ ĐÚNG cùng tham chiếu object với state.shifts hiện
+  // tại (rất dễ xảy ra do Firestore nạp lại), findSiteLogContext() lặng
+  // lẽ trả về null → tính thiếu, ra 0đ SAI. Sửa: dùng thẳng
+  // allShiftsForLedger() (chính là state.shifts, CHẮC CHẮN cùng tham
+  // chiếu) cho riêng phép tính này — đúng phạm vi hiện tại vì công ty
+  // mới có đúng 1 xe (nếu sau này có nhiều xe, khoản này vẫn chỉ tính
+  // đúng được cho xe đang mở, đúng giới hạn sẵn có của hệ thống khớp hoá
+  // đơn gốc — KHÔNG phải lỗi do sửa lần này gây ra).
+  const invoiceSupplementCost = allShiftsForLedger()
+    .filter(sh=>sh.date>=from && sh.date<=to)
+    .reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
   const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
   const netProfit = grossProfit - breakEven.fixedCost - tollFee;
   return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, invoiceSupplementCost, netProfit };
