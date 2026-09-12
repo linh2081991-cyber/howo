@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #209';
+const APP_BUILD = '2026-09-08 · #210';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2246,6 +2246,37 @@ function computeCumulativeAccrualProfit(toOverride, fromOverride){
   const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
   const netProfit = grossProfit - breakEven.fixedCost - tollFee;
   return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, invoiceSupplementCost, netProfit };
+}
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — chuẩn bị thêm xe: "Kết quả trong
+/// Linh Chí Thành lập bảng từng xe, sau đó hiện bảng cộng tổng"): bản
+/// TÁCH RIÊNG 1 XE của computeCumulativeAccrualProfit() ở trên — CHỈ
+/// gồm những khoản THẬT SỰ thuộc riêng xe đó (doanh thu, vận hành biến
+/// đổi, hoá đơn bù, sửa chữa, luật đường, khấu hao+lãi vay+bảo hiểm+đăng
+/// kiểm — tất cả đọc đúng từ allVehiclesRepairs/allVehiclesRoadFee/
+/// allVehiclesSettings[vid], không lẫn xe khác). CỐ Ý KHÔNG gồm Nhà/Điện/
+/// Cầu Đường — 3 khoản này CHUNG CÔNG TY, không thuộc riêng xe nào, chia
+/// đều/áng chừng cho từng xe sẽ không còn là số CHUẨN XÁC 100% như Ông
+/// Chủ yêu cầu — 3 khoản này hiện riêng 1 lần duy nhất ở dòng TỔNG khi
+/// gộp nhiều xe lại (xem renderPerVehicleResultsPage), cộng đúng khớp lại
+/// sẽ ra ĐÚNG BẰNG computeCumulativeAccrualProfit() ở trên — tự đối
+/// chiếu được, không thể lệch nhau.
+function computeVehicleAccrualProfit(vid, from, to){
+  const shifts = allShiftsCompanyWide().filter(sh=>sh._vehicleId===vid && sh.date>=from && sh.date<=to);
+  const s = state.allVehiclesSettings[vid] || defaultSettingsShape();
+  const roadFeeList = state.allVehiclesRoadFee[vid] || [];
+  const roadFee = fullMonthlyCostIfTouched(ym=>{
+    const e = roadFeeList.find(x=>x.month===ym);
+    return e ? (Number(e.amount)||0) : 0;
+  }, from, to);
+  const repairTotal = (state.allVehiclesRepairs[vid]||[]).filter(r=>r.date>=from && r.date<=to).reduce((sum,r)=>sum+(Number(r.amount)||0),0);
+  const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0);
+  const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  const accrualFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
+  const breakEven = computeBreakEvenDetailed(shifts, roadFee, repairTotal, accrualFixedMonthly, 0, 0);
+  const invoiceSupplementCost = shifts.reduce((sum,sh)=>sum+shiftInvoiceSupplementCost(sh),0);
+  const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
+  const netProfit = grossProfit - breakEven.fixedCost;
+  return { totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost, invoiceSupplementCost, netProfit, tripCount: shifts.length };
 }
 // ================= 2026-08-15/18: SỔ VỐN CHỦ SỞ HỮU + DỰ ÁN ĐẦU TƯ XE =================
 /// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
@@ -3900,6 +3931,7 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
           <span class="val" style="font-weight:800; color:${enough?'var(--profit)':'var(--loss)'};">${enough?fmtQty(totalRemaining-demand.totalMissing)+' khối dư':fmtQty(demand.totalMissing-totalRemaining)+' khối thiếu'}</span>
         </div>
         <button class="btn btn-ghost btn-sm" id="lotFullDetailScrollToLotsBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🔍 Chi Tiết (từng lô đã mua + từng lần rút)</button>
+        <button class="btn btn-ghost btn-sm" id="lotFullDetailVehicleSummaryBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🚛 Tổng Hợp Theo Xe</button>
       </div>
       ${(()=>{
         const combined = withLedgerReportMode(()=>combinedStockOverview(goodsType, from, to));
@@ -3982,6 +4014,10 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
     saveMainScroll();
     renderWarehouseDrawHistoryPage(goodsType, from, to);
   });
+  document.getElementById('lotFullDetailVehicleSummaryBtn').addEventListener('click', ()=>{
+    saveMainScroll();
+    renderInvoiceLotVehicleSummaryPage(goodsType, from, to);
+  });
   document.getElementById('lotFullDetailCombinedDetailBtn').addEventListener('click', ()=>{
     saveMainScroll();
     renderCombinedStockDetailPage(goodsType, from, to);
@@ -3989,6 +4025,78 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
   document.querySelectorAll('[data-open-lot]').forEach(el=>{
     el.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(el.dataset.openLot); });
   });
+}
+
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — chuẩn bị thêm xe: "Kho hàng hoá đơn
+/// phải chia ô rõ đã xuất cho những xe nào, xuất như thế nào phải thống
+/// kê thật chi tiết"): trang riêng, gộp mọi lần rút kho MUA BÙ (loại trừ
+/// phần rút từ hoá đơn thật/phần thiếu hụt — 2 khoản đó không phải "đã
+/// xuất từ kho") trong khoảng đang xem, THEO TỪNG XE. Tính TRỰC TIẾP từng
+/// site log qua siteInvoiceLotBreakdown(s, {sh,idx}) — truyền thẳng ngữ
+/// cảnh (đúng bản sửa "kho hoá đơn bù là kho chung, không phân biệt xe"),
+/// nên đúng cho BAO NHIÊU XE CŨNG ĐƯỢC, không giới hạn 1 xe như trước.
+function renderInvoiceLotVehicleSummaryPage(goodsType, from, to){
+  scrollMainToTop();
+  const gt = normGoodsType(goodsType);
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const allSh = allShiftsCompanyWide().filter(sh=>sh.date>=from && sh.date<=to);
+  const byVehicle = {};
+  allSh.forEach(sh=>{
+    const vName = vehicleNameById(sh._vehicleId);
+    let shiftDrew = false;
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      if(s.siteType!=='commercial') return;
+      const brk = siteInvoiceLotBreakdown(s, {sh, idx});
+      brk.allocations.filter(a=>normGoodsType(a.goodsType)===gt && invoiceLotById(a.lotId)).forEach(a=>{
+        if(!byVehicle[vName]) byVehicle[vName] = { volume:0, cost:0, vat:0, shifts:0 };
+        byVehicle[vName].volume += a.volume;
+        byVehicle[vName].cost += a.cost;
+        byVehicle[vName].vat += a.vat;
+        shiftDrew = true;
+      });
+    });
+    if(shiftDrew){ if(!byVehicle[vName]) byVehicle[vName]={volume:0,cost:0,vat:0,shifts:0}; byVehicle[vName].shifts++; }
+  });
+  const vehicleNames = Object.keys(byVehicle).sort((a,b)=>byVehicle[b].cost-byVehicle[a].cost);
+  const totalVolume = vehicleNames.reduce((s,v)=>s+byVehicle[v].volume,0);
+  const totalCost = vehicleNames.reduce((s,v)=>s+byVehicle[v].cost,0);
+  const totalVat = vehicleNames.reduce((s,v)=>s+byVehicle[v].vat,0);
+  const totalShifts = vehicleNames.reduce((s,v)=>s+byVehicle[v].shifts,0);
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="lotVehicleSummaryBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🚛 Tổng Hợp Theo Xe — ${escapeHtml(goodsType)}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Khoảng ngày: ${formatDateVN(from)} → ${formatDateVN(to)} — chỉ tính phần ĐÃ RÚT THẬT từ lô mua bù (không gồm phần rút từ hoá đơn thật từ mỏ, không gồm phần còn thiếu hụt chưa có lô để rút).</div>
+      ${vehicleNames.length===0 ? '<div class="hint">Chưa có xe nào rút kho loại hàng này trong khoảng đang xem.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Xe</th><th class="num">Số Ca Có Rút</th><th class="num">Khối Đã Rút</th><th class="num">Chi Phí Mua Hoá Đơn Bù</th><th class="num">VAT Được Khấu Trừ</th></tr></thead>
+          <tbody>
+            ${vehicleNames.map(v=>`<tr>
+              <td style="font-weight:700;">🚛 ${escapeHtml(v)}</td>
+              <td class="num">${byVehicle[v].shifts}</td>
+              <td class="num">${fmtQty(byVehicle[v].volume)}</td>
+              <td class="num" style="color:var(--loss);">${fmtVND(byVehicle[v].cost)}</td>
+              <td class="num" style="color:var(--profit);">${fmtVND(byVehicle[v].vat)}</td>
+            </tr>`).join('')}
+            <tr class="grid-total-row">
+              <td style="text-align:left;">TỔNG CỘNG</td>
+              <td class="num">${totalShifts}</td>
+              <td class="num">${fmtQty(totalVolume)}</td>
+              <td class="num">${fmtVND(totalCost)}</td>
+              <td class="num">${fmtVND(totalVat)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      `}
+    </section>
+  `;
+  document.getElementById('lotVehicleSummaryBackBtn').addEventListener('click', ()=>{ renderInvoiceLotFullDetailPage(goodsType, from, to); restoreMainScroll(); });
 }
 
 /// Trang Chi Tiết cho "Tồn Kho Tổng Hợp" (2026-08-22, yêu cầu Ông Chủ: "1
@@ -15264,6 +15372,108 @@ function renderBusinessReportPage(from, to){
   });
 }
 
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — chuẩn bị thêm xe: "Kết quả trong
+/// Linh Chí Thành lập bảng từng xe, sau đó hiện bảng cộng tổng"): trang
+/// riêng, dùng LẠI NGUYÊN bộ lọc kỳ (Tháng này/Từ đầu dự án/Tuỳ chỉnh)
+/// y hệt Báo Cáo Kinh Doanh Tổng Hợp — mỗi xe 1 bảng riêng (đúng số THẬT
+/// thuộc về xe đó), cuối cùng cộng lại thành 1 bảng TỔNG có cộng thêm
+/// đúng 1 lần Nhà/Điện/Cầu Đường (chung công ty) — dòng TỔNG này PHẢI
+/// khớp tuyệt đối với computeCumulativeAccrualProfit() (đã hiện ở "Hiệu
+/// Quả Đầu Tư"), tự đối chiếu ngay trên trang để Ông Chủ luôn kiểm tra
+/// được, không phải tin suông.
+function renderPerVehicleResultsPage(from, to){
+  scrollMainToTop();
+  const vehicles = state.vehicles;
+  const perVehicle = vehicles.map(v=>({ vehicle: v, r: computeVehicleAccrualProfit(v.id, from, to) }));
+  const sharedCost = houseRentForRange(from, to) + utilitiesForRange(from, to) + tollFeeForRange(from, to);
+  const sumRevenue = perVehicle.reduce((s,pv)=>s+pv.r.totalRevenue,0);
+  const sumGross = perVehicle.reduce((s,pv)=>s+pv.r.grossProfit,0);
+  const sumFixed = perVehicle.reduce((s,pv)=>s+pv.r.fixedCost,0);
+  const sumNetBeforeShared = perVehicle.reduce((s,pv)=>s+pv.r.netProfit,0);
+  const totalNetProfit = sumNetBeforeShared - sharedCost;
+  // Đối chiếu chéo — PHẢI khớp tuyệt đối với computeCumulativeAccrualProfit()
+  const companyWide = computeCumulativeAccrualProfit(to, from);
+  const matches = Math.abs(totalNetProfit - companyWide.netProfit) < 1;
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="perVehicleBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🚛 Kết Quả Từng Xe</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Mỗi xe chỉ mang đúng số THẬT thuộc riêng nó — Nhà/Điện/Cầu Đường là chi phí CHUNG công ty, không chia áng chừng cho xe nào, hiện riêng ở bảng Tổng bên dưới.</div>
+      <div class="seg" id="pvReportPreset">
+        <button data-val="month">Tháng này</button>
+        <button data-val="all">Từ đầu dự án</button>
+      </div>
+      <div class="two-col" style="margin-top:10px;">
+        <div class="field"><label>Từ ngày</label><input type="date" id="pvFrom" value="${from}"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="pvTo" value="${to}"></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="pvApplyBtn">Xem Giai Đoạn Này</button>
+    </section>
+    ${perVehicle.map(pv=>`
+    <section class="group">
+      <h3>🚛 ${escapeHtml(pv.vehicle.name||pv.vehicle.plate)}</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Doanh thu</td><td class="num">${fmtVND(pv.r.totalRevenue)}</td></tr>
+            <tr><td>LN Gộp (đã trừ giá vốn hàng + hoá đơn bù + vận hành biến đổi)</td><td class="num">${fmtVND(pv.r.grossProfit)}</td></tr>
+            <tr><td>− CP Cố Định riêng xe (sửa chữa, luật đường, khấu hao, lãi vay, bảo hiểm, đăng kiểm)</td><td class="num" style="color:var(--loss);">−${fmtVND(pv.r.fixedCost)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= LN Thực Tế riêng xe (chưa trừ CP chung công ty)</td><td class="num" style="color:${pv.r.netProfit>=0?'var(--profit)':'var(--loss)'}">${pv.r.netProfit>=0?'+':''}${fmtVND(pv.r.netProfit)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">${pv.r.tripCount} ca trong kỳ.</div>
+    </section>
+    `).join('')}
+    <section class="group">
+      <h3>💰 TỔNG CỘNG TOÀN CÔNG TY</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Tổng doanh thu (mọi xe)</td><td class="num">${fmtVND(sumRevenue)}</td></tr>
+            <tr><td>Tổng LN Gộp (mọi xe)</td><td class="num">${fmtVND(sumGross)}</td></tr>
+            <tr><td>− Tổng CP Cố Định riêng từng xe</td><td class="num" style="color:var(--loss);">−${fmtVND(sumFixed)}</td></tr>
+            <tr><td>= Tổng LN Thực Tế riêng từng xe (cộng lại)</td><td class="num">${fmtVND(sumNetBeforeShared)}</td></tr>
+            <tr><td>− Nhà/Điện/Cầu Đường (chi phí CHUNG công ty, không riêng xe nào)</td><td class="num" style="color:var(--loss);">−${fmtVND(sharedCost)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= LỢI NHUẬN THỰC TẾ TOÀN CÔNG TY</td><td class="num" style="color:${totalNetProfit>=0?'var(--profit)':'var(--loss)'}">${totalNetProfit>=0?'+':''}${fmtVND(totalNetProfit)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px; color:${matches?'var(--profit)':'var(--loss)'}; font-weight:${matches?'400':'700'};">${matches ? '✅ Đã tự đối chiếu — khớp tuyệt đối với số ở "Hiệu Quả Đầu Tư".' : '⚠️ LỆCH với số ở "Hiệu Quả Đầu Tư" ('+fmtVND(companyWide.netProfit)+') — báo lại ngay cho tao kiểm tra.'}</div>
+    </section>
+  `;
+  document.getElementById('perVehicleBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('pvApplyBtn').addEventListener('click', ()=>{
+    const f = document.getElementById('pvFrom').value;
+    const t = document.getElementById('pvTo').value;
+    if(!f || !t){ showToast('Chọn đủ Từ ngày và Đến ngày.'); return; }
+    if(f>t){ showToast('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
+    saveMainScroll();
+    renderPerVehicleResultsPage(f, t);
+    restoreMainScroll();
+  });
+  document.querySelectorAll('#pvReportPreset button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#pvReportPreset button').forEach(b=>b.classList.toggle('active', b===btn));
+      if(btn.dataset.val==='month'){
+        const mr=currentMonthRange();
+        showToast('Đang xem: Tháng này.');
+        saveMainScroll(); renderPerVehicleResultsPage(mr.from, mr.to); restoreMainScroll();
+      } else if(btn.dataset.val==='all'){
+        const allShifts = allShiftsCompanyWide();
+        const earliest = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : todayLocalDateStr();
+        const start = state.equityProjectInfo.startDate || earliest;
+        showToast('Đang xem: Từ đầu dự án tới hôm nay.');
+        saveMainScroll(); renderPerVehicleResultsPage(start, todayLocalDateStr()); restoreMainScroll();
+      }
+    });
+  });
+}
 function renderCompanyDashboardPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
@@ -15336,7 +15546,8 @@ function renderCompanyDashboardPage(){
       <h2 style="margin-bottom:2px;">🏢 LINH CHÍ THÀNH</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">Dự Án Đầu Tư Xe — Toàn Công Ty, không tách riêng theo xe</div>
 
-      <button class="btn btn-accent btn-block" id="openBizReportBtn" style="font-size:15.5px; padding:14px; margin-bottom:14px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</button>
+      <button class="btn btn-accent btn-block" id="openBizReportBtn" style="font-size:15.5px; padding:14px; margin-bottom:10px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</button>
+      <button class="btn btn-ghost btn-block" id="openPerVehicleBtn" style="margin-bottom:14px;">🚛 Kết Quả Từng Xe</button>
 
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
@@ -15720,6 +15931,12 @@ function renderCompanyDashboardPage(){
     const mr = currentMonthRange();
     saveMainScroll();
     renderBusinessReportPage(mr.from, mr.to);
+    restoreMainScroll();
+  });
+  document.getElementById('openPerVehicleBtn').addEventListener('click', ()=>{
+    const mr = currentMonthRange();
+    saveMainScroll();
+    renderPerVehicleResultsPage(mr.from, mr.to);
     restoreMainScroll();
   });
   document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
