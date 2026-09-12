@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #203';
+const APP_BUILD = '2026-09-08 · #204';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2190,7 +2190,7 @@ function companyWideAccrualFixedMonthly(from, to){
 /// cộng dồn), để đối chiếu 1-1 với tab Kết Quả khi cần kiểm tra.
 function computeCumulativeAccrualProfit(toOverride, fromOverride){
   const allShifts = allShiftsCompanyWide();
-  const empty = { from:null, to:null, totalRevenue:0, grossProfit:0, fixedCost:0, tollFee:0, netProfit:0 };
+  const empty = { from:null, to:null, totalRevenue:0, grossProfit:0, fixedCost:0, tollFee:0, invoiceSupplementCost:0, netProfit:0 };
   if(allShifts.length===0) return empty;
   const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
   const from = fromOverride || state.equityProjectInfo.startDate || earliestShiftDate;
@@ -2204,8 +2204,18 @@ function computeCumulativeAccrualProfit(toOverride, fromOverride){
   const repairTotal = repairsInRangeCompanyWide(from, to).reduce((s,r)=>s+(Number(r.amount)||0),0);
   const accrualFixedMonthly = companyWideAccrualFixedMonthly(from, to);
   const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal, accrualFixedMonthly, houseRent, utilities);
-  const netProfit = breakEven.grossProfit - breakEven.fixedCost - tollFee;
-  return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit: breakEven.grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, netProfit };
+  // SỬA 2026-09-08 LẦN 3 (Ông Chủ đối chiếu ra khớp tuyệt đối — 88.751.202
+  // − 56.059.971 = 32.691.231, ĐÚNG BẰNG số thật tab Kết Quả): bắt được
+  // lỗi thật sự — computeBreakEvenDetailed() (viết riêng cho Điểm Hoà
+  // Vốn) KHÔNG trừ "Chi phí mua hoá đơn bù" (shiftInvoiceSupplementCost),
+  // trong khi LỢI NHUẬN THỰC TẾ THẬT (tab Kết Quả, gTotal.grossProfit)
+  // LUÔN trừ khoản này cùng với Giá vốn hàng mua. Cộng thêm ở đây, đúng
+  // 1 lần, không đụng gì tới computeBreakEvenDetailed() gốc (vẫn dùng cho
+  // Điểm Hoà Vốn theo đúng mục đích riêng của nó, không đổi).
+  const invoiceSupplementCost = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
+  const netProfit = grossProfit - breakEven.fixedCost - tollFee;
+  return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, invoiceSupplementCost, netProfit };
 }
 // ================= 2026-08-15/18: SỔ VỐN CHỦ SỞ HỮU + DỰ ÁN ĐẦU TƯ XE =================
 /// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
