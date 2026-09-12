@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #201';
+const APP_BUILD = '2026-09-08 · #202';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2164,12 +2164,19 @@ function companyWideCashFlowFixedMonthly(from, to){
 /// LỢI NHUẬN/ĐIỂM HOÀ VỐN — KHÔNG dùng cho dòng tiền/khớp ngân hàng (2
 /// mục đích khác nhau, hàm companyWideCashFlowFixedMonthly() ở trên vẫn
 /// giữ nguyên, đúng vai trò của nó, không đổi).
+/// SỬA 2026-09-08 LẦN 2 (Ông Chủ phát hiện tiếp — "số tháng 9 không khớp
+/// tab Kết Quả"): BẮT ĐƯỢC LỖI THẬT — dùng nhầm fullMonthlyCostIfTouched()
+/// (tính ĐỦ NGUYÊN THÁNG dù chỉ chạm 1 ngày), trong khi computePeriodSummary()
+/// (tab Kết Quả, nguồn đối chiếu đúng) dùng proratedMonthlyCost() (CHIA
+/// THEO ĐÚNG SỐ NGÀY thật trong khoảng đang xem). Với tháng đang chạy dở
+/// (chưa hết ngày), 2 cách cho ra 2 số KHÁC NHAU — đổi về ĐÚNG 1 chuẩn
+/// duy nhất (proratedMonthlyCost), khớp tuyệt đối với tab Kết Quả.
 function companyWideAccrualFixedMonthly(from, to){
   let sum = 0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
     const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0);
     const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
-    sum += fullMonthlyCostIfTouched(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
+    sum += proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
   });
   return sum;
 }
