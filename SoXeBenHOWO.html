@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #205';
+const APP_BUILD = '2026-09-08 · #206';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2375,6 +2375,7 @@ function computeMonthlyAccrualProfitTimeline(){
     cumulative += monthResult.netProfit;
     return { month: ym, monthlyProfit: monthResult.netProfit, totalRevenue: monthResult.totalRevenue,
       grossProfit: monthResult.grossProfit, fixedCost: monthResult.fixedCost,
+      invoiceSupplementCost: monthResult.invoiceSupplementCost,
       cumulativeProfit: cumulative, snapshotDate };
   });
 }
@@ -14707,7 +14708,7 @@ function openROICalculationDetail(){
     : '';
   const monthlyBreakdown = accrualTimeline.map(t=>({
     month: t.month, amount: t.monthlyProfit, totalRevenue: t.totalRevenue,
-    grossProfit: t.grossProfit, fixedCost: t.fixedCost,
+    grossProfit: t.grossProfit, fixedCost: t.fixedCost, invoiceSupplementCost: t.invoiceSupplementCost,
     isPartial: t.snapshotDate < `${t.month}-${String(daysInMonth(`${t.month}-01`)).padStart(2,'0')}`
   }));
   // SỬA 2026-09-08 LẦN 4 (yêu cầu Ông Chủ — "cho trang này thành 1 trang
@@ -14742,6 +14743,18 @@ function openROICalculationDetail(){
         </table>
       </div>
       <div class="hint" style="margin-top:8px;">So sánh trực tiếp: vào tab Kết Quả → chọn đúng tháng này → xem dòng "Tổng doanh thu" và "LỢI NHUẬN THỰC TẾ" — phải khớp đúng 2 cột tương ứng ở bảng trên. Nếu lệch, chụp cả 2 màn hình gửi lại để tra tiếp.</div>
+    </section>
+    <section class="group">
+      <h3>🔎 Kiểm Tra Riêng — Chi Phí Mua Hoá Đơn Bù</h3>
+      <div class="hint" style="margin-top:0;">Khoản này đã được cộng vào cột "LN Gộp" ở bảng trên (LN Gộp = Doanh thu − Giá vốn hàng − khoản này). Hiện riêng ra đây để đối chiếu trực tiếp với dòng "Chi phí mua hoá đơn bù" ở tab Kết Quả.</div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">Chi Phí Mua Hoá Đơn Bù</th></tr></thead>
+          <tbody>
+            ${monthlyBreakdown.map(m=>`<tr><td>${monthLabelVN(m.month)}</td><td class="num">${fmtVND(m.invoiceSupplementCost)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
     </section>
     <section class="group">
       <h3>1. Đã thu hồi được (%)</h3>
