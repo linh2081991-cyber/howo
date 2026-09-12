@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #202';
+const APP_BUILD = '2026-09-08 · #203';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2180,18 +2180,20 @@ function companyWideAccrualFixedMonthly(from, to){
   });
   return sum;
 }
-/// LỢI NHUẬN THỰC TẾ CỘNG DỒN TOÀN CÔNG TY — dùng lại NGUYÊN
+/// LỢI NHUẬN THỰC TẾ TOÀN CÔNG TY trong [from,to] — dùng lại NGUYÊN
 /// computeBreakEvenDetailed() (công thức accrual đã đóng băng, y hệt tab
 /// Kết Quả), chỉ đổi tham số chi phí cố định sang bản ACCRUAL đúng ở
 /// trên, cộng thêm Cầu Đường (khoản duy nhất computeBreakEvenDetailed()
-/// không nhận tham số riêng). Đây là số ĐÚNG CHUẨN để trả lời "bỏ vốn ra
-/// tao lãi/lỗ thật bao nhiêu" — đã trừ khấu hao, KHÔNG trừ nhầm gốc vay.
-function computeCumulativeAccrualProfit(toOverride){
+/// không nhận tham số riêng). Mặc định (không truyền fromOverride) =
+/// CỘNG DỒN từ Ngày Bắt Đầu Dự Án — nhưng có thể truyền fromOverride để
+/// tính TRỰC TIẾP đúng 1 tháng cụ thể (không suy ra bằng phép trừ 2 mốc
+/// cộng dồn), để đối chiếu 1-1 với tab Kết Quả khi cần kiểm tra.
+function computeCumulativeAccrualProfit(toOverride, fromOverride){
   const allShifts = allShiftsCompanyWide();
-  const empty = { from:null, to:null, grossProfit:0, fixedCost:0, tollFee:0, netProfit:0 };
+  const empty = { from:null, to:null, totalRevenue:0, grossProfit:0, fixedCost:0, tollFee:0, netProfit:0 };
   if(allShifts.length===0) return empty;
   const earliestShiftDate = allShifts.map(sh=>sh.date).sort()[0];
-  const from = state.equityProjectInfo.startDate || earliestShiftDate;
+  const from = fromOverride || state.equityProjectInfo.startDate || earliestShiftDate;
   const to = toOverride || todayLocalDateStr();
   if(from>to) return { ...empty, from, to };
   const inRange = allShifts.filter(sh=>sh.date>=from && sh.date<=to);
@@ -2203,7 +2205,7 @@ function computeCumulativeAccrualProfit(toOverride){
   const accrualFixedMonthly = companyWideAccrualFixedMonthly(from, to);
   const breakEven = computeBreakEvenDetailed(inRange, roadFee, repairTotal, accrualFixedMonthly, houseRent, utilities);
   const netProfit = breakEven.grossProfit - breakEven.fixedCost - tollFee;
-  return { from, to, grossProfit: breakEven.grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, netProfit };
+  return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit: breakEven.grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, netProfit };
 }
 // ================= 2026-08-15/18: SỔ VỐN CHỦ SỞ HỮU + DỰ ÁN ĐẦU TƯ XE =================
 /// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
@@ -2335,6 +2337,15 @@ function computeMonthlyEquityTimeline(){
 /// "Biến Động Vốn Chủ Sở Hữu Theo Tháng" vẫn giữ nguyên bản tiền mặt cũ
 /// (đã báo Ông Chủ: sửa hẳn "Vốn Chủ Sở Hữu" cần xây thêm sổ dư nợ vay
 /// còn lại như 1 khoản nợ, việc lớn hơn, để xử lý riêng nếu cần).
+/// SỬA 2026-09-08 LẦN 2 (Ông Chủ hỏi tiếp — "tính dựa trên dữ liệu nào,
+/// tab Kết Quả không thấy số này"): trước đây suy ra từng tháng bằng
+/// PHÉP TRỪ 2 mốc cộng dồn (cộng dồn tới cuối tháng 8 − cộng dồn tới
+/// cuối tháng 7) — về lý thuyết cộng đúng, nhưng khó đối chiếu trực tiếp
+/// và có rủi ro nếu bất kỳ thành phần nào không cộng dồn tuyến tính hoàn
+/// hảo. Đổi hẳn sang tính TRỰC TIẾP ĐỘC LẬP từng tháng (from=đầu tháng
+/// đó, to=cuối tháng đó hoặc hôm nay nếu chưa hết) — Y HỆT CÁCH tab Kết
+/// Quả tính khi Ông Chủ tự chọn đúng tháng đó — nên PHẢI khớp tuyệt đối,
+/// dễ đối chiếu 1-1. Trả về đủ Doanh thu/Chi phí để kiểm tra minh bạch.
 function computeMonthlyAccrualProfitTimeline(){
   const allShifts = allShiftsCompanyWide();
   if(allShifts.length===0) return [];
@@ -2343,12 +2354,18 @@ function computeMonthlyAccrualProfitTimeline(){
   const today = todayLocalDateStr();
   if(startDate>today) return [];
   const months = monthsBetween(startDate, today);
-  return months.map(ym=>{
+  let cumulative = 0;
+  return months.map((ym, i)=>{
     const dim = daysInMonth(`${ym}-01`);
-    const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
-    const snapshotDate = monthEnd < today ? monthEnd : today;
-    const cumulativeProfit = computeCumulativeAccrualProfit(snapshotDate).netProfit;
-    return { month: ym, cumulativeProfit, snapshotDate };
+    const monthStartFull = `${ym}-01`;
+    const monthStart = (i===0 && startDate>monthStartFull) ? startDate : monthStartFull; // tháng đầu tiên có thể bắt đầu giữa tháng nếu dự án khai Ngày Bắt Đầu Dự Án giữa tháng
+    const monthEndFull = `${ym}-${String(dim).padStart(2,'0')}`;
+    const snapshotDate = monthEndFull < today ? monthEndFull : today;
+    const monthResult = computeCumulativeAccrualProfit(snapshotDate, monthStart);
+    cumulative += monthResult.netProfit;
+    return { month: ym, monthlyProfit: monthResult.netProfit, totalRevenue: monthResult.totalRevenue,
+      grossProfit: monthResult.grossProfit, fixedCost: monthResult.fixedCost,
+      cumulativeProfit: cumulative, snapshotDate };
   });
 }
 /// Tốc độ thu hồi vốn trung bình mỗi tháng, tính từ CHÊNH LỆCH LỢI NHUẬN
@@ -14676,14 +14693,14 @@ function openROICalculationDetail(){
   const sameWindowNote = (recentRate3!==null && recentRate6!==null && recentRate3===recentRate6)
     ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${accrualTimeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
     : '';
-  // SỬA 2026-09-08 (yêu cầu Ông Chủ — "trang ngoài hiện tổng quan, bấm
-  // chi tiết mới hiện đủ những con số cần quan tâm tháng 7,8... và số
-  // tổng rõ ràng"): tách LỢI NHUẬN THỰC TẾ CỘNG DỒN theo từng tháng
-  // (delta giữa 2 mốc liền kề trong accrualTimeline đã có sẵn), hiện
-  // thành bảng riêng NGAY ĐẦU modal, có dòng TỔNG rõ ràng.
-  const monthlyBreakdown = accrualTimeline.map((t,i)=>({
-    month: t.month,
-    amount: t.cumulativeProfit - (i>0 ? accrualTimeline[i-1].cumulativeProfit : 0),
+  // SỬA 2026-09-08 LẦN 2 (Ông Chủ hỏi tiếp — "tính dựa trên dữ liệu nào,
+  // tab Kết Quả không thấy"): accrualTimeline giờ đã tính TRỰC TIẾP từng
+  // tháng (không suy ra bằng phép trừ nữa) — dùng thẳng luôn, và hiện đủ
+  // Doanh thu/Lợi nhuận gộp/Chi phí cố định để đối chiếu 1-1 với tab Kết
+  // Quả khi Ông Chủ tự chọn đúng tháng đó.
+  const monthlyBreakdown = accrualTimeline.map(t=>({
+    month: t.month, amount: t.monthlyProfit, totalRevenue: t.totalRevenue,
+    grossProfit: t.grossProfit, fixedCost: t.fixedCost,
     isPartial: t.snapshotDate < `${t.month}-${String(daysInMonth(`${t.month}-01`)).padStart(2,'0')}`
   }));
   openModal(`
@@ -14691,12 +14708,29 @@ function openROICalculationDetail(){
     <div class="hint" style="margin-top:0;">Dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) — KHÔNG dùng tiền mặt, vì tiền mặt trừ nhầm gốc vay ngân hàng như 1 khoản chi phí (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
     <div class="field">
       <label style="font-weight:800;">0. Lợi Nhuận Thực Tế từng tháng</label>
-      <div class="hint" style="margin:0;">Cộng dồn = tổng các tháng bên dưới, đúng bằng số ở mục 1.</div>
+      <div class="hint" style="margin:0;">Mỗi tháng tính ĐỘC LẬP (đúng từ ngày 1 tới cuối tháng đó, hoặc hôm nay nếu chưa hết) — Y HỆT cách tab Kết Quả tính khi tự chọn đúng tháng đó, nên đối chiếu được trực tiếp từng dòng.</div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">Doanh thu</th><th class="num">LN Gộp</th><th class="num">CP Cố Định</th><th class="num">LN Thực Tế</th></tr></thead>
+          <tbody>
+            ${monthlyBreakdown.map(m=>`<tr>
+              <td>${monthLabelVN(m.month)}${m.isPartial?' (chưa hết tháng)':''}</td>
+              <td class="num">${fmtVND(m.totalRevenue)}</td>
+              <td class="num">${fmtVND(m.grossProfit)}</td>
+              <td class="num">−${fmtVND(m.fixedCost)}</td>
+              <td class="num" style="color:${m.amount>=0?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.amount>=0?'+':''}${fmtVND(m.amount)}</td>
+            </tr>`).join('')}
+            <tr class="grid-total-row"><td colspan="4" style="text-align:left;">TỔNG CỘNG DỒN</td><td class="num" style="color:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}">${accrualProfit.netProfit>=0?'+':''}${fmtVND(accrualProfit.netProfit)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px;">So sánh trực tiếp: vào tab Kết Quả → chọn đúng tháng này → xem dòng "Tổng doanh thu" và "LỢI NHUẬN THỰC TẾ" — phải khớp đúng 2 cột tương ứng ở bảng trên. Nếu lệch, chụp cả 2 màn hình gửi lại để tra tiếp.</div>
+    </div>
+    <div class="field" style="display:none;">
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <thead><tr><th>Tháng</th><th class="num">Lợi Nhuận Thực Tế</th></tr></thead>
           <tbody>
-            ${monthlyBreakdown.map(m=>`<tr><td>${monthLabelVN(m.month)}${m.isPartial?' (chưa hết tháng)':''}</td><td class="num" style="color:${m.amount>=0?'var(--profit)':'var(--loss)'}; font-weight:700;">${m.amount>=0?'+':''}${fmtVND(m.amount)}</td></tr>`).join('')}
             <tr class="grid-total-row"><td style="text-align:left;">TỔNG CỘNG DỒN</td><td class="num" style="color:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}">${accrualProfit.netProfit>=0?'+':''}${fmtVND(accrualProfit.netProfit)}</td></tr>
           </tbody>
         </table>
