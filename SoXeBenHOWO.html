@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #207';
+const APP_BUILD = '2026-09-08 · #209';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1978,6 +1978,19 @@ async function bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId,
 /// thường xuyên. Mở rộng thêm repairs/roadFee/settings (yêu cầu Ông Chủ
 /// 2026-08-15: Dòng Tiền Thuần ở chế độ LINH CHÍ THÀNH cần gộp đủ chi phí
 /// vận hành/cố định của TẤT CẢ xe, không chỉ xe đang xem).
+/// SỬA 2026-09-08 LẦN 6 (Ông Chủ yêu cầu audit toàn app khi thêm xe —
+/// TÌM RA GỐC RỄ THẬT SỰ của lỗi "Chi phí mua hoá đơn bù ra 0đ" ở trên):
+/// hàm này chạy "1 lần khi mở app" (nạp lại TOÀN BỘ dữ liệu mọi xe từ
+/// Firestore vào allVehiclesShifts) NHƯNG KHÔNG đồng bộ lại state.shifts
+/// cho đúng xe đang mở — trong khi hàm anh em forceRefreshInvoiceLedgerData()
+/// bên dưới ĐÃ CÓ sẵn bước đồng bộ này (xem chú thích ở đó). Thiếu bước
+/// này khiến `state.shifts` và `state.allVehiclesShifts[xe đang mở]`
+/// TRỎ TỚI 2 MẢNG OBJECT KHÁC NHAU ngay từ lúc mở app — bất kỳ hàm nào so
+/// khớp theo THAM CHIẾU object (VD findSiteLogContext(), nền tảng của
+/// toàn bộ hệ thống khớp Kho Hoá Đơn Bù) sẽ ÂM THẦM không tìm thấy ngữ
+/// cảnh, tính SAI mà không báo lỗi gì cả — CHÍNH LÀ nguyên nhân gốc của
+/// lỗi "Chi phí mua hoá đơn bù ra 0đ" vừa tìm thấy. Bổ sung ĐÚNG 1 dòng
+/// đồng bộ, y hệt forceRefreshInvoiceLedgerData(), cho nhất quán.
 async function refreshAllVehiclesShiftsCache(){
   const entries = await Promise.all(state.vehicles.map(async v=>{
     const [sSnap, rSnap, roadFeeSnap, stSnap] = await Promise.all([
@@ -1997,6 +2010,10 @@ async function refreshAllVehiclesShiftsCache(){
     state.allVehiclesRepairs[vid]=repairsList;
     state.allVehiclesRoadFee[vid]=roadFeeList;
     state.allVehiclesSettings[vid]=settingsObj;
+    // Đồng bộ luôn state.shifts nếu đây đúng là xe đang xem/sửa — tránh
+    // để 2 nơi trỏ tới 2 mảng KHÁC NHAU (dù cùng nội dung) làm sai lệch
+    // các chỗ so khớp theo THAM CHIẾU object (VD findSiteLogContext()).
+    if(vid===activeVehicleIdForEditing()) state.shifts = shiftsList;
   });
 }
 /// SỬA 2026-08-23 (Ông Chủ báo LẦN NỮA: bảng "Chi Phí & VAT Hưởng Theo
@@ -2215,21 +2232,17 @@ function computeCumulativeAccrualProfit(toOverride, fromOverride){
   // SỬA 2026-09-08 LẦN 5 (Ông Chủ đối chiếu tiếp — bảng debug lộ ra CẢ 3
   // THÁNG ĐỀU RA 0đ): bắt được lỗi thật SÂU HƠN — shiftInvoiceSupplementCost()
   // → siteInvoiceLotBreakdown() → siteGoodsTypeGroups() → findSiteLogContext()
-  // tìm lại ca chứa đúng site log bằng SO KHỚP THAM CHIẾU OBJECT
-  // (indexOf), và CHỈ tìm trong allShiftsForLedger() = state.shifts (xe
-  // đang mở). `inRange` ở trên tới từ allShiftsCompanyWide(), đi qua 1
-  // lớp Object.assign() sao chép qua allVehiclesShifts — nếu lớp cache
-  // này không còn giữ ĐÚNG cùng tham chiếu object với state.shifts hiện
-  // tại (rất dễ xảy ra do Firestore nạp lại), findSiteLogContext() lặng
-  // lẽ trả về null → tính thiếu, ra 0đ SAI. Sửa: dùng thẳng
-  // allShiftsForLedger() (chính là state.shifts, CHẮC CHẮN cùng tham
-  // chiếu) cho riêng phép tính này — đúng phạm vi hiện tại vì công ty
-  // mới có đúng 1 xe (nếu sau này có nhiều xe, khoản này vẫn chỉ tính
-  // đúng được cho xe đang mở, đúng giới hạn sẵn có của hệ thống khớp hoá
-  // đơn gốc — KHÔNG phải lỗi do sửa lần này gây ra).
-  const invoiceSupplementCost = allShiftsForLedger()
-    .filter(sh=>sh.date>=from && sh.date<=to)
-    .reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  // tìm lại ca chứa đúng site log bằng SO KHỚP THAM CHIẾU OBJECT, và CHỈ
+  // tìm trong state.shifts (xe đang mở) — lúc đó tạm vá bằng
+  // allShiftsForLedger(), nhưng cách đó CHỈ đúng cho 1 xe.
+  // SỬA 2026-09-08 LẦN 7 (Ông Chủ phản biện — "kho hoá đơn bù là kho
+  // CHUNG toàn công ty, không phân biệt xe"): sửa TẬN GỐC ở chính
+  // shiftInvoiceSupplementCost() (nay tự mang theo {sh,idx}, không còn
+  // cần đi đường tắt findSiteLogContext() nữa) — nên ở đây ĐỔI LẠI dùng
+  // `inRange` (từ allShiftsCompanyWide(), gộp ĐÚNG mọi xe) thay vì
+  // allShiftsForLedger() (chỉ 1 xe) — giờ đã đúng cho cả trường hợp có
+  // nhiều xe, không chỉ đúng cho hiện tại (1 xe).
+  const invoiceSupplementCost = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
   const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
   const netProfit = grossProfit - breakEven.fixedCost - tollFee;
   return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, invoiceSupplementCost, netProfit };
@@ -5004,13 +5017,27 @@ function buildInvoiceLotLedger(goodsType){
 /// shortfallVolume > 0 nghĩa là kho không đủ cho riêng nhóm này. Dùng
 /// siteGroupRealMissingVolume (SỰ THẬT theo tick) làm căn cứ, KHÔNG dùng
 /// thẳng g.missingVolume (chỉ là ước tính lý thuyết hiển thị tham khảo).
-function siteInvoiceGroupBreakdown(s, goodsType){
-  const groups = siteGoodsTypeGroups(s);
+// SỬA 2026-09-08 LẦN 7 (Ông Chủ phản biện — "kho hoá đơn bù là kho CHUNG
+// toàn công ty, cứ ngày nào cần là khớp lệnh rút, không phân biệt xe nào"):
+// XÁC NHẬN tư duy này ĐÚNG và ĐÃ khớp với cách buildMineInvoiceMatchLedger()
+// (Sổ Hoá Đơn Thật Từ Mỏ) vẫn làm từ trước — kho/sổ vốn ĐÃ gộp đúng toàn
+// công ty. Lỗi hôm qua KHÔNG nằm ở thiết kế kho, mà ở khâu TRA CỨU: khi
+// cần biết "ca này, vị trí nào trong danh sách" để tra sổ, hệm thống có 1
+// đường tắt (findSiteLogContext, so khớp tham chiếu object trong CHỈ
+// state.shifts — xe đang mở) — đường tắt này chỉ đúng khi đang thao tác
+// đúng 1 xe. Sửa TẬN GỐC: thêm tham số shCtx TUỲ CHỌN xuyên suốt cả
+// chuỗi — nơi nào ĐÃ SẴN CÓ {sh, idx} (như shiftInvoiceSupplementCost()
+// dưới đây, vốn đang duyệt qua sh.siteLogs) sẽ truyền thẳng, không bao
+// giờ cần đi đường tắt nữa, dùng ĐÚNG cho MỌI xe, không riêng xe đang mở.
+// Nơi nào KHÔNG truyền (mọi lời gọi cũ trong app) vẫn rơi về ĐÚNG hành vi
+// cũ (findSiteLogContext) — không đổi 1 dòng hành vi nào đã có.
+function siteInvoiceGroupBreakdown(s, goodsType, shCtx){
+  const groups = siteGoodsTypeGroups(s, shCtx);
   const g = groups.find(x=>normGoodsType(x.goodsType)===normGoodsType(goodsType));
   if(!g) return { allocations:[], shortfallVolume:0 };
   const real = siteGroupRealMissingVolume(s, g);
   if(real<=0) return { allocations:[], shortfallVolume:0 };
-  const ctx = findSiteLogContext(s);
+  const ctx = shCtx || findSiteLogContext(s);
   if(!ctx || !normGoodsType(goodsType)) return { allocations:[], shortfallVolume: real };
   const ledger = buildInvoiceLotLedger(goodsType);
   const rec = ledger.bySiteLog[siteLogGroupKey(ctx.sh, ctx.idx, goodsType)];
@@ -5021,9 +5048,9 @@ function siteInvoiceGroupBreakdown(s, goodsType){
 /// ĐANG CẦN THẬT SỰ (siteGroupRealMissingVolume>0, tức đã tick BÁN) trong
 /// site log này, mỗi dòng allocation có gắn kèm đúng loại hàng để hiển thị
 /// modal không lẫn lộn giữa các loại.
-function siteInvoiceLotBreakdown(s){
-  const groups = siteGoodsTypeGroups(s).filter(g=>siteGroupRealMissingVolume(s,g)>0);
-  const perGroup = groups.map(g=>({ goodsType: g.goodsType, ...siteInvoiceGroupBreakdown(s, g.goodsType) }));
+function siteInvoiceLotBreakdown(s, shCtx){
+  const groups = siteGoodsTypeGroups(s, shCtx).filter(g=>siteGroupRealMissingVolume(s,g)>0);
+  const perGroup = groups.map(g=>({ goodsType: g.goodsType, ...siteInvoiceGroupBreakdown(s, g.goodsType, shCtx) }));
   const allocations = perGroup.flatMap(pg=>pg.allocations.map(a=>({ ...a, goodsType: pg.goodsType })));
   const shortfallVolume = perGroup.reduce((sum,pg)=>sum+pg.shortfallVolume, 0);
   return { allocations, shortfallVolume, byGroup: perGroup };
@@ -5034,21 +5061,21 @@ function siteInvoiceLotBreakdown(s){
 /// đơn của lô − tiền mặt nhận lại của lô, chia đều theo khối lượng). Phần
 /// chưa đủ lô để rút (shortfall) KHÔNG tính chi phí — tránh bịa số khi
 /// chưa thật sự mua lô mới.
-function siteInvoiceSupplementCost(s){
+function siteInvoiceSupplementCost(s, shCtx){
   if(s.siteType!=='commercial') return 0;
-  return siteInvoiceLotBreakdown(s).allocations.reduce((sum,a)=>sum+a.cost, 0);
+  return siteInvoiceLotBreakdown(s, shCtx).allocations.reduce((sum,a)=>sum+a.cost, 0);
 }
 /// VAT khấu trừ được từ các lô đã rút cho ca này, cộng dồn qua mọi nhóm
 /// loại hàng — tính đúng theo VAT suất GHI TRÊN TỪNG LÔ hoá đơn thật.
-function siteInvoiceSupplementVatCredit(s){
+function siteInvoiceSupplementVatCredit(s, shCtx){
   if(s.siteType!=='commercial') return 0;
-  return siteInvoiceLotBreakdown(s).allocations.reduce((sum,a)=>sum+a.vat, 0);
+  return siteInvoiceLotBreakdown(s, shCtx).allocations.reduce((sum,a)=>sum+a.vat, 0);
 }
-function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementCost(s),0); }
+function shiftInvoiceSupplementCost(sh){ return (sh.siteLogs||[]).reduce((sum,s,idx)=>sum+siteInvoiceSupplementCost(s,{sh,idx}),0); }
 /// Y HỆT shiftInvoiceSupplementCost() ở trên nhưng cho VAT được khấu trừ
 /// (thay vì chi phí) — dùng để dựng bảng "VAT Hưởng Theo Ca" ở mục Kho Hoá
 /// Đơn Bù (yêu cầu Ông Chủ 2026-08-16).
-function shiftInvoiceSupplementVatCredit(sh){ return (sh.siteLogs||[]).reduce((sum,s)=>sum+siteInvoiceSupplementVatCredit(s),0); }
+function shiftInvoiceSupplementVatCredit(sh){ return (sh.siteLogs||[]).reduce((sum,s,idx)=>sum+siteInvoiceSupplementVatCredit(s,{sh,idx}),0); }
 /// Bảng "mỗi CA được hưởng bao nhiêu VAT + tốn bao nhiêu chi phí từ Kho
 /// Hoá Đơn Bù" trong khoảng [from,to] — GỘP QUA MỌI LOẠI HÀNG của ca đó
 /// (không lọc riêng 1 loại hàng như bộ lọc phía trên), vì 1 ca có thể có
