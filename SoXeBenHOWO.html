@@ -646,7 +646,6 @@
     </div>
     <div id="headerAction"></div>
   </header>
-  <div id="vehicleScopeBar" class="vehicle-scope-bar"></div>
   <main id="app"></main>
   <div class="toast" id="toast"></div>
   <nav class="tabbar">
@@ -666,7 +665,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #221';
+const APP_BUILD = '2026-09-08 · #222';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6293,29 +6292,30 @@ function driverAvatarIcon(){
 /// MÀ có từ 2 xe trở lên (activeVehicleIdForEditing() trả về null), vì
 /// Ca Làm Việc/Tài Xế bắt buộc phải rõ đang thao tác đúng xe nào mới lưu
 /// đúng chỗ. Với đúng 1 xe (hiện tại) hàm này sẽ không bao giờ hiện ra.
-/// SỬA 2026-09-08 (yêu cầu Ông Chủ — chuẩn bị thêm xe: "cấu trúc dạng sơ
-/// đồ map, biểu tượng Linh Chí Thành phân ra biểu tượng từng xe kèm biển
-/// số, bấm thẳng vào là vào luôn xe đó"): thay hẳn màn nhắc "Chọn Xe →"
-/// (phải mở modal riêng) bằng 1 SƠ ĐỒ CÂY hiện ngay tại chỗ — nút gốc
-/// 🏢 LINH CHÍ THÀNH, nối xuống từng nút lá 🚛 [Tên xe] — [Biển số], bấm
-/// THẲNG vào từng xe là chuyển luôn (switchVehicle), không cần qua modal.
+/// SỬA 2026-09-08 LẦN 2 (yêu cầu Ông Chủ — "bỏ khu vực Linh Chí Thành và
+/// nút đổi xe, mọi dữ liệu Linh Chí Thành cho vào nút Linh Chí Thành
+/// mới"): xoá hẳn thanh ngang cũ (#vehicleScopeBar, ẩn Đổi Xe khỏi mọi
+/// màn hình) — dồn 2 chức năng của nó vào ĐÚNG sơ đồ cây này: (1) bấm
+/// nút gốc 🏢 LINH CHÍ THÀNH → mở Dự Án Đầu Tư Xe (y hệt hành vi cũ của
+/// thanh ngang), (2) "+ Thêm Xe"/xoá xe (trước đây nằm trong modal Đổi
+/// Xe, giờ modal đó không còn lối vào nào khác) → đưa thẳng xuống cuối
+/// sơ đồ, không mất chức năng nào.
 function renderChooseVehiclePrompt(){
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
       <div style="text-align:center; margin-bottom:2px;">
-        <div style="display:inline-block; padding:14px 26px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft);">
+        <button id="vehicleMapHubBtn" style="display:inline-block; padding:14px 26px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
           <div style="font-size:30px; line-height:1;">🏢</div>
           <div style="font-weight:900; margin-top:6px; color:var(--accent);">LINH CHÍ THÀNH</div>
-        </div>
+        </button>
       </div>
       <div style="width:2px; height:18px; background:var(--border); margin:0 auto;"></div>
-      <div class="hint" style="text-align:center; margin-bottom:14px;">Bấm thẳng vào 1 xe bên dưới để xem/sửa đúng dữ liệu xe đó</div>
       <div style="border-left:2px solid var(--border); margin-left:22px;">
         ${state.vehicles.map(v=>`
-          <div style="position:relative; padding:2px 0 2px 22px; margin-bottom:10px;">
+          <div style="position:relative; padding:2px 0 2px 22px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
             <div style="position:absolute; left:0; top:28px; width:20px; height:2px; background:var(--border);"></div>
-            <button class="vehicle-map-node" data-vid="${v.id}" style="width:100%; text-align:left; padding:14px 16px; border-radius:14px; border:1.5px solid var(--border); background:var(--card-bg,#fff); display:flex; align-items:center; gap:12px; cursor:pointer;">
+            <button class="vehicle-map-node" data-vid="${v.id}" style="flex:1; text-align:left; padding:14px 16px; border-radius:14px; border:1.5px solid var(--border); background:var(--card-bg,#fff); display:flex; align-items:center; gap:12px; cursor:pointer;">
               <span style="font-size:28px; line-height:1;">🚛</span>
               <span style="flex:1;">
                 <div style="font-weight:800; font-size:15px;">${escapeHtml(v.name||'Xe')}</div>
@@ -6323,11 +6323,21 @@ function renderChooseVehiclePrompt(){
               </span>
               <span style="color:var(--ink-soft); font-size:18px;">→</span>
             </button>
+            ${!v.isPrimary ? `<button class="vehicle-map-delete" data-vid="${v.id}" data-vname="${escapeHtml(v.name||v.plate||'')}" style="background:none; border:none; color:var(--loss); font-size:18px; padding:4px 6px; flex-shrink:0;">🗑️</button>` : ''}
           </div>`).join('')}
       </div>
+      <button class="btn btn-ghost btn-block" id="vehicleMapAddBtn" style="margin-top:6px;">+ Thêm Xe</button>
     </section>`;
+  document.getElementById('vehicleMapHubBtn').addEventListener('click', ()=>{ saveMainScroll(); state.showCompanyDashboard = true; renderAll(); });
+  document.getElementById('vehicleMapAddBtn').addEventListener('click', renderAddVehicleModal);
   document.querySelectorAll('.vehicle-map-node').forEach(btn=>{
     btn.addEventListener('click', ()=>switchVehicle(btn.dataset.vid));
+  });
+  document.querySelectorAll('.vehicle-map-delete').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      renderDeleteVehicleConfirmModal(btn.dataset.vid, btn.dataset.vname);
+    });
   });
 }
 function renderShiftList(){
