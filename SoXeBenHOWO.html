@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #224';
+const APP_BUILD = '2026-09-08 · #225';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6353,18 +6353,15 @@ function renderChooseVehiclePrompt(){
       <div style="width:2px; height:18px; background:var(--border); margin:0 auto;"></div>
       <div style="border-left:2px solid var(--border); margin-left:22px;">
         ${state.vehicles.map(v=>`
-          <div style="position:relative; padding:2px 0 2px 22px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
-            <div style="position:absolute; left:0; top:28px; width:20px; height:2px; background:var(--border);"></div>
-            <button class="vehicle-map-node" data-vid="${v.id}" style="flex:1; text-align:left; padding:14px 16px; border-radius:14px; border:1.5px solid var(--border); background:var(--card-bg,#fff); display:flex; align-items:center; gap:12px; cursor:pointer;">
-              <span style="font-size:28px; line-height:1;">🚛</span>
-              <span style="flex:1;">
-                <div style="font-weight:800; font-size:15px;">${escapeHtml(v.name||'Xe')}</div>
-                ${v.plate ? `<div class="hint" style="margin:1px 0 0;">${escapeHtml(v.plate)}</div>` : ''}
-              </span>
+          <div style="position:relative; padding:2px 0 2px 22px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+            <div style="position:absolute; left:0; top:24px; width:20px; height:2px; background:var(--border);"></div>
+            <button class="vehicle-map-node" data-vid="${v.id}" style="flex:1; text-align:left; padding:10px 8px; background:none; border:none; display:flex; align-items:center; gap:12px; cursor:pointer;">
+              <span style="font-size:30px; line-height:1;">🚛</span>
+              <span style="font-weight:800; font-size:19px; flex:1;">${escapeHtml(v.plate||v.name||'Xe')}</span>
               <span style="color:var(--ink-soft); font-size:18px;">→</span>
             </button>
-            <button class="vehicle-map-edit" data-vid="${v.id}" style="background:none; border:none; color:var(--ink-soft); font-size:18px; padding:4px 6px; flex-shrink:0;">✏️</button>
-            ${!v.isPrimary ? `<button class="vehicle-map-delete" data-vid="${v.id}" data-vname="${escapeHtml(v.name||v.plate||'')}" style="background:none; border:none; color:var(--loss); font-size:18px; padding:4px 6px; flex-shrink:0;">🗑️</button>` : ''}
+            ${!v.isPrimary ? `<button class="vehicle-map-edit" data-vid="${v.id}" style="background:none; border:none; color:var(--ink-soft); font-size:18px; padding:4px 6px; flex-shrink:0;">✏️</button>
+            <button class="vehicle-map-delete" data-vid="${v.id}" data-vname="${escapeHtml(v.name||v.plate||'')}" style="background:none; border:none; color:var(--loss); font-size:18px; padding:4px 6px; flex-shrink:0;">🗑️</button>` : ''}
           </div>`).join('')}
       </div>
       <button class="btn btn-ghost btn-block" id="vehicleMapAddBtn" style="margin-top:6px;">+ Thêm Xe</button>
