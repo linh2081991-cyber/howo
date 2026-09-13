@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #215';
+const APP_BUILD = '2026-09-08 · #217';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -896,6 +896,7 @@ let state = {
   // Dòng Tiền Thuần: "Lợi Nhuận Luỹ Kế" trong công thức Vốn Chủ Sở Hữu chỉ
   // tính đúng được ở cấp công ty.
   ownerEquityEntries: [], // {id, date, type:'contribution'|'withdrawal', amount, note}
+  vatPayments: [], // {id, date, amount, notes} — CHUNG CÔNG TY, tiền VAT đã nộp thật cho nhà nước
   // "Dự Án Đầu Tư Xe" (2026-08-15) — Vốn Đầu Tư Ban Đầu (giá xe + chi phí
   // liên quan mua xe, Ông Chủ tự điền tay) TÁCH RIÊNG hẳn khỏi Sổ Vốn Chủ
   // Sở Hữu ở trên (đó là các lần góp/rút LẺ TẺ về sau) — và Ngày Bắt Đầu
@@ -1550,7 +1551,7 @@ function withTimeout(promise, ms=15000){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap, vatPaymentSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1583,7 +1584,12 @@ async function loadAll(){
       sharedDataRef('companySettings').get(),
       sharedDataRef('ownerEquityEntries').get(),
       sharedDataRef('equityProjectInfo').get(),
-      sharedDataRef('bankBalanceCheckpoints').get()
+      sharedDataRef('bankBalanceCheckpoints').get(),
+      // SỬA 2026-09-08 (Ông Chủ phát hiện — "VAT phải nộp app tính nhưng
+      // chưa có nơi ghi nhận khi đã nộp thật"): sổ ghi nhận từng lần nộp
+      // VAT thật cho nhà nước — CHUNG CÔNG TY, dùng cho Khớp Số Dư Ngân
+      // Hàng (tiền nộp thuế luôn qua tài khoản doanh nghiệp).
+      sharedDataRef('vatPayments').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1617,6 +1623,8 @@ async function loadAll(){
     state.supplierPayments = supplierPaymentData && Array.isArray(supplierPaymentData.list) ? supplierPaymentData.list : [];
     const ownerEquityData = ownerEquitySnap.exists ? ownerEquitySnap.data() : null;
     state.ownerEquityEntries = ownerEquityData && Array.isArray(ownerEquityData.list) ? ownerEquityData.list : [];
+    const vatPaymentData = vatPaymentSnap.exists ? vatPaymentSnap.data() : null;
+    state.vatPayments = vatPaymentData && Array.isArray(vatPaymentData.list) ? vatPaymentData.list : [];
     if(equityProjectInfoSnap.exists){
       const epi = equityProjectInfoSnap.data();
       state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null,
@@ -1906,6 +1914,10 @@ async function saveSupplierPayments(){
 async function saveOwnerEquityEntries(){
   try { await withTimeout(sharedDataRef('ownerEquityEntries').set({ list: state.ownerEquityEntries })); return true; }
   catch(e){ showToast('Lỗi lưu sổ vốn chủ sở hữu: ' + (e?.message || e)); return false; }
+}
+async function saveVatPayments(){
+  try { await withTimeout(sharedDataRef('vatPayments').set({ list: state.vatPayments })); return true; }
+  catch(e){ showToast('Lỗi lưu sổ nộp thuế VAT: ' + (e?.message || e)); return false; }
 }
 async function saveEquityProjectInfo(){
   try { await withTimeout(sharedDataRef('equityProjectInfo').set(state.equityProjectInfo)); return true; }
@@ -11598,13 +11610,20 @@ function computeBankBalanceReconciliation(){
     return sum + loans.filter(loan=>loan.disbursementDate && loan.disbursementDate>=from && loan.disbursementDate<=today)
       .reduce((s2,loan)=>s2+(Number(loan.principal)||0), 0);
   }, 0);
+  // SỬA 2026-09-08 LẦN 2 (Ông Chủ hỏi — "Khớp Số Dư đã biểu thị hết luồng
+  // tiền chưa?"): BẮT ĐƯỢC KHOẢN THIẾU THỨ 2 — VAT phải nộp được tính
+  // (Kết Quả tab) nhưng CHƯA từng có nơi ghi nhận khi Ông Chủ ĐÃ NỘP tiền
+  // thật cho nhà nước — khoản này LUÔN qua tài khoản doanh nghiệp (nộp
+  // thuế điện tử), cộng vào đây.
+  const vatPaymentBank = (state.vatPayments||[]).filter(p=>p.date>=from && p.date<=today)
+    .reduce((s,p)=>s+(Number(p.amount)||0), 0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank + loanDisbursedBank;
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
-    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank };
+    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -15032,6 +15051,100 @@ function renderLoanList(){
 /// cần nút bên Cài Đặt"): modal nhỏ sửa 3 số Chi Phí Cố Định Hàng Tháng
 /// (Khấu hao/Bảo hiểm/Đăng kiểm) — lưu ngay lập tức, KHÔNG còn qua nút
 /// "Lưu Cài Đặt" chung, và KHÔNG còn hiện 3 ô này ở Cài Đặt nữa.
+/// SỬA 2026-09-08 (Ông Chủ phát hiện — "Khớp Số Dư Ngân Hàng chưa biểu
+/// thị hết luồng tiền"): sổ ghi nhận từng lần ĐÃ NỘP THẬT tiền VAT cho
+/// nhà nước — CHUNG CÔNG TY, LUÔN qua ngân hàng (nộp thuế điện tử), dùng
+/// cho Khớp Số Dư Ngân Hàng. Trang riêng, đặt trong Linh Chí Thành.
+function renderVatPaymentListPage(){
+  scrollMainToTop();
+  const sorted = [...state.vatPayments].sort((a,b)=>b.date.localeCompare(a.date));
+  const total = sorted.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="vatPayBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🧾 Đã Nộp Thuế VAT</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Ghi nhận từng lần ĐÃ NỘP THẬT tiền VAT cho nhà nước — luôn tính là tiền ngân hàng, dùng để Khớp Số Dư Ngân Hàng khớp đúng.</div>
+      <button class="btn btn-accent btn-block" id="addVatPaymentBtn" style="margin-bottom:14px;">🧾➕ Ghi Nhận Đã Nộp</button>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Ghi chú</th><th class="num">Số Tiền</th><th></th></tr></thead>
+          <tbody>
+            ${sorted.length===0 ? '<tr><td colspan="4" class="hint" style="padding:14px;">Chưa ghi nhận lần nộp VAT nào.</td></tr>' : sorted.map(p=>`
+              <tr>
+                <td>${formatDateVN(p.date)}</td>
+                <td>${p.notes?escapeHtml(p.notes):'—'}</td>
+                <td class="num" style="font-weight:700; color:var(--loss);">−${fmtVND(p.amount)}</td>
+                <td><button class="link-btn editVatPaymentBtn" data-id="${p.id}" style="padding:0;">Sửa</button></td>
+              </tr>`).join('')}
+            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">TỔNG ĐÃ NỘP</td><td class="num">${fmtVND(total)}</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+  document.getElementById('vatPayBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('addVatPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openVatPaymentEditor(null); });
+  document.querySelectorAll('.editVatPaymentBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ saveMainScroll(); openVatPaymentEditor(btn.dataset.id); });
+  });
+}
+function openVatPaymentEditor(id){
+  scrollMainToTop();
+  const existing = id ? state.vatPayments.find(p=>p.id===id) : null;
+  const draft = existing ? {...existing} : { id: uid('vatpay'), date: todayLocalDateStr(), amount:0, notes:'' };
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>🧾 ${existing?'Sửa':'Ghi Nhận'} Đã Nộp Thuế VAT</h3>
+      <div class="card">
+        <div class="field">
+          <label>Ngày đã nộp</label>
+          <input type="date" id="vp_date" value="${draft.date}">
+        </div>
+        <div class="field">
+          <label>Số tiền đã nộp</label>
+          <input type="text" inputmode="decimal" id="vp_amount">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="vp_notes" value="${escapeHtml(draft.notes)}" placeholder="VD: VAT tháng 8/2026">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        ${existing ? '<button class="btn btn-danger" id="delVatPaymentBtn">Xoá</button>' : ''}
+        <button class="btn btn-ghost" id="cancelVatPaymentBtn">Huỷ</button>
+        <button class="btn btn-accent btn-block" id="saveVatPaymentBtn">Lưu</button>
+      </div>
+    </section>
+  `;
+  attachMoneyInput(document.getElementById('vp_amount'), draft.amount, v=>draft.amount=v);
+  const goBack = () => { renderVatPaymentListPage(); restoreMainScroll(); };
+  document.getElementById('cancelVatPaymentBtn').addEventListener('click', goBack);
+  document.getElementById('saveVatPaymentBtn').addEventListener('click', async ()=>{
+    draft.date = document.getElementById('vp_date').value;
+    draft.notes = document.getElementById('vp_notes').value.trim();
+    if(!draft.date){ showToast('Chọn ngày đã nộp.'); return; }
+    if(!(Number(draft.amount)>0)){ showToast('Nhập số tiền đã nộp.'); return; }
+    const idx = state.vatPayments.findIndex(p=>p.id===draft.id);
+    if(idx>=0) state.vatPayments[idx]=draft; else state.vatPayments.push(draft);
+    const ok = await saveVatPayments();
+    if(!ok) return;
+    showToast('Đã lưu.');
+    goBack();
+  });
+  if(existing){
+    document.getElementById('delVatPaymentBtn').addEventListener('click', async ()=>{
+      state.vatPayments = state.vatPayments.filter(p=>p.id!==draft.id);
+      const ok = await saveVatPayments();
+      if(!ok) return;
+      showToast('Đã xoá.');
+      goBack();
+    });
+  }
+}
 function openFixedCostsEditor(){
   let depVal = Number(state.settings.monthlyVehicleDepreciation)||0;
   let insVal = Number(state.settings.monthlyInsurance)||0;
@@ -15840,6 +15953,12 @@ function renderCompanyDashboardPage(){
     </section>
 
     <section class="group">
+      <h3>🧾 Đã Nộp Thuế VAT</h3>
+      <div class="hint" style="margin-bottom:10px;">Ghi nhận từng lần đã nộp thật tiền VAT cho nhà nước — dùng để Khớp Số Dư Ngân Hàng khớp đúng (khoản này luôn qua tài khoản doanh nghiệp).</div>
+      <button class="btn btn-ghost btn-block" id="openVatPaymentsBtn">🧾 Xem / Ghi Nhận Đã Nộp Thuế VAT</button>
+    </section>
+
+    <section class="group">
       <h3>💰 Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -15977,6 +16096,7 @@ function renderCompanyDashboardPage(){
     restoreMainScroll();
   });
   document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
+  document.getElementById('openVatPaymentsBtn').addEventListener('click', ()=>{ saveMainScroll(); renderVatPaymentListPage(); });
   const roiCalcDetailBtn = document.getElementById('roiCalcDetailBtn');
   if(roiCalcDetailBtn) roiCalcDetailBtn.addEventListener('click', openROICalculationDetail);
   document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
@@ -16469,6 +16589,8 @@ function renderBankReconDetailPage(){
     .map(ym=>({ label:`Điện nước ${monthLabelVN(ym)}`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).utilitiesAmount)||0 })) : [];
   const bankTollFeeItems = bankRecon ? monthsInRange.filter(ym=>state.tollFeeByMonth.some(e=>e.month===ym && Number(e.amount)>0))
     .map(ym=>({ label:`Cầu đường ${monthLabelVN(ym)}`, amount: Number(state.tollFeeByMonth.find(e=>e.month===ym).amount)||0 })) : [];
+  const bankVatPaymentItems = bankRecon ? (state.vatPayments||[]).filter(p=>p.date>bankRecon.checkpoint.date && p.date<=rangeTo)
+    .map(p=>({ label:`Đã nộp thuế VAT — ${formatDateVN(p.date)}${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
   const bankLoanPaymentItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
@@ -16496,6 +16618,12 @@ function renderBankReconDetailPage(){
   // đây (chỉ có ở trang khác), và CHƯA có công nợ — giờ gộp đủ cả 3 vào
   // đúng 1 trang, đúng vai trò "báo cáo của kế toán" Ông Chủ mô tả.
   const debtSummary = computeAllPartnersDebtSummary();
+  // SỬA 2026-09-08 LẦN 3 (Ông Chủ hỏi lại — "tiền của tao nằm ở đâu tao
+  // phải thấy rõ"): trước đây chỉ hiện RIÊNG 2 mảnh (số dư ngân hàng +
+  // bảng công nợ) và NHẮC mày tự cộng bằng chữ — vẫn bắt làm toán thủ
+  // công. Giờ CỘNG SẴN thành 1 con số DUY NHẤT, hiện to rõ ràng ngay đầu
+  // trang — không còn phải tự nhẩm nữa.
+  const totalCurrentValue = bankRecon ? bankRecon.computedBalance + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed : 0;
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -16505,10 +16633,15 @@ function renderBankReconDetailPage(){
       <h2 style="margin-bottom:2px;">🏦 Chi Tiết Dòng Tiền Từ Mốc Chốt</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay — CHỈ giao dịch NGÂN HÀNG (không gồm tiền mặt)`:'Chưa khai mốc chốt nào'}</div>
       ${bankRecon ? `
-      <div class="card" style="text-align:center; border:2px solid var(--accent);">
+      <div class="card" style="text-align:center; border:2px solid var(--accent); background:var(--accent-soft);">
+        <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ (ngân hàng + công nợ)</div>
+        <div style="font-size:32px; font-weight:900; margin-top:4px; color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'};">${fmtVND(totalCurrentValue)}</div>
+        <div class="hint" style="margin-top:6px;">= Số dư ngân hàng ${fmtVND(bankRecon.computedBalance)} ${debtSummary.totalCustomerOwed>=0?'+':'−'} Khách nợ/(nợ khách) ${fmtVND(Math.abs(debtSummary.totalCustomerOwed))} ${debtSummary.totalSupplierOwed>=0?'−':'+'} Nợ mỏ/(mỏ nợ) ${fmtVND(Math.abs(debtSummary.totalSupplierOwed))} — đáp án cuối cùng cho "tiền của tao đang nằm ở đâu".</div>
+      </div>
+      <div class="card" style="text-align:center; margin-top:12px;">
         <div class="hint" style="margin:0;">Mốc chốt ${formatDateVN(bankRecon.checkpoint.date)}: ${fmtVND(bankRecon.checkpoint.balance)}</div>
         <div style="font-size:13px; font-weight:700; margin-top:8px;">= SỐ DƯ NGÂN HÀNG APP TÍNH HÔM NAY</div>
-        <div style="font-size:30px; font-weight:900; margin-top:2px; color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(bankRecon.computedBalance)}</div>
+        <div style="font-size:26px; font-weight:900; margin-top:2px; color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(bankRecon.computedBalance)}</div>
         <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
       </div>
       <div class="grid-table-wrap" style="margin-top:12px;">
@@ -16517,10 +16650,10 @@ function renderBankReconDetailPage(){
           <tbody>
             <tr><td>${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
             <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ HIỆN CÓ</td><td class="num" style="color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'}">${fmtVND(totalCurrentValue)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">Đây là tiền CHƯA thu/chưa trả — chưa nằm trong số dư ngân hàng ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản). Cộng cả 3 con số (số dư ngân hàng + khách nợ − mỏ nợ) mới ra ĐÚNG toàn bộ tài sản tiền mặt/công nợ hiện có của dự án xe.</div>
       ` : ''}
     </section>
     <section class="group">
@@ -16631,6 +16764,15 @@ function renderBankReconDetailPage(){
       <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)</div>
       <div class="card" style="padding:0; overflow:hidden;">
         ${bankInsuranceRegItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankVatPaymentItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Đã Nộp Thuế VAT</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankVatPaymentItems.map(r=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
