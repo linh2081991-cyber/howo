@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #212';
+const APP_BUILD = '2026-09-08 · #215';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11560,11 +11560,16 @@ function computeBankBalanceReconciliation(){
   const from = addDaysToDateStr(latest.date, 1);
   const cashInBank = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutBank = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
-  // Tiền dầu đổ thêm — CHỈ tính khi ca đó tự đánh dấu "Phương Thức Chi Phí
-  // Vận Hành = Ngân hàng" (dầu có thể đổ tiền mặt HOẶC chuyển khoản tuỳ
-  // lần, không cố định như 6 khoản dưới đây).
+  // SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận LẦN THỨ 2 — "toàn bộ tiền vào
+  // và ra trên app này tao đều dùng tk doanh nghiệp để xử lý"): BẮT ĐƯỢC
+  // LỖI THẬT SỰ NGHIÊM TRỌNG — điều kiện `sh.operatingCostMethod==='bank'`
+  // dưới đây không BAO GIỜ đúng, vì KHÔNG CÓ Ô NHẬP NÀO trên form Sửa Ca
+  // từng gán giá trị cho field này — nghĩa là tiền dầu ĐÃ BỊ BỎ SÓT HOÀN
+  // TOÀN khỏi Khớp Số Dư Ngân Hàng từ trước tới giờ, không phải do Ông
+  // Chủ quên tick. Sửa THẲNG theo đúng nguyên tắc Ông Chủ nói: dầu LUÔN
+  // coi là ngân hàng, y hệt cách advanceBank bên dưới đã làm đúng.
   const fuelBank = allShiftsCompanyWide()
-    .filter(sh=>sh.date>=from && sh.date<=today && sh.operatingCostMethod==='bank')
+    .filter(sh=>sh.date>=from && sh.date<=today)
     .reduce((s,sh)=>s+shiftFuelRefillCost(sanitizeShiftForRevenue(sh)), 0);
   // Tạm ứng tài xế — LUÔN là tiền ngân hàng (Q4), không còn gán theo
   // operatingCostMethod của ca (SỬA lỗi 2026-08-23: trước đây bị buộc
@@ -15705,7 +15710,7 @@ function renderCompanyDashboardPage(){
             </tbody>
           </table>
         </div>
-        <div class="hint" style="margin:2px 0 8px;">Đã gồm đủ: tiền khách/mỏ (có gắn Phương thức Ngân hàng) + dầu (ca đánh dấu Ngân hàng) + tạm ứng tài xế + sửa chữa + luật đường + Gốc/Lãi vay + bảo hiểm/đăng kiểm + mua Lô Hoá Đơn Bù + tiền vay mới giải ngân — các khoản sau LUÔN tính là ngân hàng, đúng nguyên tắc "mọi luồng tiền công ty đều qua tài khoản".</div>
+        <div class="hint" style="margin:2px 0 8px;">Đã gồm đủ: tiền khách/mỏ (có gắn Phương thức Ngân hàng) + dầu + tạm ứng tài xế + sửa chữa + luật đường + Gốc/Lãi vay + bảo hiểm/đăng kiểm + mua Lô Hoá Đơn Bù + tiền vay mới giải ngân — các khoản sau LUÔN tính là ngân hàng, đúng nguyên tắc "mọi luồng tiền công ty đều qua tài khoản".</div>
         <button class="btn btn-ghost btn-block" id="bankReconDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Dòng Tiền Từ Mốc Chốt Tới Nay</button>
         ` : `
         <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đầu tiên bên dưới (đúng số dư ngân hàng THẬT ngay lúc này) để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
@@ -16425,8 +16430,13 @@ function renderBankReconDetailPage(){
   // kiện sai. Thêm mới: Sửa chữa / Luật đường / Gốc+Lãi vay+Bảo hiểm+Đăng
   // kiểm / Mua Lô Hoá Đơn Bù — đều hiện ra đây để Ông Chủ tự đối chiếu,
   // khớp đúng với computeBankBalanceReconciliation().
+  // SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận LẦN 2 — "toàn bộ tiền vào ra
+  // trên app đều dùng tk doanh nghiệp"): bỏ điều kiện operatingCostMethod
+  // ===`bank` — field này KHÔNG CÓ Ô NHẬP nào từng gán giá trị, nên tiền
+  // dầu trước đây LUÔN bị lọc thành rỗng (không phải do Ông Chủ quên
+  // tick). Dầu giờ LUÔN tính là ngân hàng, y hệt Tạm ứng bên dưới.
   const bankFuelShifts = bankRecon ? allShiftsCompanyWide()
-    .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr() && sh.operatingCostMethod==='bank')
+    .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr())
     .map(sh=>({ date: sh.date, vehicleName: vehicleNameById(sh._vehicleId), cost: shiftFuelRefillCost(sanitizeShiftForRevenue(sh)) }))
     .filter(r=>r.cost>0)
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
@@ -16436,6 +16446,56 @@ function renderBankReconDetailPage(){
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const bankRepairs = bankRecon ? repairsInRangeCompanyWide(addDaysToDateStr(bankRecon.checkpoint.date,1), todayLocalDateStr()).sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const bankInvoiceLots = bankRecon ? state.invoiceLots.filter(l=>l.purchaseDate>bankRecon.checkpoint.date && l.purchaseDate<=todayLocalDateStr()).sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)) : [];
+  // SỬA 2026-09-08 LẦN 2 (Ông Chủ — "1 trang hoàn chỉnh, không lệch 1 mã
+  // nào, 1 đồng nào"): BẮT ĐƯỢC KHOẢNG TRỐNG LỚN — Nhà/Điện/Cầu Đường
+  // ĐANG được TÍNH vào tổng số dư (cashFlowSince) nhưng CHƯA TỪNG hiện
+  // dòng nào ở trang này để đối chiếu — vô hình với Ông Chủ dù ảnh hưởng
+  // trực tiếp tới con số cuối. Và "Gốc+Lãi vay+Bảo hiểm+Đăng kiểm" đang
+  // gộp CHUNG mọi khoản vay + mọi xe thành 1 số duy nhất — không đúng
+  // "1 mã 1 dòng" khi có ≥2 khoản vay/xe. Tách hết ra từng dòng độc lập.
+  const rangeFrom = bankRecon ? addDaysToDateStr(bankRecon.checkpoint.date,1) : null;
+  const rangeTo = todayLocalDateStr();
+  const monthsInRange = bankRecon ? monthsBetween(rangeFrom, rangeTo) : [];
+  const bankRoadFeeItems = bankRecon ? state.vehicles.flatMap(v=>{
+    const list = state.allVehiclesRoadFee[v.id] || [];
+    return monthsInRange.filter(ym=>list.some(e=>e.month===ym)).map(ym=>{
+      const e = list.find(x=>x.month===ym);
+      return { label: `Luật đường ${monthLabelVN(ym)} — 🚛 ${v.name||v.plate}`, amount: Number(e.amount)||0 };
+    });
+  }).filter(r=>r.amount>0) : [];
+  const bankHouseRentItems = bankRecon ? monthsInRange.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.rentAmount)>0))
+    .map(ym=>({ label:`Thuê nhà ${monthLabelVN(ym)}`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).rentAmount)||0 })) : [];
+  const bankUtilitiesItems = bankRecon ? monthsInRange.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.utilitiesAmount)>0))
+    .map(ym=>({ label:`Điện nước ${monthLabelVN(ym)}`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).utilitiesAmount)||0 })) : [];
+  const bankTollFeeItems = bankRecon ? monthsInRange.filter(ym=>state.tollFeeByMonth.some(e=>e.month===ym && Number(e.amount)>0))
+    .map(ym=>({ label:`Cầu đường ${monthLabelVN(ym)}`, amount: Number(state.tollFeeByMonth.find(e=>e.month===ym).amount)||0 })) : [];
+  const bankLoanPaymentItems = bankRecon ? state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    return loans.flatMap(loan=>computeFullLoanSchedule(loan)
+      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; return d>bankRecon.checkpoint.date && d<=rangeTo; })
+      .map(p=>({ label:`${escapeHtml(loan.name||'Khoản vay')} — kỳ ${p.dueDate.getDate()}/${p.dueDate.getMonth()+1}/${p.dueDate.getFullYear()} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total })));
+  }) : [];
+  const bankInsuranceRegItems = bankRecon ? state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const items = [];
+    if(Number(s.monthlyInsurance)>0) monthsInRange.forEach(ym=>items.push({ label:`Bảo hiểm ${monthLabelVN(ym)} — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyInsurance) }));
+    if(Number(s.monthlyRegistrationFee)>0) monthsInRange.forEach(ym=>items.push({ label:`Đăng kiểm/Đăng ký ${monthLabelVN(ym)} — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyRegistrationFee) }));
+    return items;
+  }) : [];
+  const bankLoanDisbursedItems = bankRecon ? state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    return loans.filter(loan=>loan.disbursementDate && loan.disbursementDate>bankRecon.checkpoint.date && loan.disbursementDate<=rangeTo)
+      .map(loan=>({ label:`Giải ngân ${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} — ${formatDateVN(loan.disbursementDate)}`, amount: Number(loan.principal)||0 }));
+  }) : [];
+  // SỬA 2026-09-08 (Ông Chủ "logic thật kỹ" — coi đây như 1 kế toán nội bộ
+  // phải trả lời đủ 3 câu: "tiền thật bao nhiêu, ai đang nợ tao, tao đang
+  // nợ ai"): thêm khối tổng hợp NGAY ĐẦU trang — trước đây trang này chỉ
+  // liệt kê từng dòng giao dịch, CHƯA hề hiện số dư app tính nổi bật ở
+  // đây (chỉ có ở trang khác), và CHƯA có công nợ — giờ gộp đủ cả 3 vào
+  // đúng 1 trang, đúng vai trò "báo cáo của kế toán" Ông Chủ mô tả.
+  const debtSummary = computeAllPartnersDebtSummary();
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -16444,6 +16504,26 @@ function renderBankReconDetailPage(){
     <section class="group">
       <h2 style="margin-bottom:2px;">🏦 Chi Tiết Dòng Tiền Từ Mốc Chốt</h2>
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay — CHỈ giao dịch NGÂN HÀNG (không gồm tiền mặt)`:'Chưa khai mốc chốt nào'}</div>
+      ${bankRecon ? `
+      <div class="card" style="text-align:center; border:2px solid var(--accent);">
+        <div class="hint" style="margin:0;">Mốc chốt ${formatDateVN(bankRecon.checkpoint.date)}: ${fmtVND(bankRecon.checkpoint.balance)}</div>
+        <div style="font-size:13px; font-weight:700; margin-top:8px;">= SỐ DƯ NGÂN HÀNG APP TÍNH HÔM NAY</div>
+        <div style="font-size:30px; font-weight:900; margin-top:2px; color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(bankRecon.computedBalance)}</div>
+        <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
+      </div>
+      <div class="grid-table-wrap" style="margin-top:12px;">
+        <table class="grid-table">
+          <thead><tr><th>Công Nợ Hiện Tại (Toàn Công Ty)</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
+            <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">Đây là tiền CHƯA thu/chưa trả — chưa nằm trong số dư ngân hàng ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản). Cộng cả 3 con số (số dư ngân hàng + khách nợ − mỏ nợ) mới ra ĐÚNG toàn bộ tài sản tiền mặt/công nợ hiện có của dự án xe.</div>
+      ` : ''}
+    </section>
+    <section class="group">
       <div class="card" style="padding:0; overflow:hidden;">
         ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có giao dịch ngân hàng nào sau mốc chốt.</div>' : entries.map(e=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
@@ -16455,7 +16535,7 @@ function renderBankReconDetailPage(){
           </div>`).join('')}
       </div>
       ${bankFuelShifts.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tiền Dầu Đổ Thêm (ca đánh dấu Ngân hàng)</div>
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tiền Dầu Đổ Thêm</div>
       <div class="card" style="padding:0; overflow:hidden;">
         ${bankFuelShifts.map(r=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
@@ -16493,16 +16573,68 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)))}</span>
           </div>`).join('')}
       </div>` : ''}
-      ${bankRecon && bankRecon.loanDisbursedBank>0 ? `
+      ${bankLoanDisbursedItems.length>0 ? `
       <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Nhận Tiền Vay Ngân Hàng Mới (Giải Ngân)</div>
-      <div class="card">
-        <div class="summary-row"><span>Tiền vay mới đã nhận về tài khoản</span><span class="val" style="color:var(--profit);">+${fmtVND(bankRecon.loanDisbursedBank)}</span></div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankLoanDisbursedItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬆️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--profit);">+${fmtVND(r.amount)}</span>
+          </div>`).join('')}
       </div>` : ''}
-      ${bankRecon && (bankRecon.roadFeeBank>0 || bankRecon.fixedMonthlyBank>0) ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Luật Đường + Gốc/Lãi Vay + Bảo Hiểm/Đăng Kiểm</div>
-      <div class="card">
-        <div class="summary-row"><span>Luật đường</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.roadFeeBank)}</span></div>
-        <div class="summary-row"><span>Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</span><span class="val" style="color:var(--loss);">−${fmtVND(bankRecon.fixedMonthlyBank)}</span></div>
+      ${bankRoadFeeItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Luật Đường</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankRoadFeeItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankHouseRentItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Thuê Nhà</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankHouseRentItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankUtilitiesItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Điện Nước</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankUtilitiesItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankTollFeeItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Cầu Đường</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankTollFeeItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankLoanPaymentItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Gốc + Lãi Vay Ngân Hàng (từng khoản, từng kỳ)</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankLoanPaymentItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankInsuranceRegItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankInsuranceRegItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
       </div>` : ''}
       ${cashEntries.length>0 ? `
       <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">💵 Giao dịch Tiền Mặt cùng khoảng thời gian (KHÔNG tính vào số dư ngân hàng)</div>
@@ -16516,7 +16648,7 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:var(--ink-soft);">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>` : ''}
-      <div class="hint" style="margin-top:8px;">Gồm ĐÚNG mọi khoản đi qua ngân hàng kể từ sau mốc chốt: tiền khách/mỏ/góp/rút có gắn Phương thức = Ngân hàng, tiền dầu của ca đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng", cộng với tạm ứng lương/sửa chữa/luật đường/gốc+lãi vay/bảo hiểm/đăng kiểm/mua lô hoá đơn bù/tiền vay mới giải ngân — 8 khoản sau LUÔN coi là ngân hàng (không có ô chọn riêng). Muốn xem đủ MỌI khoản kể cả tiền mặt, vào "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" ở mục Tổng Kết Dòng Tiền.</div>
+      <div class="hint" style="margin-top:8px;">Gồm ĐÚNG mọi khoản đi qua ngân hàng kể từ sau mốc chốt: tiền khách/mỏ/góp/rút có gắn Phương thức = Ngân hàng, cộng với tiền dầu/tạm ứng lương/sửa chữa/luật đường/gốc+lãi vay/bảo hiểm/đăng kiểm/mua lô hoá đơn bù/tiền vay mới giải ngân — 9 khoản sau LUÔN coi là ngân hàng (đúng nguyên tắc "mọi luồng tiền công ty đều qua tài khoản doanh nghiệp"). Muốn xem đủ MỌI khoản kể cả tiền mặt, vào "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" ở mục Tổng Kết Dòng Tiền.</div>
     </section>
   `;
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
