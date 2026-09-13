@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #210';
+const APP_BUILD = '2026-09-08 · #212';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11581,13 +11581,25 @@ function computeBankBalanceReconciliation(){
   const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today);
   const invoiceLotBank = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today)
     .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
+  // SỬA 2026-09-08 (Ông Chủ "logic lại" — "TẤT CẢ tiền công ty đều qua tài
+  // khoản ngân hàng"): BẮT ĐƯỢC KHOẢN THIẾU — trước đây tính đủ mọi khoản
+  // CHI (trả gốc+lãi vay qua fixedMonthlyBank) nhưng CHƯA CÓ khoản THU khi
+  // NHẬN tiền vay MỚI (giải ngân) — nếu sau mốc chốt Ông Chủ vay thêm 1
+  // khoản, tiền vào tài khoản thật nhưng app không cộng, làm số app tính
+  // THẤP HƠN số thật. Cộng thêm — quét TẤT CẢ khoản vay của MỌI xe, khoản
+  // nào có Ngày Giải Ngân rơi vào đúng khoảng sau mốc chốt tới hôm nay.
+  const loanDisbursedBank = Object.values(state.allVehiclesSettings).reduce((sum,s)=>{
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    return sum + loans.filter(loan=>loan.disbursementDate && loan.disbursementDate>=from && loan.disbursementDate<=today)
+      .reduce((s2,loan)=>s2+(Number(loan.principal)||0), 0);
+  }, 0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank;
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank + loanDisbursedBank;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
-    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank };
+    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -14965,6 +14977,11 @@ function renderLoanList(){
     const r = computeBankLoanAmortization(loan, new Date());
     return sum + (r.hasBasis && !r.isPaidOff ? r.totalPaymentCurrent : 0);
   }, 0);
+  // SỬA 2026-09-08 (Ông Chủ báo — "thiếu nút ghi nhận khi đã đóng gốc+lãi
+  // kỳ hiện tại"): cơ chế "✅ Xác Nhận Đã Trả Từng Kỳ" đã có sẵn TỪ TRƯỚC,
+  // nhưng chỉ nằm trong trang "Sửa" đầy đủ — phải mở vào mới thấy. Thêm
+  // hẳn 1 nút xác nhận nhanh NGAY TRÊN danh sách này, bấm 1 phát là tick
+  // đúng kỳ đang tới hạn (r.dueDate), không cần mở trang Sửa nữa.
   wrap.innerHTML = `
     <div class="grid-table-wrap">
       <table class="grid-table">
@@ -14973,13 +14990,18 @@ function renderLoanList(){
           ${loans.map(loan=>{
             const r = computeBankLoanAmortization(loan, new Date());
             const paidCount = loanPaidPeriodsCount(loan);
+            const dueYm = r.hasBasis && r.dueDate ? `${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}` : null;
+            const alreadyPaidThisPeriod = dueYm && Array.isArray(loan.paidMonths) && loan.paidMonths.includes(dueYm);
             return `<tr>
               <td><strong>${escapeHtml(loan.name||'Khoản vay')}</strong></td>
               <td class="num">${r.hasBasis ? fmtVND(r.remainingBalance) : '—'}</td>
               <td class="num">${r.hasBasis ? (r.isPaidOff?'Đã hết nợ ✅':fmtVND(r.totalPaymentCurrent)) : '—'}</td>
               <td>${r.hasBasis ? `${paidCount}/${r.termMonths} kỳ` : '—'}</td>
               <td><button class="btn btn-ghost btn-sm editLoanBtn" data-id="${loan.id}" style="width:auto; padding:5px 10px;">Sửa</button></td>
-            </tr>`;
+            </tr>
+            ${(r.hasBasis && !r.isPaidOff && dueYm) ? `<tr><td colspan="5" style="padding-top:0;">
+              <button class="btn ${alreadyPaidThisPeriod?'btn-ghost':'btn-accent'} btn-block confirmLoanPeriodBtn" data-id="${loan.id}" data-ym="${dueYm}" style="margin-top:6px; ${alreadyPaidThisPeriod?'opacity:0.6;':''}">${alreadyPaidThisPeriod?`✅ Đã xác nhận đóng kỳ ${monthLabelVN(dueYm)}`:`✅ Xác Nhận Đã Đóng Kỳ ${monthLabelVN(dueYm)} (${fmtVND(r.totalPaymentCurrent)})`}</button>
+            </td></tr>` : ''}`;
           }).join('')}
           <tr class="grid-total-row"><td colspan="2" style="text-align:left;">TỔNG Gốc+Lãi/Tháng (kỳ hiện tại, mọi khoản)</td><td class="num">${fmtVND(totalThisPeriod)}</td><td></td><td></td></tr>
         </tbody>
@@ -14987,6 +15009,18 @@ function renderLoanList(){
     </div>`;
   wrap.querySelectorAll('.editLoanBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>openLoanEditor(btn.dataset.id));
+  });
+  wrap.querySelectorAll('.confirmLoanPeriodBtn').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const loan = (state.settings.bankLoans||[]).find(l=>l.id===btn.dataset.id);
+      if(!loan) return;
+      const alreadyPaid = Array.isArray(loan.paidMonths) && loan.paidMonths.includes(btn.dataset.ym);
+      setLoanPeriodPaid(loan, btn.dataset.ym, !alreadyPaid);
+      recomputeBankLoanMonthlyPayment();
+      const ok = await saveSettings();
+      showToast(ok ? (alreadyPaid?`Đã bỏ xác nhận kỳ ${monthLabelVN(btn.dataset.ym)}.`:`Đã ghi nhận đóng kỳ ${monthLabelVN(btn.dataset.ym)}.`) : 'Lưu thất bại — thử lại.');
+      renderLoanList();
+    });
   });
 }
 /// SỬA 2026-09-08 (yêu cầu Ông Chủ — "gọn gàng vào Linh Chí Thành, không
@@ -15610,7 +15644,6 @@ function renderCompanyDashboardPage(){
             </tbody>
           </table>
         </div>
-        <div class="hint" style="margin-top:8px;">"Tiền đảo" = những lần Ông Chủ chuyển tiền vào rồi rút ra (hoặc ngược lại) chỉ để đủ hồ sơ Vốn Điều Lệ trên giấy tờ, KHÔNG phải tiền mới bỏ thêm vào công ty hay tiền rút thật ra khỏi công ty — nên KHÔNG tính vào Vốn Chủ Sở Hữu thật, dù vẫn hiện đủ trong Sao Kê Toàn Bộ Dòng Tiền (vì đó là tiền ngân hàng thật đã di chuyển).</div>
       </div>
       ` : ''}
       <button class="btn btn-ghost btn-block" id="cashFlowLedgerBtn" style="margin-top:2px;">📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra</button>
@@ -15655,7 +15688,6 @@ function renderCompanyDashboardPage(){
             </tbody>
           </table>
         </div>
-        <div class="hint" style="margin-top:6px;">Màu XANH = tiền Ông Chủ sẽ nhận thêm hoặc đang được giữ hộ (có lợi). Màu ĐỎ = tiền Ông Chủ còn phải trả (nghĩa vụ). Đây là công nợ CHƯA thu/chưa trả — chưa nằm trong Lợi Nhuận Luỹ Kế ở trên (số đó chỉ tính tiền THẬT đã ra/vào tài khoản). Bấm 🔍 để xem rõ từng khách/nhà cung cấp.</div>
       </div>
 
       <div class="card" style="margin-top:12px; border:1.5px solid var(--accent);">
@@ -15673,7 +15705,7 @@ function renderCompanyDashboardPage(){
             </tbody>
           </table>
         </div>
-        <div class="hint" style="margin:2px 0 8px;">Đã gồm đủ: tiền khách/mỏ (có gắn Phương thức Ngân hàng) + dầu (ca đánh dấu Ngân hàng) + tạm ứng tài xế + sửa chữa + luật đường + Gốc/Lãi vay + bảo hiểm/đăng kiểm + mua Lô Hoá Đơn Bù — 6 khoản sau LUÔN tính là ngân hàng theo đúng xác nhận của Ông Chủ.</div>
+        <div class="hint" style="margin:2px 0 8px;">Đã gồm đủ: tiền khách/mỏ (có gắn Phương thức Ngân hàng) + dầu (ca đánh dấu Ngân hàng) + tạm ứng tài xế + sửa chữa + luật đường + Gốc/Lãi vay + bảo hiểm/đăng kiểm + mua Lô Hoá Đơn Bù + tiền vay mới giải ngân — các khoản sau LUÔN tính là ngân hàng, đúng nguyên tắc "mọi luồng tiền công ty đều qua tài khoản".</div>
         <button class="btn btn-ghost btn-block" id="bankReconDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Dòng Tiền Từ Mốc Chốt Tới Nay</button>
         ` : `
         <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đầu tiên bên dưới (đúng số dư ngân hàng THẬT ngay lúc này) để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
@@ -16461,6 +16493,11 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)))}</span>
           </div>`).join('')}
       </div>` : ''}
+      ${bankRecon && bankRecon.loanDisbursedBank>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Nhận Tiền Vay Ngân Hàng Mới (Giải Ngân)</div>
+      <div class="card">
+        <div class="summary-row"><span>Tiền vay mới đã nhận về tài khoản</span><span class="val" style="color:var(--profit);">+${fmtVND(bankRecon.loanDisbursedBank)}</span></div>
+      </div>` : ''}
       ${bankRecon && (bankRecon.roadFeeBank>0 || bankRecon.fixedMonthlyBank>0) ? `
       <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Luật Đường + Gốc/Lãi Vay + Bảo Hiểm/Đăng Kiểm</div>
       <div class="card">
@@ -16479,7 +16516,7 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:var(--ink-soft);">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>` : ''}
-      <div class="hint" style="margin-top:8px;">Gồm tiền khách/mỏ/góp/rút CÓ GẮN "Phương thức" + chi phí vận hành của ca nào đã đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng" (ở Sửa Ca). Sửa chữa/luật đường/vay chưa có ô Phương thức riêng, vẫn coi là tiền mặt, không tính vào đây — xem đủ MỌI khoản (kể cả tiền mặt) ở "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" tại mục Tổng Kết Dòng Tiền.</div>
+      <div class="hint" style="margin-top:8px;">Gồm ĐÚNG mọi khoản đi qua ngân hàng kể từ sau mốc chốt: tiền khách/mỏ/góp/rút có gắn Phương thức = Ngân hàng, tiền dầu của ca đánh dấu "Phương Thức Chi Phí Vận Hành = Ngân hàng", cộng với tạm ứng lương/sửa chữa/luật đường/gốc+lãi vay/bảo hiểm/đăng kiểm/mua lô hoá đơn bù/tiền vay mới giải ngân — 8 khoản sau LUÔN coi là ngân hàng (không có ô chọn riêng). Muốn xem đủ MỌI khoản kể cả tiền mặt, vào "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" ở mục Tổng Kết Dòng Tiền.</div>
     </section>
   `;
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
