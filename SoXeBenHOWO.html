@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #223';
+const APP_BUILD = '2026-09-08 · #224';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1775,6 +1775,38 @@ function renderAddVehicleModal(){
     if(!ok){ state.vehicles.pop(); showToast('Lưu xe mới thất bại — xem lý do lỗi ở thông báo trước đó, thử thêm lại.'); return; }
     showToast(`Đã thêm ${name}.`);
     switchVehicle(v.id);
+  });
+}
+/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "cho tao cơ chế sửa được biển số
+/// xe"): trước đây renderAddVehicleModal() chỉ có chiều TẠO MỚI, không
+/// có cách nào SỬA LẠI biển số/tên 1 xe đã có sẵn (kể cả xe chính) — bổ
+/// sung modal riêng, gọi từ nút ✏️ ở đúng sơ đồ cây chọn xe.
+function openEditVehicleModal(vid){
+  const v = state.vehicles.find(x=>x.id===vid);
+  if(!v) return;
+  openModal(`
+    <h3>✏️ Sửa Thông Tin Xe</h3>
+    <div class="field">
+      <label>Biển số xe</label>
+      <input type="text" id="editVehiclePlate" value="${escapeHtml(v.plate||'')}" placeholder="VD 29H-123.45">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Tên gọi (tuỳ chọn — để trống dùng luôn biển số)</label>
+      <input type="text" id="editVehicleName" value="${escapeHtml(v.name||'')}" placeholder="VD Xe Ben 2">
+    </div>
+    <button class="btn btn-accent btn-block" id="saveEditVehicleBtn" style="margin-top:10px;">Lưu</button>
+  `);
+  document.getElementById('saveEditVehicleBtn').addEventListener('click', async ()=>{
+    const plate = (document.getElementById('editVehiclePlate').value||'').trim();
+    if(!plate){ showToast('Nhập biển số xe trước đã.'); return; }
+    const name = (document.getElementById('editVehicleName').value||'').trim() || plate;
+    const oldPlate = v.plate, oldName = v.name;
+    v.plate = plate; v.name = name;
+    const ok = await saveVehicles();
+    if(!ok){ v.plate = oldPlate; v.name = oldName; showToast('Lưu thất bại — thử lại.'); return; }
+    showToast('Đã lưu.');
+    closeModal();
+    renderAll();
   });
 }
 /// Tải riêng TOÀN BỘ dữ liệu RIÊNG CỦA 1 XE vào bộ nhớ (Ca Làm Việc, Tài
@@ -6331,6 +6363,7 @@ function renderChooseVehiclePrompt(){
               </span>
               <span style="color:var(--ink-soft); font-size:18px;">→</span>
             </button>
+            <button class="vehicle-map-edit" data-vid="${v.id}" style="background:none; border:none; color:var(--ink-soft); font-size:18px; padding:4px 6px; flex-shrink:0;">✏️</button>
             ${!v.isPrimary ? `<button class="vehicle-map-delete" data-vid="${v.id}" data-vname="${escapeHtml(v.name||v.plate||'')}" style="background:none; border:none; color:var(--loss); font-size:18px; padding:4px 6px; flex-shrink:0;">🗑️</button>` : ''}
           </div>`).join('')}
       </div>
@@ -6340,6 +6373,12 @@ function renderChooseVehiclePrompt(){
   document.getElementById('vehicleMapAddBtn').addEventListener('click', renderAddVehicleModal);
   document.querySelectorAll('.vehicle-map-node').forEach(btn=>{
     btn.addEventListener('click', ()=>switchVehicle(btn.dataset.vid));
+  });
+  document.querySelectorAll('.vehicle-map-edit').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      openEditVehicleModal(btn.dataset.vid);
+    });
   });
   document.querySelectorAll('.vehicle-map-delete').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
