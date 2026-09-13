@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #217';
+const APP_BUILD = '2026-09-08 · #220';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -897,6 +897,8 @@ let state = {
   // tính đúng được ở cấp công ty.
   ownerEquityEntries: [], // {id, date, type:'contribution'|'withdrawal', amount, note}
   vatPayments: [], // {id, date, amount, notes} — CHUNG CÔNG TY, tiền VAT đã nộp thật cho nhà nước
+  cashBalanceCheckpoints: [], // {id, date, balance, note} — mốc chốt TIỀN MẶT ĐANG CẦM, sinh đôi với bankBalanceCheckpoints
+  internalTransfers: [], // {id, date, direction:'bankToCash'|'cashToBank', amount, note} — chuyển tiền NỘI BỘ giữa 2 túi (ngân hàng/tiền mặt) của CÙNG 1 công ty, KHÔNG phải chi tiêu — không đổi Tổng Giá Trị Hiện Có
   // "Dự Án Đầu Tư Xe" (2026-08-15) — Vốn Đầu Tư Ban Đầu (giá xe + chi phí
   // liên quan mua xe, Ông Chủ tự điền tay) TÁCH RIÊNG hẳn khỏi Sổ Vốn Chủ
   // Sở Hữu ở trên (đó là các lần góp/rút LẺ TẺ về sau) — và Ngày Bắt Đầu
@@ -1551,7 +1553,7 @@ function withTimeout(promise, ms=15000){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap, vatPaymentSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1589,7 +1591,19 @@ async function loadAll(){
       // chưa có nơi ghi nhận khi đã nộp thật"): sổ ghi nhận từng lần nộp
       // VAT thật cho nhà nước — CHUNG CÔNG TY, dùng cho Khớp Số Dư Ngân
       // Hàng (tiền nộp thuế luôn qua tài khoản doanh nghiệp).
-      sharedDataRef('vatPayments').get()
+      sharedDataRef('vatPayments').get(),
+      // SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài
+      // thật sự còn 123tr"): mốc chốt TIỀN MẶT ĐANG CẦM, sinh đôi với
+      // bankBalanceCheckpoints — cùng cơ chế "khai 1 lần, không cần nhớ
+      // lịch sử", để "Tổng Giá Trị Hiện Có" cộng đủ CẢ ngân hàng lẫn tiền
+      // mặt, không còn thiếu khoản nào.
+      sharedDataRef('cashBalanceCheckpoints').get(),
+      // SỬA 2026-09-08 LẦN 3 (Ông Chủ — "dù lấy từ nguồn tài khoản hay
+      // tiền mặt thì vẫn lấy từ tổng nguồn cty ra"): sổ CHUYỂN TIỀN NỘI
+      // BỘ giữa 2 túi ngân hàng/tiền mặt CỦA CÙNG CÔNG TY — không phải
+      // chi tiêu, chỉ đổi hình thái, nên phải trừ 1 bên + cộng bên kia
+      // ĐỒNG THỜI để Tổng Giá Trị Hiện Có không bị đổi sai.
+      sharedDataRef('internalTransfers').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1625,6 +1639,10 @@ async function loadAll(){
     state.ownerEquityEntries = ownerEquityData && Array.isArray(ownerEquityData.list) ? ownerEquityData.list : [];
     const vatPaymentData = vatPaymentSnap.exists ? vatPaymentSnap.data() : null;
     state.vatPayments = vatPaymentData && Array.isArray(vatPaymentData.list) ? vatPaymentData.list : [];
+    const cashBalanceCheckpointsData = cashBalanceCheckpointsSnap.exists ? cashBalanceCheckpointsSnap.data() : null;
+    state.cashBalanceCheckpoints = cashBalanceCheckpointsData && Array.isArray(cashBalanceCheckpointsData.list) ? cashBalanceCheckpointsData.list : [];
+    const internalTransfersData = internalTransfersSnap.exists ? internalTransfersSnap.data() : null;
+    state.internalTransfers = internalTransfersData && Array.isArray(internalTransfersData.list) ? internalTransfersData.list : [];
     if(equityProjectInfoSnap.exists){
       const epi = equityProjectInfoSnap.data();
       state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null,
@@ -1926,6 +1944,14 @@ async function saveEquityProjectInfo(){
 async function saveBankBalanceCheckpoints(){
   try { await withTimeout(sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints })); return true; }
   catch(e){ showToast('Lỗi lưu mốc chốt số dư ngân hàng: ' + (e?.message || e)); return false; }
+}
+async function saveCashBalanceCheckpoints(){
+  try { await withTimeout(sharedDataRef('cashBalanceCheckpoints').set({ list: state.cashBalanceCheckpoints })); return true; }
+  catch(e){ showToast('Lỗi lưu mốc chốt tiền mặt đang cầm: ' + (e?.message || e)); return false; }
+}
+async function saveInternalTransfers(){
+  try { await withTimeout(sharedDataRef('internalTransfers').set({ list: state.internalTransfers })); return true; }
+  catch(e){ showToast('Lỗi lưu sổ chuyển tiền nội bộ: ' + (e?.message || e)); return false; }
 }
 async function saveShifts(){
   try {
@@ -11617,13 +11643,52 @@ function computeBankBalanceReconciliation(){
   // thuế điện tử), cộng vào đây.
   const vatPaymentBank = (state.vatPayments||[]).filter(p=>p.date>=from && p.date<=today)
     .reduce((s,p)=>s+(Number(p.amount)||0), 0);
+  // SỬA 2026-09-08 LẦN 3 (Ông Chủ — "có khi nộp tiền cho mỏ phải dùng
+  // tiền mặt, nhưng dù lấy từ nguồn nào cũng là tổng nguồn công ty"):
+  // CHUYỂN TIỀN NỘI BỘ giữa ngân hàng ↔ tiền mặt — KHÔNG phải chi tiêu,
+  // chỉ đổi túi. Rút tiền mặt từ ngân hàng (bankToCash) làm GIẢM ngân
+  // hàng; nộp tiền mặt vào lại ngân hàng (cashToBank) làm TĂNG ngân
+  // hàng — ngược lại đúng ở sổ tiền mặt bên dưới, để tổng 2 sổ cộng lại
+  // không đổi (đúng bản chất "vẫn là tiền công ty, chỉ đổi hình thái").
+  const transferOutToCash = (state.internalTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='bankToCash').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const transferInFromCash = (state.internalTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='cashToBank').reduce((s,t)=>s+(Number(t.amount)||0),0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank;
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash;
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
-    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank };
+    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash };
+}
+/// SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài thật
+/// sự còn 123tr"): SINH ĐÔI với computeBankBalanceReconciliation() ở
+/// trên, nhưng cho TIỀN MẶT ĐANG CẦM — cùng cơ chế "khai 1 lần đúng số
+/// thật đang cầm, sau đó chỉ cộng dồn các giao dịch CÓ ĐÁNH DẤU Phương
+/// Thức = Tiền Mặt phát sinh SAU mốc chốt". Chỉ 3 nguồn có thể chọn
+/// "tiền mặt" trong app (khách trả/mỏ nhận/góp-rút vốn) — mọi khoản khác
+/// (dầu, tạm ứng, sửa chữa, luật đường, vay, hoá đơn bù, VAT...) LUÔN
+/// LUÔN là ngân hàng theo đúng xác nhận của Ông Chủ, không liên quan tới
+/// sổ tiền mặt này.
+function computeCashBalanceReconciliation(){
+  const today = todayLocalDateStr();
+  const sorted = [...state.cashBalanceCheckpoints].filter(c=>c.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
+  if(sorted.length===0) return null;
+  const latest = sorted[0];
+  const from = addDaysToDateStr(latest.date, 1);
+  const cashInCash = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method==='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const cashOutCash = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method==='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
+  // Y HỆT chiều ngược lại của computeBankBalanceReconciliation() ở trên —
+  // rút tiền mặt từ ngân hàng (bankToCash) làm TĂNG tiền mặt đang cầm;
+  // nộp tiền mặt vào lại ngân hàng (cashToBank) làm GIẢM tiền mặt đang
+  // cầm. Cộng 2 sổ lại luôn ra ĐÚNG như trước khi chuyển — không đổi
+  // Tổng Giá Trị Hiện Có.
+  const transferInFromBank = (state.internalTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='bankToCash').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const transferOutToBank = (state.internalTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='cashToBank').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank;
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
+  return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -15145,6 +15210,60 @@ function openVatPaymentEditor(id){
     });
   }
 }
+/// SỬA 2026-09-08 LẦN 3 (Ông Chủ — "có khi nộp tiền cho mỏ phải dùng
+/// tiền mặt, nhưng dù lấy từ nguồn nào cũng là tổng nguồn công ty"):
+/// modal nhẹ ghi nhận 1 lần chuyển tiền NỘI BỘ giữa 2 túi ngân hàng/tiền
+/// mặt CỦA CÙNG CÔNG TY — không phải chi tiêu, chỉ đổi hình thái. Dùng
+/// openModal() (không cần cả trang riêng) vì đây là thao tác nhanh, 1
+/// lần bấm là xong.
+function openInternalTransferModal(){
+  let amountVal = 0;
+  openModal(`
+    <h3>🔄 Ghi Nhận Chuyển Tiền Nội Bộ</h3>
+    <div class="field">
+      <label>Chiều chuyển</label>
+      <div class="seg" id="it_direction">
+        <button data-val="bankToCash" class="active">🏦→💵 Rút tiền mặt từ ngân hàng</button>
+        <button data-val="cashToBank">💵→🏦 Nộp tiền mặt vào ngân hàng</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Ngày</label>
+      <input type="date" id="it_date" value="${todayLocalDateStr()}">
+    </div>
+    <div class="field">
+      <label>Số tiền</label>
+      <input type="text" inputmode="decimal" id="it_amount">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Ghi chú</label>
+      <input type="text" id="it_notes" placeholder="VD: Rút tiền mặt để trả mỏ Hoàng Phong">
+    </div>
+    <button class="btn btn-accent btn-block" id="it_saveBtn" style="margin-top:14px;">Lưu</button>
+  `);
+  let direction = 'bankToCash';
+  document.querySelectorAll('#it_direction button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      direction = btn.dataset.val;
+      document.querySelectorAll('#it_direction button').forEach(b=>b.classList.toggle('active', b===btn));
+    });
+  });
+  attachMoneyInput(document.getElementById('it_amount'), 0, v=>amountVal=v);
+  document.getElementById('it_saveBtn').addEventListener('click', async ()=>{
+    const date = document.getElementById('it_date').value;
+    const notes = document.getElementById('it_notes').value.trim();
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(!(amountVal>0)){ showToast('Nhập số tiền trước đã.'); return; }
+    state.internalTransfers.push({ id: uid('xfer'), date, direction, amount: amountVal, note: notes });
+    const ok = await saveInternalTransfers();
+    if(!ok) return;
+    showToast('Đã ghi nhận chuyển tiền.');
+    closeModal();
+    saveMainScroll();
+    renderCompanyDashboardPage();
+    restoreMainScroll();
+  });
+}
 function openFixedCostsEditor(){
   let depVal = Number(state.settings.monthlyVehicleDepreciation)||0;
   let insVal = Number(state.settings.monthlyInsurance)||0;
@@ -15653,8 +15772,7 @@ function renderCompanyDashboardPage(){
     ? { label:'Ông Chủ đang nợ nhà cung cấp', value:supOwed, color:'var(--loss)' }
     : { label:'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)', value:-supOwed, color:'var(--profit)' };
   const bankRecon = computeBankBalanceReconciliation();
-
-  let roiHtml = '';
+  const cashRecon = computeCashBalanceReconciliation();
   // SỬA 2026-09-08 (Ông Chủ phát hiện lỗi — "Hiệu Quả Đầu Tư không nên
   // dùng số tiền mặt vì trừ nhầm gốc vay ngân hàng như 1 khoản chi phí,
   // gốc vay KHÔNG làm giảm vốn thật — chỉ chuyển tiền mặt thành giảm
@@ -15854,6 +15972,75 @@ function renderCompanyDashboardPage(){
             <div style="display:flex; align-items:center; gap:10px;">
               <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
               <button class="link-btn" data-del-bankcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <div class="card" style="margin-top:16px; border:1.5px solid var(--accent);">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">💵 Tiền Mặt Đang Cầm</div>
+        ${cashRecon ? `
+        <div class="grid-table-wrap" style="margin-bottom:8px;">
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
+              <tr><td>Mốc chốt gần nhất (${formatDateVN(cashRecon.checkpoint.date)})</td><td class="num">${fmtVND(cashRecon.checkpoint.balance)}</td></tr>
+              <tr><td>+ Thu/Chi TIỀN MẶT phát sinh sau đó</td><td class="num" style="color:${cashRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${cashRecon.cashFlowSince>=0?'+':''}${fmtVND(cashRecon.cashFlowSince)}</td></tr>
+              <tr><td>+ Đã góp thêm (tiền mặt) sau đó</td><td class="num" style="color:var(--profit);">+${fmtVND(cashRecon.contributedSince)}</td></tr>
+              <tr><td>− Đã rút ra (tiền mặt) sau đó</td><td class="num" style="color:var(--loss);">−${fmtVND(cashRecon.withdrawnSince)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= Tiền mặt app tính đang cầm</td><td class="num" style="color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(cashRecon.computedBalance)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="hint" style="margin:2px 0 8px;">Chỉ gồm: tiền khách/mỏ/góp/rút vốn có gắn Phương thức = Tiền mặt — mọi khoản khác (dầu, tạm ứng, sửa chữa, luật đường, vay, hoá đơn bù, VAT...) LUÔN LUÔN là ngân hàng, không liên quan sổ này.</div>
+        ` : `
+        <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đúng số tiền mặt THẬT đang cầm ngay lúc này để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
+        `}
+        <div class="formula-divider" style="margin:12px 0;"></div>
+        <div class="field">
+          <label>Ngày chốt</label>
+          <input type="date" id="cbc_date" value="${todayLocalDateStr()}">
+        </div>
+        <div class="field">
+          <label>Tiền mặt THẬT đang cầm vào đúng ngày này</label>
+          <input type="text" inputmode="decimal" id="cbc_balance">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="cbc_note" placeholder="Không bắt buộc">
+        </div>
+        <button class="btn btn-accent btn-block" id="cbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
+      </div>
+      ${state.cashBalanceCheckpoints.length>0 ? `
+      <div class="card" style="margin-top:12px; padding:0; overflow:hidden;">
+        ${[...state.cashBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${formatDateVN(c.date)}</div>
+              ${c.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(c.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
+              <button class="link-btn" data-del-cashcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+    </section>
+
+    <section class="group">
+      <h3>🔄 Chuyển Tiền Nội Bộ: Ngân Hàng ↔ Tiền Mặt</h3>
+      <div class="hint" style="margin-bottom:10px;">Dùng khi rút tiền mặt từ ngân hàng ra để xài (VD: trả mỏ bằng tiền mặt), hoặc nộp tiền mặt dư vào lại ngân hàng — KHÔNG phải chi tiêu, chỉ đổi túi, nên không làm đổi Tổng Giá Trị Hiện Có (1 bên giảm, bên kia tăng đúng bằng nhau).</div>
+      <button class="btn btn-accent btn-block" id="addInternalTransferBtn" style="margin-bottom:10px;">🔄➕ Ghi Nhận Chuyển Tiền</button>
+      ${state.internalTransfers.length>0 ? `
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${[...state.internalTransfers].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10).map(t=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt từ ngân hàng':'💵→🏦 Nộp tiền mặt vào ngân hàng'} — ${formatDateVN(t.date)}</div>
+              ${t.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(t.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap;">${fmtVND(t.amount)}</span>
+              <button class="link-btn" data-del-transfer="${t.id}" style="color:var(--loss); padding:0;">Xoá</button>
             </div>
           </div>`).join('')}
       </div>` : ''}
@@ -16074,6 +16261,42 @@ function renderCompanyDashboardPage(){
       state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
       if(!(await saveBankBalanceCheckpoints())) return;
       showToast('Đã xoá mốc chốt.');
+      saveMainScroll();
+      renderCompanyDashboardPage();
+      restoreMainScroll();
+    });
+  });
+  let cbcBalanceVal = 0;
+  attachMoneyInput(document.getElementById('cbc_balance'), 0, v=>cbcBalanceVal=v);
+  document.getElementById('cbc_addBtn').addEventListener('click', async ()=>{
+    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const date = document.getElementById('cbc_date').value;
+    const note = document.getElementById('cbc_note').value.trim();
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(state.cashBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
+    state.cashBalanceCheckpoints.push({ id: uid('cashcp'), date, balance: cbcBalanceVal, note });
+    if(!(await saveCashBalanceCheckpoints())) return;
+    showToast('Đã khai báo mốc chốt tiền mặt.');
+    saveMainScroll();
+    renderCompanyDashboardPage();
+    restoreMainScroll();
+  });
+  document.querySelectorAll('[data-del-cashcheckpoint]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.cashBalanceCheckpoints = state.cashBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delCashcheckpoint);
+      if(!(await saveCashBalanceCheckpoints())) return;
+      showToast('Đã xoá mốc chốt.');
+      saveMainScroll();
+      renderCompanyDashboardPage();
+      restoreMainScroll();
+    });
+  });
+  document.getElementById('addInternalTransferBtn').addEventListener('click', openInternalTransferModal);
+  document.querySelectorAll('[data-del-transfer]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.internalTransfers = state.internalTransfers.filter(t=>t.id!==btn.dataset.delTransfer);
+      if(!(await saveInternalTransfers())) return;
+      showToast('Đã xoá.');
       saveMainScroll();
       renderCompanyDashboardPage();
       restoreMainScroll();
@@ -16591,6 +16814,8 @@ function renderBankReconDetailPage(){
     .map(ym=>({ label:`Cầu đường ${monthLabelVN(ym)}`, amount: Number(state.tollFeeByMonth.find(e=>e.month===ym).amount)||0 })) : [];
   const bankVatPaymentItems = bankRecon ? (state.vatPayments||[]).filter(p=>p.date>bankRecon.checkpoint.date && p.date<=rangeTo)
     .map(p=>({ label:`Đã nộp thuế VAT — ${formatDateVN(p.date)}${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
+  const bankTransferItems = bankRecon ? (state.internalTransfers||[]).filter(t=>t.date>bankRecon.checkpoint.date && t.date<=rangeTo)
+    .map(t=>({ label:`${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt':'💵→🏦 Nộp tiền mặt vào'} — ${formatDateVN(t.date)}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='bankToCash'?-1:1 })) : [];
   const bankLoanPaymentItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
@@ -16618,12 +16843,11 @@ function renderBankReconDetailPage(){
   // đây (chỉ có ở trang khác), và CHƯA có công nợ — giờ gộp đủ cả 3 vào
   // đúng 1 trang, đúng vai trò "báo cáo của kế toán" Ông Chủ mô tả.
   const debtSummary = computeAllPartnersDebtSummary();
-  // SỬA 2026-09-08 LẦN 3 (Ông Chủ hỏi lại — "tiền của tao nằm ở đâu tao
-  // phải thấy rõ"): trước đây chỉ hiện RIÊNG 2 mảnh (số dư ngân hàng +
-  // bảng công nợ) và NHẮC mày tự cộng bằng chữ — vẫn bắt làm toán thủ
-  // công. Giờ CỘNG SẴN thành 1 con số DUY NHẤT, hiện to rõ ràng ngay đầu
-  // trang — không còn phải tự nhẩm nữa.
-  const totalCurrentValue = bankRecon ? bankRecon.computedBalance + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed : 0;
+  const cashRecon = computeCashBalanceReconciliation();
+  // SỬA 2026-09-08 LẦN 4 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài thật
+  // sự còn 123tr"): TỔNG GIÁ TRỊ HIỆN CÓ giờ cộng ĐỦ CẢ 3 mảnh — ngân
+  // hàng + tiền mặt đang cầm + công nợ ròng — không chỉ 2 mảnh như trước.
+  const totalCurrentValue = (bankRecon ? bankRecon.computedBalance : 0) + (cashRecon ? cashRecon.computedBalance : 0) + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed;
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -16634,9 +16858,9 @@ function renderBankReconDetailPage(){
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay — CHỈ giao dịch NGÂN HÀNG (không gồm tiền mặt)`:'Chưa khai mốc chốt nào'}</div>
       ${bankRecon ? `
       <div class="card" style="text-align:center; border:2px solid var(--accent); background:var(--accent-soft);">
-        <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ (ngân hàng + công nợ)</div>
+        <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ (ngân hàng + tiền mặt + công nợ)</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'};">${fmtVND(totalCurrentValue)}</div>
-        <div class="hint" style="margin-top:6px;">= Số dư ngân hàng ${fmtVND(bankRecon.computedBalance)} ${debtSummary.totalCustomerOwed>=0?'+':'−'} Khách nợ/(nợ khách) ${fmtVND(Math.abs(debtSummary.totalCustomerOwed))} ${debtSummary.totalSupplierOwed>=0?'−':'+'} Nợ mỏ/(mỏ nợ) ${fmtVND(Math.abs(debtSummary.totalSupplierOwed))} — đáp án cuối cùng cho "tiền của tao đang nằm ở đâu".</div>
+        <div class="hint" style="margin-top:6px;">= Ngân hàng ${fmtVND(bankRecon.computedBalance)} + Tiền mặt ${fmtVND(cashRecon?cashRecon.computedBalance:0)} ${debtSummary.totalCustomerOwed>=0?'+':'−'} Khách nợ/(nợ khách) ${fmtVND(Math.abs(debtSummary.totalCustomerOwed))} ${debtSummary.totalSupplierOwed>=0?'−':'+'} Nợ mỏ/(mỏ nợ) ${fmtVND(Math.abs(debtSummary.totalSupplierOwed))} — đáp án cuối cùng cho "tiền Ông Chủ đang nằm ở đâu".</div>
       </div>
       <div class="card" style="text-align:center; margin-top:12px;">
         <div class="hint" style="margin:0;">Mốc chốt ${formatDateVN(bankRecon.checkpoint.date)}: ${fmtVND(bankRecon.checkpoint.balance)}</div>
@@ -16644,6 +16868,13 @@ function renderBankReconDetailPage(){
         <div style="font-size:26px; font-weight:900; margin-top:2px; color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(bankRecon.computedBalance)}</div>
         <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
       </div>
+      ${cashRecon ? `
+      <div class="card" style="text-align:center; margin-top:12px;">
+        <div class="hint" style="margin:0;">Mốc chốt ${formatDateVN(cashRecon.checkpoint.date)}: ${fmtVND(cashRecon.checkpoint.balance)}</div>
+        <div style="font-size:13px; font-weight:700; margin-top:8px;">= TIỀN MẶT APP TÍNH ĐANG CẦM HÔM NAY</div>
+        <div style="font-size:26px; font-weight:900; margin-top:2px; color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(cashRecon.computedBalance)}</div>
+      </div>
+      ` : ''}
       <div class="grid-table-wrap" style="margin-top:12px;">
         <table class="grid-table">
           <thead><tr><th>Công Nợ Hiện Tại (Toàn Công Ty)</th><th class="num">Số Tiền</th></tr></thead>
@@ -16776,6 +17007,15 @@ function renderBankReconDetailPage(){
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankTransferItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankTransferItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">${r.sign>0?'⬆️':'⬇️'} ${r.label}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:${r.sign>0?'var(--profit)':'var(--loss)'};">${r.sign>0?'+':'−'}${fmtVND(r.amount)}</span>
           </div>`).join('')}
       </div>` : ''}
       ${cashEntries.length>0 ? `
