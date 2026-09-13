@@ -646,6 +646,7 @@
     </div>
     <div id="headerAction"></div>
   </header>
+  <div id="vehicleScopeBar" class="vehicle-scope-bar" style="display:none;"></div>
   <main id="app"></main>
   <div class="toast" id="toast"></div>
   <nav class="tabbar">
@@ -665,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #222';
+const APP_BUILD = '2026-09-08 · #223';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1855,20 +1856,27 @@ async function switchVehicle(vid){
   const label = vid===null ? 'LINH CHÍ THÀNH' : ((state.vehicles.find(v=>v.id===vid)||{}).name||'');
   showToast(`Đang xem: ${label}`);
 }
-/// Cập nhật thanh chọn Xe ngay dưới header — gọi từ renderAll() mỗi lần
-/// render, để luôn khớp đúng state.currentVehicleId hiện tại.
-/// Thanh header dưới tiêu đề: TÁCH RIÊNG 2 điểm bấm (yêu cầu Ông Chủ
-/// 2026-08-15) — nhãn "🏢 LINH CHÍ THÀNH" LUÔN CỐ ĐỊNH (không đổi theo xe
-/// đang xem nữa) → bấm vào mở thẳng "Dự Án Đầu Tư Xe" (Vốn Chủ Sở Hữu),
-/// từ BẤT KỲ tab/xe nào; "Đổi xe ▾" giữ nguyên chức năng cũ, mở modal
-/// chọn xe.
+/// SỬA 2026-09-08 (Ông Chủ yêu cầu bỏ hẳn thanh "LINH CHÍ THÀNH/Đổi xe"
+/// cũ — dồn 2 chức năng đó vào sơ đồ cây ở renderChooseVehiclePrompt()).
+/// NHƯNG khi đang xem SÂU vào 1 xe cụ thể (trong lúc có ≥2 xe), sơ đồ cây
+/// đó không hiện ra nữa (nó chỉ hiện khi CHƯA chọn xe nào) — nếu không
+/// còn cách nào quay lại, Ông Chủ sẽ bị "kẹt" trong đúng 1 xe, không có
+/// đường thoát (đúng lỗi Ông Chủ báo ở Ảnh 1). Giữ lại ĐÚNG 1 nút nhỏ
+/// "← Quay Lại Chọn Xe" — CHỈ hiện khi có ≥2 xe VÀ đang xem đúng 1 xe cụ
+/// thể (không hiện khi chỉ có 1 xe, cũng không hiện khi đã ở chế độ Tổng
+/// Linh Chí Thành) — không phục hồi lại nhãn "LINH CHÍ THÀNH"/"Đổi xe ▾"
+/// cũ như Ông Chủ đã yêu cầu bỏ.
 function updateVehicleScopeBar(){
   const bar = document.getElementById('vehicleScopeBar');
   if(!bar) return;
-  bar.innerHTML = `<span class="vsb-label" id="vsbEquityLink" style="cursor:pointer;"><span class="vsb-icon">🏢</span>LINH CHÍ THÀNH</span><span class="vsb-chev" id="vsbVehicleLink" style="cursor:pointer;">Đổi xe ▾</span>`;
-  bar.onclick = null;
-  document.getElementById('vsbEquityLink').addEventListener('click', e=>{ e.stopPropagation(); saveMainScroll(); state.showCompanyDashboard = true; renderAll(); });
-  document.getElementById('vsbVehicleLink').addEventListener('click', e=>{ e.stopPropagation(); renderVehiclePickerModal(); });
+  if(state.vehicles.length>1 && state.currentVehicleId){
+    bar.innerHTML = `<span class="vsb-label" id="vsbBackToTreeLink" style="cursor:pointer;">← Quay Lại Chọn Xe</span>`;
+    bar.style.display = '';
+    document.getElementById('vsbBackToTreeLink').addEventListener('click', e=>{ e.stopPropagation(); switchVehicle(null); });
+  } else {
+    bar.innerHTML = '';
+    bar.style.display = 'none';
+  }
 }
 
 /// Trả về ĐÚNG document Firestore của 1 xe. Xe #1 (isPrimary:true) LUÔN
@@ -16892,33 +16900,43 @@ function renderBankReconDetailPage(){
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay — CHỈ giao dịch NGÂN HÀNG (không gồm tiền mặt)`:'Chưa khai mốc chốt nào'}</div>
       ${bankRecon ? `
       <div class="card" style="text-align:center; border:2px solid var(--accent); background:var(--accent-soft);">
-        <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ (ngân hàng + tiền mặt + công nợ)</div>
+        <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'};">${fmtVND(totalCurrentValue)}</div>
-        <div class="hint" style="margin-top:6px;">= Ngân hàng ${fmtVND(bankRecon.computedBalance)} + Tiền mặt ${fmtVND(cashRecon?cashRecon.computedBalance:0)} ${debtSummary.totalCustomerOwed>=0?'+':'−'} Khách nợ/(nợ khách) ${fmtVND(Math.abs(debtSummary.totalCustomerOwed))} ${debtSummary.totalSupplierOwed>=0?'−':'+'} Nợ mỏ/(mỏ nợ) ${fmtVND(Math.abs(debtSummary.totalSupplierOwed))} — đáp án cuối cùng cho "tiền Ông Chủ đang nằm ở đâu".</div>
+        <div class="hint" style="margin-top:4px;">Đáp án cuối cùng cho "tiền Ông Chủ đang nằm ở đâu"</div>
       </div>
-      <div class="card" style="text-align:center; margin-top:12px;">
-        <div class="hint" style="margin:0;">Mốc chốt ${formatDateVN(bankRecon.checkpoint.date)}: ${fmtVND(bankRecon.checkpoint.balance)}</div>
-        <div style="font-size:13px; font-weight:700; margin-top:8px;">= SỐ DƯ NGÂN HÀNG APP TÍNH HÔM NAY</div>
-        <div style="font-size:26px; font-weight:900; margin-top:2px; color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(bankRecon.computedBalance)}</div>
-        <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
-      </div>
-      ${cashRecon ? `
-      <div class="card" style="text-align:center; margin-top:12px;">
-        <div class="hint" style="margin:0;">Mốc chốt ${formatDateVN(cashRecon.checkpoint.date)}: ${fmtVND(cashRecon.checkpoint.balance)}</div>
-        <div style="font-size:13px; font-weight:700; margin-top:8px;">= TIỀN MẶT APP TÍNH ĐANG CẦM HÔM NAY</div>
-        <div style="font-size:26px; font-weight:900; margin-top:2px; color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'};">${fmtVND(cashRecon.computedBalance)}</div>
-      </div>
-      ` : ''}
       <div class="grid-table-wrap" style="margin-top:12px;">
         <table class="grid-table">
-          <thead><tr><th>Công Nợ Hiện Tại (Toàn Công Ty)</th><th class="num">Số Tiền</th></tr></thead>
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
+            <tr><td>Ngân hàng (app tính hôm nay)</td><td class="num" style="font-weight:700;">${fmtVND(bankRecon.computedBalance)}</td></tr>
+            <tr><td>Tiền mặt (đang cầm)</td><td class="num" style="font-weight:700;">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
             <tr><td>${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
             <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ HIỆN CÓ</td><td class="num" style="color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'}">${fmtVND(totalCurrentValue)}</td></tr>
           </tbody>
         </table>
       </div>
+      <div class="grid-table-wrap" style="margin-top:16px;">
+        <table class="grid-table">
+          <thead><tr><th>Khớp Số Dư Ngân Hàng</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Mốc chốt (${formatDateVN(bankRecon.checkpoint.date)})</td><td class="num">${fmtVND(bankRecon.checkpoint.balance)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Số dư app tính hôm nay</td><td class="num" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
+      ${cashRecon ? `
+      <div class="grid-table-wrap" style="margin-top:16px;">
+        <table class="grid-table">
+          <thead><tr><th>Tiền Mặt Đang Cầm</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Mốc chốt (${formatDateVN(cashRecon.checkpoint.date)})</td><td class="num">${fmtVND(cashRecon.checkpoint.balance)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Tiền mặt app tính hôm nay</td><td class="num" style="color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(cashRecon.computedBalance)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ` : ''}
       ` : ''}
     </section>
     <section class="group">
@@ -17064,7 +17082,6 @@ function renderBankReconDetailPage(){
             <span style="font-weight:800; white-space:nowrap; color:var(--ink-soft);">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
           </div>`).join('')}
       </div>` : ''}
-      <div class="hint" style="margin-top:8px;">Gồm ĐÚNG mọi khoản đi qua ngân hàng kể từ sau mốc chốt: tiền khách/mỏ/góp/rút có gắn Phương thức = Ngân hàng, cộng với tiền dầu/tạm ứng lương/sửa chữa/luật đường/gốc+lãi vay/bảo hiểm/đăng kiểm/mua lô hoá đơn bù/tiền vay mới giải ngân — 9 khoản sau LUÔN coi là ngân hàng (đúng nguyên tắc "mọi luồng tiền công ty đều qua tài khoản doanh nghiệp"). Muốn xem đủ MỌI khoản kể cả tiền mặt, vào "Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế" ở mục Tổng Kết Dòng Tiền.</div>
     </section>
   `;
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
