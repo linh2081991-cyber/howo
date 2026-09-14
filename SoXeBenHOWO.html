@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #238';
+const APP_BUILD = '2026-09-14 · #239';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2845,7 +2845,25 @@ function renderHousingUtilMonthTable(){
 // vào — dùng để cộng dồn đúng những tháng liên quan khi Ông Chủ lọc 1
 // khoảng ngày bất kỳ trong tab Kết Quả (đa số trường hợp chỉ ra đúng 1
 // tháng, vì khoảng mặc định luôn là "cả tháng hiện tại").
+// SỬA 2026-09-14 LẦN 4 (Ông Chủ báo — mốc chốt hôm nay 352.090.794đ vẫn
+// bị tính ra 264.424.794đ, lệch đúng 87.666.000đ — ĐÃ RÀ LẠI TOÀN BỘ
+// công thức Khớp Số Dư, không còn chỗ nào dùng nhầm `>= latest.date` nữa,
+// nên lỗi này KHÁC HẲN 2 lần sửa trước): BẮT ĐƯỢC LỖI GỐC THẬT SỰ Ở
+// CHÍNH HÀM NÀY — chỉ so sánh NĂM/THÁNG của from/to, KHÔNG so sánh đủ cả
+// ngày. Khi khai mốc chốt ĐÚNG HÔM NAY, from = ngày mai (hôm sau mốc
+// chốt), to = hôm nay — nghĩa là from > to, khoảng ngày RỖNG (chưa qua
+// ngày nào cả). NHƯNG vì from và to rơi vào CÙNG 1 tháng (cùng tháng 9),
+// vòng lặp bên dưới vẫn coi là "có chạm tháng 9" và trả về ['2026-09'] —
+// SAI, phải trả về mảng RỖNG. Lỗi này khiến MỌI hàm dùng chung
+// monthsBetween() (fullMonthlyCostIfTouched → Luật Đường, Bảo Hiểm/Đăng
+// Kiểm, Thuê Nhà, Điện Nước, Cầu Đường) đều cộng NHẦM ĐỦ NGUYÊN THÁNG
+// hiện tại vào Khớp Số Dư dù chưa qua ngày nào — đúng bằng khoản
+// 87.666.000đ Ông Chủ phát hiện. Thêm 1 dòng chặn sớm: from > to (so
+// sánh ĐỦ CẢ NGÀY, không chỉ năm/tháng) thì trả về rỗng ngay — sửa 1 lần
+// tại gốc, tự động đúng cho MỌI hàm đang gọi tới đây, không cần sửa lại
+// từng chỗ.
 function monthsBetween(from, to){
+  if(from > to) return [];
   const months = [];
   let y = Number(from.slice(0,4)), m = Number(from.slice(5,7));
   const ey = Number(to.slice(0,4)), em = Number(to.slice(5,7));
