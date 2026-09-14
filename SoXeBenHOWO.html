@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #233';
+const APP_BUILD = '2026-09-14 · #234';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6391,6 +6391,19 @@ function driverAvatarIcon(){
 /// Xe, giờ modal đó không còn lối vào nào khác) → đưa thẳng xuống cuối
 /// sơ đồ, không mất chức năng nào.
 function renderChooseVehiclePrompt(){
+  // SỬA 2026-09-14 (Ông Chủ báo — thanh "← Quay Lại Chọn Xe" thừa ngay
+  // trên chính màn Chọn Xe): GỐC RỄ THẬT SỰ — updateVehicleScopeBar() chỉ
+  // suy luận GIÁN TIẾP "có đang xem xe cụ thể không" qua state.currentVehicleId
+  // có giá trị hay không, KHÔNG hề biết trực tiếp màn hình nào đang thực sự
+  // hiển thị. Suy luận gián tiếp này đòi hỏi MỌI luồng dẫn tới màn Chọn Xe
+  // (thêm xe mới, xoá xe, thứ tự tải dữ liệu Firestore không đồng bộ...)
+  // đều phải tự tay reset currentVehicleId về null ĐÚNG THỜI ĐIỂM — chỉ cần
+  // 1 luồng nào đó lệch nhịp là thanh bị kẹt sai. Sửa tận gốc: màn Chọn Xe
+  // tự ép ẩn thẳng thanh này ngay khi vẽ ra, không phụ thuộc currentVehicleId
+  // đang là gì — đảm bảo 100% không bao giờ còn hiện sai trên đúng màn này,
+  // bất kể lý do gì dẫn tới đây.
+  const scopeBar = document.getElementById('vehicleScopeBar');
+  if(scopeBar){ scopeBar.innerHTML=''; scopeBar.style.display='none'; }
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
