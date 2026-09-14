@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #232';
+const APP_BUILD = '2026-09-14 · #233';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13272,7 +13272,7 @@ function renderCustomerTransactionDetailPage(customerId, filterFrom, filterTo){
         <button data-val="month">Tháng này</button>
         <button data-val="all">Xem Tất Cả</button>
       </div>
-      <div class="two-col" style="margin-top:10px;">
+      <div class="date-range" style="margin-top:10px;">
         <div class="field"><label>Từ ngày</label><input type="date" id="custTxnFrom" value="${filterFrom||''}"></div>
         <div class="field"><label>Đến ngày</label><input type="date" id="custTxnTo" value="${filterTo||''}"></div>
       </div>
@@ -13676,7 +13676,7 @@ function renderSupplierTransactionDetailPage(supplierId, filterFrom, filterTo){
         <button data-val="month">Tháng này</button>
         <button data-val="all">Xem Tất Cả</button>
       </div>
-      <div class="two-col" style="margin-top:10px;">
+      <div class="date-range" style="margin-top:10px;">
         <div class="field"><label>Từ ngày</label><input type="date" id="supTxnFrom" value="${filterFrom||''}"></div>
         <div class="field"><label>Đến ngày</label><input type="date" id="supTxnTo" value="${filterTo||''}"></div>
       </div>
@@ -15697,7 +15697,7 @@ function renderBusinessReportPage(from, to){
         <button data-val="month">Tháng này</button>
         <button data-val="all">Từ đầu dự án</button>
       </div>
-      <div class="two-col" style="margin-top:10px;">
+      <div class="date-range" style="margin-top:10px;">
         <div class="field"><label>Từ ngày</label><input type="date" id="bizFrom" value="${from}"></div>
         <div class="field"><label>Đến ngày</label><input type="date" id="bizTo" value="${to}"></div>
       </div>
@@ -15868,7 +15868,7 @@ function renderPerVehicleResultsPage(from, to){
         <button data-val="month">Tháng này</button>
         <button data-val="all">Từ đầu dự án</button>
       </div>
-      <div class="two-col" style="margin-top:10px;">
+      <div class="date-range" style="margin-top:10px;">
         <div class="field"><label>Từ ngày</label><input type="date" id="pvFrom" value="${from}"></div>
         <div class="field"><label>Đến ngày</label><input type="date" id="pvTo" value="${to}"></div>
       </div>
