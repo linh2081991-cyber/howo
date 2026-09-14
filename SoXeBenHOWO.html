@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #236';
+const APP_BUILD = '2026-09-14 · #238';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3804,7 +3804,43 @@ function renderInvoiceLotOverview(){
   const { from, to } = state.invoiceLotFilter;
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const vatByShift = withLedgerReportMode(()=>computeInvoiceLotVatCreditByShift(from, to));
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu — "tạo bộ lọc Từ ngày/Đến ngày đặt
+  // ngay dưới dòng chữ Kho Hoá Đơn Bù, cập nhật kết quả theo lựa chọn"):
+  // Ông Chủ đã xác nhận rõ — KHÔNG đụng "Tồn Kho Tổng Hợp" (vẫn LUÔN
+  // ALL_TIME như sửa 2026-09-07, lý do đã ghi rõ ngay bên dưới), mà thêm
+  // 1 bảng MỚI "Hoạt Động Trong Kỳ Đã Chọn" — dùng lại NGUYÊN VẸN hàm
+  // combinedStockOverview() đã có sẵn (chỉ đổi tham số ngày truyền vào
+  // từ ALL_TIME sang đúng from/to Ông Chủ chọn) để tính mua bù/bán ra
+  // PHÁT SINH riêng trong kỳ đó — không phải số tồn kho, nên KHÔNG hiện
+  // dòng "= Tồn Kho", tránh gây hiểu lầm y hệt lỗi cũ đã sửa. Bộ lọc
+  // ngày này dùng CHUNG đúng 1 state.invoiceLotFilter với mục "Chi Phí &
+  // VAT Hưởng Theo Ca" bên dưới — bỏ luôn ô lọc trùng lặp ở đó, chỉ còn
+  // 1 nơi duy nhất để chọn ngày trên toàn trang này.
+  const periodRows = goodsTypes.map(g => ({ goodsType: g, ...withLedgerReportMode(()=>combinedStockOverview(g, from, to)) }))
+    .filter(r=>r.mineVolKhoi>0 || r.lotVolKhoi>0 || r.soldVolKhoi>0);
   wrap.innerHTML = `
+    <div class="date-range" style="margin-bottom:12px;">
+      <div class="field"><label>Từ ngày</label><input type="date" id="lotFilterFrom" value="${from}"></div>
+      <div class="field"><label>Đến ngày</label><input type="date" id="lotFilterTo" value="${to}"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px; border:1.5px solid var(--accent);">
+      <div style="font-weight:800; font-size:13px; margin-bottom:2px;">📊 Hoạt Động Trong Kỳ Đã Chọn (${formatDateVN(from)} → ${formatDateVN(to)})</div>
+      <div class="hint" style="margin:2px 0 8px;">Số phát sinh RIÊNG trong kỳ này — không phải tồn kho (xem "Tồn Kho Tổng Hợp" bên dưới cho số tồn thật, luôn tính từ đầu tới giờ).</div>
+      ${periodRows.length>0 ? `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Loại Hàng</th><th class="num">Hoá Đơn Thật<br>(÷ tỷ trọng)</th><th class="num">Lô<br>Mua Bù</th><th class="num">Đã<br>Bán</th></tr></thead>
+          <tbody>
+            ${periodRows.map(r=>`<tr>
+              <td><strong>${escapeHtml(r.goodsType)}</strong></td>
+              <td class="num">${fmtQty(r.mineVolKhoi)}</td>
+              <td class="num">${fmtQty(r.lotVolKhoi)}</td>
+              <td class="num" style="color:var(--loss);">${fmtQty(r.soldVolKhoi)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : `<div class="hint">Không có hoạt động nào (nhận hoá đơn/mua bù/bán) trong khoảng ngày này.</div>`}
+    </div>
     ${(()=>{
       // SỬA 2026-09-07 (Ông Chủ chỉ rõ — "đây là hàng tồn kho, phải luôn
       // cập nhật số THẬT, không dùng riêng cho tháng nào hay xe nào mà
@@ -3815,12 +3851,15 @@ function renderInvoiceLotOverview(){
       // SAI (không phản ánh đúng tồn kho thật đang có). Giờ tách hẳn ra
       // khỏi bộ lọc ngày — LUÔN tính từ đầu tới giờ (ALL_TIME), đúng bản
       // chất "tồn kho" là số dư TẠI THỜI ĐIỂM HIỆN TẠI, không phải số
-      // phát sinh riêng 1 kỳ nào. Bộ lọc "Từ ngày/Đến ngày" bên dưới giờ
-      // CHỈ còn ảnh hưởng riêng mục "Chi Phí & VAT Hưởng Theo Ca".
+      // phát sinh riêng 1 kỳ nào. SỬA 2026-09-14: Ông Chủ xác nhận LẦN 2
+      // — giữ nguyên đúng như vậy, KHÔNG đổi theo bộ lọc ngày mới thêm ở
+      // trên (bộ lọc đó chỉ ảnh hưởng "Hoạt Động Trong Kỳ" và "Chi Phí &
+      // VAT Hưởng Theo Ca").
       const rows = goodsTypes.map(g => ({ goodsType: g, ...withLedgerReportMode(()=>combinedStockOverview(g, ALL_TIME_FROM, ALL_TIME_TO)) }));
       return `
     <div class="card" style="margin-bottom:14px; border:1.5px solid var(--accent);">
       <div style="font-weight:800; font-size:13px; margin-bottom:2px;">🧮 Tồn Kho Tổng Hợp — Đối Chiếu KT Thuế (Tất Cả Loại Hàng)</div>
+      <div class="hint" style="margin:2px 0 8px;">Luôn tính từ đầu tới giờ (không đổi theo bộ lọc ngày ở trên) — đúng bản chất số tồn kho THẬT tại thời điểm hiện tại.</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Loại Hàng</th><th class="num">Hoá Đơn Thật<br>(÷ tỷ trọng)</th><th class="num">+ Lô<br>Mua Bù</th><th class="num">− Đã<br>Bán</th><th class="num">= Tồn Kho<br>Tổng Hợp</th><th></th></tr></thead>
@@ -3842,10 +3881,6 @@ function renderInvoiceLotOverview(){
     })()}
     <div class="formula-divider" style="margin:10px 0;"></div>
     <div style="font-weight:700; margin-bottom:6px;">💰 Chi Phí &amp; VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
-    <div class="date-range" style="margin-bottom:10px;">
-      <div class="field"><label>Từ ngày</label><input type="date" id="lotFilterFrom" value="${from}"></div>
-      <div class="field"><label>Đến ngày</label><input type="date" id="lotFilterTo" value="${to}"></div>
-    </div>
     <div class="grid-table-wrap" style="margin-bottom:6px;">
       <table class="grid-table">
         <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Chi Phí</th><th>VAT Hưởng</th></tr></thead>
@@ -16313,6 +16348,29 @@ function renderCompanyDashboardPage(){
     <section class="group">
       <h3>🧾 Đã Nộp Thuế VAT</h3>
       <div class="hint" style="margin-bottom:10px;">Ghi nhận từng lần đã nộp thật tiền VAT cho nhà nước — dùng để Kế Toán Nội Bộ khớp đúng (khoản này luôn qua tài khoản doanh nghiệp).</div>
+      ${(()=>{
+        // SỬA 2026-09-14 (Ông Chủ báo — "khu vực nộp thuế phải thêm cập
+        // nhật số real time"): TRƯỚC ĐÂY mục này CHỈ có 1 nút bấm vào mới
+        // thấy số, không khác gì "hộp đen" — không giống mọi mục khác
+        // trên trang này đều hiện số ngay (VD "Khoản Vay" hiện luôn TỔNG
+        // Gốc+Lãi/Tháng). Thêm 2 số tính lại MỖI LẦN trang này vẽ ra (tự
+        // động theo đúng nghĩa "real time" trong app này — không cần
+        // bấm gì thêm): đã nộp tháng hiện tại + luỹ kế từ đầu tới giờ.
+        const vatPayments = state.vatPayments||[];
+        const ymNow = todayLocalDateStr().slice(0,7);
+        const vatThisMonth = vatPayments.filter(p=>(p.date||'').slice(0,7)===ymNow).reduce((s,p)=>s+(Number(p.amount)||0),0);
+        const vatAllTime = vatPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
+        return `
+      <div class="grid-table-wrap" style="margin-bottom:10px;">
+        <table class="grid-table">
+          <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Đã nộp tháng ${monthLabelVN(ymNow)}</td><td class="num" style="font-weight:800;">${fmtVND(vatThisMonth)}</td></tr>
+            <tr><td>Luỹ kế đã nộp từ đầu tới giờ</td><td class="num" style="font-weight:800;">${fmtVND(vatAllTime)}</td></tr>
+          </tbody>
+        </table>
+      </div>`;
+      })()}
       <button class="btn btn-ghost btn-block" id="openVatPaymentsBtn">🧾 Xem / Ghi Nhận Đã Nộp Thuế VAT</button>
     </section>
 
@@ -16897,6 +16955,18 @@ function renderCashFlowBreakdownDetailPage(){
 function renderBankReconDetailPage(){
   scrollMainToTop();
   const bankRecon = computeBankBalanceReconciliation();
+  // SỬA 2026-09-14 LẦN 4 (Ông Chủ báo lỗi hệ thống thật — "Cannot access
+  // 'cashRecon' before initialization"): BẮT ĐƯỢC LỖI THẬT SỰ do chính em
+  // gây ra ở lần sửa trước — khai báo `const cashRecon` TRƯỚC ĐÂY nằm Ở
+  // RẤT XA phía dưới hàm này (gần khối "💵 Tiền Mặt"), nhưng lần thêm
+  // cashDriverAdvanceItems/cashBonusItems lại lỡ DÙNG cashRecon NGAY Ở
+  // TRÊN, trước dòng khai báo đó — đúng bẫy "temporal dead zone" của
+  // const/let trong JavaScript (khai báo bằng const/let trong 1 hàm bị
+  // "treo" ngay từ đầu hàm nhưng KHÔNG dùng được cho tới đúng dòng khai
+  // báo — dùng sớm hơn sẽ vỡ ngay, khác hẳn var). Chuyển khai báo
+  // cashRecon lên ĐÂY, ngay đầu hàm, để mọi chỗ dùng ở dưới đều hợp lệ —
+  // xoá bỏ dòng khai báo trùng lặp phía xa bên dưới.
+  const cashRecon = computeCashBalanceReconciliation();
   const allEntries = computeCompanyCashFlowLedger();
   const entries = bankRecon ? allEntries.filter(e=>{
     if(e.method==='cash') return false;
@@ -17016,7 +17086,9 @@ function renderBankReconDetailPage(){
   // đây (chỉ có ở trang khác), và CHƯA có công nợ — giờ gộp đủ cả 3 vào
   // đúng 1 trang, đúng vai trò "báo cáo của kế toán" Ông Chủ mô tả.
   const debtSummary = computeAllPartnersDebtSummary();
-  const cashRecon = computeCashBalanceReconciliation();
+  // SỬA 2026-09-14 LẦN 4: cashRecon giờ khai báo 1 LẦN DUY NHẤT ở ngay
+  // đầu hàm (xem chú thích ở đó) — xoá dòng khai báo trùng lặp cũ ở đây,
+  // tránh lỗi "Identifier 'cashRecon' has already been declared".
   // SỬA 2026-09-08 LẦN 4 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài thật
   // sự còn 123tr"): TỔNG GIÁ TRỊ HIỆN CÓ giờ cộng ĐỦ CẢ 3 mảnh — ngân
   // hàng + tiền mặt đang cầm + công nợ ròng — không chỉ 2 mảnh như trước.
