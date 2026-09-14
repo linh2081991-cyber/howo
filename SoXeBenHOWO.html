@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #240';
+const APP_BUILD = '2026-09-14 · #241';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14884,18 +14884,33 @@ function effectiveAnnualRate(rateSchedule, refDate){
 // Tính đúng 1 kỳ trả nợ thứ `periodIndex` (0-indexed, kỳ 0 = kỳ đầu tiên).
 // Mức lãi áp dụng lấy tại đúng Ngày Đến Hạn của kỳ đó (đúng thời điểm ngân
 // hàng chốt sổ thu).
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "cơ chế ÂN HẠN dùng chung cho mọi
+// khoản vay sau này"): thêm graceMonths — số kỳ ĐẦU TIÊN chỉ trả LÃI,
+// KHÔNG trả gốc (dư nợ giữ nguyên = principal suốt ân hạn, đúng bản chất
+// "ân hạn gốc" ngân hàng VN hay áp dụng). Sau khi hết ân hạn, gốc mới bắt
+// đầu chia đều cho ĐÚNG số kỳ CÒN LẠI (termMonths - graceMonths), không
+// phải chia đều cho cả termMonths như trước — nếu không, tổng gốc trả
+// suốt đời khoản vay sẽ KHÔNG khớp đúng principal ban đầu (thiếu hoặc dư).
+// graceMonths=0 (mặc định, tương thích ngược 100%): amortMonths=termMonths,
+// periodIndex<0 luôn sai → monthlyPrincipal=principal/termMonths cho MỌI
+// kỳ — Y HỆT công thức cũ, không đổi hành vi bất kỳ khoản vay nào đã có.
 function computeLoanPeriod(loanForCalc, periodIndex, dueDates){
   const { principal, termMonths } = loanForCalc;
-  const monthlyPrincipal = principal/termMonths;
+  const graceMonths = Math.max(0, Math.min(termMonths-1, Math.round(Number(loanForCalc.graceMonths)||0)));
+  const amortMonths = termMonths - graceMonths; // số kỳ THỰC SỰ trả gốc (luôn >=1)
+  const inGracePeriod = periodIndex < graceMonths;
+  const monthlyPrincipal = inGracePeriod ? 0 : principal/amortMonths;
   const periodEnd = dueDates[periodIndex];
   const periodStart = periodIndex===0 ? new Date(loanForCalc.disbursementDate+'T00:00:00') : dueDates[periodIndex-1];
   const daysInPeriod = daysBetweenDates(periodStart, periodEnd);
-  const remainingBalanceAtStart = Math.max(0, principal - periodIndex*monthlyPrincipal);
-  const remainingBalanceAfter = Math.max(0, principal - (periodIndex+1)*monthlyPrincipal);
+  // Số kỳ ĐÃ trả gốc tính tới TRƯỚC kỳ này — chỉ đếm bắt đầu từ sau ân hạn.
+  const principalPeriodsElapsed = Math.max(0, periodIndex - graceMonths);
+  const remainingBalanceAtStart = inGracePeriod ? principal : Math.max(0, principal - principalPeriodsElapsed*(principal/amortMonths));
+  const remainingBalanceAfter = inGracePeriod ? principal : Math.max(0, principal - (principalPeriodsElapsed+1)*(principal/amortMonths));
   const annualRatePercent = effectiveAnnualRate(loanForCalc.rateSchedule, periodEnd);
   const interest = remainingBalanceAtStart * (annualRatePercent/100) * (daysInPeriod/365);
   return { periodIndex, dueDate: periodEnd, periodStart, daysInPeriod, monthlyPrincipal,
-           interest, total: monthlyPrincipal+interest, remainingBalanceAtStart, remainingBalanceAfter, annualRatePercent };
+           interest, total: monthlyPrincipal+interest, remainingBalanceAtStart, remainingBalanceAfter, annualRatePercent, inGracePeriod };
 }
 // Trả về mảng đủ TỪNG KỲ trong suốt vòng đời khoản vay — dùng để hiển thị
 // lịch trả nợ chi tiết từng tháng.
@@ -14908,7 +14923,8 @@ function computeFullLoanSchedule(loan){
     rateSchedule = [{ effectiveFrom: disbursementDate, ratePercent: Number(loan.annualRatePercent) }];
   }
   if(!(principal>0 && termMonths>0 && disbursementDate && rateSchedule.length>0)) return [];
-  const loanForCalc = { principal, termMonths, disbursementDate, rateSchedule };
+  const graceMonths = Math.max(0, Math.round(Number(loan && loan.graceMonths)||0));
+  const loanForCalc = { principal, termMonths, graceMonths, disbursementDate, rateSchedule };
   const dueDates = loanDueDatesSequence(disbursementDate, loan.dueDayOfMonth, termMonths);
   const rows = [];
   for(let i=0;i<termMonths;i++) rows.push(computeLoanPeriod(loanForCalc, i, dueDates));
@@ -14940,7 +14956,8 @@ function computeBankLoanAmortization(loan, refDate){
     return { hasBasis:false, elapsedMonths:0, termMonths, monthlyPrincipal:0,
              monthlyInterestCurrent:0, totalPaymentCurrent:0, remainingBalance:principal, isPaidOff:false, annualRatePercent:0 };
   }
-  const loanForCalc = { principal, termMonths, disbursementDate, rateSchedule };
+  const graceMonths = Math.max(0, Math.round(Number(loan && loan.graceMonths)||0));
+  const loanForCalc = { principal, termMonths, graceMonths, disbursementDate, rateSchedule };
   const dueDates = loanDueDatesSequence(disbursementDate, loan.dueDayOfMonth, termMonths);
   // Mỗi kỳ rơi đúng 1 tháng dương lịch (cách nhau đúng 1 tháng) — tìm kỳ có
   // Ngày Đến Hạn thuộc ĐÚNG tháng của refDate (tháng đang xem/hôm nay).
@@ -14949,7 +14966,7 @@ function computeBankLoanAmortization(loan, refDate){
     if(refDate < dueDates[0]){
       // Vẫn trong tháng giải ngân, chưa tới kỳ trả đầu tiên — chưa phát
       // sinh nghĩa vụ trả nào trong tháng này.
-      return { hasBasis:true, elapsedMonths:0, termMonths, monthlyPrincipal:principal/termMonths,
+      return { hasBasis:true, elapsedMonths:0, termMonths, monthlyPrincipal: graceMonths>0 ? 0 : principal/Math.max(1,termMonths-graceMonths),
                monthlyInterestCurrent:0, totalPaymentCurrent:0, remainingBalance:principal, isPaidOff:false, annualRatePercent:0 };
     }
     // Đã qua kỳ cuối cùng — đã trả hết nợ.
@@ -14959,7 +14976,7 @@ function computeBankLoanAmortization(loan, refDate){
   const p = computeLoanPeriod(loanForCalc, periodIndex, dueDates);
   return { hasBasis:true, elapsedMonths:periodIndex, termMonths, monthlyPrincipal:p.monthlyPrincipal,
            monthlyInterestCurrent:p.interest, totalPaymentCurrent:p.total, remainingBalance:p.remainingBalanceAtStart,
-           isPaidOff:false, annualRatePercent:p.annualRatePercent, dueDate:p.dueDate, daysInPeriod:p.daysInPeriod };
+           isPaidOff:false, annualRatePercent:p.annualRatePercent, dueDate:p.dueDate, daysInPeriod:p.daysInPeriod, inGracePeriod:p.inGracePeriod };
 }
 // Gọi ở đầu renderAll() — luôn làm mới monthlyLoanPayment theo ĐÚNG ngày
 // hôm nay (dư nợ giảm dần theo thời gian thực) mỗi lần app render, dù Ông
@@ -14992,8 +15009,14 @@ function recomputeBankLoanMonthlyPayment(){
 function openLoanEditor(loanId){
   saveMainScroll();
   const existing = loanId ? (state.settings.bankLoans||[]).find(l=>l.id===loanId) : null;
-  const draft = existing ? { ...existing, rateSchedule: [...(existing.rateSchedule||[])], paidMonths: [...(existing.paidMonths||[])] }
-    : { id: uid('loan'), name: '', principal: 0, termMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [], paidMonths: [] };
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu — "cơ chế ÂN HẠN, dùng cho cả các gói
+  // vay sau này", không phải chỉnh riêng 1 khoản): thêm field graceMonths
+  // (số kỳ đầu CHỈ trả lãi, không trả gốc — dư nợ giữ nguyên, khác hẳn
+  // amortization thường). Khoản vay CŨ chưa từng có field này → mặc định
+  // 0 (tương thích ngược tuyệt đối — hành vi y hệt trước đây, không suy ra
+  // ân hạn bừa cho khoản vay nào chưa từng khai).
+  const draft = existing ? { ...existing, graceMonths: Number(existing.graceMonths)||0, rateSchedule: [...(existing.rateSchedule||[])], paidMonths: [...(existing.paidMonths||[])] }
+    : { id: uid('loan'), name: '', principal: 0, termMonths: 0, graceMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [], paidMonths: [] };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -15001,7 +15024,7 @@ function openLoanEditor(loanId){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">🏦 ${existing?'Sửa':'Thêm'} Khoản Vay Ngân Hàng</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định.</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Nếu khoản vay có ÂN HẠN (1 số kỳ đầu chỉ trả lãi, chưa trả gốc), khai ở ô "Số tháng ân hạn" bên dưới — cơ chế này dùng chung cho MỌI khoản vay, không riêng khoản nào.</div>
       <div class="card">
         <div class="field">
           <label>Tên khoản vay (VD "Vay mua xe 29E-691.12", "Vay vốn lưu động")</label>
@@ -15013,9 +15036,14 @@ function openLoanEditor(loanId){
             <input type="text" inputmode="decimal" id="loan_principal">
           </div>
           <div class="field">
-            <label>Thời hạn vay (tháng)</label>
+            <label>Tổng thời hạn vay (tháng, gồm cả ân hạn nếu có)</label>
             <input type="number" inputmode="numeric" id="loan_term" value="${blankIfZero(draft.termMonths)}" placeholder="0">
           </div>
+        </div>
+        <div class="field">
+          <label>Số tháng ân hạn (chỉ trả lãi, chưa trả gốc)</label>
+          <input type="number" inputmode="numeric" min="0" id="loan_grace" value="${blankIfZero(draft.graceMonths)}" placeholder="0">
+          <div class="hint">Để 0 nếu khoản vay trả gốc đều ngay từ kỳ đầu (không có ân hạn). VD hợp đồng "vay 60 tháng, ân hạn gốc 24 tháng đầu" → Tổng thời hạn = 60, Ân hạn = 24 (36 tháng còn lại mới trả gốc).</div>
         </div>
         <div class="field">
           <label>Ngày giải ngân</label>
@@ -15095,8 +15123,8 @@ function openLoanEditor(loanId){
           ${r.isPaidOff ? `
           <div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>
           ` : `
-          <div class="summary-row"><span>Kỳ này (${r.daysInPeriod} ngày, hạn ${formatDateVN(`${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}-${String(r.dueDate.getDate()).padStart(2,'0')}`)})</span><span class="val"></span></div>
-          <div class="summary-row"><span>Gốc phải trả kỳ này</span><span class="val">${fmtVND(r.monthlyPrincipal)}</span></div>
+          <div class="summary-row"><span>Kỳ này (${r.daysInPeriod} ngày, hạn ${formatDateVN(`${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}-${String(r.dueDate.getDate()).padStart(2,'0')}`)})${r.inGracePeriod?' <span style="color:var(--accent); font-weight:800;">— Đang Ân Hạn</span>':''}</span><span class="val"></span></div>
+          <div class="summary-row"><span>Gốc phải trả kỳ này${r.inGracePeriod?' (ân hạn, chưa trả gốc)':''}</span><span class="val">${fmtVND(r.monthlyPrincipal)}</span></div>
           <div class="summary-row"><span>Lãi phải trả kỳ này (dư nợ đầu kỳ × lãi suất × số ngày/365)</span><span class="val">${fmtVND(r.monthlyInterestCurrent)}</span></div>
           <div class="formula-divider" style="margin:8px 0;"></div>
           <div class="summary-row total"><span>TỔNG GỐC + LÃI PHẢI TRẢ KỲ NÀY</span><span class="val" style="font-weight:800;">${fmtVND(r.totalPaymentCurrent)}</span></div>
@@ -15170,10 +15198,10 @@ function openLoanEditor(loanId){
           const isCurrent = row.periodIndex===nextUnpaidIndex;
           return `
           <div class="kv" style="padding:6px 0; ${isCurrent?'font-weight:800; color:var(--accent);':''}">
-            <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} (${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm)</span>
+            <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} (${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm)${row.inGracePeriod?' <span style="color:var(--accent); font-weight:800;">— Ân Hạn</span>':''}</span>
             <span class="val">${fmtVND(row.total)}</span>
           </div>
-          <div class="hint" style="margin:0 0 6px; ${isCurrent?'font-weight:800;':''}">Gốc ${fmtVND(row.monthlyPrincipal)} + Lãi ${fmtVND(row.interest)} · Dư nợ sau kỳ: ${fmtVND(row.remainingBalanceAfter)}</div>
+          <div class="hint" style="margin:0 0 6px; ${isCurrent?'font-weight:800;':''}">Gốc ${fmtVND(row.monthlyPrincipal)}${row.inGracePeriod?' (ân hạn, chưa trả gốc)':''} + Lãi ${fmtVND(row.interest)} · Dư nợ sau kỳ: ${fmtVND(row.remainingBalanceAfter)}</div>
           `;
         }).join('')}
       </div>
@@ -15181,6 +15209,7 @@ function openLoanEditor(loanId){
   }
   attachMoneyInput(document.getElementById('loan_principal'), draft.principal, v=>{ draft.principal=v; renderLoanPreview(); });
   document.getElementById('loan_term').addEventListener('input', e=>{ draft.termMonths = Number(e.target.value)||0; renderLoanPreview(); });
+  document.getElementById('loan_grace').addEventListener('input', e=>{ draft.graceMonths = Math.max(0, Number(e.target.value)||0); renderLoanPreview(); });
   document.getElementById('loan_dueDay').addEventListener('input', e=>{ draft.dueDayOfMonth = Number(e.target.value)||20; });
   document.getElementById('loan_date').addEventListener('change', e=>{
     draft.disbursementDate = e.target.value || null;
@@ -15204,6 +15233,7 @@ function openLoanEditor(loanId){
     draft.name = document.getElementById('loan_name').value.trim() || `Khoản vay ${(state.settings.bankLoans||[]).length+1}`;
     if(!(draft.principal>0)){ showToast('Nhập số tiền vay trước đã.'); return; }
     if(!(draft.termMonths>0)){ showToast('Nhập thời hạn vay trước đã.'); return; }
+    if(draft.graceMonths>=draft.termMonths){ showToast('Số tháng ân hạn phải nhỏ hơn Tổng thời hạn vay (phải còn ít nhất 1 tháng để trả gốc).'); return; }
     if(!draft.disbursementDate){ showToast('Chọn ngày giải ngân trước đã.'); return; }
     if(!Array.isArray(state.settings.bankLoans)) state.settings.bankLoans = [];
     const idx = state.settings.bankLoans.findIndex(l=>l.id===draft.id);
