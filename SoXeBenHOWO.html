@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #239';
+const APP_BUILD = '2026-09-14 · #240';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11920,8 +11920,20 @@ function computeBankBalanceReconciliation(){
   // trong số Ông Chủ vừa khai, 1 lần nữa bị app tính thêm. Sửa về đúng
   // `>= from` cho khớp 100% với mọi khoản khác — không đụng bất kỳ dòng
   // nào khác trong công thức.
-  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  // SỬA 2026-09-14 LẦN 5 (Ông Chủ báo — mốc chốt hôm nay 352.090.794đ vẫn
+  // lệch tiếp 70.000.000đ dù đã sửa 2 lỗi trước): BẮT ĐƯỢC LỖI THỨ 3,
+  // KHÁC HẲN 2 lỗi trước — 2 dòng contributedSince/withdrawnSince ngay
+  // dưới đây THIẾU HẲN điều kiện chặn trên `<= today`, trong khi MỌI
+  // khoản khác trong công thức này (dầu, tạm ứng, sửa chữa, luật đường,
+  // vay, VAT, ứng tài xế, tip thưởng...) đều có ĐỦ CẢ 2 chặn (`>=from &&
+  // <=today`). Thiếu chặn trên nghĩa là BẤT KỲ khoản góp/rút vốn nào có
+  // ngày rơi vào TƯƠNG LAI so với hôm nay (dù chỉ 1 ngày, hay xa hơn) —
+  // kể cả khi được ghi TỪ TRƯỚC ngày khai mốc chốt hiện tại — vẫn bị
+  // cộng/trừ vào, dù về logic "từ mốc chốt tới HÔM NAY" không thể bao
+  // gồm ngày tương lai. Thêm `&& e.date<=today` cho khớp đúng 100% với
+  // mọi dòng khác — không đụng gì thêm.
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.date<=today && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
     operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash, driverAdvanceBank, bonusBank };
@@ -11962,8 +11974,12 @@ function computeCashBalanceReconciliation(){
   // phía trên — cùng nguyên nhân, cùng cách sửa): dùng đúng `>= from`
   // thay vì `>= latest.date`, tránh tính trùng khoản góp/rút vốn ghi đúng
   // ngày khai mốc chốt.
-  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  // SỬA 2026-09-14 LẦN 5 (sinh đôi với lỗi vừa sửa ở
+  // computeBankBalanceReconciliation() phía trên — cùng nguyên nhân,
+  // cùng cách sửa): thêm nốt điều kiện chặn trên `<= today` đang bị
+  // thiếu ở đây.
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash };
 }
