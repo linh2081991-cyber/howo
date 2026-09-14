@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-08 · #226';
+const APP_BUILD = '2026-09-08 · #228';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1738,21 +1738,27 @@ function renderDeleteVehicleConfirmModal(vehicleId, vehicleName){
     <button class="btn btn-danger btn-block" id="confirmDeleteVehicleBtn">Xác Nhận Xoá</button>
     <button class="btn btn-ghost btn-block" id="cancelDeleteVehicleBtn" style="margin-top:8px;">Huỷ</button>
   `);
-  document.getElementById('cancelDeleteVehicleBtn').addEventListener('click', renderVehiclePickerModal);
+  // SỬA 2026-09-08 (audit toàn app — "kiểm tra sâu xem còn lỗi nào"): BẮT
+  // ĐƯỢC LỖI ĐIỀU HƯỚNG THẬT — trước đây "Huỷ" mở lại renderVehiclePickerModal()
+  // (modal Chọn Xe kiểu CŨ), nhưng modal đó giờ KHÔNG CÒN LỐI VÀO chính
+  // thức nào nữa (đã thay bằng sơ đồ cây renderChooseVehiclePrompt()) —
+  // bấm "Huỷ" từ sơ đồ cây sẽ bất ngờ hiện ra 1 màn hình cũ, lạc lõng.
+  // Sửa đúng: chỉ closeModal() để về lại sơ đồ cây đã có sẵn bên dưới.
+  document.getElementById('cancelDeleteVehicleBtn').addEventListener('click', closeModal);
   document.getElementById('confirmDeleteVehicleBtn').addEventListener('click', async ()=>{
     state.vehicles = state.vehicles.filter(v=>v.id!==vehicleId);
     if(!(await saveVehicles())) return;
+    closeModal();
     if(state.currentVehicleId===vehicleId){
       await switchVehicle(null);
     } else {
       showToast(`Đã xoá ${vehicleName}.`);
-      renderVehiclePickerModal();
+      renderAll();
     }
   });
 }
 function renderAddVehicleModal(){
   openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="backToVehicleListBtn">← Quay lại</button></div>
     <h3>🚛 + Thêm Xe Mới</h3>
     <div class="field">
       <label>Biển số xe</label>
@@ -1764,7 +1770,6 @@ function renderAddVehicleModal(){
     </div>
     <button class="btn btn-accent btn-block" id="saveNewVehicleBtn" style="margin-top:10px;">Lưu Xe Mới</button>
   `);
-  document.getElementById('backToVehicleListBtn').addEventListener('click', renderVehiclePickerModal);
   document.getElementById('saveNewVehicleBtn').addEventListener('click', async ()=>{
     const plate = (document.getElementById('newVehiclePlate').value||'').trim();
     if(!plate){ showToast('Nhập biển số xe trước đã.'); return; }
@@ -12763,10 +12768,7 @@ function renderResults(){
             </tbody>
           </table>
         </div>
-        ` : `
-        <h3 style="margin:0 0 8px;">💰 Dòng Tiền Thuần Từ Hoạt Động Kinh Doanh</h3>
-        <div class="hint">💡 Đây là tiền mặt thật của CẢ CÔNG TY (tiền khách trả/trả mỏ dùng chung, không thể quy đúng cho riêng 1 xe) — chỉ xem được ở chế độ <b>LINH CHÍ THÀNH</b>. Bấm "Đổi xe" ở đầu trang, chọn LINH CHÍ THÀNH để xem đúng số này.</div>
-        `}
+        ` : ''}
 
       <div class="card" style="margin-top:14px;">
         <div class="field" style="margin-bottom:0;">
@@ -18097,12 +18099,21 @@ function ktBuildTongQuan(wb, S, companyName, mst){
   line('VAT phải nộp trong kỳ (bắt buộc)', S.vatPayableInRange, {color:'FFB23A2E'});
   line('Thuế TNDN dự kiến (KT thuế tư vấn)', S.manualCitValue, {color:'FFB23A2E'});
   setH(10);
-  ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (trực tiếp)',{bold:true,fill:KT_HEAD_FILL,wrap:true}); setH(30);
-  line('Tiền khách bank vào (thật)', S.cashIn, {color:'FF1F7A4D'});
-  line('Tiền bank cho mỏ (thật)', -S.cashOutToSuppliers);
-  line('Chi phí vận hành (dầu, lương, ăn, phát sinh)', -S.operatingCashCost);
-  line('Sửa chữa + luật đường + tiền nhà/điện nước + gốc/lãi vay/bảo hiểm/đăng kiểm (thật)', -(S.repairTotal+S.roadFee+S.houseRent+S.utilities+S.otherFixedMonthlyForCashFlow));
-  line('DÒNG TIỀN THUẦN', S.netOperatingCashFlow, {bold:true, color:S.netOperatingCashFlow>=0?'FF1F7A4D':'FFB23A2E'});
+  // SỬA 2026-09-08 (audit toàn app theo yêu cầu Ông Chủ — "kiểm tra sâu
+  // xem còn chỗ nào lỗi/trùng lặp"): BẮT ĐƯỢC lỗi Y HỆT lỗi UI vừa sửa ở
+  // renderResults() — khối "Dòng Tiền Thuần" trộn cashIn/cashOutToSuppliers
+  // (tiền khách/mỏ, CHỈ đúng khi cộng dồn TOÀN CÔNG TY) với chi phí của
+  // RIÊNG 1 xe khi xuất Excel không phải ở chế độ Linh Chí Thành — ra số
+  // sai, gây hiểu nhầm khi đưa cho kế toán thuế. Chỉ xuất khối này khi
+  // đang ở Linh Chí Thành (S.isCompanyWide), y hệt điều kiện UI.
+  if(S.isCompanyWide){
+    ws.mergeCells(`A${r}:B${r}`); ktCell(ws,`A${r}`,'DÒNG TIỀN THUẦN TỪ HOẠT ĐỘNG KINH DOANH (trực tiếp, toàn công ty)',{bold:true,fill:KT_HEAD_FILL,wrap:true}); setH(30);
+    line('Tiền khách bank vào (thật)', S.cashIn, {color:'FF1F7A4D'});
+    line('Tiền bank cho mỏ (thật)', -S.cashOutToSuppliers);
+    line('Chi phí vận hành (dầu, lương, ăn, phát sinh) — tất cả xe', -S.operatingCashCost);
+    line('Sửa chữa + luật đường + tiền nhà/điện nước + gốc/lãi vay/bảo hiểm/đăng kiểm — tất cả xe (thật)', -(S.cashFlowRepairTotal+S.cashFlowRoadFee+S.houseRent+S.utilities+S.tollFee+S.cashFlowFixedMonthly));
+    line('DÒNG TIỀN THUẦN (TOÀN CÔNG TY)', S.netOperatingCashFlow, {bold:true, color:S.netOperatingCashFlow>=0?'FF1F7A4D':'FFB23A2E'});
+  }
 }
 function ktBuildHoaDonRa(wb, taxData, from, to){
   const ws = wb.addWorksheet('Hoa Don Ra');
