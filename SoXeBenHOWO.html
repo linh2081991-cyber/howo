@@ -58,7 +58,24 @@
   }
   header.top h1{ font-size:19px; margin:0; font-weight:700; letter-spacing:-0.2px; }
   header.top .sub{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
-  main{ flex:1; padding:14px 14px 90px 14px; overflow-y:auto; }
+  /* SỬA 2026-09-14 (Ông Chủ báo LẠI — vẫn tràn ở "Chi Phí & VAT Hưởng Theo
+     Ca" dù đã khoá html/body ở trên): tìm ra NGUYÊN NHÂN GỐC THẬT SỰ khác
+     hẳn — <main id="app"> là 1 flex item của #shell (display:flex), và
+     flex item mặc định có min-width:auto (KHÔNG PHẢI 0), nghĩa là nó
+     KHÔNG CHỊU co lại nhỏ hơn kích thước tối thiểu của nội dung bên
+     trong. Nếu 1 phần tử con nào đó (bảng nhiều cột, chữ dài không xuống
+     dòng...) đòi rộng hơn khung #shell (520px), main sẽ tự phình ra khỏi
+     #shell — html/body chặn được TRANG không cuộn ngang, nhưng phần đã
+     phình đó vẫn bị CẮT CỤT ngay tại mép màn hình (không phải cuộn được,
+     mà là mất hẳn 1 phần, đúng triệu chứng Ông Chủ mô tả). Thêm
+     min-width:0 để main LUÔN chịu co đúng bằng khung #shell, không bao
+     giờ phình theo nội dung con nữa — sửa tận gốc, không cần dò từng ô
+     ngày/bảng riêng lẻ. overflow-x:hidden thêm vào làm lưới an toàn thứ
+     2: nếu vẫn có gì đó cố phình, giờ nó bị cắt bên trong main (không
+     tràn ra ngoài #shell nữa) — không ảnh hưởng các khung cuộn ngang CÓ
+     CHỦ ĐÍCH bên trong (.grid-table-wrap/.dash-wrap/.driver-tabbar vẫn tự
+     cuộn ngang riêng, độc lập với main). */
+  main{ flex:1; padding:14px 14px 90px 14px; overflow-y:auto; overflow-x:hidden; min-width:0; }
   .btn{
     appearance:none; border:none; border-radius:12px; padding:12px 16px;
     font-size:15px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
@@ -534,8 +551,15 @@
      được thêm overflow:hidden (xem rule gốc phía trên) nên dù 2 ô cạnh
      nhau bị hẹp lại, chữ dài nhất cũng chỉ bị CẮT gọn theo khung, tuyệt
      đối không tràn ra ngoài — an toàn để xếp ngang trở lại. */
-  .date-range{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-bottom:14px; }
-  .date-range .field{ min-width:0; margin-bottom:0; }
+  .date-range{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-bottom:14px; overflow:hidden; }
+  /* SỬA 2026-09-14 LẦN 2 (lưới an toàn cuối cùng riêng cho đúng ô này —
+     Ông Chủ yêu cầu "xử lý thật triệt để"): thêm overflow:hidden ngay
+     trên chính .field (1 thẻ div thường, LUÔN tuân thủ đúng kích cỡ cột
+     grid — khác hẳn input[type=date] là control gốc của hệ điều hành, đôi
+     khi tự ý fudge kích cỡ). Dù input bên trong có cố tình rộng hơn cách
+     nào, div bọc ngoài này chốt cứng đúng 50% cột, không bao giờ để lọt
+     ra ngoài — kể cả sang cột bên cạnh hay ra mép màn hình. */
+  .date-range .field{ min-width:0; margin-bottom:0; overflow:hidden; }
   /* 2026-08-16 LẦN 4 (yêu cầu Ông Chủ, ghi đè quyết định LẦN 3 ngay dưới
      đây): trước đó Ông Chủ chỉ muốn khớp kích cỡ input chuẩn, KHÔNG thu
      nhỏ chữ — nhưng lần này yêu cầu THÊM 1 bước nữa: thu nhỏ khung y hệt
@@ -666,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #231';
+const APP_BUILD = '2026-09-14 · #232';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
