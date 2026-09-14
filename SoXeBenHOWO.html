@@ -666,7 +666,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #230';
+const APP_BUILD = '2026-09-14 · #231';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -16120,118 +16120,26 @@ function renderCompanyDashboardPage(){
           <div style="width:2px; height:14px; background:var(--border);"></div>
         </div>
         <div style="display:flex; gap:14px; justify-content:center;">
-          <button id="ktnbGoBankBtn" style="flex:1; max-width:150px; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
-            <div style="font-size:26px; line-height:1;">🏦</div>
-            <div style="font-weight:800; margin-top:6px; font-size:12.5px;">TCB Bank</div>
-            <div style="font-weight:900; margin-top:2px; font-size:14px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
-          </button>
-          <button id="ktnbGoCashBtn" style="flex:1; max-width:150px; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
-            <div style="font-size:26px; line-height:1;">💵</div>
-            <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Tiền Mặt</div>
-            <div style="font-weight:900; margin-top:2px; font-size:14px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
-          </button>
+          <div style="flex:1; max-width:150px; text-align:center;">
+            <button id="ktnbGoBankBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+              <div style="font-size:26px; line-height:1;">🏦</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">TCB Bank</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
+            </button>
+            <button id="ktnbDetailBankBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
+          </div>
+          <div style="flex:1; max-width:150px; text-align:center;">
+            <button id="ktnbGoCashBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+              <div style="font-size:26px; line-height:1;">💵</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Tiền Mặt</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
+            </button>
+            <button id="ktnbDetailCashBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
+          </div>
         </div>
-        <div class="hint" style="text-align:center; margin-top:12px;">Toàn quyền theo dõi, ghi chép, tính toán chi ra/thu về/công nợ toàn app — không lọt 1 đồng nào. Bấm 1 nhánh để xem/khai báo chi tiết.</div>
+        <button class="btn btn-ghost btn-block" id="ktnbTransferShortcutBtn" style="margin-top:14px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</button>
+        <div class="hint" style="text-align:center; margin-top:10px;">Toàn quyền theo dõi, ghi chép, tính toán chi ra/thu về/công nợ toàn app — không lọt 1 đồng nào. Bấm 1 nhánh để xem chi tiết + khai báo mốc chốt mới.</div>
       </div>
-
-      <div id="ktnbBankCard" class="card" style="margin-top:16px; border:1.5px solid var(--accent);">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🏦 TCB Bank</div>
-        ${bankRecon ? `
-        <div class="grid-table-wrap" style="margin-bottom:8px;">
-          <table class="grid-table">
-            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
-            <tbody>
-              <tr><td>Mốc chốt gần nhất (${formatDateVN(bankRecon.checkpoint.date)})</td><td class="num">${fmtVND(bankRecon.checkpoint.balance)}</td></tr>
-              <tr><td>+ Thu/Chi QUA NGÂN HÀNG phát sinh sau đó</td><td class="num" style="color:${bankRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${bankRecon.cashFlowSince>=0?'+':''}${fmtVND(bankRecon.cashFlowSince)}</td></tr>
-              <tr><td>+ Đã góp thêm sau đó</td><td class="num" style="color:var(--profit);">+${fmtVND(bankRecon.contributedSince)}</td></tr>
-              <tr><td>− Đã rút ra sau đó</td><td class="num" style="color:var(--loss);">−${fmtVND(bankRecon.withdrawnSince)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= Số dư app tính</td><td class="num" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="hint" style="margin:2px 0 8px;">Đã gồm đủ: tiền khách/mỏ (có gắn Phương thức Ngân hàng) + dầu + tạm ứng tài xế + sửa chữa + luật đường + Gốc/Lãi vay + bảo hiểm/đăng kiểm + mua Lô Hoá Đơn Bù + tiền vay mới giải ngân — các khoản sau LUÔN tính là ngân hàng, đúng nguyên tắc "mọi luồng tiền công ty đều qua tài khoản".</div>
-        <button class="btn btn-ghost btn-block" id="bankReconDetailBtn" style="margin-top:10px;">📋 Chi Tiết — Dòng Tiền Từ Mốc Chốt Tới Nay</button>
-        ` : `
-        <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đầu tiên bên dưới (đúng số dư ngân hàng THẬT ngay lúc này) để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
-        `}
-        <div class="formula-divider" style="margin:12px 0;"></div>
-        <div class="field">
-          <label>Ngày chốt</label>
-          <input type="date" id="bbc_date" value="${todayLocalDateStr()}">
-        </div>
-        <div class="field">
-          <label>Số dư ngân hàng THẬT vào đúng ngày này</label>
-          <input type="text" inputmode="decimal" id="bbc_balance">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Ghi chú</label>
-          <input type="text" id="bbc_note" placeholder="Không bắt buộc">
-        </div>
-        <button class="btn btn-accent btn-block" id="bbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
-      </div>
-      ${state.bankBalanceCheckpoints.length>0 ? `
-      <div class="card" style="margin-top:12px; padding:0; overflow:hidden;">
-        ${[...state.bankBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${formatDateVN(c.date)}</div>
-              ${c.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(c.note)}</div>` : ''}
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
-              <button class="link-btn" data-del-bankcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
-            </div>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <div id="ktnbCashCard" class="card" style="margin-top:16px; border:1.5px solid var(--accent);">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">💵 Tiền Mặt</div>
-        ${cashRecon ? `
-        <div class="grid-table-wrap" style="margin-bottom:8px;">
-          <table class="grid-table">
-            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
-            <tbody>
-              <tr><td>Mốc chốt gần nhất (${formatDateVN(cashRecon.checkpoint.date)})</td><td class="num">${fmtVND(cashRecon.checkpoint.balance)}</td></tr>
-              <tr><td>+ Thu/Chi TIỀN MẶT phát sinh sau đó</td><td class="num" style="color:${cashRecon.cashFlowSince>=0?'var(--profit)':'var(--loss)'}">${cashRecon.cashFlowSince>=0?'+':''}${fmtVND(cashRecon.cashFlowSince)}</td></tr>
-              <tr><td>+ Đã góp thêm (tiền mặt) sau đó</td><td class="num" style="color:var(--profit);">+${fmtVND(cashRecon.contributedSince)}</td></tr>
-              <tr><td>− Đã rút ra (tiền mặt) sau đó</td><td class="num" style="color:var(--loss);">−${fmtVND(cashRecon.withdrawnSince)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= Tiền mặt app tính đang cầm</td><td class="num" style="color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(cashRecon.computedBalance)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="hint" style="margin:2px 0 8px;">Chỉ gồm: tiền khách/mỏ/góp/rút vốn có gắn Phương thức = Tiền mặt — mọi khoản khác (dầu, tạm ứng, sửa chữa, luật đường, vay, hoá đơn bù, VAT...) LUÔN LUÔN là ngân hàng, không liên quan sổ này.</div>
-        ` : `
-        <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đúng số tiền mặt THẬT đang cầm ngay lúc này để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
-        `}
-        <div class="formula-divider" style="margin:12px 0;"></div>
-        <div class="field">
-          <label>Ngày chốt</label>
-          <input type="date" id="cbc_date" value="${todayLocalDateStr()}">
-        </div>
-        <div class="field">
-          <label>Tiền mặt THẬT đang cầm vào đúng ngày này</label>
-          <input type="text" inputmode="decimal" id="cbc_balance">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Ghi chú</label>
-          <input type="text" id="cbc_note" placeholder="Không bắt buộc">
-        </div>
-        <button class="btn btn-accent btn-block" id="cbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
-      </div>
-      ${state.cashBalanceCheckpoints.length>0 ? `
-      <div class="card" style="margin-top:12px; padding:0; overflow:hidden;">
-        ${[...state.cashBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${formatDateVN(c.date)}</div>
-              ${c.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(c.note)}</div>` : ''}
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
-              <button class="link-btn" data-del-cashcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
-            </div>
-          </div>`).join('')}
-      </div>` : ''}
     </section>
 
     <section class="group">
@@ -16390,16 +16298,23 @@ function renderCompanyDashboardPage(){
   document.querySelectorAll('.debtDetailBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(btn.dataset.filter); });
   });
-  // SỬA 2026-09-14 (redesign "Kế Toán Nội Bộ"): bấm icon nhánh 🏦/💵 trên sơ
-  // đồ hub thì cuộn mượt xuống đúng card khai báo/chi tiết của nhánh đó —
-  // không mở trang mới, giữ nguyên cơ chế khai báo 1 lần đang có sẵn.
+  // SỬA 2026-09-14 LẦN 2 (Ông Chủ — "bỏ hẳn khối bảng cũ, mỗi nhánh chỉ cần
+  // nút Chi Tiết gọn gàng"): bấm icon HOẶC nút "📋 Chi tiết" của nhánh nào
+  // đều mở thẳng trang renderBankReconDetailPage() — trang đó đã tách rõ
+  // bảng Ngân hàng/Tiền mặt riêng, và giờ còn có luôn form khai mốc chốt
+  // mới ngay trong đó (xem renderBankReconDetailPage()). Không còn card
+  // Retro cũ để cuộn tới nữa.
   const ktnbGoBankBtn = document.getElementById('ktnbGoBankBtn');
-  if(ktnbGoBankBtn) ktnbGoBankBtn.addEventListener('click', ()=>{ document.getElementById('ktnbBankCard').scrollIntoView({behavior:'smooth', block:'start'}); });
+  if(ktnbGoBankBtn) ktnbGoBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  const ktnbDetailBankBtn = document.getElementById('ktnbDetailBankBtn');
+  if(ktnbDetailBankBtn) ktnbDetailBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
   const ktnbGoCashBtn = document.getElementById('ktnbGoCashBtn');
-  if(ktnbGoCashBtn) ktnbGoCashBtn.addEventListener('click', ()=>{ document.getElementById('ktnbCashCard').scrollIntoView({behavior:'smooth', block:'start'}); });
+  if(ktnbGoCashBtn) ktnbGoCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  const ktnbDetailCashBtn = document.getElementById('ktnbDetailCashBtn');
+  if(ktnbDetailCashBtn) ktnbDetailCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  const ktnbTransferShortcutBtn = document.getElementById('ktnbTransferShortcutBtn');
+  if(ktnbTransferShortcutBtn) ktnbTransferShortcutBtn.addEventListener('click', openInternalTransferModal);
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
-  const bankReconDetailBtn = document.getElementById('bankReconDetailBtn');
-  if(bankReconDetailBtn) bankReconDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
   const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
   let oeAmountVal = 0;
@@ -16449,63 +16364,6 @@ function renderCompanyDashboardPage(){
     restoreMainScroll();
   });
   document.getElementById('equityHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderEquityHistoryDetailPage(); });
-  let bbcBalanceVal = 0;
-  attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
-  document.getElementById('bbc_addBtn').addEventListener('click', async ()=>{
-    // SỬA 2026-09-08 (Ông Chủ báo — thoát ra màn hình chạy lên đầu thay vì
-    // ở lại đúng khu vực): bàn phím ảo (iOS) vẫn đang mở lúc bấm nút này
-    // (vừa gõ xong ô Số Dư) — nếu lưu vị trí cuộn NGAY LÚC bàn phím còn
-    // che 1 phần màn hình, vị trí lưu được sẽ SAI so với lúc bàn phím đã
-    // đóng hẳn (layout đổi khác khi bàn phím biến mất). Ép đóng bàn phím
-    // (blur) TRƯỚC KHI lưu vị trí cuộn, để màn hình ổn định đúng trạng
-    // thái cuối cùng trước khi ghi nhớ.
-    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const date = document.getElementById('bbc_date').value;
-    const note = document.getElementById('bbc_note').value.trim();
-    if(!date){ showToast('Chọn ngày trước đã.'); return; }
-    if(state.bankBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
-    state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
-    if(!(await saveBankBalanceCheckpoints())) return;
-    showToast('Đã khai báo mốc chốt.');
-    saveMainScroll();
-    renderCompanyDashboardPage();
-    restoreMainScroll();
-  });
-  document.querySelectorAll('[data-del-bankcheckpoint]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
-      if(!(await saveBankBalanceCheckpoints())) return;
-      showToast('Đã xoá mốc chốt.');
-      saveMainScroll();
-      renderCompanyDashboardPage();
-      restoreMainScroll();
-    });
-  });
-  let cbcBalanceVal = 0;
-  attachMoneyInput(document.getElementById('cbc_balance'), 0, v=>cbcBalanceVal=v);
-  document.getElementById('cbc_addBtn').addEventListener('click', async ()=>{
-    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const date = document.getElementById('cbc_date').value;
-    const note = document.getElementById('cbc_note').value.trim();
-    if(!date){ showToast('Chọn ngày trước đã.'); return; }
-    if(state.cashBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
-    state.cashBalanceCheckpoints.push({ id: uid('cashcp'), date, balance: cbcBalanceVal, note });
-    if(!(await saveCashBalanceCheckpoints())) return;
-    showToast('Đã khai báo mốc chốt tiền mặt.');
-    saveMainScroll();
-    renderCompanyDashboardPage();
-    restoreMainScroll();
-  });
-  document.querySelectorAll('[data-del-cashcheckpoint]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      state.cashBalanceCheckpoints = state.cashBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delCashcheckpoint);
-      if(!(await saveCashBalanceCheckpoints())) return;
-      showToast('Đã xoá mốc chốt.');
-      saveMainScroll();
-      renderCompanyDashboardPage();
-      restoreMainScroll();
-    });
-  });
   document.getElementById('addInternalTransferBtn').addEventListener('click', openInternalTransferModal);
   document.querySelectorAll('[data-del-transfer]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
@@ -17102,28 +16960,103 @@ function renderBankReconDetailPage(){
           </tbody>
         </table>
       </div>
-      <div class="grid-table-wrap" style="margin-top:16px;">
-        <table class="grid-table">
-          <thead><tr><th>🏦 TCB Bank</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            <tr><td>Mốc chốt (${formatDateVN(bankRecon.checkpoint.date)})</td><td class="num">${fmtVND(bankRecon.checkpoint.balance)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= Số dư app tính hôm nay</td><td class="num" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
-      ${cashRecon ? `
-      <div class="grid-table-wrap" style="margin-top:16px;">
-        <table class="grid-table">
-          <thead><tr><th>💵 Tiền Mặt</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            <tr><td>Mốc chốt (${formatDateVN(cashRecon.checkpoint.date)})</td><td class="num">${fmtVND(cashRecon.checkpoint.balance)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= Tiền mặt app tính hôm nay</td><td class="num" style="color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(cashRecon.computedBalance)}</td></tr>
-          </tbody>
-        </table>
-      </div>
       ` : ''}
-      ` : ''}
+    </section>
+
+    <section class="group">
+      <div class="card" style="border:1.5px solid var(--accent);">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🏦 TCB Bank</div>
+        ${bankRecon ? `
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số Tiền</th></tr></thead>
+            <tbody>
+              <tr><td>Mốc chốt (${formatDateVN(bankRecon.checkpoint.date)})</td><td class="num">${fmtVND(bankRecon.checkpoint.balance)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= Số dư app tính hôm nay</td><td class="num" style="color:${bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(bankRecon.computedBalance)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
+        ` : `
+        <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đầu tiên bên dưới (đúng số dư ngân hàng THẬT ngay lúc này) để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
+        `}
+        <div class="formula-divider" style="margin:12px 0;"></div>
+        <div class="field">
+          <label>Ngày chốt</label>
+          <input type="date" id="bbc_date" value="${todayLocalDateStr()}">
+        </div>
+        <div class="field">
+          <label>Số dư ngân hàng THẬT vào đúng ngày này</label>
+          <input type="text" inputmode="decimal" id="bbc_balance">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="bbc_note" placeholder="Không bắt buộc">
+        </div>
+        <button class="btn btn-accent btn-block" id="bbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
+      </div>
+      ${state.bankBalanceCheckpoints.length>0 ? `
+      <div class="card" style="margin-top:12px; padding:0; overflow:hidden;">
+        ${[...state.bankBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${formatDateVN(c.date)}</div>
+              ${c.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(c.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
+              <button class="link-btn" data-del-bankcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+    </section>
+
+    <section class="group">
+      <div class="card" style="border:1.5px solid var(--accent);">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">💵 Tiền Mặt</div>
+        ${cashRecon ? `
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số Tiền</th></tr></thead>
+            <tbody>
+              <tr><td>Mốc chốt (${formatDateVN(cashRecon.checkpoint.date)})</td><td class="num">${fmtVND(cashRecon.checkpoint.balance)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= Tiền mặt app tính hôm nay</td><td class="num" style="color:${cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)'}">${fmtVND(cashRecon.computedBalance)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        ` : `
+        <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đúng số tiền mặt THẬT đang cầm ngay lúc này để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
+        `}
+        <div class="formula-divider" style="margin:12px 0;"></div>
+        <div class="field">
+          <label>Ngày chốt</label>
+          <input type="date" id="cbc_date" value="${todayLocalDateStr()}">
+        </div>
+        <div class="field">
+          <label>Tiền mặt THẬT đang cầm vào đúng ngày này</label>
+          <input type="text" inputmode="decimal" id="cbc_balance">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Ghi chú</label>
+          <input type="text" id="cbc_note" placeholder="Không bắt buộc">
+        </div>
+        <button class="btn btn-accent btn-block" id="cbc_addBtn" style="margin-top:12px;">+ Khai Báo Mốc Chốt Này</button>
+      </div>
+      ${state.cashBalanceCheckpoints.length>0 ? `
+      <div class="card" style="margin-top:12px; padding:0; overflow:hidden;">
+        ${[...state.cashBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${formatDateVN(c.date)}</div>
+              ${c.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(c.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap;">${fmtVND(c.balance)}</span>
+              <button class="link-btn" data-del-cashcheckpoint="${c.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+      <button class="btn btn-ghost btn-block" id="ktnbTransferShortcutBtn2" style="margin-top:14px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</button>
     </section>
     <section class="group">
       <div class="card" style="padding:0; overflow:hidden;">
@@ -17270,6 +17203,55 @@ function renderBankReconDetailPage(){
       </div>` : ''}
     </section>
   `;
+  // SỬA 2026-09-14 LẦN 2 (chuyển form khai mốc chốt + lịch sử từ dashboard
+  // sang thẳng trang Chi Tiết này, theo yêu cầu Ông Chủ "bỏ hẳn khối bảng
+  // cũ ở màn chính"): giữ NGUYÊN VẸN logic lưu/xoá — chỉ đổi noi gọi lại
+  // là renderBankReconDetailPage() (ở lại đúng trang này) thay vì
+  // renderCompanyDashboardPage() như trước.
+  let bbcBalanceVal = 0;
+  attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
+  document.getElementById('bbc_addBtn').addEventListener('click', async ()=>{
+    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const date = document.getElementById('bbc_date').value;
+    const note = document.getElementById('bbc_note').value.trim();
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(state.bankBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
+    state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
+    if(!(await saveBankBalanceCheckpoints())) return;
+    showToast('Đã khai báo mốc chốt.');
+    renderBankReconDetailPage();
+  });
+  document.querySelectorAll('[data-del-bankcheckpoint]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
+      if(!(await saveBankBalanceCheckpoints())) return;
+      showToast('Đã xoá mốc chốt.');
+      renderBankReconDetailPage();
+    });
+  });
+  let cbcBalanceVal = 0;
+  attachMoneyInput(document.getElementById('cbc_balance'), 0, v=>cbcBalanceVal=v);
+  document.getElementById('cbc_addBtn').addEventListener('click', async ()=>{
+    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const date = document.getElementById('cbc_date').value;
+    const note = document.getElementById('cbc_note').value.trim();
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(state.cashBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
+    state.cashBalanceCheckpoints.push({ id: uid('cashcp'), date, balance: cbcBalanceVal, note });
+    if(!(await saveCashBalanceCheckpoints())) return;
+    showToast('Đã khai báo mốc chốt tiền mặt.');
+    renderBankReconDetailPage();
+  });
+  document.querySelectorAll('[data-del-cashcheckpoint]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.cashBalanceCheckpoints = state.cashBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delCashcheckpoint);
+      if(!(await saveCashBalanceCheckpoints())) return;
+      showToast('Đã xoá mốc chốt.');
+      renderBankReconDetailPage();
+    });
+  });
+  const ktnbTransferShortcutBtn2 = document.getElementById('ktnbTransferShortcutBtn2');
+  if(ktnbTransferShortcutBtn2) ktnbTransferShortcutBtn2.addEventListener('click', openInternalTransferModal);
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
 }
 /// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
