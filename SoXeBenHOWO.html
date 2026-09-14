@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #234';
+const APP_BUILD = '2026-09-14 · #236';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11853,8 +11853,22 @@ function computeBankBalanceReconciliation(){
   const bonusBank = state.monthlyBonuses.filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method!=='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
   const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash - driverAdvanceBank - bonusBank;
-  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  // SỬA 2026-09-14 LẦN 3 (Ông Chủ báo — khai mốc chốt ĐÚNG HÔM NAY,
+  // 352.090.794đ, nhưng app tính ra 264.424.794đ, lệch đúng 87.666.000đ):
+  // BẮT ĐƯỢC LỖI TÍNH TRÙNG NGÀY THẬT SỰ NGHIÊM TRỌNG — 2 dòng
+  // contributedSince/withdrawnSince NGAY BÊN DƯỚI dùng mốc lọc
+  // `>= latest.date` (TÍNH LUÔN CẢ NGÀY CHỐT), trong khi MỌI khoản khác
+  // trong công thức này (dầu, tạm ứng, sửa chữa, luật đường, vay, VAT...)
+  // đều đúng dùng `>= from` (from = latest.date + 1, KHÔNG tính ngày chốt
+  // — xem dòng "const from = addDaysToDateStr(...)" phía trên). Khai mốc
+  // chốt nghĩa là "số dư THẬT ngay lúc này, đã bao gồm mọi thứ xảy ra
+  // trong ngày hôm nay" — nếu ĐÚNG NGÀY ĐÓ còn có 1 khoản góp/rút vốn nào
+  // khác cũng được ghi, khoản đó bị cộng/trừ 2 LẦN: 1 lần đã nằm sẵn
+  // trong số Ông Chủ vừa khai, 1 lần nữa bị app tính thêm. Sửa về đúng
+  // `>= from` cho khớp 100% với mọi khoản khác — không đụng bất kỳ dòng
+  // nào khác trong công thức.
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
     operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash, driverAdvanceBank, bonusBank };
@@ -11891,8 +11905,12 @@ function computeCashBalanceReconciliation(){
   const driverAdvanceCash = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method==='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const bonusCash = state.monthlyBonuses.filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method==='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
   const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank - driverAdvanceCash - bonusCash;
-  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=latest.date && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=latest.date && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  // SỬA 2026-09-14 LẦN 3 (sinh đôi với lỗi vừa sửa ở computeBankBalanceReconciliation()
+  // phía trên — cùng nguyên nhân, cùng cách sửa): dùng đúng `>= from`
+  // thay vì `>= latest.date`, tránh tính trùng khoản góp/rút vốn ghi đúng
+  // ngày khai mốc chốt.
+  const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash };
 }
@@ -16882,11 +16900,18 @@ function renderBankReconDetailPage(){
   const allEntries = computeCompanyCashFlowLedger();
   const entries = bankRecon ? allEntries.filter(e=>{
     if(e.method==='cash') return false;
+    // SỬA 2026-09-14 (Ông Chủ — "mọi đồng tiền ra/vào phải lập bảng thống
+    // kê chi tiết đúng nghiệp vụ kế toán, không được gộp chung"): 2 khoản
+    // này giờ có bảng riêng của chính nó (bankDriverAdvanceItems/
+    // bankBonusItems bên dưới) — loại khỏi danh sách gộp chung ở đây để
+    // KHÔNG hiện trùng lặp 2 lần trên cùng 1 trang.
+    if(e.category==='Ứng riêng cho tài xế' || e.category==='Tip/Thưởng tháng') return false;
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
     return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
   }) : [];
   const cashEntries = bankRecon ? allEntries.filter(e=>{
     if(e.method!=='cash') return false;
+    if(e.category==='Ứng riêng cho tài xế' || e.category==='Tip/Thưởng tháng') return false;
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
     return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
   }) : [];
@@ -16909,6 +16934,31 @@ function renderBankReconDetailPage(){
   const bankAdvanceShifts = bankRecon ? allShiftsCompanyWide()
     .filter(sh=>sh.date>bankRecon.checkpoint.date && sh.date<=todayLocalDateStr() && (Number(sh.advanceAmount)||0)>0)
     .map(sh=>{ const driver = driverById(sh.driverId); return { date: sh.date, name: driver?driver.name:(sh.driverNameSnapshot||''), cost: sh.advanceAmount }; })
+    .sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  // SỬA 2026-09-14 (Ông Chủ — "ứng tiền tài xế hay tip cũng dùng tiền công
+  // ty, phải được ghi chép lập bảng thống kê chi tiết đúng nghiệp vụ kế
+  // toán, không được gộp chung"): 2 khoản này TRƯỚC ĐÂY chỉ nằm lẫn trong
+  // 1 danh sách gộp chung (entries/cashEntries phía trên, chung với Khách
+  // trả/Nhà cung cấp/Góp-Rút vốn) — không đúng chuẩn "mỗi hạng mục 1 bảng
+  // riêng" như dầu/tạm ứng theo ca/sửa chữa đang có. Tách hẳn thành 4 mảng
+  // riêng (bank + cash × ứng riêng + tip thưởng), y hệt khuôn bankAdvanceShifts
+  // ở trên — đủ cả 2 phía Ngân hàng VÀ Tiền Mặt, vì 2 khoản này giờ có ô
+  // chọn nguồn, không còn mặc định luôn là ngân hàng nữa.
+  const bankDriverAdvanceItems = bankRecon ? state.driverAdvances
+    .filter(a=>a.date>bankRecon.checkpoint.date && a.date<=todayLocalDateStr() && a.method!=='cash')
+    .map(a=>{ const driver = driverById(a.driverId); return { date:a.date, name: driver?driver.name:'', note:a.note||'', cost:Number(a.amount)||0 }; })
+    .sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  const bankBonusItems = bankRecon ? state.monthlyBonuses
+    .filter(b=>{ const d=bonusEffectiveDate(b); return d>bankRecon.checkpoint.date && d<=todayLocalDateStr() && b.method!=='cash'; })
+    .map(b=>{ const driver = driverById(b.driverId); return { date:bonusEffectiveDate(b), name: driver?driver.name:'', yearMonth:b.yearMonth, cost:Number(b.amount)||0 }; })
+    .sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  const cashDriverAdvanceItems = cashRecon ? state.driverAdvances
+    .filter(a=>a.date>cashRecon.checkpoint.date && a.date<=todayLocalDateStr() && a.method==='cash')
+    .map(a=>{ const driver = driverById(a.driverId); return { date:a.date, name: driver?driver.name:'', note:a.note||'', cost:Number(a.amount)||0 }; })
+    .sort((a,b)=>b.date.localeCompare(a.date)) : [];
+  const cashBonusItems = cashRecon ? state.monthlyBonuses
+    .filter(b=>{ const d=bonusEffectiveDate(b); return d>cashRecon.checkpoint.date && d<=todayLocalDateStr() && b.method==='cash'; })
+    .map(b=>{ const driver = driverById(b.driverId); return { date:bonusEffectiveDate(b), name: driver?driver.name:'', yearMonth:b.yearMonth, cost:Number(b.amount)||0 }; })
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const bankRepairs = bankRecon ? repairsInRangeCompanyWide(addDaysToDateStr(bankRecon.checkpoint.date,1), todayLocalDateStr()).sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const bankInvoiceLots = bankRecon ? state.invoiceLots.filter(l=>l.purchaseDate>bankRecon.checkpoint.date && l.purchaseDate<=todayLocalDateStr()).sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)) : [];
@@ -17064,6 +17114,27 @@ function renderBankReconDetailPage(){
         ` : `
         <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đúng số tiền mặt THẬT đang cầm ngay lúc này để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
         `}
+        ${cashDriverAdvanceItems.length>0 ? `
+        <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">💵 Ứng Riêng Cho Tài Xế (Tiền Mặt)</div>
+        <div class="card" style="padding:0; overflow:hidden; margin-bottom:12px;">
+          ${cashDriverAdvanceItems.map(r=>`
+            <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+              <div>
+                <div style="font-weight:700;">⬇️ Ứng riêng — ${escapeHtml(r.name)} — ${formatDateVN(r.date)}</div>
+                ${r.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(r.note)}</div>` : ''}
+              </div>
+              <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
+            </div>`).join('')}
+        </div>` : ''}
+        ${cashBonusItems.length>0 ? `
+        <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🎁 Tip/Thưởng Tháng (Tiền Mặt)</div>
+        <div class="card" style="padding:0; overflow:hidden; margin-bottom:12px;">
+          ${cashBonusItems.map(r=>`
+            <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+              <div><div style="font-weight:700;">⬇️ Tip/Thưởng — ${escapeHtml(r.name)} — tháng ${escapeHtml(r.yearMonth)}</div></div>
+              <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
+            </div>`).join('')}
+        </div>` : ''}
         <div class="formula-divider" style="margin:12px 0;"></div>
         <div class="field">
           <label>Ngày chốt</label>
@@ -17124,6 +17195,27 @@ function renderBankReconDetailPage(){
         ${bankAdvanceShifts.map(r=>`
           <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
             <div><div style="font-weight:700;">⬇️ Tạm ứng — ${escapeHtml(r.name)} — ${formatDateVN(r.date)}</div></div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankDriverAdvanceItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Ứng Riêng Cho Tài Xế</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankDriverAdvanceItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">⬇️ Ứng riêng — ${escapeHtml(r.name)} — ${formatDateVN(r.date)}</div>
+              ${r.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(r.note)}</div>` : ''}
+            </div>
+            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${bankBonusItems.length>0 ? `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🎁 Tip/Thưởng Tháng</div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${bankBonusItems.map(r=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:700;">⬇️ Tip/Thưởng — ${escapeHtml(r.name)} — tháng ${escapeHtml(r.yearMonth)}</div></div>
             <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
           </div>`).join('')}
       </div>` : ''}
