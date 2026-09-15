@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #250';
+const APP_BUILD = '2026-09-14 · #251';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17393,6 +17393,32 @@ function renderCashFlowBreakdownDetailPage(){
 /// Chi Tiết Khớp Ngân Hàng — lọc lại đúng Sao Kê Toàn Bộ Dòng Tiền
 /// (computeCompanyCashFlowLedger) CHỈ những giao dịch SAU mốc chốt gần
 /// nhất, để Ông Chủ tự soát từng dòng thay vì chỉ nhìn 1 số gộp.
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "chia ô và thống kê thật chi tiết để
+// minh bạch"): hàm dùng CHUNG cho MỌI danh sách hạng mục ở trang Chi Tiết
+// Dòng Tiền — thay vì mỗi dòng gộp chung 1 câu chữ dài, giờ tách hẳn
+// thành bảng có cột riêng: Ngày/Kỳ | Nội Dung | Số Tiền — dễ quét mắt,
+// dễ đối chiếu, không còn phải đọc hết cả câu mới biết ngày tháng nào.
+function renderLedgerItemsTable(title, items){
+  if(!items || items.length===0) return '';
+  return `
+      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">${title}</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th style="white-space:nowrap;">Ngày/Kỳ</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${items.map(r=>{
+              const sign = r.sign===1 ? 1 : -1;
+              const dateLabel = r.date ? formatDateVN(r.date) : (r.period||'');
+              return `<tr>
+                <td style="white-space:nowrap; color:var(--ink-soft); font-size:12.5px;">${dateLabel}</td>
+                <td>${r.label}</td>
+                <td class="num" style="font-weight:700; color:${sign>0?'var(--profit)':'var(--loss)'};">${sign>0?'+':'−'}${fmtVND(r.amount)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+}
 function renderBankReconDetailPage(){
   scrollMainToTop();
   const bankRecon = computeBankBalanceReconciliation();
@@ -17482,43 +17508,96 @@ function renderBankReconDetailPage(){
   // "1 mã 1 dòng" khi có ≥2 khoản vay/xe. Tách hết ra từng dòng độc lập.
   const rangeFrom = bankRecon ? addDaysToDateStr(bankRecon.checkpoint.date,1) : null;
   const rangeTo = todayLocalDateStr();
-  const monthsInRange = bankRecon ? monthsBetween(rangeFrom, rangeTo) : [];
+  // SỬA 2026-09-14 LẦN 8 (Ông Chủ đối chiếu — bắt được 5 dòng Luật Đường/
+  // Thuê Nhà/Điện Nước/Cầu Đường/Bảo Hiểm-Đăng Kiểm ở trang Chi Tiết này
+  // vẫn hiện đúng tháng của mốc chốt, dù tổng số đã sửa không tính trùng
+  // tháng đó từ lâu): TRANG CHI TIẾT ĐANG DÙNG MỐC NGÀY CŨ (`rangeFrom`
+  // thô), KHÁC với `fixedCostFrom` (tháng kế tiếp sau tháng mốc chốt) mà
+  // computeBankBalanceReconciliation()/computeCashBalanceReconciliation()
+  // đã dùng để tính tổng — nghĩa là trang này hiện ra NHỮNG DÒNG "ma"
+  // không hề nằm trong tổng thật, làm sai lệch niềm tin dù tổng vẫn đúng.
+  // Dùng ĐÚNG firstDayOfMonthAfter() y hệt 2 hàm tính tổng, để trang Chi
+  // Tiết khớp tuyệt đối với tổng số — không còn dòng "ma" nào nữa.
+  const fixedCostFrom = bankRecon ? firstDayOfMonthAfter(bankRecon.checkpoint.date) : null;
+  const monthsInRange = bankRecon ? monthsBetween(fixedCostFrom, rangeTo) : [];
+  // SỬA 2026-09-14 LẦN 8 (tiếp — cùng đợt): 5 danh sách dưới đây TRƯỚC ĐÂY
+  // không hề lọc theo Phương Thức (method) — hiện ra CẢ khoản đã đánh dấu
+  // Tiền Mặt lẫn trong bảng "TCB Bank", sai hẳn với tổng bên Ngân Hàng
+  // (đã đúng lọc method từ trước). Thêm lọc `(e.method||'bank')!=='cash'`
+  // cho đủ 5 danh sách, và thêm hẳn 5 danh sách phía "cash" song song để
+  // khoản nào đánh dấu Tiền Mặt vẫn hiện đúng bên "💵 Tiền Mặt" — không
+  // còn khoản nào "biến mất" khỏi cả 2 bên.
   const bankRoadFeeItems = bankRecon ? state.vehicles.flatMap(v=>{
     const list = state.allVehiclesRoadFee[v.id] || [];
-    return monthsInRange.filter(ym=>list.some(e=>e.month===ym)).map(ym=>{
+    return monthsInRange.filter(ym=>list.some(e=>e.month===ym && (e.method||'bank')!=='cash')).map(ym=>{
       const e = list.find(x=>x.month===ym);
-      return { label: `Luật đường ${monthLabelVN(ym)} — 🚛 ${v.name||v.plate}`, amount: Number(e.amount)||0 };
+      return { period: monthLabelVN(ym), label: `Luật đường — 🚛 ${v.name||v.plate}`, amount: Number(e.amount)||0 };
     });
   }).filter(r=>r.amount>0) : [];
-  const bankHouseRentItems = bankRecon ? monthsInRange.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.rentAmount)>0))
-    .map(ym=>({ label:`Thuê nhà ${monthLabelVN(ym)}`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).rentAmount)||0 })) : [];
-  const bankUtilitiesItems = bankRecon ? monthsInRange.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.utilitiesAmount)>0))
-    .map(ym=>({ label:`Điện nước ${monthLabelVN(ym)}`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).utilitiesAmount)||0 })) : [];
-  const bankTollFeeItems = bankRecon ? monthsInRange.filter(ym=>state.tollFeeByMonth.some(e=>e.month===ym && Number(e.amount)>0))
-    .map(ym=>({ label:`Cầu đường ${monthLabelVN(ym)}`, amount: Number(state.tollFeeByMonth.find(e=>e.month===ym).amount)||0 })) : [];
-  const bankVatPaymentItems = bankRecon ? (state.vatPayments||[]).filter(p=>p.date>bankRecon.checkpoint.date && p.date<=rangeTo)
-    .map(p=>({ label:`Đã nộp thuế VAT — ${formatDateVN(p.date)}${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
+  const cashRoadFeeItems = cashRecon ? state.vehicles.flatMap(v=>{
+    const list = state.allVehiclesRoadFee[v.id] || [];
+    const cashMonths = monthsBetween(firstDayOfMonthAfter(cashRecon.checkpoint.date), rangeTo);
+    return cashMonths.filter(ym=>list.some(e=>e.month===ym && e.method==='cash')).map(ym=>{
+      const e = list.find(x=>x.month===ym);
+      return { period: monthLabelVN(ym), label: `Luật đường — 🚛 ${v.name||v.plate}`, amount: Number(e.amount)||0 };
+    });
+  }).filter(r=>r.amount>0) : [];
+  const bankHouseRentItems = bankRecon ? monthsInRange.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.rentAmount)>0 && (e.method||'bank')!=='cash'))
+    .map(ym=>({ period: monthLabelVN(ym), label:`Thuê nhà`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).rentAmount)||0 })) : [];
+  const bankUtilitiesItems = bankRecon ? monthsInRange.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.utilitiesAmount)>0 && (e.method||'bank')!=='cash'))
+    .map(ym=>({ period: monthLabelVN(ym), label:`Điện nước`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).utilitiesAmount)||0 })) : [];
+  const bankTollFeeItems = bankRecon ? monthsInRange.filter(ym=>state.tollFeeByMonth.some(e=>e.month===ym && Number(e.amount)>0 && (e.method||'bank')!=='cash'))
+    .map(ym=>({ period: monthLabelVN(ym), label:`Cầu đường`, amount: Number(state.tollFeeByMonth.find(e=>e.month===ym).amount)||0 })) : [];
+  const cashMonthsForHousing = cashRecon ? monthsBetween(firstDayOfMonthAfter(cashRecon.checkpoint.date), rangeTo) : [];
+  const cashHouseRentItems = cashRecon ? cashMonthsForHousing.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.rentAmount)>0 && e.method==='cash'))
+    .map(ym=>({ period: monthLabelVN(ym), label:`Thuê nhà`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).rentAmount)||0 })) : [];
+  const cashUtilitiesItems = cashRecon ? cashMonthsForHousing.filter(ym=>state.housingUtilitiesByMonth.some(e=>e.month===ym && Number(e.utilitiesAmount)>0 && e.method==='cash'))
+    .map(ym=>({ period: monthLabelVN(ym), label:`Điện nước`, amount: Number(state.housingUtilitiesByMonth.find(e=>e.month===ym).utilitiesAmount)||0 })) : [];
+  const cashTollFeeItems = cashRecon ? cashMonthsForHousing.filter(ym=>state.tollFeeByMonth.some(e=>e.month===ym && Number(e.amount)>0 && e.method==='cash'))
+    .map(ym=>({ period: monthLabelVN(ym), label:`Cầu đường`, amount: Number(state.tollFeeByMonth.find(e=>e.month===ym).amount)||0 })) : [];
+  const bankVatPaymentItems = bankRecon ? (state.vatPayments||[]).filter(p=>p.date>bankRecon.checkpoint.date && p.date<=rangeTo && (p.method||'bank')!=='cash')
+    .map(p=>({ date:p.date, label:`Đã nộp thuế VAT${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
+  const cashVatPaymentItems = cashRecon ? (state.vatPayments||[]).filter(p=>p.date>cashRecon.checkpoint.date && p.date<=rangeTo && p.method==='cash')
+    .map(p=>({ date:p.date, label:`Đã nộp thuế VAT${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
   const bankTransferItems = bankRecon ? (state.internalTransfers||[]).filter(t=>t.date>bankRecon.checkpoint.date && t.date<=rangeTo)
-    .map(t=>({ label:`${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt':'💵→🏦 Nộp tiền mặt vào'} — ${formatDateVN(t.date)}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='bankToCash'?-1:1 })) : [];
+    .map(t=>({ date:t.date, label:`${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt':'💵→🏦 Nộp tiền mặt vào'}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='bankToCash'?-1:1 })) : [];
   const bankLoanPaymentItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
     return loans.flatMap(loan=>computeFullLoanSchedule(loan)
-      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; return d>bankRecon.checkpoint.date && d<=rangeTo; })
-      .map(p=>({ label:`${escapeHtml(loan.name||'Khoản vay')} — kỳ ${p.dueDate.getDate()}/${p.dueDate.getMonth()+1}/${p.dueDate.getFullYear()} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total })));
+      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return d>bankRecon.checkpoint.date && d<=rangeTo && method!=='cash'; })
+      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total })));
+  }) : [];
+  const cashLoanPaymentItems = cashRecon ? state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    return loans.flatMap(loan=>computeFullLoanSchedule(loan)
+      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return d>cashRecon.checkpoint.date && d<=rangeTo && method==='cash'; })
+      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total })));
   }) : [];
   const bankInsuranceRegItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const items = [];
-    if(Number(s.monthlyInsurance)>0) monthsInRange.forEach(ym=>items.push({ label:`Bảo hiểm ${monthLabelVN(ym)} — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyInsurance) }));
-    if(Number(s.monthlyRegistrationFee)>0) monthsInRange.forEach(ym=>items.push({ label:`Đăng kiểm/Đăng ký ${monthLabelVN(ym)} — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyRegistrationFee) }));
+    if((s.insuranceMethod||'bank')!=='cash'){
+      if(Number(s.monthlyInsurance)>0) monthsInRange.forEach(ym=>items.push({ period: monthLabelVN(ym), label:`Bảo hiểm — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyInsurance) }));
+      if(Number(s.monthlyRegistrationFee)>0) monthsInRange.forEach(ym=>items.push({ period: monthLabelVN(ym), label:`Đăng kiểm/Đăng ký — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyRegistrationFee) }));
+    }
+    return items;
+  }) : [];
+  const cashInsuranceRegItems = cashRecon ? state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const items = [];
+    if(s.insuranceMethod==='cash'){
+      if(Number(s.monthlyInsurance)>0) cashMonthsForHousing.forEach(ym=>items.push({ period: monthLabelVN(ym), label:`Bảo hiểm — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyInsurance) }));
+      if(Number(s.monthlyRegistrationFee)>0) cashMonthsForHousing.forEach(ym=>items.push({ period: monthLabelVN(ym), label:`Đăng kiểm/Đăng ký — 🚛 ${v.name||v.plate}`, amount: Number(s.monthlyRegistrationFee) }));
+    }
     return items;
   }) : [];
   const bankLoanDisbursedItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
     return loans.filter(loan=>loan.disbursementDate && loan.disbursementDate>bankRecon.checkpoint.date && loan.disbursementDate<=rangeTo)
-      .map(loan=>({ label:`Giải ngân ${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} — ${formatDateVN(loan.disbursementDate)}`, amount: Number(loan.principal)||0 }));
+      .map(loan=>({ date:loan.disbursementDate, label:`Giải ngân ${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate}`, amount: Number(loan.principal)||0, sign:1 }));
   }) : [];
   // SỬA 2026-09-08 (Ông Chủ "logic thật kỹ" — coi đây như 1 kế toán nội bộ
   // phải trả lời đủ 3 câu: "tiền thật bao nhiêu, ai đang nợ tao, tao đang
@@ -17679,169 +17758,61 @@ function renderBankReconDetailPage(){
       <button class="btn btn-ghost btn-block" id="ktnbTransferShortcutBtn2" style="margin-top:14px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</button>
     </section>
     <section class="group">
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${entries.length===0 ? '<div class="hint" style="padding:14px;">Chưa có giao dịch ngân hàng nào sau mốc chốt.</div>' : entries.map(e=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">🏦 Ngân hàng</span></div>
-              ${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
-          </div>`).join('')}
-      </div>
-      ${bankFuelShifts.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tiền Dầu Đổ Thêm</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankFuelShifts.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">⬇️ Tiền dầu đổ thêm — ${formatDateVN(r.date)}</div>
-              ${r.vehicleName ? `<div class="hint" style="margin-top:2px;">🚛 ${escapeHtml(r.vehicleName)}</div>` : ''}
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankAdvanceShifts.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Tạm Ứng Lương Tài Xế</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankAdvanceShifts.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ Tạm ứng — ${escapeHtml(r.name)} — ${formatDateVN(r.date)}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankDriverAdvanceItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Ứng Riêng Cho Tài Xế</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankDriverAdvanceItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">⬇️ Ứng riêng — ${escapeHtml(r.name)} — ${formatDateVN(r.date)}</div>
-              ${r.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(r.note)}</div>` : ''}
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankBonusItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🎁 Tip/Thưởng Tháng</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankBonusItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ Tip/Thưởng — ${escapeHtml(r.name)} — tháng ${escapeHtml(r.yearMonth)}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.cost)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankRepairs.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Sửa Chữa</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankRepairs.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${escapeHtml(r.item||'Sửa chữa')} — ${formatDateVN(r.date)}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankInvoiceLots.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Mua Lô Hoá Đơn Bù</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankInvoiceLots.map(l=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${escapeHtml(l.sourceName||l.goodsType||'Lô hoá đơn bù')} — ${formatDateVN(l.purchaseDate)}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)))}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankLoanDisbursedItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Nhận Tiền Vay Ngân Hàng Mới (Giải Ngân)</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankLoanDisbursedItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬆️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--profit);">+${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankRoadFeeItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Luật Đường</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankRoadFeeItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankHouseRentItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Thuê Nhà</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankHouseRentItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankUtilitiesItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Điện Nước</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankUtilitiesItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankTollFeeItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Cầu Đường</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankTollFeeItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankLoanPaymentItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Gốc + Lãi Vay Ngân Hàng (từng khoản, từng kỳ)</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankLoanPaymentItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankInsuranceRegItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankInsuranceRegItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankVatPaymentItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🏦 Đã Nộp Thuế VAT</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankVatPaymentItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">⬇️ ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--loss);">−${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${bankTransferItems.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${bankTransferItems.map(r=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div><div style="font-weight:700;">${r.sign>0?'⬆️':'⬇️'} ${r.label}</div></div>
-            <span style="font-weight:800; white-space:nowrap; color:${r.sign>0?'var(--profit)':'var(--loss)'};">${r.sign>0?'+':'−'}${fmtVND(r.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-      ${cashEntries.length>0 ? `
-      <div style="font-weight:800; font-size:13px; margin:16px 0 8px 2px;">💵 Giao dịch Tiền Mặt cùng khoảng thời gian (KHÔNG tính vào số dư ngân hàng)</div>
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${cashEntries.map(e=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border); opacity:0.65;">
-            <div>
-              <div style="font-weight:700;">${e.sign>0?'⬆️':'⬇️'} ${escapeHtml(e.category)} — ${formatDateVN(e.date)} <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">💵 Tiền mặt</span></div>
-              ${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}
-            </div>
-            <span style="font-weight:800; white-space:nowrap; color:var(--ink-soft);">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</span>
-          </div>`).join('')}
-      </div>` : ''}
+      <div style="font-weight:800; font-size:13px; margin:0 0 8px 2px;">🏦 Khách Trả / Trả NCC / Góp-Rút Vốn (Ngân Hàng)</div>
+      ${entries.length===0 ? '<div class="hint">Chưa có giao dịch ngân hàng nào sau mốc chốt.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th style="white-space:nowrap;">Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${entries.map(e=>`<tr>
+              <td style="white-space:nowrap; color:var(--ink-soft); font-size:12.5px;">${formatDateVN(e.date)}</td>
+              <td>${escapeHtml(e.category)}${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}</td>
+              <td class="num" style="font-weight:700; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      ${renderLedgerItemsTable('🏦 Tiền Dầu Đổ Thêm', bankFuelShifts.map(r=>({ date:r.date, label:r.vehicleName?`🚛 ${escapeHtml(r.vehicleName)}`:'Tiền dầu', amount:r.cost })))}
+      ${renderLedgerItemsTable('🏦 Tạm Ứng Lương Tài Xế', bankAdvanceShifts.map(r=>({ date:r.date, label:escapeHtml(r.name), amount:r.cost })))}
+      ${renderLedgerItemsTable('🏦 Ứng Riêng Cho Tài Xế', bankDriverAdvanceItems.map(r=>({ date:r.date, label:escapeHtml(r.name)+(r.note?`<div class="hint" style="margin-top:2px;">${escapeHtml(r.note)}</div>`:''), amount:r.cost })))}
+      ${renderLedgerItemsTable('🎁 Tip/Thưởng Tháng', bankBonusItems.map(r=>({ date:r.date, label:`${escapeHtml(r.name)} — tháng ${escapeHtml(r.yearMonth)}`, amount:r.cost })))}
+      ${renderLedgerItemsTable('🏦 Sửa Chữa', bankRepairs.map(r=>({ date:r.date, label:escapeHtml(r.item||'Sửa chữa'), amount:r.amount })))}
+      ${renderLedgerItemsTable('🏦 Mua Lô Hoá Đơn Bù', bankInvoiceLots.map(l=>({ date:l.purchaseDate, label:escapeHtml(l.sourceName||l.goodsType||'Lô hoá đơn bù'), amount:Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)) })))}
+      ${renderLedgerItemsTable('🏦 Nhận Tiền Vay Ngân Hàng Mới (Giải Ngân)', bankLoanDisbursedItems)}
+      ${renderLedgerItemsTable('🏦 Luật Đường', bankRoadFeeItems)}
+      ${renderLedgerItemsTable('🏦 Thuê Nhà', bankHouseRentItems)}
+      ${renderLedgerItemsTable('🏦 Điện Nước', bankUtilitiesItems)}
+      ${renderLedgerItemsTable('🏦 Cầu Đường', bankTollFeeItems)}
+      ${renderLedgerItemsTable('🏦 Gốc + Lãi Vay Ngân Hàng (từng khoản, từng kỳ)', bankLoanPaymentItems)}
+      ${renderLedgerItemsTable('🏦 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)', bankInsuranceRegItems)}
+      ${renderLedgerItemsTable('🏦 Đã Nộp Thuế VAT', bankVatPaymentItems)}
+      ${renderLedgerItemsTable('🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)', bankTransferItems)}
+    </section>
+
+    <section class="group">
+      <div style="font-weight:800; font-size:13px; margin:0 0 8px 2px;">💵 Khách Trả / Trả NCC / Góp-Rút Vốn (Tiền Mặt)</div>
+      ${cashEntries.length===0 ? '<div class="hint">Chưa có giao dịch tiền mặt nào sau mốc chốt.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th style="white-space:nowrap;">Ngày</th><th>Nội Dung</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${cashEntries.map(e=>`<tr>
+              <td style="white-space:nowrap; color:var(--ink-soft); font-size:12.5px;">${formatDateVN(e.date)}</td>
+              <td>${escapeHtml(e.category)}${e.desc ? `<div class="hint" style="margin-top:2px;">${escapeHtml(e.desc)}</div>` : ''}</td>
+              <td class="num" style="font-weight:700; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      ${renderLedgerItemsTable('💵 Ứng Riêng Cho Tài Xế', cashDriverAdvanceItems.map(r=>({ date:r.date, label:escapeHtml(r.name)+(r.note?`<div class="hint" style="margin-top:2px;">${escapeHtml(r.note)}</div>`:''), amount:r.cost })))}
+      ${renderLedgerItemsTable('🎁 Tip/Thưởng Tháng', cashBonusItems.map(r=>({ date:r.date, label:`${escapeHtml(r.name)} — tháng ${escapeHtml(r.yearMonth)}`, amount:r.cost })))}
+      ${renderLedgerItemsTable('💵 Luật Đường', cashRoadFeeItems)}
+      ${renderLedgerItemsTable('💵 Thuê Nhà', cashHouseRentItems)}
+      ${renderLedgerItemsTable('💵 Điện Nước', cashUtilitiesItems)}
+      ${renderLedgerItemsTable('💵 Cầu Đường', cashTollFeeItems)}
+      ${renderLedgerItemsTable('💵 Gốc + Lãi Vay Ngân Hàng (từng khoản, từng kỳ)', cashLoanPaymentItems)}
+      ${renderLedgerItemsTable('💵 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)', cashInsuranceRegItems)}
+      ${renderLedgerItemsTable('💵 Đã Nộp Thuế VAT', cashVatPaymentItems)}
     </section>
   `;
   // SỬA 2026-09-14 LẦN 2 (chuyển form khai mốc chốt + lịch sử từ dashboard
