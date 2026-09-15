@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #248';
+const APP_BUILD = '2026-09-14 · #250';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -16346,11 +16346,37 @@ function renderPerVehicleResultsPage(from, to){
     });
   });
 }
+// SỬA 2026-09-14 (Ông Chủ hoảng tưởng mất dữ liệu — xem chú thích đầy đủ
+// ở renderCompanyDashboardPage()): thông báo dùng chung cho 4 mục gắn
+// riêng theo từng xe, khi đang ở LINH CHÍ THÀNH mà chưa chọn xe nào —
+// liệt kê thẳng từng xe để bấm qua xem ngay tại đây, không cần thoát ra
+// lại màn Chọn Xe.
+function renderPerVehicleDataNotice(){
+  return `
+    <div class="hint" style="background:var(--accent-soft); padding:12px; border-radius:10px; margin-bottom:10px;">⚠️ Mục này gắn riêng theo TỪNG XE — dữ liệu vẫn còn nguyên, chỉ cần bấm đúng tên xe bên dưới để xem/sửa.</div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${state.vehicles.map(v=>`<button class="btn btn-ghost btn-block per-vehicle-notice-btn" data-vid="${v.id}">🚛 ${escapeHtml(v.name||v.plate||'(chưa đặt tên)')}</button>`).join('')}
+    </div>`;
+}
 function renderCompanyDashboardPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
   const charterStatus = computeCharterCapitalStatus();
   const timeline = computeMonthlyEquityTimeline();
+  // SỬA 2026-09-14 (Ông Chủ hoảng — tưởng MẤT dữ liệu Khoản Vay/Chi Phí Cố
+  // Định/Giấy Tờ Xe/Bảo Dưỡng khi vào thẳng "LINH CHÍ THÀNH"): xác minh
+  // kỹ — dữ liệu KHÔNG hề mất, vẫn nguyên trong Firestore. 4 mục này gắn
+  // RIÊNG theo từng xe (state.settings/documents/maintenanceSchedules),
+  // chỉ được TẢI vào bộ nhớ khi Ông Chủ bấm trực tiếp vào 1 xe cụ thể ở
+  // màn Chọn Xe (xem switchVehicle() — có ≥2 xe mà đang ở LINH CHÍ THÀNH
+  // thì CỐ Ý không tải xe nào, y hệt cách "Ca Làm Việc"/"Tài Xế" đang xử
+  // lý). Trước đây khi công ty chỉ có 1 xe, việc này không lộ ra vì luôn
+  // tự đúng — giờ có xe thứ 2, nếu vào thẳng trang này mà CHƯA bấm qua xe
+  // nào, 4 mục sẽ hiện "trống" — TRÔNG như mất, nhưng thực ra là CHƯA
+  // TẢI. Sửa đúng theo cùng nguyên tắc đã dùng ở nơi khác: khi có ≥2 xe
+  // và chưa chọn xe nào, hiện rõ lời nhắc + nút bấm thẳng qua từng xe,
+  // TUYỆT ĐỐI không hiện số "0đ/trống" gây hiểu lầm là mất dữ liệu.
+  const noVehicleChosenForPerVehicleData = state.vehicles.length>1 && !activeVehicleIdForEditing();
   // SỬA 2026-09-08 (Ông Chủ phát hiện lỗi — "trừ nhầm gốc vay"): tốc độ
   // thu hồi vốn giờ tính theo TIMELINE ACCRUAL riêng (đã trừ khấu hao,
   // KHÔNG trừ gốc vay) — KHÁC với `timeline` ở trên (tiền mặt, vẫn giữ
@@ -16626,7 +16652,6 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>🔄 Chuyển Tiền Nội Bộ: Ngân Hàng ↔ Tiền Mặt</h3>
-      <div class="hint" style="margin-bottom:10px;">Dùng khi rút tiền mặt từ ngân hàng ra để xài (VD: trả mỏ bằng tiền mặt), hoặc nộp tiền mặt dư vào lại ngân hàng — KHÔNG phải chi tiêu, chỉ đổi túi, nên không làm đổi Tổng Giá Trị Hiện Có (1 bên giảm, bên kia tăng đúng bằng nhau).</div>
       <button class="btn btn-accent btn-block" id="addInternalTransferBtn" style="margin-bottom:10px;">🔄➕ Ghi Nhận Chuyển Tiền</button>
       ${state.internalTransfers.length>0 ? `
       <div class="card" style="padding:0; overflow:hidden;">
@@ -16732,9 +16757,11 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>🏦 Khoản Vay Ngân Hàng</h3>
+      ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `
       <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Mỗi khoản vay (vay mua xe, vay vốn lưu động...) tính RIÊNG, hoàn toàn độc lập với nhau.</div>
       <div id="loanListWrap"></div>
       <button class="btn btn-accent btn-block" id="addLoanBtn" style="margin-top:10px; font-size:15.5px; padding:14px;">🏦➕ Thêm Khoản Vay Mới</button>
+      `}
     </section>
 
     <section class="group">
@@ -16768,6 +16795,7 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>💰 Chi Phí Cố Định Hàng Tháng (Ngoài Vận Hành)</h3>
+      ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền/Tháng</th></tr></thead>
@@ -16782,16 +16810,17 @@ function renderCompanyDashboardPage(){
         <button class="btn btn-ghost" id="editFixedCostsBtn" style="flex:1;">✏️ Sửa</button>
         <button class="btn btn-ghost" id="depreciationDetailBtn" style="flex:1;">📊 Chi Tiết Thu Hồi Khấu Hao</button>
       </div>
+      `}
     </section>
 
     <section class="group">
       <h3>📄 Giấy Tờ Xe & Tài Xế</h3>
-      <div id="documentListWrap"></div>
+      ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `<div id="documentListWrap"></div>`}
     </section>
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      <div id="maintenanceListWrap"></div>
+      ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `<div id="maintenanceListWrap"></div>`}
     </section>
   `;
   document.getElementById('companyDashBackBtn').addEventListener('click', ()=>{
@@ -16894,8 +16923,17 @@ function renderCompanyDashboardPage(){
     renderPerVehicleResultsPage(mr.from, mr.to);
     restoreMainScroll();
   });
-  document.getElementById('addLoanBtn').addEventListener('click', ()=>openLoanEditor(null));
+  // SỬA 2026-09-14 (thêm lời nhắc "chọn xe" khi ≥2 xe chưa chọn xe nào —
+  // xem renderPerVehicleDataNotice()): 3 nút dưới đây CHỈ tồn tại trong
+  // DOM khi ĐÃ chọn đúng 1 xe cụ thể (noVehicleChosenForPerVehicleData
+  // false) — thêm guard tồn-tại để không vỡ khi đang hiện lời nhắc thay
+  // vào đó.
+  const addLoanBtn = document.getElementById('addLoanBtn');
+  if(addLoanBtn) addLoanBtn.addEventListener('click', ()=>openLoanEditor(null));
   document.getElementById('openVatPaymentsBtn').addEventListener('click', ()=>{ saveMainScroll(); renderVatPaymentListPage(); });
+  document.querySelectorAll('.per-vehicle-notice-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ saveMainScroll(); switchVehicle(btn.dataset.vid); });
+  });
   const roiCalcDetailBtn = document.getElementById('roiCalcDetailBtn');
   if(roiCalcDetailBtn) roiCalcDetailBtn.addEventListener('click', openROICalculationDetail);
   // SỬA 2026-09-14 (hub 2 nhánh "Hiệu Quả Đầu Tư" mới — Khấu Hao Xe Đã
@@ -16909,8 +16947,10 @@ function renderCompanyDashboardPage(){
   if(netProfitHubBtn) netProfitHubBtn.addEventListener('click', openROICalculationDetail);
   const netProfitHubDetailBtn = document.getElementById('netProfitHubDetailBtn');
   if(netProfitHubDetailBtn) netProfitHubDetailBtn.addEventListener('click', openROICalculationDetail);
-  document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
-  document.getElementById('depreciationDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
+  const editFixedCostsBtn = document.getElementById('editFixedCostsBtn');
+  if(editFixedCostsBtn) editFixedCostsBtn.addEventListener('click', openFixedCostsEditor);
+  const depreciationDetailBtn = document.getElementById('depreciationDetailBtn');
+  if(depreciationDetailBtn) depreciationDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
   renderDocumentList();
   renderMaintenanceList();
 }
@@ -17501,12 +17541,11 @@ function renderBankReconDetailPage(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">🧾 Chi Tiết Dòng Tiền — Kế Toán Nội Bộ</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Từ sau ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay — CHỈ giao dịch NGÂN HÀNG (không gồm tiền mặt)`:'Chưa khai mốc chốt nào'}</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Tính từ sau mốc chốt ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay. TCB Bank và Tiền Mặt đều là tài sản THẬT của công ty — Tổng Giá Trị Hiện Có dưới đây cộng đủ cả 2 (không riêng ngân hàng). Xuống các mục bên dưới mới tách riêng từng dòng tiền Ngân hàng và Tiền mặt để dễ đối chiếu.`:'Chưa khai mốc chốt nào'}</div>
       ${bankRecon ? `
       <div class="card" style="text-align:center; border:2px solid var(--accent); background:var(--accent-soft);">
         <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'};">${fmtVND(totalCurrentValue)}</div>
-        <div class="hint" style="margin-top:4px;">Đáp án cuối cùng cho "tiền Ông Chủ đang nằm ở đâu"</div>
       </div>
       <div class="grid-table-wrap" style="margin-top:12px;">
         <table class="grid-table">
