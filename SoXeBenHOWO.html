@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #246';
+const APP_BUILD = '2026-09-14 · #247';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3449,6 +3449,16 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
   const sortedInvoices = [...state.mineInvoices].sort((a,b)=>
     (b.deliveryFrom||b.invoiceDate||'').localeCompare(a.deliveryFrom||a.invoiceDate||''));
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu — "hoá đơn nào ra hoá đơn đó, phân
+  // tách rõ ràng bằng đường kẻ đậm, dễ theo dõi"): mỗi hoá đơn thật từ mỏ
+  // thường tách thành 2 dòng (Base A + Base B cùng 1 hoá đơn) — trước đây
+  // bảng phẳng, không phân biệt được dòng nào cùng 1 hoá đơn với dòng
+  // nào. Gom nhóm theo ĐÚNG "Ngày HĐ + Số HĐ" (mã định danh 1 hoá đơn
+  // thật duy nhất) — dòng ĐẦU TIÊN của mỗi hoá đơn MỚI (khác hoá đơn với
+  // dòng ngay phía trên) được kẻ viền trên thật đậm, để mắt thường phân
+  // biệt ngay ranh giới giữa các hoá đơn, dù bảng vẫn liền 1 khối.
+  let lastInvoiceGroupKey = null;
+  let groupIndex = -1;
   const tableHtml = sortedInvoices.length ? `
     <div class="grid-table-wrap">
       <table class="grid-table">
@@ -3457,7 +3467,13 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
           ${sortedInvoices.map(inv=>{
             const sup = inv.supplierId ? supplierById(inv.supplierId) : null;
             const khoi = mineInvoiceVolumeKhoi(inv);
-            return `<tr>
+            const groupKey = `${inv.invoiceDate||''}|${inv.invoiceNumber||''}`;
+            const isNewGroup = groupKey!==lastInvoiceGroupKey;
+            if(isNewGroup) groupIndex++;
+            lastInvoiceGroupKey = groupKey;
+            const groupBorder = isNewGroup ? 'border-top:3px solid var(--ink);' : '';
+            const groupShade = groupIndex%2===1 ? 'background:var(--bg);' : '';
+            return `<tr style="${groupBorder}${groupShade}">
               <td><strong>${escapeHtml(inv.goodsType||'(chưa khai)')}</strong></td>
               <td>${dateRangeLabel(inv.deliveryFrom||inv.invoiceDate, inv.deliveryTo||inv.invoiceDate)}</td>
               <td>${formatDateVN(inv.invoiceDate)}${inv.invoiceNumber?`<br><span class="hint">Số ${escapeHtml(inv.invoiceNumber)}</span>`:''}</td>
