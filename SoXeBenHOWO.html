@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #243';
+const APP_BUILD = '2026-09-14 · #244';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2364,6 +2364,23 @@ function companyWideAccrualFixedMonthly(from, to){
     const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0);
     const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
     sum += proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
+  });
+  return sum;
+}
+// SỬA 2026-09-14 (Ông Chủ yêu cầu tách "Tiền Lãi Ròng" ra khỏi "Khấu Hao
+// Xe Đã Thu" — chuyên gia phản biện: khấu hao không phải tiền mặt rời
+// túi, cộng ngược lại mới ra đúng tiền mặt THẬT đã thu hồi): tách riêng
+// ĐÚNG phần khấu hao đang bị gộp chung trong companyWideAccrualFixedMonthly()
+// ở trên — dùng CHUNG 1 hàm proratedMonthlyCost() và ĐÚNG [from,to] mà
+// computeCumulativeAccrualProfit() dùng, để cộng ngược lại là RA ĐÚNG
+// KHỚP 100% với phần đã bị trừ, không lệch dù 1 đồng do 2 cách tính khác
+// nhau (KHÔNG dùng computeDepreciationMonthlyHistory() ở đây — hàm đó cố
+// ý bỏ qua tháng đang chạy dở, chỉ đúng cho mục đích RIÊNG của nó là "Chi
+// Tiết Thu Hồi Khấu Hao", không khớp tuyệt đối với accrualProfit).
+function depreciationPortionForRange(from, to){
+  let sum = 0;
+  Object.values(state.allVehiclesSettings).forEach(s=>{
+    sum += proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, from, to);
   });
   return sum;
 }
@@ -15445,8 +15462,19 @@ function openROICalculationDetail(){
   const recentRate3 = computeRecentMonthlyRate(accrualTimeline, 3);
   const recentRate6 = computeRecentMonthlyRate(accrualTimeline, 6);
   const totalCapital = eq.initialInvestment + eq.contributedExtra;
-  const recoveredPercent = totalCapital>0 ? Math.max(0, Math.min(100, (accrualProfit.netProfit/totalCapital)*100)) : 0;
-  const remainingToRecover = totalCapital - accrualProfit.netProfit;
+  // SỬA 2026-09-14 (Ông Chủ phản biện — "2,6% là lãi thật sau khi đầu tư
+  // hơn 2 tỷ, phải tính lại"): chuyên gia phản biện lại — khấu hao KHÔNG
+  // phải tiền mặt rời túi (tiền mua xe đã tính 1 LẦN ở mẫu số "Tổng vốn
+  // đã bỏ vào" rồi, trừ thêm khấu hao vào tử số là tính trùng 2 lần).
+  // "Đã thu hồi được" đúng nghĩa phải là TIỀN MẶT THẬT đã lấy lại — nên
+  // CỘNG NGƯỢC lại đúng phần khấu hao đã bị trừ trong accrualProfit, dùng
+  // ĐÚNG [from,to] accrualProfit vừa tính để khớp tuyệt đối, không lệch
+  // 1 đồng. Quỹ khấu hao để dành thay xe sau này đã có trang riêng "Chi
+  // Tiết Thu Hồi Khấu Hao" lo, không cần trừ lần nữa ở đây.
+  const depreciationInAccrual = accrualProfit.from ? depreciationPortionForRange(accrualProfit.from, accrualProfit.to) : 0;
+  const netCashProfit = accrualProfit.netProfit + depreciationInAccrual;
+  const recoveredPercent = totalCapital>0 ? Math.max(0, Math.min(100, (netCashProfit/totalCapital)*100)) : 0;
+  const remainingToRecover = totalCapital - netCashProfit;
   const sameWindowNote = (recentRate3!==null && recentRate6!==null && recentRate3===recentRate6)
     ? `<div class="hint" style="margin-top:6px;">⚠️ 2 số 3 tháng/6 tháng đang GIỐNG HỆT NHAU vì dự án chưa đủ 6 tháng dữ liệu — cả 2 đang tự động dùng chung TOÀN BỘ dữ liệu hiện có (chỉ ${accrualTimeline.length} tháng). Khi đủ dữ liệu hơn, 2 số này sẽ tự tách ra khác nhau.</div>`
     : '';
@@ -15466,7 +15494,7 @@ function openROICalculationDetail(){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📖 Chi Tiết Cách Tính — Hiệu Quả Đầu Tư</h2>
-      <div class="hint" style="margin-top:0;">Dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) — KHÔNG dùng tiền mặt, vì tiền mặt trừ nhầm gốc vay ngân hàng như 1 khoản chi phí (gốc vay chỉ chuyển tiền mặt thành giảm nợ, không làm giảm vốn thật).</div>
+      <div class="hint" style="margin-top:0;">Bảng tháng dưới đây dùng LỢI NHUẬN THỰC TẾ (chuẩn kế toán, đã trừ khấu hao) để đối chiếu 1-1 với tab Kết Quả. Riêng mục "1. Đã thu hồi được (%)" bên dưới cộng ngược lại khấu hao — vì đó là câu hỏi "tiền mặt thật đã lấy lại bao nhiêu", khác với câu hỏi "lãi/lỗ trên sổ sách".</div>
     </section>
     <section class="group">
       <h3>0. Lợi Nhuận Thực Tế từng tháng</h3>
@@ -15502,16 +15530,19 @@ function openROICalculationDetail(){
     </section>
     <section class="group">
       <h3>1. Đã thu hồi được (%)</h3>
-      <div class="hint" style="margin-top:0;">= Lợi Nhuận Thực Tế cộng dồn ÷ Tổng vốn đã bỏ vào × 100%</div>
+      <div class="hint" style="margin-top:0;">= Tiền Lãi Ròng (tiền mặt thật) ÷ Tổng vốn đã bỏ vào × 100%</div>
       <div class="grid-table-wrap" style="margin-top:8px;">
         <table class="grid-table">
           <tbody>
-            <tr><td>Lợi Nhuận Thực Tế cộng dồn (từ đầu dự án, đã trừ khấu hao)</td><td class="num">${fmtVND(accrualProfit.netProfit)}</td></tr>
+            <tr><td>Lợi Nhuận Thực Tế cộng dồn (đã trừ khấu hao — chuẩn kế toán)</td><td class="num">${fmtVND(accrualProfit.netProfit)}</td></tr>
+            <tr><td>+ Cộng ngược Khấu hao (không phải tiền mặt rời túi — xem "Chi Tiết Thu Hồi Khấu Hao")</td><td class="num" style="color:var(--profit);">+${fmtVND(depreciationInAccrual)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Tiền Lãi Ròng (tiền mặt thật đã thu hồi)</td><td class="num" style="color:${netCashProfit>=0?'var(--profit)':'var(--loss)'}">${netCashProfit>=0?'+':''}${fmtVND(netCashProfit)}</td></tr>
             <tr><td>÷ Tổng vốn đã bỏ vào (mua xe ${fmtVND(eq.initialInvestment)} + góp thêm ${fmtVND(eq.contributedExtra)})</td><td class="num">${fmtVND(totalCapital)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Đã thu hồi được</td><td class="num">${recoveredPercent.toFixed(1)}%</td></tr>
           </tbody>
         </table>
       </div>
+      <div class="hint" style="margin-top:8px;">Vì sao cộng ngược khấu hao: tiền mua xe đã tính 1 lần ở mẫu số rồi — trừ thêm khấu hao vào tử số là tính trùng chi phí xe 2 lần. Khấu hao không phải tiền rời khỏi Kế Toán Nội Bộ (TCB/Tiền Mặt), chỉ là ghi nhận hao mòn trên sổ sách.</div>
     </section>
     <section class="group">
       <h3>2. Tốc độ thu hồi TB 3/6 tháng gần nhất</h3>
@@ -16290,11 +16321,26 @@ function renderCompanyDashboardPage(){
   // trả lời "bỏ vốn ra tao lãi/lỗ thật bao nhiêu".
   const accrualProfit = computeCumulativeAccrualProfit();
   const totalCapitalForROI = eq.initialInvestment + eq.contributedExtra;
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu — "tách 2 nhánh rõ ràng: khấu hao xe
+  // đã thu / tiền lãi ròng, dạng sơ đồ như TCB/Tiền Mặt, hiện real time"):
+  // Tiền Lãi Ròng = Lợi Nhuận Thực Tế (đã trừ khấu hao) CỘNG NGƯỢC lại
+  // đúng phần khấu hao đã trừ — vì khấu hao không phải tiền mặt rời túi,
+  // tiền đó vẫn đang nằm trong Kế Toán Nội Bộ (TCB/Tiền Mặt), chỉ là sổ
+  // sách ghi nhận "hao mòn". Dùng depreciationPortionForRange() với ĐÚNG
+  // [from,to] mà accrualProfit vừa tính, đảm bảo cộng ngược khớp tuyệt
+  // đối với phần đã bị trừ — không lệch 1 đồng.
+  const depreciationInAccrual = accrualProfit.from ? depreciationPortionForRange(accrualProfit.from, accrualProfit.to) : 0;
+  const netCashProfit = accrualProfit.netProfit + depreciationInAccrual;
+  // "Khấu Hao Xe Đã Thu" — dùng ĐÚNG số đã hiện sẵn ở trang riêng "Chi
+  // Tiết Thu Hồi Khấu Hao" (computeDepreciationMonthlyHistory) để 2 nơi
+  // luôn khớp nhau tuyệt đối, không tính lại theo cách khác.
+  const depHistory = computeDepreciationMonthlyHistory();
+  const depreciationRecovered = depHistory.length ? depHistory[depHistory.length-1].cumulative : 0;
   if(totalCapitalForROI>0){
-    const recoveredPercent = Math.max(0, Math.min(100, (accrualProfit.netProfit/totalCapitalForROI)*100));
-    const remainingToRecover = totalCapitalForROI - accrualProfit.netProfit;
+    const recoveredPercent = Math.max(0, Math.min(100, (netCashProfit/totalCapitalForROI)*100));
+    const remainingToRecover = totalCapitalForROI - netCashProfit;
     let breakEvenLine;
-    if(accrualProfit.netProfit>=totalCapitalForROI){
+    if(netCashProfit>=totalCapitalForROI){
       breakEvenLine = `<span style="color:var(--profit);">ĐÃ THU HỒI ĐỦ VỐN ✅</span>`;
     } else if(recentRate3!==null && recentRate3>0){
       breakEvenLine = `còn ~${Math.ceil(remainingToRecover/recentRate3)} tháng (theo nhịp 3 tháng gần nhất)`;
@@ -16302,12 +16348,44 @@ function renderCompanyDashboardPage(){
       breakEvenLine = `Chưa đủ dữ liệu / đang chững lại`;
     }
     roiHtml = `
-    <div class="card" style="margin-top:14px;">
-      <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🎯 Hiệu Quả Đầu Tư</div>
-      <div class="hint" style="margin:0 0 8px;">Dùng đúng Lợi Nhuận Thực Tế (đã trừ khấu hao, KHÔNG trừ gốc vay ngân hàng — vì gốc vay không phải chi phí, chỉ là chuyển tiền mặt thành giảm nợ).</div>
+    <div class="card" style="margin-top:14px; padding:18px 12px 20px;">
+      <div style="text-align:center;">
+        <div style="display:inline-block; padding:10px 20px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft);">
+          <div style="font-size:26px; line-height:1;">🎯</div>
+          <div style="font-weight:900; margin-top:4px; color:var(--accent); font-size:13.5px; letter-spacing:0.3px;">HIỆU QUẢ ĐẦU TƯ</div>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top:2px;">
+        <div style="display:inline-block; width:2px; height:16px; background:var(--border);"></div>
+      </div>
+      <div style="max-width:230px; height:2px; background:var(--border); margin:0 auto;"></div>
+      <div style="display:flex; justify-content:space-between; max-width:230px; margin:0 auto;">
+        <div style="width:2px; height:14px; background:var(--border);"></div>
+        <div style="width:2px; height:14px; background:var(--border);"></div>
+      </div>
+      <div style="display:flex; gap:14px; justify-content:center;">
+        <div style="flex:1; max-width:150px; text-align:center;">
+          <button id="depHubBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+            <div style="font-size:26px; line-height:1;">🔧</div>
+            <div style="font-weight:800; margin-top:6px; font-size:12px;">Khấu Hao Xe Đã Thu</div>
+            <div style="font-weight:900; margin-top:2px; font-size:13.5px; color:var(--ink);">${fmtVND(depreciationRecovered)}</div>
+          </button>
+          <button id="depHubDetailBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
+        </div>
+        <div style="flex:1; max-width:150px; text-align:center;">
+          <button id="netProfitHubBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+            <div style="font-size:26px; line-height:1;">💰</div>
+            <div style="font-weight:800; margin-top:6px; font-size:12px;">Tiền Lãi Ròng</div>
+            <div style="font-weight:900; margin-top:2px; font-size:13.5px; color:${netCashProfit>=0?'var(--profit)':'var(--loss)'};">${netCashProfit>=0?'+':''}${fmtVND(netCashProfit)}</div>
+          </button>
+          <button id="netProfitHubDetailBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
+        </div>
+      </div>
+      <div class="hint" style="text-align:center; margin-top:12px;">Tiền Lãi Ròng = tiền mặt THẬT đã thu hồi (đã cộng ngược khấu hao — khấu hao không rời túi, vẫn nằm trong Kế Toán Nội Bộ). Khấu Hao Xe Đã Thu = quỹ riêng để dành cho lần thay xe sau.</div>
+      <div class="formula-divider" style="margin:12px 0;"></div>
       <div class="summary-row"><span>Đã thu hồi được</span><span class="val" style="font-weight:800;">${recoveredPercent.toFixed(1)}% tổng vốn đã bỏ vào</span></div>
       <div style="background:var(--border); height:8px; border-radius:4px; overflow:hidden; margin:8px 0 12px 0;">
-        <div style="background:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
+        <div style="background:${netCashProfit>=0?'var(--profit)':'var(--loss)'}; height:100%; width:${recoveredPercent}%; border-radius:4px;"></div>
       </div>
       ${accrualTimeline.length<4 ? `<div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-bottom:10px; font-weight:600;">⚠️ Mới có ${accrualTimeline.length} tháng dữ liệu (tháng gần nhất CHƯA kết thúc), và các tháng đã qua đang biến động mạnh (có tháng lỗ, có tháng lãi) — số dự kiến bên dưới CHỈ mang tính tham khảo ban đầu, ĐỘ TIN CẬY CÒN THẤP. Chưa nên dùng riêng số này để quyết định mua thêm xe/mở rộng — cần theo dõi thêm vài tháng nữa cho ổn định.</div>` : ''}
       <div class="summary-row" style="padding-top:2px;"><span>Dự kiến thu hồi đủ vốn</span><span class="val" style="font-weight:800; text-align:right;">${breakEvenLine}</span></div>
@@ -16760,6 +16838,17 @@ function renderCompanyDashboardPage(){
   document.getElementById('openVatPaymentsBtn').addEventListener('click', ()=>{ saveMainScroll(); renderVatPaymentListPage(); });
   const roiCalcDetailBtn = document.getElementById('roiCalcDetailBtn');
   if(roiCalcDetailBtn) roiCalcDetailBtn.addEventListener('click', openROICalculationDetail);
+  // SỬA 2026-09-14 (hub 2 nhánh "Hiệu Quả Đầu Tư" mới — Khấu Hao Xe Đã
+  // Thu / Tiền Lãi Ròng): bấm icon HOẶC nút "Chi tiết" của nhánh nào đều
+  // mở đúng trang chi tiết của nhánh đó.
+  const depHubBtn = document.getElementById('depHubBtn');
+  if(depHubBtn) depHubBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
+  const depHubDetailBtn = document.getElementById('depHubDetailBtn');
+  if(depHubDetailBtn) depHubDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
+  const netProfitHubBtn = document.getElementById('netProfitHubBtn');
+  if(netProfitHubBtn) netProfitHubBtn.addEventListener('click', openROICalculationDetail);
+  const netProfitHubDetailBtn = document.getElementById('netProfitHubDetailBtn');
+  if(netProfitHubDetailBtn) netProfitHubDetailBtn.addEventListener('click', openROICalculationDetail);
   document.getElementById('editFixedCostsBtn').addEventListener('click', openFixedCostsEditor);
   document.getElementById('depreciationDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
   renderDocumentList();
