@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #242';
+const APP_BUILD = '2026-09-14 · #243';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1370,15 +1370,23 @@ function computeLoanDueWarnings(){
 /// thẳng object `loan` cần sửa (1 phần tử trong state.settings.bankLoans)
 /// thay vì luôn động vào state.settings.bankLoan (khoản duy nhất cũ).
 /// Logic đếm/set y hệt như trước, chỉ đổi phạm vi áp dụng.
-function setLoanPeriodPaid(loan, ym, paid){
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "mọi khoản chi được chọn tiền mặt
+// hay TCB"): thêm tham số `method` — khi tick "Đã trả", lưu luôn kỳ đó
+// trả bằng nguồn nào vào loan.paidMethods (object {ym: 'bank'|'cash'}).
+// Kỳ nào chưa từng có trong paidMethods (khoản vay cũ trước khi có tính
+// năng này) mặc định coi là 'bank' — xem bankLoanRealCostForRange().
+function setLoanPeriodPaid(loan, ym, paid, method){
   if(!loan) return;
   if(!Array.isArray(loan.paidMonths)) loan.paidMonths = loan.lastPaidMonth ? [loan.lastPaidMonth] : [];
+  if(!loan.paidMethods || typeof loan.paidMethods!=='object') loan.paidMethods = {};
   if(paid){
     if(!loan.paidMonths.includes(ym)) loan.paidMonths.push(ym);
     loan.lastPaidMonth = ym;
+    loan.paidMethods[ym] = method || 'bank';
   } else {
     loan.paidMonths = loan.paidMonths.filter(m=>m!==ym);
     loan.lastPaidMonth = loan.paidMonths.length ? loan.paidMonths[loan.paidMonths.length-1] : null;
+    delete loan.paidMethods[ym];
   }
 }
 
@@ -2245,24 +2253,41 @@ function fullMonthlyCostIfTouched(monthlyAmountFn, from, to){
 /// cộng lại — KHÔNG dùng monthlyLoanPayment (chỉ là 1 con số snapshot của
 /// ĐÚNG kỳ hiện tại, sai cho các kỳ trước vì lãi giảm dần theo dư nợ) và
 /// KHÔNG chia nhỏ theo ngày (Ông Chủ trả tròn từng kỳ, không trả rải).
-function bankLoanRealCostForRange(bankLoan, from, to){
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "mọi khoản chi được chọn tiền mặt
+// hay TCB"): thêm tham số methodFilter — nếu có, chỉ cộng đúng những kỳ
+// đã đánh dấu ĐÚNG phương thức đó (mặc định 'bank' cho kỳ chưa từng ghi
+// phương thức, hoặc khoản vay cũ trước khi có tính năng này — giữ đúng
+// hành vi cũ tuyệt đối). Không truyền methodFilter (undefined) = cộng
+// TẤT CẢ như cũ, dùng cho các phép tính Lợi Nhuận/Điểm Hoà Vốn không
+// quan tâm tiền mặt hay ngân hàng.
+function bankLoanRealCostForRange(bankLoan, from, to, methodFilter){
   const schedule = computeFullLoanSchedule(bankLoan);
+  const paidMethods = bankLoan.paidMethods || {};
   let sum = 0;
   schedule.forEach(row=>{
     const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-    if(dueStr>=from && dueStr<=to) sum += row.total;
+    if(dueStr>=from && dueStr<=to){
+      const ym = dueStr.slice(0,7);
+      const method = paidMethods[ym] || 'bank';
+      if(!methodFilter || method===methodFilter) sum += row.total;
+    }
   });
   return sum;
 }
 /// Y HỆT roadFeeForRange() nhưng gộp Luật Đường của TẤT CẢ xe. SỬA
 /// 2026-08-23: đổi từ phân bổ theo ngày sang lấy ĐỦ NGUYÊN số tiền từng
 /// tháng có chạm tới (xem fullMonthlyCostIfTouched).
-function roadFeeForRangeCompanyWide(from, to){
+// SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
+// TCB"): thêm methodFilter, lọc theo e.method (mặc định 'bank' cho
+// dòng cũ chưa có field này). Không truyền = cộng tất cả như cũ.
+function roadFeeForRangeCompanyWide(from, to, methodFilter){
   let sum = 0;
   Object.values(state.allVehiclesRoadFee).forEach(list=>{
     sum += fullMonthlyCostIfTouched(ym=>{
       const e = list.find(x=>x.month===ym);
-      return e ? (Number(e.amount)||0) : 0;
+      if(!e) return 0;
+      if(methodFilter && (e.method||'bank')!==methodFilter) return 0;
+      return Number(e.amount)||0;
     }, from, to);
   });
   return sum;
@@ -2299,14 +2324,22 @@ function companyWideOperatingCashCost(from, to){
 // cùng tháng — dùng đúng `from` gốc. Bảo hiểm/đăng kiểm thì dùng
 // `fixedCostFromForTouch` (tháng kế tiếp sau tháng mốc chốt) để tránh
 // tính trùng — xem chú thích ở firstDayOfMonthAfter().
-function companyWideCashFlowFixedMonthly(from, to, fixedCostFromForTouch){
+// SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
+// TCB"): thêm methodFilter — lọc cả 2 phần (lãi vay theo paidMethods
+// của từng kỳ, bảo hiểm/đăng kiểm theo s.insuranceMethod cài 1 lần cho
+// mọi tháng). Không truyền = cộng tất cả như cũ (dùng cho Lợi Nhuận/
+// Điểm Hoà Vốn, không quan tâm nguồn tiền).
+function companyWideCashFlowFixedMonthly(from, to, fixedCostFromForTouch, methodFilter){
   let sum = 0;
   const touchFrom = fixedCostFromForTouch || from;
   Object.values(state.allVehiclesSettings).forEach(s=>{
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    loans.forEach(loan=>{ sum += bankLoanRealCostForRange(loan, from, to); });
-    const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
-    sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, touchFrom, to);
+    loans.forEach(loan=>{ sum += bankLoanRealCostForRange(loan, from, to, methodFilter); });
+    const insMethod = s.insuranceMethod || 'bank';
+    if(!methodFilter || insMethod===methodFilter){
+      const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+      sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, touchFrom, to);
+    }
   });
   return sum;
 }
@@ -2691,7 +2724,7 @@ function openMonthlyAmountEditor(kind, id, presetMonth){
     ? { get list(){ return state.roadFeeByMonth; }, set list(v){ state.roadFeeByMonth=v; }, saveFn: saveRoadFeeByMonth, title:'Tiền Luật Đường', icon:'🚧', prefix:'roadfee' }
     : { get list(){ return state.tollFeeByMonth; }, set list(v){ state.tollFeeByMonth=v; }, saveFn: saveTollFeeByMonth, title:'CP Cầu Đường', icon:'🌉', prefix:'tollfee' };
   const existing = id ? cfg.list.find(e=>e.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid(cfg.prefix), month: presetMonth || todayLocalDateStr().slice(0,7), amount: 0 };
+  const draft = existing ? {...existing, method: existing.method||'bank'} : { id: uid(cfg.prefix), month: presetMonth || todayLocalDateStr().slice(0,7), amount: 0, method: 'bank' };
   let amountVal = draft.amount;
   openModal(`
     <h3>${cfg.icon} ${existing?'Sửa':'Thêm'} ${cfg.title} Theo Tháng</h3>
@@ -2699,9 +2732,16 @@ function openMonthlyAmountEditor(kind, id, presetMonth){
       <label>Tháng</label>
       <input type="month" id="mae_month" value="${draft.month}" ${existing?'disabled':''}>
     </div>
-    <div class="field" style="margin-bottom:0;">
+    <div class="field">
       <label>Số tiền tháng này</label>
       <input type="text" inputmode="decimal" id="mae_amount">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Trả từ nguồn nào</label>
+      <select id="mae_method">
+        <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Ngân hàng</option>
+        <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+      </select>
     </div>
     <div style="display:flex; gap:10px; margin-top:14px;">
       ${existing ? '<button class="btn btn-danger" id="mae_delBtn">Xoá</button>' : ''}
@@ -2724,6 +2764,7 @@ function openMonthlyAmountEditor(kind, id, presetMonth){
     if(!existing && cfg.list.some(e=>e.month===month)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
     draft.month = month;
     draft.amount = amountVal;
+    draft.method = document.getElementById('mae_method').value;
     const idx = cfg.list.findIndex(e=>e.id===draft.id);
     if(idx>=0) cfg.list[idx]=draft; else cfg.list.push(draft);
     if(!(await cfg.saveFn())) return;
@@ -2741,7 +2782,7 @@ function openMonthlyAmountEditor(kind, id, presetMonth){
 /// openMonthlyAmountEditor() ở trên nhưng 2 ô/tháng thay vì 1.
 function openHousingUtilEditor(id, presetMonth){
   const existing = id ? state.housingUtilitiesByMonth.find(e=>e.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid('housingutil'), month: presetMonth || todayLocalDateStr().slice(0,7), rentAmount: 0, utilitiesAmount: 0 };
+  const draft = existing ? {...existing, method: existing.method||'bank'} : { id: uid('housingutil'), month: presetMonth || todayLocalDateStr().slice(0,7), rentAmount: 0, utilitiesAmount: 0, method: 'bank' };
   let rentVal = draft.rentAmount, utilVal = draft.utilitiesAmount;
   openModal(`
     <h3>🏠 ${existing?'Sửa':'Thêm'} Tiền Nhà & Điện Nước Theo Tháng</h3>
@@ -2753,9 +2794,16 @@ function openHousingUtilEditor(id, presetMonth){
       <label>Tiền Thuê Nhà</label>
       <input type="text" inputmode="decimal" id="hue_rent">
     </div>
-    <div class="field" style="margin-bottom:0;">
+    <div class="field">
       <label>Tiền Điện Nước</label>
       <input type="text" inputmode="decimal" id="hue_util">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Trả từ nguồn nào (áp dụng cho cả 2 khoản trên)</label>
+      <select id="hue_method">
+        <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Ngân hàng</option>
+        <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+      </select>
     </div>
     <div style="display:flex; gap:10px; margin-top:14px;">
       ${existing ? '<button class="btn btn-danger" id="hue_delBtn">Xoá</button>' : ''}
@@ -2778,6 +2826,7 @@ function openHousingUtilEditor(id, presetMonth){
     if(!month){ showToast('Chọn tháng trước đã.'); return; }
     if(!existing && state.housingUtilitiesByMonth.some(e=>e.month===month)){ showToast('Tháng này đã có trong danh sách rồi.'); return; }
     draft.month = month; draft.rentAmount = rentVal; draft.utilitiesAmount = utilVal;
+    draft.method = document.getElementById('hue_method').value;
     const idx = state.housingUtilitiesByMonth.findIndex(e=>e.id===draft.id);
     if(idx>=0) state.housingUtilitiesByMonth[idx]=draft; else state.housingUtilitiesByMonth.push(draft);
     if(!(await saveHousingUtilitiesByMonth())) return;
@@ -2952,26 +3001,36 @@ function roadFeeForRange(from, to){
 // TY (thay cho housingForShift() cũ đã xoá — không còn gắn theo ca/theo
 // tài xế). 2 hàm riêng vì "Tiền Điện Nước" thường chốt số trễ hơn (cuối
 // tháng mới có hoá đơn) nên cần hiển thị/nhập tách biệt với Tiền Thuê Nhà.
-function houseRentForRange(from, to){
+// SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
+// TCB"): thêm methodFilter cho cả 3 hàm dưới đây — housingUtilitiesByMonth
+// dùng CHUNG 1 field `method` cho cả rentAmount lẫn utilitiesAmount của
+// đúng tháng đó (đã chốt với Ông Chủ — 1 lần trả gộp, không tách riêng).
+function houseRentForRange(from, to, methodFilter){
   return fullMonthlyCostIfTouched(ym=>{
     const e = state.housingUtilitiesByMonth.find(x=>x.month===ym);
-    return e ? (Number(e.rentAmount)||0) : 0;
+    if(!e) return 0;
+    if(methodFilter && (e.method||'bank')!==methodFilter) return 0;
+    return Number(e.rentAmount)||0;
   }, from, to);
 }
-function utilitiesForRange(from, to){
+function utilitiesForRange(from, to, methodFilter){
   return fullMonthlyCostIfTouched(ym=>{
     const e = state.housingUtilitiesByMonth.find(x=>x.month===ym);
-    return e ? (Number(e.utilitiesAmount)||0) : 0;
+    if(!e) return 0;
+    if(methodFilter && (e.method||'bank')!==methodFilter) return 0;
+    return Number(e.utilitiesAmount)||0;
   }, from, to);
 }
 // SỬA 2026-09-07 (Ông Chủ yêu cầu — "CP Cầu Đường, 1 CP thật, không cố
 // định, điền tay theo từng tháng, ngay trên CP cố định hàng tháng"):
 // mirror NGUYÊN XI houseRentForRange()/utilitiesForRange() ở trên —
 // CHUNG CÔNG TY, tháng nào không ghi = 0, không suy đoán/chia theo ngày.
-function tollFeeForRange(from, to){
+function tollFeeForRange(from, to, methodFilter){
   return fullMonthlyCostIfTouched(ym=>{
     const e = state.tollFeeByMonth.find(x=>x.month===ym);
-    return e ? (Number(e.amount)||0) : 0;
+    if(!e) return 0;
+    if(methodFilter && (e.method||'bank')!==methodFilter) return 0;
+    return Number(e.amount)||0;
   }, from, to);
 }
 async function saveSitePayments(){
@@ -3680,6 +3739,13 @@ function renderInvoiceLotManagerModal(editingId, opts){
           <span>= Số Tiền Thật Phải Trả Đối Tác</span>
           <span class="val" id="lot_realCostVal">0đ</span>
         </div>
+        <div class="field">
+          <label>Trả từ nguồn nào</label>
+          <select id="lot_method">
+            <option value="bank" ${(val(editing,'method')||'bank')==='bank'?'selected':''}>🏦 Ngân hàng</option>
+            <option value="cash" ${val(editing,'method')==='cash'?'selected':''}>💵 Tiền mặt</option>
+          </select>
+        </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú</label>
           <input type="text" id="lot_note" value="${escapeHtml(val(editing,'note'))}">
@@ -3795,6 +3861,7 @@ function renderInvoiceLotManagerModal(editingId, opts){
       purchaseDate, totalVolume, totalInvoiceValue,
       vatRatePercent: parseVN(document.getElementById('lot_vat').value),
       cashReturned: curCashReturned || 0,
+      method: document.getElementById('lot_method').value,
       note: document.getElementById('lot_note').value.trim()
     };
     let savedId;
@@ -11903,13 +11970,13 @@ function computeBankBalanceReconciliation(){
   const advanceBank = allShiftsCompanyWide()
     .filter(sh=>sh.date>=from && sh.date<=today)
     .reduce((s,sh)=>s+(Number(sh.advanceAmount)||0), 0);
-  const repairBank = repairsInRangeCompanyWide(from, today).reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const roadFeeBank = roadFeeForRangeCompanyWide(fixedCostFrom, today);
-  const houseRentBank = houseRentForRange(fixedCostFrom, today);
-  const utilitiesBank = utilitiesForRange(fixedCostFrom, today);
-  const tollFeeBank = tollFeeForRange(fixedCostFrom, today);
-  const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today, fixedCostFrom);
-  const invoiceLotBank = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today)
+  const repairBank = repairsInRangeCompanyWide(from, today).filter(r=>(r.method||'bank')!=='cash').reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const roadFeeBank = roadFeeForRangeCompanyWide(fixedCostFrom, today, 'bank');
+  const houseRentBank = houseRentForRange(fixedCostFrom, today, 'bank');
+  const utilitiesBank = utilitiesForRange(fixedCostFrom, today, 'bank');
+  const tollFeeBank = tollFeeForRange(fixedCostFrom, today, 'bank');
+  const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today, fixedCostFrom, 'bank');
+  const invoiceLotBank = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today && (l.method||'bank')!=='cash')
     .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
   // SỬA 2026-09-08 (Ông Chủ "logic lại" — "TẤT CẢ tiền công ty đều qua tài
   // khoản ngân hàng"): BẮT ĐƯỢC KHOẢN THIẾU — trước đây tính đủ mọi khoản
@@ -11928,7 +11995,7 @@ function computeBankBalanceReconciliation(){
   // (Kết Quả tab) nhưng CHƯA từng có nơi ghi nhận khi Ông Chủ ĐÃ NỘP tiền
   // thật cho nhà nước — khoản này LUÔN qua tài khoản doanh nghiệp (nộp
   // thuế điện tử), cộng vào đây.
-  const vatPaymentBank = (state.vatPayments||[]).filter(p=>p.date>=from && p.date<=today)
+  const vatPaymentBank = (state.vatPayments||[]).filter(p=>p.date>=from && p.date<=today && (p.method||'bank')!=='cash')
     .reduce((s,p)=>s+(Number(p.amount)||0), 0);
   // SỬA 2026-09-08 LẦN 3 (Ông Chủ — "có khi nộp tiền cho mỏ phải dùng
   // tiền mặt, nhưng dù lấy từ nguồn nào cũng là tổng nguồn công ty"):
@@ -12000,6 +12067,10 @@ function computeCashBalanceReconciliation(){
   if(sorted.length===0) return null;
   const latest = sorted[0];
   const from = addDaysToDateStr(latest.date, 1);
+  // SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
+  // TCB"): mốc riêng cho 5 khoản cố định theo tháng, y hệt bên Ngân
+  // Hàng — tránh tính trùng tháng của mốc chốt (xem firstDayOfMonthAfter()).
+  const fixedCostFrom = firstDayOfMonthAfter(latest.date);
   const cashInCash = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method==='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutCash = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method==='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   // Y HỆT chiều ngược lại của computeBankBalanceReconciliation() ở trên —
@@ -12016,7 +12087,24 @@ function computeCashBalanceReconciliation(){
   // hoặc tip/thưởng) thì tiền mặt đang cầm giảm đúng bằng số đó.
   const driverAdvanceCash = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method==='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const bonusCash = state.monthlyBonuses.filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method==='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
-  const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank - driverAdvanceCash - bonusCash;
+  // SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
+  // TCB, mày liên kết chuẩn để có số chuẩn xác"): thêm ĐỦ chiều tiền mặt
+  // sinh đôi với mọi khoản đã có bên Ngân Hàng — sửa chữa, luật đường,
+  // bảo hiểm/đăng kiểm+lãi vay, nhà, điện nước, cầu đường, mua lô hoá
+  // đơn bù, VAT — CHỈ cộng đúng những khoản Ông Chủ tự chọn nguồn là
+  // Tiền Mặt, không đụng gì tới phần Ngân Hàng đã tính riêng.
+  const repairCash = repairsInRangeCompanyWide(from, today).filter(r=>r.method==='cash').reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const roadFeeCash = roadFeeForRangeCompanyWide(fixedCostFrom, today, 'cash');
+  const houseRentCash = houseRentForRange(fixedCostFrom, today, 'cash');
+  const utilitiesCash = utilitiesForRange(fixedCostFrom, today, 'cash');
+  const tollFeeCash = tollFeeForRange(fixedCostFrom, today, 'cash');
+  const fixedMonthlyCash = companyWideCashFlowFixedMonthly(from, today, fixedCostFrom, 'cash');
+  const invoiceLotCash = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today && l.method==='cash')
+    .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
+  const vatPaymentCash = (state.vatPayments||[]).filter(p=>p.date>=from && p.date<=today && p.method==='cash')
+    .reduce((s,p)=>s+(Number(p.amount)||0), 0);
+  const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank - driverAdvanceCash - bonusCash
+    - repairCash - roadFeeCash - houseRentCash - utilitiesCash - tollFeeCash - fixedMonthlyCash - invoiceLotCash - vatPaymentCash;
   // SỬA 2026-09-14 LẦN 3 (sinh đôi với lỗi vừa sửa ở computeBankBalanceReconciliation()
   // phía trên — cùng nguyên nhân, cùng cách sửa): dùng đúng `>= from`
   // thay vì `>= latest.date`, tránh tính trùng khoản góp/rút vốn ghi đúng
@@ -12028,7 +12116,8 @@ function computeCashBalanceReconciliation(){
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
-  return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash };
+  return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash,
+    repairCash, roadFeeCash, houseRentCash, utilitiesCash, tollFeeCash, fixedMonthlyCash, invoiceLotCash, vatPaymentCash };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -14766,8 +14855,8 @@ function renderRepairList(repairsHere){
 function openRepairEditor(id){
   saveMainScroll();
   const existing = id ? state.repairs.find(r=>r.id===id) : null;
-  const draft = existing ? {...existing, responsibility: existing.responsibility || 'owner_full', responsibleDriverId: existing.responsibleDriverId || null, driverCustomAmount: existing.driverCustomAmount || 0}
-    : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'', responsibility:'owner_full', responsibleDriverId:null, driverCustomAmount:0 };
+  const draft = existing ? {...existing, responsibility: existing.responsibility || 'owner_full', responsibleDriverId: existing.responsibleDriverId || null, driverCustomAmount: existing.driverCustomAmount || 0, method: existing.method || 'bank'}
+    : { id: uid('repair'), date: state.resultsRange.to, item:'', invoiceCode:'', amount:0, notes:'', responsibility:'owner_full', responsibleDriverId:null, driverCustomAmount:0, method:'bank' };
   const app=document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -14788,6 +14877,15 @@ function openRepairEditor(id){
         <div class="field" style="margin-bottom:0;">
           <label>Số tiền trên hoá đơn</label>
           <input type="text" inputmode="decimal" id="rp_amount">
+        </div>
+      </div>
+      <div class="card">
+        <div class="field" style="margin-bottom:0;">
+          <label>Trả từ nguồn nào</label>
+          <select id="rp_method">
+            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Ngân hàng</option>
+            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+          </select>
         </div>
       </div>
       <div class="card">
@@ -14851,6 +14949,7 @@ function openRepairEditor(id){
     draft.date = document.getElementById('rp_date').value || draft.date;
     draft.item = document.getElementById('rp_item').value.trim();
     draft.invoiceCode = document.getElementById('rp_invoice').value.trim();
+    draft.method = document.getElementById('rp_method').value;
     draft.responsibility = document.getElementById('rp_responsibility').value;
     const driverSel = document.getElementById('rp_driver');
     draft.responsibleDriverId = draft.responsibility==='owner_full' ? null : (driverSel.value || null);
@@ -15197,11 +15296,18 @@ function openLoanEditor(loanId){
                 const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
                 const checked = paidSet.has(ym);
                 const notYetDue = row.dueDate>todayD;
+                const periodMethod = (draft.paidMethods && draft.paidMethods[ym]) || 'bank';
                 return `
-                <label class="summary-row" style="cursor:pointer; align-items:center;">
+                <div class="summary-row" style="align-items:center;">
                   <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)}${notYetDue?' <span style="color:var(--ink-soft); font-weight:400;">(chưa tới hạn)</span>':''} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
-                  <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px; margin-left:10px;">
-                </label>`;
+                  <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                    <select class="loan-period-method" data-ym="${ym}" style="width:auto; padding:4px 6px; font-size:12.5px; ${checked?'':'display:none;'}">
+                      <option value="bank" ${periodMethod==='bank'?'selected':''}>🏦</option>
+                      <option value="cash" ${periodMethod==='cash'?'selected':''}>💵</option>
+                    </select>
+                    <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px;">
+                  </span>
+                </div>`;
               }).join('');
             })()}
           </div>
@@ -15209,7 +15315,9 @@ function openLoanEditor(loanId){
         `;
         wrap.querySelectorAll('.loan-period-paid-chk').forEach(chk=>{
           chk.addEventListener('change', async ()=>{
-            setLoanPeriodPaid(draft, chk.dataset.ym, chk.checked);
+            const methodSel = wrap.querySelector(`.loan-period-method[data-ym="${chk.dataset.ym}"]`);
+            if(methodSel) methodSel.style.display = chk.checked ? '' : 'none';
+            setLoanPeriodPaid(draft, chk.dataset.ym, chk.checked, methodSel ? methodSel.value : 'bank');
             recomputeBankLoanMonthlyPayment();
             renderLoanPreview();
             // Chỉ lưu ngay xuống Cloud nếu khoản vay này ĐÃ TỒN TẠI (đang
@@ -15223,6 +15331,22 @@ function openLoanEditor(loanId){
               if(idx>=0) state.settings.bankLoans[idx] = draft;
               const ok = await saveSettings();
               showToast(ok ? `Đã ghi nhận trả kỳ hạn tháng ${monthLabelVN(chk.dataset.ym)} (tổng ${draft.paidMonths.length} kỳ đã trả).` : 'Lưu thất bại — xem lý do lỗi ở thông báo trước đó, thử lại.');
+            }
+          });
+        });
+        // SỬA 2026-09-14 (Ông Chủ yêu cầu — "mọi khoản chi được chọn tiền
+        // mặt hay TCB"): đổi Phương thức của 1 kỳ ĐÃ tick "Đã trả" — chỉ
+        // hiện select này khi kỳ đó đã tick, nên luôn có method để lưu.
+        wrap.querySelectorAll('.loan-period-method').forEach(sel=>{
+          sel.addEventListener('change', async ()=>{
+            if(!draft.paidMethods || typeof draft.paidMethods!=='object') draft.paidMethods = {};
+            draft.paidMethods[sel.dataset.ym] = sel.value;
+            recomputeBankLoanMonthlyPayment();
+            if(existing){
+              const idx = state.settings.bankLoans.findIndex(l=>l.id===draft.id);
+              if(idx>=0) state.settings.bankLoans[idx] = draft;
+              const ok = await saveSettings();
+              if(ok) showToast(`Đã đổi nguồn trả kỳ tháng ${monthLabelVN(sel.dataset.ym)} thành ${sel.value==='cash'?'Tiền mặt':'Ngân hàng'}.`);
             }
           });
         });
@@ -15526,7 +15650,7 @@ function renderVatPaymentListPage(){
 function openVatPaymentEditor(id){
   scrollMainToTop();
   const existing = id ? state.vatPayments.find(p=>p.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid('vatpay'), date: todayLocalDateStr(), amount:0, notes:'' };
+  const draft = existing ? {...existing, method: existing.method||'bank'} : { id: uid('vatpay'), date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -15539,6 +15663,13 @@ function openVatPaymentEditor(id){
         <div class="field">
           <label>Số tiền đã nộp</label>
           <input type="text" inputmode="decimal" id="vp_amount">
+        </div>
+        <div class="field">
+          <label>Trả từ nguồn nào</label>
+          <select id="vp_method">
+            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Ngân hàng</option>
+            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+          </select>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú</label>
@@ -15558,6 +15689,7 @@ function openVatPaymentEditor(id){
   document.getElementById('saveVatPaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('vp_date').value;
     draft.notes = document.getElementById('vp_notes').value.trim();
+    draft.method = document.getElementById('vp_method').value;
     if(!draft.date){ showToast('Chọn ngày đã nộp.'); return; }
     if(!(Number(draft.amount)>0)){ showToast('Nhập số tiền đã nộp.'); return; }
     const idx = state.vatPayments.findIndex(p=>p.id===draft.id);
@@ -15635,6 +15767,7 @@ function openFixedCostsEditor(){
   let depVal = Number(state.settings.monthlyVehicleDepreciation)||0;
   let insVal = Number(state.settings.monthlyInsurance)||0;
   let regVal = Number(state.settings.monthlyRegistrationFee)||0;
+  const insMethod = state.settings.insuranceMethod || 'bank';
   openModal(`
     <h3>💰 Sửa Chi Phí Cố Định Hàng Tháng</h3>
     <div class="field">
@@ -15645,9 +15778,16 @@ function openFixedCostsEditor(){
       <label>Bảo hiểm xe / tháng</label>
       <input type="text" inputmode="decimal" id="fce_ins">
     </div>
-    <div class="field" style="margin-bottom:0;">
+    <div class="field">
       <label>Đăng kiểm / Đăng ký / Phù hiệu vận tải / tháng</label>
       <input type="text" inputmode="decimal" id="fce_reg">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Bảo hiểm + Đăng kiểm trả từ nguồn nào (áp dụng chung mọi tháng)</label>
+      <select id="fce_method">
+        <option value="bank" ${insMethod==='bank'?'selected':''}>🏦 Ngân hàng</option>
+        <option value="cash" ${insMethod==='cash'?'selected':''}>💵 Tiền mặt</option>
+      </select>
     </div>
     <div class="hint" style="margin-top:8px;">Các khoản này (cùng Gốc+Lãi vay ngân hàng tính riêng ở mục Khoản Vay) đều trừ vào Lợi Nhuận Gộp để ra Lợi Nhuận Thực Tế Cuối Cùng, và cộng vào chi phí cố định khi tính Điểm Hoà Vốn — xem ở tab "Kết Quả".</div>
     <div style="display:flex; gap:10px; margin-top:14px;">
@@ -15663,6 +15803,7 @@ function openFixedCostsEditor(){
     state.settings.monthlyVehicleDepreciation = depVal;
     state.settings.monthlyInsurance = insVal;
     state.settings.monthlyRegistrationFee = regVal;
+    state.settings.insuranceMethod = document.getElementById('fce_method').value;
     if(!(await saveSettings())) return;
     closeModal();
     showToast('Đã lưu.');
