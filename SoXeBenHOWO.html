@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #241';
+const APP_BUILD = '2026-09-14 · #242';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2290,13 +2290,23 @@ function companyWideOperatingCashCost(from, to){
 /// (bankLoanRealCostForRange, khớp tuyệt đối "Xác Nhận Đã Trả Từng Kỳ") —
 /// chính xác hơn hẳn con số snapshot cũ. Bảo hiểm + Đăng kiểm lấy đủ
 /// nguyên tháng (fullMonthlyCostIfTouched) — không chia nhỏ theo ngày nữa.
-function companyWideCashFlowFixedMonthly(from, to){
+// SỬA 2026-09-14 LẦN 6 (tách rời khi thêm fixedCostFrom ở trên): hàm này
+// gộp 2 loại khác hẳn nhau — (1) Gốc+Lãi vay tính theo ĐÚNG NGÀY ĐẾN HẠN
+// (bankLoanRealCostForRange, ngày cụ thể, không phải "chạm tháng"), và
+// (2) Bảo hiểm/Đăng kiểm tính theo kiểu "chạm tháng nào tính đủ tháng đó"
+// (fullMonthlyCostIfTouched). 2 mốc bắt đầu này PHẢI KHÁC NHAU: lãi vay
+// đến hạn giữa tháng (VD ngày 20) vẫn phải tính nếu rơi sau mốc chốt dù
+// cùng tháng — dùng đúng `from` gốc. Bảo hiểm/đăng kiểm thì dùng
+// `fixedCostFromForTouch` (tháng kế tiếp sau tháng mốc chốt) để tránh
+// tính trùng — xem chú thích ở firstDayOfMonthAfter().
+function companyWideCashFlowFixedMonthly(from, to, fixedCostFromForTouch){
   let sum = 0;
+  const touchFrom = fixedCostFromForTouch || from;
   Object.values(state.allVehiclesSettings).forEach(s=>{
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
     loans.forEach(loan=>{ sum += bankLoanRealCostForRange(loan, from, to); });
     const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
-    sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, from, to);
+    sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, touchFrom, to);
   });
   return sum;
 }
@@ -2902,6 +2912,25 @@ function addDaysToDateStr(dateStr, days){
   const d = new Date(dateStr+'T00:00:00');
   d.setDate(d.getDate()+days);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// SỬA 2026-09-14 LẦN 6 (Ông Chủ báo — mốc chốt giữa tháng 9, hôm sau vẫn
+// còn trong tháng 9, số app tính bị TRỪ OAN đủ nguyên tháng 9 của 5 khoản
+// Luật Đường/Bảo Hiểm-Đăng Kiểm/Nhà/Điện Nước/Cầu Đường dù tiền THẬT
+// không hề rời khỏi tài khoản): 5 khoản này dùng cơ chế "khoảng ngày
+// CHẠM tháng nào thì cộng ĐỦ NGUYÊN tháng đó" (theo đúng yêu cầu trước
+// đây — "luật đường mất chẵn tiền, không chia theo ngày"). Cơ chế này
+// ĐÚNG khi mốc chốt và hôm nay khác tháng nhau, nhưng SAI khi cả 2 cùng
+// nằm trong 1 tháng (mốc chốt giữa tháng) — vì tháng CỦA MỐC CHỐT coi
+// như đã được phản ánh đủ trong đúng số dư THẬT Ông Chủ vừa khai (dù đã
+// trả hay chưa tới hạn, tiền vẫn đang nằm đúng trong số đó), không được
+// tính lại. Hàm này trả về mốc bắt đầu ĐÚNG để đưa vào 5 khoản cố định
+// theo tháng — luôn là ngày 1 của THÁNG KẾ TIẾP ngay sau tháng mốc chốt,
+// không bao giờ là tháng của chính mốc chốt nữa.
+function firstDayOfMonthAfter(dateStr){
+  const [y,m] = dateStr.split('-').map(Number);
+  const ny = m===12 ? y+1 : y;
+  const nm = m===12 ? 1 : m+1;
+  return `${ny}-${String(nm).padStart(2,'0')}-01`;
 }
 // Tổng tiền luật đường thực đóng trong khoảng [from,to] — cộng dồn từng
 // khoản THÁNG đã ghi trong state.roadFeeByMonth (mỗi tháng 1 số duy
@@ -6178,6 +6207,18 @@ function renderHeader(){
       back.className='btn btn-ghost btn-sm'; back.textContent='Đóng';
       back.onclick=()=>{ state.view='list'; state.draftShift=null; renderAll(); restoreMainScroll(); };
       action.appendChild(back);
+    } else if(!activeVehicleIdForEditing()){
+      // SỬA 2026-09-14 (Ông Chủ báo — "Ca Làm Việc"/"+ Ca Mới" thừa ngay
+      // trên chính màn Chọn Xe): CÙNG GỐC BỆNH với lỗi thanh "← Quay Lại
+      // Chọn Xe" đã sửa trước đó (build #234) — renderHeader() chỉ suy
+      // luận GIÁN TIẾP qua state.currentTab==='shifts', không biết trực
+      // tiếp màn nào đang thực sự hiển thị (danh sách ca THẬT hay màn
+      // Chọn Xe). Dùng ĐÚNG guard activeVehicleIdForEditing() mà chính
+      // renderShiftList() dùng để quyết định có vẽ màn Chọn Xe hay
+      // không — nếu nó rỗng (đang ở màn Chọn Xe) thì tiêu đề header phải
+      // trung lập, không phải "Ca Làm Việc" của 1 xe cụ thể nào.
+      title.textContent='Chọn Xe';
+      sub.textContent='';
     } else if(state.shiftArchiveMonth){
       title.textContent = 'Tháng ' + monthLabelVN(state.shiftArchiveMonth);
       sub.textContent = 'Xem lại — chỉ đọc';
@@ -11403,13 +11444,16 @@ function computeCostPerKmTrend(monthsBack){
     const monthEnd = `${monthEndDate.getFullYear()}-${String(monthEndDate.getMonth()+1).padStart(2,'0')}-${String(monthEndDate.getDate()).padStart(2,'0')}`;
     const shiftsInMonth = state.shifts.filter(sh=>sh.date>=monthStart && sh.date<=monthEnd);
     const totalKm = shiftsInMonth.reduce((s,sh)=>s+shiftOdoDriven(sh),0);
-    const totalCost = shiftsInMonth.reduce((s,sh)=>s+shiftTotalCost(sh),0);
-    // SỬA 2026-09-04 (Ông Chủ yêu cầu — cần giải trình rõ vì sao ra đúng
-    // con số đó): lưu sẵn ĐÚNG từng khoản đã cộng nên shiftTotalCost(),
-    // tính 1 LẦN DUY NHẤT ở đây — trang "Chi Tiết" dùng lại NGUYÊN các số
-    // này, không tính lại lần 2 ở chỗ khác, đảm bảo LUÔN khớp tuyệt đối
-    // với con số trên biểu đồ (tránh lặp lại bài học cũ: 2 nơi tính cùng
-    // 1 thứ dễ bị lệch nhau).
+    // SỬA 2026-09-14 (Ông Chủ chỉ ra — "giá vốn vật liệu + chi phí bù hoá
+    // đơn không nên nằm trong Chi Phí/Km"): ĐÚNG — 2 khoản này gắn với
+    // KHỐI LƯỢNG HÀNG BÁN (đá Base A/B), không liên quan gì tới SỐ KM xe
+    // chạy — nhét vào đây làm sai hẳn bản chất "chi phí vận hành mỗi
+    // km" (giá vốn vật liệu thường gấp nhiều lần chi phí vận hành thật,
+    // lấn át hoàn toàn ý nghĩa so sánh hiệu quả vận hành giữa các tháng).
+    // totalCost giờ CHỈ cộng đúng 6 khoản vận hành thật — bỏ hẳn material
+    // và invoiceSupplement ra khỏi breakdown của trang này luôn (không chỉ
+    // bỏ khỏi tổng, để bảng chi tiết không liệt kê nhầm khoản không thuộc
+    // về "vận hành").
     const breakdown = {
       fuel: shiftsInMonth.reduce((s,sh)=>s+shiftFuelCost(sh),0),
       tripWage: shiftsInMonth.reduce((s,sh)=>s+shiftTotalTripWage(sh),0),
@@ -11417,9 +11461,8 @@ function computeCostPerKmTrend(monthsBack){
       food: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.foodAllowance)||0),0),
       incidental: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0),
       roadFeeIncidental: shiftsInMonth.reduce((s,sh)=>s+(Number(sh.roadFeeIncidental)||0),0),
-      material: shiftsInMonth.reduce((s,sh)=>s+shiftMaterialCost(sh),0),
-      invoiceSupplement: shiftsInMonth.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0),
     };
+    const totalCost = Object.values(breakdown).reduce((s,v)=>s+v, 0);
     buckets.push({ label, monthStart, monthEnd, costPerKm: totalKm>0 ? totalCost/totalKm : 0, totalKm, totalCost, shiftCount: shiftsInMonth.length, breakdown });
   }
   return buckets;
@@ -11436,8 +11479,7 @@ function renderCostPerKmTrendDetailPage(costTrend){
   const app = document.getElementById('app');
   const labels = {
     fuel:'Tiền dầu tiêu hao', tripWage:'Lương chuyến', baseSalary:'Lương cứng phân bổ',
-    food:'Tiền ăn', incidental:'Chi phí phát sinh', roadFeeIncidental:'Luật đường phát sinh/chuyến',
-    material:'Giá vốn vật liệu (công trình chở cước/thương mại)', invoiceSupplement:'Chi phí bù hoá đơn kho'
+    food:'Tiền ăn', incidental:'Chi phí phát sinh', roadFeeIncidental:'Luật đường phát sinh/chuyến'
   };
   app.innerHTML = `
     <section class="group">
@@ -11445,7 +11487,7 @@ function renderCostPerKmTrendDetailPage(costTrend){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📈 Xu Hướng Chi Phí / Km — Chi Tiết Từng Tháng</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Chi Phí/Km = Tổng CHI PHÍ TOÀN BỘ của mọi ca trong tháng (dầu, lương chuyến, lương cứng, tiền ăn, phát sinh, luật đường, giá vốn vật liệu, chi phí bù hoá đơn) ÷ Tổng số Km đã chạy trong tháng đó. Tháng không có ca nào ghi nhận thì không tính được (hiện "—" trên biểu đồ).</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Chi Phí/Km = Tổng CHI PHÍ VẬN HÀNH (dầu, lương chuyến, lương cứng, tiền ăn, phát sinh, luật đường) ÷ Tổng số Km đã chạy trong tháng đó. KHÔNG gồm giá vốn vật liệu/chi phí bù hoá đơn — 2 khoản đó gắn với khối lượng hàng bán, không liên quan số Km, xem riêng ở mục Kết Quả Kinh Doanh. Tháng không có ca nào ghi nhận thì không tính được (hiện "—" trên biểu đồ).</div>
       ${costTrend.map(b=>{
         if(b.shiftCount===0){
           return `
@@ -11836,6 +11878,11 @@ function computeBankBalanceReconciliation(){
   if(sorted.length===0) return null;
   const latest = sorted[0];
   const from = addDaysToDateStr(latest.date, 1);
+  // SỬA 2026-09-14 LẦN 6: mốc bắt đầu RIÊNG cho 5 khoản cố định theo
+  // tháng (Luật Đường/Bảo Hiểm-Đăng Kiểm/Nhà/Điện Nước/Cầu Đường) — luôn
+  // là ngày 1 tháng KẾ TIẾP sau tháng mốc chốt, KHÔNG BAO GIỜ là `from`
+  // thô như mọi khoản khác — xem chú thích đầy đủ ở firstDayOfMonthAfter().
+  const fixedCostFrom = firstDayOfMonthAfter(latest.date);
   const cashInBank = state.sitePayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const cashOutBank = state.supplierPayments.filter(p=>p.date>=from && p.date<=today && p.method!=='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
   // SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận LẦN THỨ 2 — "toàn bộ tiền vào
@@ -11857,11 +11904,11 @@ function computeBankBalanceReconciliation(){
     .filter(sh=>sh.date>=from && sh.date<=today)
     .reduce((s,sh)=>s+(Number(sh.advanceAmount)||0), 0);
   const repairBank = repairsInRangeCompanyWide(from, today).reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const roadFeeBank = roadFeeForRangeCompanyWide(from, today);
-  const houseRentBank = houseRentForRange(from, today);
-  const utilitiesBank = utilitiesForRange(from, today);
-  const tollFeeBank = tollFeeForRange(from, today);
-  const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today);
+  const roadFeeBank = roadFeeForRangeCompanyWide(fixedCostFrom, today);
+  const houseRentBank = houseRentForRange(fixedCostFrom, today);
+  const utilitiesBank = utilitiesForRange(fixedCostFrom, today);
+  const tollFeeBank = tollFeeForRange(fixedCostFrom, today);
+  const fixedMonthlyBank = companyWideCashFlowFixedMonthly(from, today, fixedCostFrom);
   const invoiceLotBank = state.invoiceLots.filter(l=>l.purchaseDate>=from && l.purchaseDate<=today)
     .reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
   // SỬA 2026-09-08 (Ông Chủ "logic lại" — "TẤT CẢ tiền công ty đều qua tài
