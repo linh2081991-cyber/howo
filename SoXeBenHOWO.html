@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #247';
+const APP_BUILD = '2026-09-14 · #248';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -15449,6 +15449,16 @@ function openLoanEditor(loanId){
     if(!(draft.termMonths>0)){ showToast('Nhập thời hạn vay trước đã.'); return; }
     if(draft.graceMonths>=draft.termMonths){ showToast('Số tháng ân hạn phải nhỏ hơn Tổng thời hạn vay (phải còn ít nhất 1 tháng để trả gốc).'); return; }
     if(!draft.disbursementDate){ showToast('Chọn ngày giải ngân trước đã.'); return; }
+    // SỬA 2026-09-14 (Ông Chủ báo — "Vay vốn vận hành xe" lưu xong nhưng
+    // Dư Nợ/Kỳ Này toàn hiện "—"): BẮT ĐƯỢC NGUYÊN NHÂN THẬT — trước đây
+    // không hề bắt buộc phải có ít nhất 1 mức lãi suất mới cho lưu, nên
+    // rất dễ điền xong Số Tiền/Thời Hạn/Ngày Giải Ngân rồi quên hẳn phần
+    // "Lộ Trình Lãi Suất" bên dưới (vì nó nằm tách riêng, dễ bỏ sót) —
+    // khoản vay vẫn lưu được nhưng KHÔNG CÓ CĂN CỨ để tính (thiếu lãi
+    // suất = không biết tính lãi kiểu gì), nên mọi số đều ra "—". Chặn
+    // ngay từ lúc lưu, báo rõ lý do, để không còn khoản vay "mồ côi" nào
+    // nữa.
+    if(!draft.rateSchedule || draft.rateSchedule.length===0){ showToast('Chưa có mức lãi suất nào — kéo xuống mục "Lộ Trình Lãi Suất", nhập % lãi + ngày áp dụng rồi bấm "+ Thêm Mức Lãi" trước khi Lưu.'); return; }
     if(!Array.isArray(state.settings.bankLoans)) state.settings.bankLoans = [];
     const idx = state.settings.bankLoans.findIndex(l=>l.id===draft.id);
     if(idx>=0) state.settings.bankLoans[idx] = draft; else state.settings.bankLoans.push(draft);
@@ -16611,8 +16621,6 @@ function renderCompanyDashboardPage(){
             <button id="ktnbDetailCashBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
           </div>
         </div>
-        <button class="btn btn-ghost btn-block" id="ktnbTransferShortcutBtn" style="margin-top:14px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</button>
-        <div class="hint" style="text-align:center; margin-top:10px;">Toàn quyền theo dõi, ghi chép, tính toán chi ra/thu về/công nợ toàn app — không lọt 1 đồng nào. Bấm 1 nhánh để xem chi tiết + khai báo mốc chốt mới.</div>
       </div>
     </section>
 
@@ -16809,8 +16817,6 @@ function renderCompanyDashboardPage(){
   if(ktnbGoCashBtn) ktnbGoCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
   const ktnbDetailCashBtn = document.getElementById('ktnbDetailCashBtn');
   if(ktnbDetailCashBtn) ktnbDetailCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
-  const ktnbTransferShortcutBtn = document.getElementById('ktnbTransferShortcutBtn');
-  if(ktnbTransferShortcutBtn) ktnbTransferShortcutBtn.addEventListener('click', openInternalTransferModal);
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
