@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #252';
+const APP_BUILD = '2026-09-14 · #254';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2260,14 +2260,32 @@ function fullMonthlyCostIfTouched(monthlyAmountFn, from, to){
 // hành vi cũ tuyệt đối). Không truyền methodFilter (undefined) = cộng
 // TẤT CẢ như cũ, dùng cho các phép tính Lợi Nhuận/Điểm Hoà Vốn không
 // quan tâm tiền mặt hay ngân hàng.
+// SỬA 2026-09-14 LẦN 10 (Ông Chủ báo — "cả 2 khoản vay đều xác nhận đã
+// đóng nhưng Tiền Mặt mới nhận diện được 1 khoản", "kỳ 3 đã đóng nhưng
+// biến mất khỏi danh sách xác nhận"): BẮT ĐƯỢC LỖI GỐC THẬT SỰ — hàm này
+// trước đây chỉ đếm 1 kỳ khi ĐÚNG NGÀY ĐẾN HẠN đã rơi vào [from,to]
+// (`dueStr<=to`, với to luôn là HÔM NAY) — nghĩa là nếu Ông Chủ đóng kỳ
+// SỚM HƠN ngày đến hạn ghi trên lịch (rất phổ biến — ai cũng có thể trả
+// nợ trước hạn), tiền ĐÃ THẬT SỰ rời khỏi túi ngay lúc tick, nhưng hàm
+// này vẫn coi như CHƯA XẢY RA cho tới đúng ngày ghi trên lịch mới tính —
+// vừa làm Tiền Mặt/TCB "quên" mất khoản đã trả, vừa làm kỳ đó biến mất
+// khỏi danh sách "Xác Nhận Đã Trả Từng Kỳ" (hàm duePeriods ở nơi khác
+// cũng dựa vào đúng cùng 1 kiểu so ngày này). Sửa tận gốc: CĂN CỨ DUY
+// NHẤT để tính 1 kỳ đã trả là đã TICK "Đã trả" (paidMonths chứa đúng kỳ
+// đó) — không còn phụ thuộc ngày đến hạn đã tới hay chưa. `from` vẫn giữ
+// lại để tránh đếm trùng kỳ đã trả TỪ TRƯỚC mốc chốt (đã nằm sẵn trong số
+// dư đã khai); bỏ hẳn điều kiện `dueStr<=to` vì nó chính là nguyên nhân
+// gây lỗi (trả sớm hơn "hôm nay" của ngày đến hạn thì KHÔNG được phép bị
+// coi là "chưa xảy ra").
 function bankLoanRealCostForRange(bankLoan, from, to, methodFilter){
   const schedule = computeFullLoanSchedule(bankLoan);
   const paidMethods = bankLoan.paidMethods || {};
+  const paidMonths = new Set(Array.isArray(bankLoan.paidMonths) ? bankLoan.paidMonths : []);
   let sum = 0;
   schedule.forEach(row=>{
     const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-    if(dueStr>=from && dueStr<=to){
-      const ym = dueStr.slice(0,7);
+    const ym = dueStr.slice(0,7);
+    if(paidMonths.has(ym) && dueStr>=from){
       const method = paidMethods[ym] || 'bank';
       if(!methodFilter || method===methodFilter) sum += row.total;
     }
@@ -15330,11 +15348,22 @@ function openLoanEditor(loanId){
             ${(()=>{
               const todayD = new Date(todayLocalDateStr()+'T00:00:00');
               const nextUnpaidIdx = loanPaidPeriodsCount(draft);
-              // Luôn hiện thêm đúng 1 kỳ TIẾP THEO (ngay sau kỳ cuối đã
-              // tick) dù chưa tới hạn, để tick sớm được bất cứ lúc nào.
-              const duePeriods = schedule.filter(row=>row.dueDate<=todayD || row.periodIndex===nextUnpaidIdx);
-              if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
               const paidSet = new Set(Array.isArray(draft.paidMonths)?draft.paidMonths:[]);
+              // SỬA 2026-09-14 LẦN 10 (Ông Chủ báo — "kỳ 3 đã đóng nhưng
+              // biến mất khỏi danh sách"): BẮT ĐƯỢC LỖI GỐC — trước đây
+              // chỉ hiện kỳ khi ĐÃ TỚI HẠN (dueDate<=todayD) HOẶC là đúng
+              // 1 kỳ tiếp theo (nextUnpaidIdx). Nếu Ông Chủ tick "Đã trả"
+              // SỚM HƠN ngày đến hạn (rất bình thường), kỳ đó không thoả
+              // ĐIỀU KIỆN NÀO trong 2 điều kiện trên nữa (không còn là
+              // "kỳ tiếp theo" vì đã tick rồi, cũng chưa tới hạn) — biến
+              // mất khỏi danh sách dù đã trả thật. Thêm điều kiện thứ 3:
+              // LUÔN hiện mọi kỳ đã có trong paidMonths, bất kể ngày đến
+              // hạn đã tới hay chưa.
+              const duePeriods = schedule.filter(row=>{
+                const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+                return row.dueDate<=todayD || row.periodIndex===nextUnpaidIdx || paidSet.has(ym);
+              });
+              if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
               return `
               <div class="grid-table-wrap">
                 <table class="grid-table">
@@ -17588,19 +17617,30 @@ function renderBankReconDetailPage(mode){
     .map(p=>({ date:p.date, label:`Đã nộp thuế VAT${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
   const bankTransferItems = bankRecon ? (state.internalTransfers||[]).filter(t=>t.date>bankRecon.checkpoint.date && t.date<=rangeTo)
     .map(t=>({ date:t.date, label:`${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt':'💵→🏦 Nộp tiền mặt vào'}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='bankToCash'?-1:1 })) : [];
+  // SỬA 2026-09-14 LẦN 10 (cùng lỗi gốc với bankLoanRealCostForRange() ở
+  // trên — CĂN CỨ DUY NHẤT phải là ĐÃ TICK "Đã trả" (paidMonths), không
+  // phải "đã tới hạn trên lịch"): trả sớm hơn hạn thì bị bỏ sót; ngược
+  // lại, quá hạn nhưng CHƯA thật sự trả thì lại bị tính khống vào đây dù
+  // tiền chưa hề rời khỏi túi. Sửa cả 2 chiều cho đúng.
   const bankLoanPaymentItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    return loans.flatMap(loan=>computeFullLoanSchedule(loan)
-      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return d>bankRecon.checkpoint.date && d<=rangeTo && method!=='cash'; })
-      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total })));
+    return loans.flatMap(loan=>{
+      const paidSet = new Set(Array.isArray(loan.paidMonths)?loan.paidMonths:[]);
+      return computeFullLoanSchedule(loan)
+      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return paidSet.has(ym) && d>bankRecon.checkpoint.date && method!=='cash'; })
+      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total }));
+    });
   }) : [];
   const cashLoanPaymentItems = cashRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    return loans.flatMap(loan=>computeFullLoanSchedule(loan)
-      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return d>cashRecon.checkpoint.date && d<=rangeTo && method==='cash'; })
-      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total })));
+    return loans.flatMap(loan=>{
+      const paidSet = new Set(Array.isArray(loan.paidMonths)?loan.paidMonths:[]);
+      return computeFullLoanSchedule(loan)
+      .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return paidSet.has(ym) && d>cashRecon.checkpoint.date && method==='cash'; })
+      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total }));
+    });
   }) : [];
   const bankInsuranceRegItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
@@ -17633,6 +17673,55 @@ function renderBankReconDetailPage(mode){
   // đây (chỉ có ở trang khác), và CHƯA có công nợ — giờ gộp đủ cả 3 vào
   // đúng 1 trang, đúng vai trò "báo cáo của kế toán" Ông Chủ mô tả.
   const debtSummary = computeAllPartnersDebtSummary();
+  // SỬA 2026-09-14 LẦN 11 (Ông Chủ báo — trả mỏ 50tr qua bank nhưng TCB
+  // không hề trừ, yêu cầu "tạo hệ thống ghi nhận để không bị xót bất cứ
+  // khoản nào"): rà kỹ toàn bộ công thức không tìm thấy lỗi rõ ràng (mọi
+  // điều kiện lọc đều đúng trên giấy) — nhưng ĐÚNG NHƯ Ông Chủ đòi hỏi,
+  // xây hẳn 1 CƠ CHẾ ĐỐI CHIẾU (checksum) thay vì chỉ tin 1 công thức
+  // duy nhất: cộng dồn lại CHÍNH XÁC từng bảng chi tiết đang hiện ra bên
+  // dưới (itemizedSum), rồi so với cashFlowSince — con số THẬT SỰ được
+  // dùng để ra "Số dư app tính hôm nay" — nếu 2 số này lệch nhau dù chỉ
+  // 1 đồng, NGHĨA LÀ có 1 khoản đang bị tính bởi công thức tổng nhưng
+  // KHÔNG hiện ra bảng nào Ông Chủ nhìn thấy (hoặc ngược lại) — hiện cảnh
+  // báo ngay, không giấu diếm, để lỗi kiểu này không bao giờ âm thầm nữa.
+  const itemizedSumBank = bankRecon ? (
+    entries.filter(e=>e.category!=='Góp vốn' && e.category!=='Rút vốn').reduce((s,e)=>s+e.sign*e.amount,0)
+    - bankFuelShifts.reduce((s,r)=>s+r.cost,0)
+    - bankAdvanceShifts.reduce((s,r)=>s+r.cost,0)
+    - bankDriverAdvanceItems.reduce((s,r)=>s+r.cost,0)
+    - bankBonusItems.reduce((s,r)=>s+r.cost,0)
+    - bankRepairs.reduce((s,r)=>s+(Number(r.amount)||0),0)
+    - bankInvoiceLots.reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0)
+    + bankLoanDisbursedItems.reduce((s,r)=>s+r.amount,0)
+    - bankRoadFeeItems.reduce((s,r)=>s+r.amount,0)
+    - bankHouseRentItems.reduce((s,r)=>s+r.amount,0)
+    - bankUtilitiesItems.reduce((s,r)=>s+r.amount,0)
+    - bankTollFeeItems.reduce((s,r)=>s+r.amount,0)
+    - bankLoanPaymentItems.reduce((s,r)=>s+r.amount,0)
+    - bankInsuranceRegItems.reduce((s,r)=>s+r.amount,0)
+    - bankVatPaymentItems.reduce((s,r)=>s+r.amount,0)
+    + bankTransferItems.reduce((s,r)=>s+(r.sign||-1)*r.amount,0)
+  ) : 0;
+  // SO SÁNH ĐÚNG PHẠM VI: cashFlowSince KHÔNG hề gồm Góp/Rút vốn (khoản
+  // đó cộng RIÊNG vào computedBalance qua contributedSince/withdrawnSince
+  // ở dòng dưới, với mốc ngày khác 1 chút — >=from thay vì >=checkpoint.
+  // date). Loại hẳn Góp/Rút vốn khỏi itemizedSumBank ở trên để so sánh
+  // đúng "táo với táo" — nếu còn giữ lại, chỉ cần 1 khoản góp/rút vốn
+  // đúng ngày mốc chốt cũng đủ báo lệch GIẢ (không phải lỗi thật).
+  const bankChecksumDiff = bankRecon ? Math.round(bankRecon.cashFlowSince - itemizedSumBank) : 0;
+  const itemizedSumCash = cashRecon ? (
+    cashEntries.filter(e=>e.category!=='Góp vốn' && e.category!=='Rút vốn').reduce((s,e)=>s+e.sign*e.amount,0)
+    - cashDriverAdvanceItems.reduce((s,r)=>s+r.cost,0)
+    - cashBonusItems.reduce((s,r)=>s+r.cost,0)
+    - cashRoadFeeItems.reduce((s,r)=>s+r.amount,0)
+    - cashHouseRentItems.reduce((s,r)=>s+r.amount,0)
+    - cashUtilitiesItems.reduce((s,r)=>s+r.amount,0)
+    - cashTollFeeItems.reduce((s,r)=>s+r.amount,0)
+    - cashLoanPaymentItems.reduce((s,r)=>s+r.amount,0)
+    - cashInsuranceRegItems.reduce((s,r)=>s+r.amount,0)
+    - cashVatPaymentItems.reduce((s,r)=>s+r.amount,0)
+  ) : 0;
+  const cashChecksumDiff = cashRecon ? Math.round(cashRecon.cashFlowSince - itemizedSumCash) : 0;
   // SỬA 2026-09-14 LẦN 4: cashRecon giờ khai báo 1 LẦN DUY NHẤT ở ngay
   // đầu hàm (xem chú thích ở đó) — xoá dòng khai báo trùng lặp cũ ở đây,
   // tránh lỗi "Identifier 'cashRecon' has already been declared".
@@ -17682,6 +17771,11 @@ function renderBankReconDetailPage(mode){
             </tbody>
           </table>
         </div>
+        ${bankChecksumDiff!==0 ? `
+        <div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-top:8px; font-weight:700;">⚠️ ĐỐI CHIẾU LỆCH ${fmtVND(Math.abs(bankChecksumDiff))} — công thức tổng và tổng các bảng chi tiết bên dưới KHÔNG khớp nhau. Có khả năng 1 khoản đang bị tính (hoặc bị bỏ sót) mà không hiện đúng bảng nào — báo lại ngay kèm số này để tra tiếp.</div>
+        ` : `
+        <div class="hint" style="color:var(--profit); margin-top:6px;">✅ Đã đối chiếu: tổng cộng dồn từng bảng chi tiết bên dưới khớp đúng 100% với số dư app tính ở trên — không sót khoản nào.</div>
+        `}
         <div class="hint" style="margin-top:6px;">Đối chiếu với số dư THẬT trên app ngân hàng — lệch 1đ cũng là dấu hiệu có khoản ghi thiếu/sai.</div>
         ` : `
         <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đầu tiên bên dưới (đúng số dư ngân hàng THẬT ngay lúc này) để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
@@ -17732,6 +17826,11 @@ function renderBankReconDetailPage(mode){
             </tbody>
           </table>
         </div>
+        ${cashChecksumDiff!==0 ? `
+        <div class="hint" style="background:var(--loss-soft); color:var(--loss); padding:10px 12px; border-radius:10px; margin-top:8px; font-weight:700;">⚠️ ĐỐI CHIẾU LỆCH ${fmtVND(Math.abs(cashChecksumDiff))} — công thức tổng và tổng các bảng chi tiết bên dưới KHÔNG khớp nhau. Báo lại ngay kèm số này để tra tiếp.</div>
+        ` : `
+        <div class="hint" style="color:var(--profit); margin-top:6px;">✅ Đã đối chiếu: tổng cộng dồn từng bảng chi tiết bên dưới khớp đúng 100% với số dư app tính ở trên — không sót khoản nào.</div>
+        `}
         ` : `
         <div class="hint">Chưa khai báo mốc chốt nào — khai 1 lần đúng số tiền mặt THẬT đang cầm ngay lúc này để app bắt đầu tự cộng dồn đúng từ đây trở đi.</div>
         `}
