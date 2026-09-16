@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #254';
+const APP_BUILD = '2026-09-14 · #256';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2361,6 +2361,29 @@ function companyWideCashFlowFixedMonthly(from, to, fixedCostFromForTouch, method
   });
   return sum;
 }
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "Gốc + lãi vay cho riêng 1 dòng",
+// tách khỏi Bảo hiểm+Đăng kiểm đang gộp chung trong companyWideCashFlowFixedMonthly()
+// ở trên): 2 hàm tách riêng dưới đây dùng LẠI NGUYÊN các khối tính đã có
+// (bankLoanRealCostForRange, fullMonthlyCostIfTouched) — cộng 2 hàm này
+// lại LUÔN bằng đúng companyWideCashFlowFixedMonthly(), không tính lại
+// công thức nào khác, chỉ tách ra để hiển thị 2 dòng riêng cho rõ.
+function companyWideLoanPaymentCashOut(from, to){
+  let sum = 0;
+  Object.values(state.allVehiclesSettings).forEach(s=>{
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    loans.forEach(loan=>{ sum += bankLoanRealCostForRange(loan, from, to); });
+  });
+  return sum;
+}
+function companyWideInsuranceRegCashOut(from, to, fixedCostFromForTouch){
+  let sum = 0;
+  const touchFrom = fixedCostFromForTouch || from;
+  Object.values(state.allVehiclesSettings).forEach(s=>{
+    const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+    sum += fullMonthlyCostIfTouched(()=>insuranceAndRegistration, touchFrom, to);
+  });
+  return sum;
+}
 /// SỬA 2026-09-08 (Ông Chủ phát hiện — "trừ nhầm cả gốc vay ngân hàng như
 /// chi phí"): bản ACCRUAL đúng chuẩn kế toán của hàm trên — GỐC vay
 /// KHÔNG phải chi phí (chỉ là chuyển tiền mặt thành giảm nợ, không đổi
@@ -2496,7 +2519,7 @@ function computeVehicleAccrualProfit(vid, from, to){
 /// ngân hàng thật Ông Chủ đã khai báo.
 function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   const allShifts = allShiftsCompanyWide();
-  const empty = { from:null, to:null, cashIn:0, cashOutToSuppliers:0, operatingCashCost:0, repairTotal:0, roadFee:0, houseRent:0, utilities:0, fixedMonthly:0, invoiceLotCashOut:0, advanceCashOut:0, total:0 };
+  const empty = { from:null, to:null, cashIn:0, cashOutToSuppliers:0, operatingCashCost:0, repairTotal:0, roadFee:0, houseRent:0, utilities:0, fixedMonthly:0, loanPayment:0, insuranceReg:0, invoiceLotCashOut:0, advanceCashOut:0, total:0 };
   const to = toOverride || todayLocalDateStr();
   let from;
   if(fromOverride){
@@ -2521,6 +2544,12 @@ function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
   const utilities = utilitiesForRange(from, to);
   const tollFee = tollFeeForRange(from, to);
   const fixedMonthly = companyWideCashFlowFixedMonthly(from, to);
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu — "Gốc + lãi vay cho riêng 1 dòng"):
+  // tách riêng loanPayment/insuranceReg từ fixedMonthly (giữ nguyên
+  // fixedMonthly để chỗ khác đang đọc field này không bị vỡ) — cộng 2 số
+  // mới lại LUÔN bằng đúng fixedMonthly, đã dùng chung 1 khối tính.
+  const loanPayment = companyWideLoanPaymentCashOut(from, to);
+  const insuranceReg = companyWideInsuranceRegCashOut(from, to);
   // SỬA 2026-08-23 (Ông Chủ báo thiếu — xác nhận Q2/Q3/Q4/Q5: đều là tiền
   // ngân hàng thật, đã ghi đủ trong app, chỉ chưa được cộng vào đây):
   //  - invoiceLotCashOut: tiền THẬT đã chuyển cho đối tác để mua Lô Hoá
@@ -2541,7 +2570,7 @@ function computeCumulativeCashFlowBreakdown(toOverride, fromOverride){
     .filter(sh=>sh.date>=from && sh.date<=to)
     .reduce((s,sh)=>s+(Number(sh.advanceAmount)||0),0);
   const total = cashIn - cashOutToSuppliers - operatingCashCost - repairTotal - roadFee - houseRent - utilities - tollFee - fixedMonthly - invoiceLotCashOut - advanceCashOut;
-  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, houseRent, utilities, tollFee, fixedMonthly, invoiceLotCashOut, advanceCashOut, total };
+  return { from, to, cashIn, cashOutToSuppliers, operatingCashCost, repairTotal, roadFee, houseRent, utilities, tollFee, fixedMonthly, loanPayment, insuranceReg, invoiceLotCashOut, advanceCashOut, total };
 }
 function computeCumulativeCompanyProfit(toOverride){
   return computeCumulativeCashFlowBreakdown(toOverride).total;
@@ -16070,7 +16099,7 @@ function computeBusinessReport(from, to){
   // ---- Nhận định / Gợi ý (ngưỡng số học đơn giản, không AI) ----
   const notes = [];
   if(allTimeCashFlow.total>=0) notes.push({ ok:true, text:`✅ Cộng dồn CẢ QUÁ TRÌNH đang LÃI TIỀN MẶT ${fmtVND(allTimeCashFlow.total)} so với tổng vốn đã bỏ vào — số này không bị lệch bởi gối đầu thanh toán, nhưng chỉ phản ánh dòng tiền, chưa phải lãi/lỗ kế toán thật.` });
-  else notes.push({ ok:false, text:`⚠️ Cộng dồn CẢ QUÁ TRÌNH đang LỖ TIỀN MẶT ${fmtVND(Math.abs(allTimeCashFlow.total))} so với tổng vốn đã bỏ vào — cần xem lại chi phí hoặc tăng sản lượng dài hạn.` });
+  else notes.push({ ok:false, text:`⚠️ Dòng Tiền Ròng cộng dồn CẢ QUÁ TRÌNH đang ÂM ${fmtVND(Math.abs(allTimeCashFlow.total))} so với tổng vốn đã bỏ vào — cần xem lại chi phí hoặc tăng sản lượng dài hạn.` });
   if(trueProfitAfterDepreciation>=0) notes.push({ ok:true, text:`✅ LỢI NHUẬN THỰC TẾ cộng dồn (đã trừ khấu hao, không trừ nhầm gốc vay) vẫn đang DƯƠNG ${fmtVND(trueProfitAfterDepreciation)} — dự án đang thật sự có lời đúng chuẩn kế toán.` });
   else notes.push({ ok:false, text:`⚠️ LỢI NHUẬN THỰC TẾ cộng dồn (đã trừ khấu hao, không trừ nhầm gốc vay) đang ÂM ${fmtVND(Math.abs(trueProfitAfterDepreciation))} — dự án đang lỗ thật khi tính đủ chuẩn kế toán, cần xem lại chiến lược dài hạn.` });
 
@@ -16616,7 +16645,7 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>📒 Tổng Kết Dòng Tiền Toàn Công Ty</h3>
-      <div class="hint" style="margin-top:-6px; margin-bottom:10px;">${breakdown.from?`Cộng dồn từ ${formatDateVN(breakdown.from)} tới hôm nay`:'Chưa có ca nào được ghi'}</div>
+      <div class="hint" style="margin-top:-6px; margin-bottom:10px;">${breakdown.from?`Cộng dồn từ ${formatDateVN(breakdown.from)} tới hôm nay — đây là DÒNG TIỀN THỰC (tiền mặt/ngân hàng thật ra/vào), KHÔNG PHẢI Lợi Nhuận kế toán. Xem đúng Lợi Nhuận (đã trừ khấu hao, chỉ tính phần hàng THẬT SỰ ĐÃ DÙNG) ở tab Kết Quả.`:'Chưa có ca nào được ghi'}</div>
       <div class="grid-table-wrap" style="margin-bottom:10px;">
         <table class="grid-table">
           <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
@@ -16626,14 +16655,15 @@ function renderCompanyDashboardPage(){
             <tr><td>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</td><td class="num">−${fmtVND(breakdown.operatingCashCost)}</td></tr>
             <tr><td>− Sửa chữa</td><td class="num">−${fmtVND(breakdown.repairTotal)}</td></tr>
             <tr><td>− Luật đường</td><td class="num">−${fmtVND(breakdown.roadFee)}</td></tr>
-            <tr><td>− Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num">−${fmtVND(breakdown.fixedMonthly)}</td></tr>
-            <tr><td>− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)</td><td class="num">−${fmtVND(breakdown.invoiceLotCashOut)}</td></tr>
-            <tr><td>− Tạm ứng lương tài xế</td><td class="num">−${fmtVND(breakdown.advanceCashOut)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= Lợi Nhuận Luỹ Kế</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
+            <tr><td>− Gốc + Lãi Vay Ngân Hàng (tất cả xe)</td><td class="num">−${fmtVND(breakdown.loanPayment)}</td></tr>
+            <tr><td>− Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num">−${fmtVND(breakdown.insuranceReg)}</td></tr>
+            <tr><td>− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác — ĐỦ cả lô, kể cả phần chưa dùng)</td><td class="num">−${fmtVND(breakdown.invoiceLotCashOut)}</td></tr>
+            <tr><td>− Tạm ứng lương tài xế (chưa phải chi phí — trừ lại khi quyết toán lương)</td><td class="num">−${fmtVND(breakdown.advanceCashOut)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Dòng Tiền Ròng Luỹ Kế</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
           </tbody>
         </table>
       </div>
-      <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-bottom:12px;">📋 Chi Tiết — Từng Khoản Cấu Thành Lợi Nhuận Luỹ Kế</button>
+      <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-bottom:12px;">📋 Chi Tiết — Từng Khoản Cấu Thành Dòng Tiền Ròng Luỹ Kế</button>
 
       <div class="card" style="margin-top:12px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Công Nợ Hiện Tại (Toàn Công Ty)</div>
@@ -16978,7 +17008,7 @@ function renderCompanyDashboardPage(){
   if(addLoanBtn) addLoanBtn.addEventListener('click', ()=>openLoanEditor(null));
   document.getElementById('openVatPaymentsBtn').addEventListener('click', ()=>{ saveMainScroll(); renderVatPaymentListPage(); });
   document.querySelectorAll('.per-vehicle-notice-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ saveMainScroll(); switchVehicle(btn.dataset.vid); });
+    btn.addEventListener('click', async ()=>{ saveMainScroll(); await switchVehicle(btn.dataset.vid); restoreMainScroll(); });
   });
   const roiCalcDetailBtn = document.getElementById('roiCalcDetailBtn');
   if(roiCalcDetailBtn) roiCalcDetailBtn.addEventListener('click', openROICalculationDetail);
@@ -17353,6 +17383,18 @@ function openCashFlowGroupDetail(category, key){
   const sign = CASH_FLOW_GROUP_SIGN[category];
   const rows = computeCashFlowGroupRows(category).filter(r=>r.key===key).sort((a,b)=>b.date.localeCompare(a.date));
   const total = rows.reduce((s,r)=>s+r.amount,0);
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu — "phân tách rõ từng tháng khác nhau,
+  // mỗi tháng 1 bảng, hiển thị khoa học thẩm mỹ"): gom `rows` (đã sắp mới
+  // nhất lên đầu) theo đúng tháng của r.date — mỗi tháng render 1 bảng
+  // RIÊNG kèm dòng tổng phụ của đúng tháng đó, dễ theo dõi hơn hẳn 1 bảng
+  // phẳng dài lẫn lộn nhiều tháng.
+  const monthGroups = [];
+  rows.forEach(r=>{
+    const ym = r.date.slice(0,7);
+    let g = monthGroups.find(x=>x.ym===ym);
+    if(!g){ g = { ym, rows: [] }; monthGroups.push(g); }
+    g.rows.push(r);
+  });
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -17360,16 +17402,24 @@ function openCashFlowGroupDetail(category, key){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">${CASH_FLOW_GROUP_LABELS[category]||''}</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${escapeHtml(key)} — ${rows.length} khoản, mới nhất lên đầu.</div>
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Ngày</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            ${rows.map(r=>`<tr><td>${formatDateVN(r.date)}</td><td class="num" style="color:${sign>0?'var(--profit)':'var(--loss)'}; font-weight:700;">${sign>0?'+':'−'}${fmtVND(r.amount)}</td></tr>`).join('')}
-            <tr class="grid-total-row"><td style="text-align:left;">TỔNG</td><td class="num">${sign>0?'+':'−'}${fmtVND(total)}</td></tr>
-          </tbody>
-        </table>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${escapeHtml(key)} — ${rows.length} khoản, chia theo từng tháng, mới nhất lên đầu.</div>
+      <div class="card" style="text-align:center; border:2px solid var(--accent); background:var(--accent-soft); margin-bottom:14px;">
+        <div style="font-size:13px; font-weight:700;">TỔNG CỘNG (${rows.length} khoản)</div>
+        <div style="font-size:26px; font-weight:900; margin-top:4px; color:${sign>0?'var(--profit)':'var(--loss)'};">${sign>0?'+':'−'}${fmtVND(total)}</div>
       </div>
+      ${monthGroups.map(g=>{
+        const monthTotal = g.rows.reduce((s,r)=>s+r.amount,0);
+        return `
+        <div style="font-weight:800; font-size:13.5px; margin:14px 0 6px 2px;">📅 Tháng ${monthLabelVN(g.ym)} <span style="font-weight:900; color:${sign>0?'var(--profit)':'var(--loss)'};">(${sign>0?'+':'−'}${fmtVND(monthTotal)})</span></div>
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Ngày</th><th class="num">Số Tiền</th></tr></thead>
+            <tbody>
+              ${g.rows.map(r=>`<tr><td>${formatDateVN(r.date)}</td><td class="num" style="color:${sign>0?'var(--profit)':'var(--loss)'}; font-weight:700;">${sign>0?'+':'−'}${fmtVND(r.amount)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      }).join('')}
     </section>
   `;
   document.getElementById('cfGroupDetailBackBtn').addEventListener('click', ()=>{ renderCashFlowBreakdownDetailPage(); restoreMainScroll(); });
@@ -17388,14 +17438,17 @@ function renderCashFlowBreakdownDetailPage(){
       <button class="btn btn-ghost btn-sm" id="cashFlowDetailBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
-      <h2 style="margin-bottom:2px;">📒 Chi Tiết Lợi Nhuận Luỹ Kế</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay — mỗi mục nhóm theo đối tác/hạng mục, bấm 🔍 xem chi tiết từng khoản.`:'Chưa có dữ liệu'}</div>
+      <h2 style="margin-bottom:2px;">📒 Chi Tiết Dòng Tiền Ròng Luỹ Kế</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay — mỗi mục nhóm theo đối tác/hạng mục, bấm 🔍 xem chi tiết từng khoản. Đây là DÒNG TIỀN THỰC (tiền mặt/ngân hàng thật ra/vào), KHÔNG PHẢI Lợi Nhuận kế toán — xem giải thích đầy đủ bên dưới.`:'Chưa có dữ liệu'}</div>
       ${section('💵 + Tiền khách chuyển vào', breakdown.cashIn, groupedCashFlowSummaryHtml('customer'))}
       ${section('⛰️ − Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, groupedCashFlowSummaryHtml('supplier'))}
+      <div class="hint" style="margin-top:-4px;">⚠️ Đây là ĐỦ số tiền đã chuyển cho mỏ — có thể gồm cả phần ứng trước/trả dư (mỏ đang giữ hộ). Xem đúng phần mỏ còn nợ lại ở "Kế Toán Nội Bộ → Nhà cung cấp đang nợ Ông Chủ".</div>
       ${section('⛽ − Chi phí vận hành', -breakdown.operatingCashCost, groupedCashFlowSummaryHtml('operating'))}
       ${section('🔧 − Sửa chữa', -breakdown.repairTotal, groupedCashFlowSummaryHtml('repair'))}
       ${section('📦 − Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, groupedCashFlowSummaryHtml('invoiceLot'))}
+      <div class="hint" style="margin-top:-4px;">⚠️ Đây là ĐỦ số tiền đã trả mua CẢ LÔ, kể cả phần CHƯA DÙNG (vẫn là hàng tồn kho — tài sản của công ty, không phải mất). Xem đúng phần ĐÃ DÙNG THẬT (tính vào chi phí) ở tab Kết Quả → "Chi phí mua hoá đơn bù".</div>
       ${section('💵 − Tạm ứng lương tài xế', -breakdown.advanceCashOut, groupedCashFlowSummaryHtml('advance'))}
+      <div class="hint" style="margin-top:-4px;">⚠️ Đây KHÔNG phải chi phí — chỉ là tiền đã rời ngân hàng/tiền mặt để đưa tay tài xế, sẽ được trừ lại đúng vào lương thật khi quyết toán cuối kỳ (không bị tính 2 lần).</div>
       <h3 style="margin-top:16px;">🚧 − Luật Đường + Nhà/Điện + Cầu Đường + Gốc/Lãi Vay + Bảo Hiểm + Đăng Kiểm</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -17404,16 +17457,17 @@ function renderCashFlowBreakdownDetailPage(){
             <tr><td>Thuê nhà</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.houseRent)}</td></tr>
             <tr><td>Điện nước</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.utilities)}</td></tr>
             <tr><td>Cầu đường</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.tollFee)}</td></tr>
-            <tr><td>Gốc+Lãi vay + Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</td></tr>
+            <tr><td>Gốc + Lãi Vay Ngân Hàng (tất cả xe)</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.loanPayment)}</td></tr>
+            <tr><td>Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.insuranceReg)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">5 khoản này lấy từ Cài Đặt/Linh Chí Thành theo tháng (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở đúng mục tương ứng.</div>
+      <div class="hint" style="margin-top:6px;">6 khoản này lấy từ Cài Đặt/Linh Chí Thành theo tháng (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở đúng mục tương ứng.</div>
     </section>
 
     <section class="group">
-      <h3>🧮 Cách Tính Ra Lãi/Lỗ Tiền Mặt Tính Đến Hôm Nay</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:8px;">Cộng đúng 8 khoản ở trên, tính lại MỖI LẦN mở trang này — luôn khớp dữ liệu mới nhất.</div>
+      <h3>🧮 Cách Tính Ra Dòng Tiền Ròng Tính Đến Hôm Nay</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Cộng đúng 9 khoản ở trên, tính lại MỖI LẦN mở trang này — luôn khớp dữ liệu mới nhất. Đây là tiền mặt/ngân hàng THỰC đã ra/vào — không phải Lợi Nhuận kế toán (xem chú thích ở từng khoản phía trên).</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <tbody>
@@ -17422,10 +17476,11 @@ function renderCashFlowBreakdownDetailPage(){
             <tr><td>− Chi phí vận hành</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.operatingCashCost)}</td></tr>
             <tr><td>− Sửa chữa</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.repairTotal)}</td></tr>
             <tr><td>− Luật đường + Nhà/Điện + Cầu đường</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.roadFee+breakdown.houseRent+breakdown.utilities+breakdown.tollFee)}</td></tr>
-            <tr><td>− Gốc+Lãi vay + Bảo hiểm + Đăng kiểm</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.fixedMonthly)}</td></tr>
+            <tr><td>− Gốc + Lãi Vay Ngân Hàng</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.loanPayment)}</td></tr>
+            <tr><td>− Bảo hiểm + Đăng kiểm</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.insuranceReg)}</td></tr>
             <tr><td>− Mua Lô Hoá Đơn Bù</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.invoiceLotCashOut)}</td></tr>
             <tr><td>− Tạm ứng lương tài xế</td><td class="num" style="color:var(--loss);">−${fmtVND(breakdown.advanceCashOut)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= ${breakdown.total>=0?'Lãi':'Lỗ'} tiền mặt tính đến hôm nay</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Dòng Tiền Ròng tính đến hôm nay</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
           </tbody>
         </table>
       </div>
@@ -17629,7 +17684,7 @@ function renderBankReconDetailPage(mode){
       const paidSet = new Set(Array.isArray(loan.paidMonths)?loan.paidMonths:[]);
       return computeFullLoanSchedule(loan)
       .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return paidSet.has(ym) && d>bankRecon.checkpoint.date && method!=='cash'; })
-      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total }));
+      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.monthlyPrincipal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total }));
     });
   }) : [];
   const cashLoanPaymentItems = cashRecon ? state.vehicles.flatMap(v=>{
@@ -17639,7 +17694,7 @@ function renderBankReconDetailPage(mode){
       const paidSet = new Set(Array.isArray(loan.paidMonths)?loan.paidMonths:[]);
       return computeFullLoanSchedule(loan)
       .filter(p=>{ const d=`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`; const ym=d.slice(0,7); const method=(loan.paidMethods&&loan.paidMethods[ym])||'bank'; return paidSet.has(ym) && d>cashRecon.checkpoint.date && method==='cash'; })
-      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.principal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total }));
+      .map(p=>({ date:`${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`, label:`${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.monthlyPrincipal)} + Lãi ${fmtVND(p.interest)})`, amount: p.total }));
     });
   }) : [];
   const bankInsuranceRegItems = bankRecon ? state.vehicles.flatMap(v=>{
