@@ -166,6 +166,17 @@
   .field{ margin-bottom:16px; }
   .field label{ display:block; font-size:14.5px; font-weight:600; color:var(--ink-soft); margin-bottom:7px; }
   .field .hint{ font-size:12.5px; color:var(--ink-soft); margin-top:5px; }
+  /* SỬA 2026-09-14 (Ông Chủ báo — "chú thích dính chữ lên bảng, không rõ
+     ràng, cần cỡ chữ nhỏ hơn và mờ hơn để phân biệt với thông tin chính"):
+     BẮT ĐÚNG LỖI GỐC — quy tắc ".field .hint" phía trên CHỈ áp dụng khi
+     ".hint" nằm BÊN TRONG ô ".field" (dùng cho chữ giải thích dưới ô nhập
+     liệu). Nhưng rất nhiều chú thích trong app (cảnh báo dưới bảng, ghi
+     chú dưới tiêu đề mục...) đặt ".hint" NGOÀI ".field" — hoàn toàn không
+     được style, hiện ra như chữ thường, "dính" vào nội dung xung quanh.
+     Thêm quy tắc CHUNG này để MỌI ".hint" (dù ở đâu) đều tự động nhỏ hơn +
+     mờ hơn, tách biệt rõ với thông tin chính — không cần sửa lại từng chỗ
+     đã dùng ".hint" trong toàn app. */
+  .hint{ font-size:12.5px; color:var(--ink-soft); line-height:1.45; }
   /* Prominent ODO-driven / fuel-consumed stat chip — replaces the old */
   /* plain-text .hint under "Đồng Hồ Km" / "Nhiên Liệu" so hai số quan */
   /* trọng nhất của 1 ca (Số ODO chạy, Dầu tiêu hao) nổi bật ngay khi */
@@ -690,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #257';
+const APP_BUILD = '2026-09-14 · #260';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -920,6 +931,7 @@ let state = {
   // Dòng Tiền Thuần: "Lợi Nhuận Luỹ Kế" trong công thức Vốn Chủ Sở Hữu chỉ
   // tính đúng được ở cấp công ty.
   ownerEquityEntries: [], // {id, date, type:'contribution'|'withdrawal', amount, note}
+  initialInvestmentEntries: [], // {id, date, amount, note} — từng lần mua xe, tự cộng dồn thành Vốn Đầu Tư Ban Đầu
   vatPayments: [], // {id, date, amount, notes} — CHUNG CÔNG TY, tiền VAT đã nộp thật cho nhà nước
   cashBalanceCheckpoints: [], // {id, date, balance, note} — mốc chốt TIỀN MẶT ĐANG CẦM, sinh đôi với bankBalanceCheckpoints
   internalTransfers: [], // {id, date, direction:'bankToCash'|'cashToBank', amount, note} — chuyển tiền NỘI BỘ giữa 2 túi (ngân hàng/tiền mặt) của CÙNG 1 công ty, KHÔNG phải chi tiêu — không đổi Tổng Giá Trị Hiện Có
@@ -1606,7 +1618,7 @@ function withTimeout(promise, ms=15000){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, initialInvestmentEntriesSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1639,6 +1651,9 @@ async function loadAll(){
       sharedDataRef('companySettings').get(),
       sharedDataRef('ownerEquityEntries').get(),
       sharedDataRef('equityProjectInfo').get(),
+      // SỬA 2026-09-14 (Ông Chủ yêu cầu — "Vốn đầu tư ban đầu" tách thành
+      // danh sách từng lần mua xe): CHUNG CÔNG TY, y hệt ownerEquityEntries.
+      sharedDataRef('initialInvestmentEntries').get(),
       sharedDataRef('bankBalanceCheckpoints').get(),
       // SỬA 2026-09-08 (Ông Chủ phát hiện — "VAT phải nộp app tính nhưng
       // chưa có nơi ghi nhận khi đã nộp thật"): sổ ghi nhận từng lần nộp
@@ -1690,6 +1705,8 @@ async function loadAll(){
     state.supplierPayments = supplierPaymentData && Array.isArray(supplierPaymentData.list) ? supplierPaymentData.list : [];
     const ownerEquityData = ownerEquitySnap.exists ? ownerEquitySnap.data() : null;
     state.ownerEquityEntries = ownerEquityData && Array.isArray(ownerEquityData.list) ? ownerEquityData.list : [];
+    const initialInvestmentEntriesData = initialInvestmentEntriesSnap.exists ? initialInvestmentEntriesSnap.data() : null;
+    state.initialInvestmentEntries = initialInvestmentEntriesData && Array.isArray(initialInvestmentEntriesData.list) ? initialInvestmentEntriesData.list : [];
     const vatPaymentData = vatPaymentSnap.exists ? vatPaymentSnap.data() : null;
     state.vatPayments = vatPaymentData && Array.isArray(vatPaymentData.list) ? vatPaymentData.list : [];
     const cashBalanceCheckpointsData = cashBalanceCheckpointsSnap.exists ? cashBalanceCheckpointsSnap.data() : null;
@@ -2037,6 +2054,13 @@ async function saveVatPayments(){
 async function saveEquityProjectInfo(){
   try { await withTimeout(sharedDataRef('equityProjectInfo').set(state.equityProjectInfo)); return true; }
   catch(e){ showToast('Lỗi lưu thông tin dự án đầu tư: ' + (e?.message || e)); return false; }
+}
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "Vốn đầu tư ban đầu" tách thành danh
+// sách từng lần mua xe, không còn 1 ô duy nhất): lưu CHUNG CÔNG TY, y hệt
+// ownerEquityEntries — không thuộc riêng xe nào.
+async function saveInitialInvestmentEntries(){
+  try { await withTimeout(sharedDataRef('initialInvestmentEntries').set({ list: state.initialInvestmentEntries })); return true; }
+  catch(e){ showToast('Lỗi lưu danh sách vốn đầu tư ban đầu: ' + (e?.message || e)); return false; }
 }
 async function saveBankBalanceCheckpoints(){
   try { await withTimeout(sharedDataRef('bankBalanceCheckpoints').set({ list: state.bankBalanceCheckpoints })); return true; }
@@ -2399,14 +2423,40 @@ function companyWideInsuranceRegCashOut(from, to, fixedCostFromForTouch){
 /// THEO ĐÚNG SỐ NGÀY thật trong khoảng đang xem). Với tháng đang chạy dở
 /// (chưa hết ngày), 2 cách cho ra 2 số KHÁC NHAU — đổi về ĐÚNG 1 chuẩn
 /// duy nhất (proratedMonthlyCost), khớp tuyệt đối với tab Kết Quả.
-function companyWideAccrualFixedMonthly(from, to){
-  let sum = 0;
+// SỬA 2026-09-14 (Ông Chủ yêu cầu "truy quét sâu toàn bộ app khi có xe
+// 2,3..."): BẮT ĐƯỢC LỖI THẬT — hàm này đọc `s.monthlyLoanInterest`, một
+// trường CHỤP NHANH (snapshot) chỉ được làm mới cho ĐÚNG 1 xe đang xem
+// qua recomputeBankLoanMonthlyPayment() (xem hàm đó) — xe KHÔNG PHẢI xe
+// đang xem gần đây nhất có thể đang mang số LÃI VAY CŨ, không phản ánh
+// đúng dư nợ giảm dần THẬT tính đến hôm nay. Sửa: tính lãi vay LIVE ngay
+// tại đây cho từng khoản vay của TỪNG XE (dùng đúng computeBankLoanAmortization()
+// y hệt recomputeBankLoanMonthlyPayment() đang làm cho 1 xe) — không còn
+// phụ thuộc field đã lưu, luôn đúng real-time cho MỌI xe, không cần vừa
+// mở đúng xe đó gần đây.
+// SỬA 2026-09-14 (tách breakdown từng khoản từ companyWideAccrualFixedMonthly()
+// ở trên — Ông Chủ báo dòng "Khấu hao/Lãi vay/Bảo hiểm/Đăng kiểm" hiển thị
+// riêng lẻ trong "Lợi Nhuận Thực Tế Cuối Cùng" vẫn chỉ đọc đúng 1 xe dù
+// tổng cuối đã sửa cộng đủ mọi xe — 2 số lệch nhau, không cộng khớp lại
+// đúng tổng hiển thị): hàm DUY NHẤT tính đủ 4 khoản, TÁI SỬ DỤNG cho cả
+// tổng (companyWideAccrualFixedMonthly gọi lại đúng .total ở đây) LẪN 4
+// dòng hiển thị riêng — đảm bảo không bao giờ lệch nhau vì cùng 1 nguồn.
+function companyWideAccrualFixedMonthlyBreakdown(from, to){
+  let depreciation=0, loanInterest=0, insurance=0, registration=0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
-    const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0);
-    const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
-    sum += proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    const liveLoanInterestMonthly = loans.reduce((sum2,loan)=>{
+      const r = computeBankLoanAmortization(loan, new Date());
+      return sum2 + (Number(r.monthlyInterestCurrent)||0);
+    }, 0);
+    depreciation += proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, from, to);
+    loanInterest += proratedMonthlyCost(()=>liveLoanInterestMonthly, from, to);
+    insurance += proratedMonthlyCost(()=>Number(s.monthlyInsurance)||0, from, to);
+    registration += proratedMonthlyCost(()=>Number(s.monthlyRegistrationFee)||0, from, to);
   });
-  return sum;
+  return { depreciation, loanInterest, insurance, registration, total: depreciation+loanInterest+insurance+registration };
+}
+function companyWideAccrualFixedMonthly(from, to){
+  return companyWideAccrualFixedMonthlyBreakdown(from, to).total;
 }
 // SỬA 2026-09-14 (Ông Chủ yêu cầu tách "Tiền Lãi Ròng" ra khỏi "Khấu Hao
 // Xe Đã Thu" — chuyên gia phản biện: khấu hao không phải tiền mặt rời
@@ -2497,7 +2547,15 @@ function computeVehicleAccrualProfit(vid, from, to){
     return e ? (Number(e.amount)||0) : 0;
   }, from, to);
   const repairTotal = (state.allVehiclesRepairs[vid]||[]).filter(r=>r.date>=from && r.date<=to).reduce((sum,r)=>sum+(Number(r.amount)||0),0);
-  const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0);
+  // SỬA 2026-09-14 (cùng đợt "truy quét sâu khi có xe 2,3..." — sinh đôi
+  // với companyWideAccrualFixedMonthly() đã sửa): s.monthlyLoanInterest
+  // là snapshot CHỈ được làm mới cho xe đang xem gần đây nhất — xem đúng
+  // 1 xe CỤ THỂ qua hàm này (Kết Quả Từng Xe) mà lâu rồi chưa mở tab Cài
+  // Đặt của ĐÚNG xe đó thì số lãi vay có thể cũ. Tính LIVE thay vì đọc
+  // field đã lưu, y hệt cách companyWideAccrualFixedMonthly() đã sửa.
+  const liveLoanInterestMonthly = (Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []))
+    .reduce((sum2,loan)=>{ const r = computeBankLoanAmortization(loan, new Date()); return sum2 + (Number(r.monthlyInterestCurrent)||0); }, 0);
+  const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + liveLoanInterestMonthly;
   const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
   const accrualFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
   const breakEven = computeBreakEvenDetailed(shifts, roadFee, repairTotal, accrualFixedMonthly, 0, 0);
@@ -2589,11 +2647,37 @@ function computeCumulativeCompanyProfit(toOverride){
 /// cả tiền đảo, vì đó là số khớp đúng sao kê ngân hàng dùng cho hồ sơ Sở
 /// KH-ĐT. Đối chiếu ngân hàng (bank reconciliation) cũng KHÔNG loại tiền
 /// đảo — vì đó là tiền THẬT có ra/vào tài khoản ngân hàng, cần khớp đủ.
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "thêm xe về sau chỉ cần nhập số và
+// lưu, không phải cộng tay lại Vốn đầu tư ban đầu; muốn thấy rõ lộ trình
+// phát triển đội xe"): "Vốn đầu tư ban đầu" giờ là 1 DANH SÁCH từng lần
+// mua xe (state.initialInvestmentEntries — {id,date,amount,note}), TỰ
+// CỘNG DỒN thành tổng — không còn 1 ô duy nhất phải tự tính tay khi thêm
+// xe mới. Hàm này là NGUỒN DUY NHẤT trả về tổng, dùng ở MỌI nơi từng đọc
+// state.equityProjectInfo.initialInvestment (không đổi giá trị các nơi
+// đó tính ra, chỉ đổi NGUỒN LẤY SỐ). Tương thích ngược: nếu Ông Chủ chưa
+// từng thêm dòng nào vào danh sách mới (app cũ, chỉ có field flat cũ),
+// tự coi flat cũ là "Xe 1" duy nhất — không mất dữ liệu, không cần thao
+// tác gì thêm.
+function computeTotalInitialInvestment(){
+  const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+  if(list.length>0) return list.reduce((s,e)=>s+(Number(e.amount)||0),0);
+  return Number(state.equityProjectInfo.initialInvestment)||0;
+}
 function computeOwnerEquity(){
-  const initialInvestment = Number(state.equityProjectInfo.initialInvestment)||0;
+  const initialInvestment = computeTotalInitialInvestment();
   const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const cumulativeProfit = computeCumulativeCompanyProfit();
+  // SỬA 2026-09-14 (Ông Chủ xác nhận theo đúng phản biện — "mua hàng chưa
+  // bán không được coi là mất tiền, chỉ là đổi tiền mặt thành hàng tồn
+  // kho"): ĐỔI từ computeCumulativeCompanyProfit() (Dòng Tiền Ròng — trừ
+  // ĐỦ cả phần tồn kho CHƯA BÁN/tạm ứng CHƯA quyết toán/tiền mỏ CÒN giữ
+  // hộ như thể đã mất) sang computeCumulativeAccrualProfit().netProfit
+  // (Lợi Nhuận Thực Tế — CHUẨN KẾ TOÁN, đúng nguyên lý Tài Sản = Nợ Phải
+  // Trả + Vốn Chủ Sở Hữu: đổi tài sản này sang tài sản khác không làm
+  // giảm Vốn Chủ Sở Hữu). Vốn Chủ Sở Hữu sẽ TĂNG so với trước — phần tăng
+  // thêm đó chính là giá trị tồn kho/tạm ứng đang nằm dưới dạng tài sản
+  // khác, không phải số ảo (xem "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp").
+  const cumulativeProfit = computeCumulativeAccrualProfit().netProfit;
   const contributed = initialInvestment + contributedExtra;
   // SỬA 2026-09-08 (Ông Chủ hỏi — "góp 1 tỷ, rút 570tr, sao góp thêm thật
   // vẫn là 660tr?"): thêm tổng THÔ (gồm cả tiền đảo) + tổng tiền đảo mỗi
@@ -2621,14 +2705,18 @@ function computeMonthlyEquityTimeline(){
   const today = todayLocalDateStr();
   if(startDate>today) return [];
   const months = monthsBetween(startDate, today);
-  const initialInvestment = Number(state.equityProjectInfo.initialInvestment)||0;
+  const initialInvestment = computeTotalInitialInvestment();
   return months.map(ym=>{
     const dim = daysInMonth(`${ym}-01`);
     const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
     const snapshotDate = monthEnd < today ? monthEnd : today;
     const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
     const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
-    const cumulativeProfit = computeCumulativeCompanyProfit(snapshotDate);
+    // SỬA 2026-09-14 (đồng bộ với computeOwnerEquity() vừa đổi sang Lợi
+    // Nhuận Thực Tế — đúng như chú thích gốc phía trên yêu cầu "khớp đúng
+    // với số Vốn Chủ Sở Hữu hiện tại"): đổi cùng nguồn, không còn dùng
+    // Dòng Tiền Ròng nữa.
+    const cumulativeProfit = computeCumulativeAccrualProfit(snapshotDate).netProfit;
     const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit;
     return { month: ym, equity, cumulativeProfit, snapshotDate };
   });
@@ -12587,7 +12675,19 @@ function computePeriodSummary(from, to){
   //    (fullMonthlyCostIfTouched), không chia nhỏ theo ngày nữa.
   const insuranceAndRegistrationMonthly = (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const depreciationAndInterestMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0);
-  const otherFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
+  // SỬA 2026-09-14 (Ông Chủ yêu cầu "truy quét sâu khi có xe 2,3..."): BẮT
+  // ĐƯỢC LỖI THẬT — `otherFixedMonthly` (dùng cho LỢI NHUẬN THỰC TẾ) trước
+  // đây LUÔN đọc `state.settings` (đúng 1 xe đang cache trong bộ nhớ),
+  // KHÔNG hề kiểm tra isCompanyWide như houseRent/utilities/tollFee đã
+  // sửa ở trên — nghĩa là khi xem TOÀN CÔNG TY (LINH CHÍ THÀNH) với ≥2
+  // xe, Khấu Hao/Lãi Vay/Bảo Hiểm/Đăng Kiểm chỉ tính cho ĐÚNG 1 xe, bỏ
+  // sót hoàn toàn xe còn lại — Lợi Nhuận Thực Tế cấp công ty bị TÍNH THIẾU
+  // chi phí. Sửa: khi isCompanyWide, dùng companyWideAccrualFixedMonthly()
+  // (đã sửa cộng dồn đúng TẤT CẢ xe, lãi vay tính LIVE) — khi xem riêng 1
+  // xe cụ thể, giữ NGUYÊN cách tính cũ (đúng, vì đang xem đúng CHI PHÍ
+  // CỦA XE ĐÓ).
+  const otherFixedMonthly = isCompanyWide ? companyWideAccrualFixedMonthly(from, to)
+    : proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
   const otherFixedMonthlyForCashFlow = (state.settings.bankLoans||[]).reduce((sum,loan)=>sum+bankLoanRealCostForRange(loan, from, to), 0)
     + fullMonthlyCostIfTouched(()=>insuranceAndRegistrationMonthly, from, to);
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly;
@@ -13035,6 +13135,19 @@ function renderResults(){
   // lấy riêng ngay dưới đây (yêu cầu Ông Chủ 2026-08-15).
   const otherFixedMonthly = periodSummary.otherFixedMonthly;
   const otherFixedMonthlyForCashFlow = periodSummary.otherFixedMonthlyForCashFlow;
+  // SỬA 2026-09-14 (tiếp — đồng bộ với otherFixedMonthly đã sửa ở
+  // computePeriodSummary()): 4 dòng hiển thị riêng (Khấu hao/Lãi vay/Bảo
+  // hiểm/Đăng kiểm) trong "Lợi Nhuận Thực Tế Cuối Cùng" phải LUÔN cộng
+  // khớp đúng bằng otherFixedMonthly ở trên — khi đang xem TOÀN CÔNG TY,
+  // dùng breakdown cộng dồn TẤT CẢ xe (companyWideAccrualFixedMonthlyBreakdown,
+  // CÙNG NGUỒN với otherFixedMonthly); khi xem riêng 1 xe, giữ nguyên
+  // state.settings của đúng xe đó.
+  const fixedCostBreakdownForDisplay = periodSummary.isCompanyWide
+    ? companyWideAccrualFixedMonthlyBreakdown(from, to)
+    : { depreciation: Number(state.settings.monthlyVehicleDepreciation)||0,
+        loanInterest: Number(state.settings.monthlyLoanInterest)||0,
+        insurance: Number(state.settings.monthlyInsurance)||0,
+        registration: Number(state.settings.monthlyRegistrationFee)||0 };
   // roadFee có thể bị Ông Chủ ghi đè riêng cho màn hình này (state.resultsRoadFeeOverride)
   // nên finalNetProfit tính lại tại đây thay vì lấy thẳng periodSummary.finalNetProfit,
   // để tôn trọng đúng giá trị đang hiển thị trên màn hình.
@@ -13168,10 +13281,10 @@ function renderResults(){
             <tr class="grid-total-row"><td>= LÃI GỘP MUA-BÁN</td><td class="num" style="color:${gTotal.takeHomeTotal>=0?'var(--profit)':'var(--loss)'}">${gTotal.takeHomeTotal>=0?'+':''}${fmtVND(gTotal.takeHomeTotal)}</td></tr>
             <tr><td>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, phát sinh, sửa chữa/khấu hao, luật đường, nhà, điện nước, cầu đường)</td><td class="num">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee + houseRent + utilities + tollFee)}</td></tr>
             <tr class="grid-total-row"><td>= Lợi nhuận gộp vận hành</td><td class="num" style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities-tollFee)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities-tollFee)}</td></tr>
-            <tr><td>− Khấu hao xe dự kiến / tháng</td><td class="num">${fmtVND(state.settings.monthlyVehicleDepreciation||0)}</td></tr>
-            <tr><td>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</td><td class="num">${fmtVND(state.settings.monthlyLoanInterest||0)}</td></tr>
-            <tr><td>− Bảo hiểm xe / tháng</td><td class="num">${fmtVND(state.settings.monthlyInsurance||0)}</td></tr>
-            <tr><td>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</td><td class="num">${fmtVND(state.settings.monthlyRegistrationFee||0)}</td></tr>
+            <tr><td>− Khấu hao xe dự kiến / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.depreciation)}</td></tr>
+            <tr><td>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.loanInterest)}</td></tr>
+            <tr><td>− Bảo hiểm xe / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.insurance)}</td></tr>
+            <tr><td>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.registration)}</td></tr>
             <tr class="grid-total-row"><td>= LỢI NHUẬN THỰC TẾ</td><td class="num" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</td></tr>
           </tbody>
         </table>
@@ -16433,6 +16546,64 @@ function renderPerVehicleDataNotice(){
       ${state.vehicles.map(v=>`<button class="btn btn-ghost btn-block per-vehicle-notice-btn" data-vid="${v.id}">🚛 ${escapeHtml(v.name||v.plate||'(chưa đặt tên)')}</button>`).join('')}
     </div>`;
 }
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "Vốn đầu tư ban đầu" tách thành danh
+// sách từng lần mua xe, tự cộng dồn, không phải cộng tay khi thêm xe
+// mới): modal thêm/sửa 1 lần đầu tư — mẫu y hệt openMonthlyAmountEditor()
+// đã dùng ở nơi khác cho nhất quán.
+function openInvestmentEntryEditor(id){
+  const existing = id ? (state.initialInvestmentEntries||[]).find(e=>e.id===id) : null;
+  const draft = existing ? {...existing} : { id: uid('invest'), date: todayLocalDateStr(), amount: 0, note: '' };
+  let amountVal = draft.amount;
+  openModal(`
+    <h3>🚛 ${existing?'Sửa':'Thêm'} Lần Đầu Tư Xe</h3>
+    <div class="field">
+      <label>Ngày mua/đầu tư</label>
+      <input type="date" id="ie_date" value="${draft.date}">
+    </div>
+    <div class="field">
+      <label>Số tiền (giá xe + chi phí liên quan)</label>
+      <input type="text" inputmode="decimal" id="ie_amount">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Ghi chú (VD: tên xe/biển số)</label>
+      <input type="text" id="ie_note" value="${escapeHtml(draft.note||'')}" placeholder="VD: Xe 29E-691.12">
+    </div>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      ${existing ? '<button class="btn btn-danger" id="ie_delBtn">Xoá</button>' : ''}
+      <button class="btn btn-ghost" id="ie_cancelBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="ie_saveBtn">Lưu</button>
+    </div>
+  `);
+  attachMoneyInput(document.getElementById('ie_amount'), amountVal, v=>amountVal=v);
+  document.getElementById('ie_cancelBtn').addEventListener('click', closeModal);
+  const afterWrite = async (msg)=>{
+    closeModal();
+    showToast(msg);
+    saveMainScroll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  };
+  document.getElementById('ie_saveBtn').addEventListener('click', async ()=>{
+    const date = document.getElementById('ie_date').value;
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(!(amountVal>0)){ showToast('Nhập số tiền trước đã.'); return; }
+    draft.date = date;
+    draft.amount = amountVal;
+    draft.note = document.getElementById('ie_note').value.trim();
+    if(!Array.isArray(state.initialInvestmentEntries)) state.initialInvestmentEntries = [];
+    const idx = state.initialInvestmentEntries.findIndex(e=>e.id===draft.id);
+    if(idx>=0) state.initialInvestmentEntries[idx]=draft; else state.initialInvestmentEntries.push(draft);
+    if(!(await saveInitialInvestmentEntries())) return;
+    afterWrite(existing?'Đã lưu.':'Đã thêm.');
+  });
+  const delBtn = document.getElementById('ie_delBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá lần đầu tư này?')) return;
+    state.initialInvestmentEntries = (state.initialInvestmentEntries||[]).filter(e=>e.id!==draft.id);
+    if(!(await saveInitialInvestmentEntries())) return;
+    afterWrite('Đã xoá.');
+  });
+}
 function renderCompanyDashboardPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
@@ -16573,6 +16744,7 @@ function renderCompanyDashboardPage(){
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
+        <div class="hint" style="margin-top:6px;">= Vốn đầu tư + Góp thêm − Rút ra + Lợi Nhuận Thực Tế (chuẩn kế toán — tồn kho/tạm ứng chưa quyết toán vẫn tính là tài sản, không trừ như đã mất). Xem đúng phần đang nằm dưới dạng hàng tồn kho ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp".</div>
       </div>
 
       ${charterStatus.registered>0 ? `
@@ -16749,10 +16921,42 @@ function renderCompanyDashboardPage(){
     <section class="group">
       <h3>⚙️ Thông Tin Dự Án</h3>
       <div class="card">
-        <div class="field">
-          <label>Vốn đầu tư ban đầu (giá xe + chi phí liên quan mua xe)</label>
-          <input type="text" inputmode="decimal" id="epi_investment">
-        </div>
+        <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🚛 Vốn Đầu Tư Ban Đầu — Lộ Trình Từng Xe</div>
+        <div class="hint" style="margin-top:0; margin-bottom:10px;">Mỗi lần mua thêm xe, chỉ cần bấm "+ Thêm Lần Đầu Tư" — không cần tự cộng tay số cũ. Tổng dưới đây TỰ ĐỘNG cộng dồn tất cả các lần.</div>
+        ${(()=>{
+          const list = [...(state.initialInvestmentEntries||[])];
+          // Tương thích ngược: chưa từng thêm dòng nào (app cũ) — hiện
+          // tạm 1 dòng ảo từ field flat cũ để Ông Chủ thấy đúng lộ trình
+          // ngay cả khi chưa bấm "+ Thêm" lần nào, không đánh mất số cũ.
+          const legacyAmount = Number(state.equityProjectInfo.initialInvestment)||0;
+          const showLegacyRow = list.length===0 && legacyAmount>0;
+          const total = list.length>0 ? list.reduce((s,e)=>s+(Number(e.amount)||0),0) : legacyAmount;
+          return `
+          ${(list.length>0 || showLegacyRow) ? `
+          <div class="grid-table-wrap">
+            <table class="grid-table">
+              <thead><tr><th>Ngày</th><th>Ghi Chú</th><th class="num">Số Tiền</th><th></th></tr></thead>
+              <tbody>
+                ${showLegacyRow ? `<tr>
+                  <td>${state.equityProjectInfo.startDate?formatDateVN(state.equityProjectInfo.startDate):'—'}</td>
+                  <td>Xe đầu tiên <span class="hint" style="margin:0;">(số cũ, chưa tách dòng)</span></td>
+                  <td class="num">${fmtVND(legacyAmount)}</td>
+                  <td></td>
+                </tr>` : [...list].sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr>
+                  <td>${formatDateVN(e.date)}</td>
+                  <td>${escapeHtml(e.note||'—')}</td>
+                  <td class="num">${fmtVND(e.amount)}</td>
+                  <td><button class="btn btn-ghost btn-sm investEntryEditBtn" data-id="${e.id}" style="width:auto; padding:4px 8px;">✏️</button></td>
+                </tr>`).join('')}
+                <tr class="grid-total-row"><td colspan="2" style="text-align:left;">= TỔNG Vốn Đầu Tư Ban Đầu</td><td class="num" colspan="2">${fmtVND(total)}</td></tr>
+              </tbody>
+            </table>
+          </div>` : '<div class="hint" style="margin-bottom:8px;">Chưa có lần đầu tư nào — bấm "+ Thêm Lần Đầu Tư" bên dưới để bắt đầu.</div>'}
+          <button class="btn btn-accent btn-block" id="addInvestEntryBtn" style="margin-top:10px;">🚛➕ Thêm Lần Đầu Tư (Xe Mới)</button>
+          `;
+        })()}
+      </div>
+      <div class="card" style="margin-top:12px;">
         <div class="field">
           <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
           <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
@@ -16835,7 +17039,6 @@ function renderCompanyDashboardPage(){
     <section class="group">
       <h3>🏦 Khoản Vay Ngân Hàng</h3>
       ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `
-      <div class="hint" style="margin-bottom:10px;">Đúng cách ngân hàng VN tính lãi vay mua xe tải: GỐC trả đều mỗi tháng, LÃI tính trên dư nợ còn lại — nên số tiền phải trả GIẢM DẦN qua từng tháng, không cố định. Mỗi khoản vay (vay mua xe, vay vốn lưu động...) tính RIÊNG, hoàn toàn độc lập với nhau.</div>
       <div id="loanListWrap"></div>
       <button class="btn btn-accent btn-block" id="addLoanBtn" style="margin-top:10px; font-size:15.5px; padding:14px;">🏦➕ Thêm Khoản Vay Mới</button>
       `}
@@ -16843,7 +17046,6 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>🧾 Đã Nộp Thuế VAT</h3>
-      <div class="hint" style="margin-bottom:10px;">Ghi nhận từng lần đã nộp thật tiền VAT cho nhà nước — dùng để Kế Toán Nội Bộ khớp đúng (khoản này luôn qua tài khoản doanh nghiệp).</div>
       ${(()=>{
         // SỬA 2026-09-14 (Ông Chủ báo — "khu vực nộp thuế phải thêm cập
         // nhật số real time"): TRƯỚC ĐÂY mục này CHỈ có 1 nút bấm vào mới
@@ -16928,12 +17130,9 @@ function renderCompanyDashboardPage(){
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
-  let epiInvestmentVal = state.equityProjectInfo.initialInvestment||0;
-  attachMoneyInput(document.getElementById('epi_investment'), epiInvestmentVal, v=>epiInvestmentVal=v);
   let epiCharterCapitalVal = state.equityProjectInfo.registeredCharterCapital||0;
   attachMoneyInput(document.getElementById('epi_charterCapital'), epiCharterCapitalVal, v=>epiCharterCapitalVal=v);
   document.getElementById('epi_saveBtn').addEventListener('click', async ()=>{
-    state.equityProjectInfo.initialInvestment = epiInvestmentVal;
     state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
     state.equityProjectInfo.registeredCharterCapital = epiCharterCapitalVal;
     state.equityProjectInfo.charterCapitalDeadline = document.getElementById('epi_charterDeadline').value || null;
@@ -16942,6 +17141,11 @@ function renderCompanyDashboardPage(){
     saveMainScroll();
     renderCompanyDashboardPage();
     restoreMainScroll();
+  });
+  const addInvestEntryBtn = document.getElementById('addInvestEntryBtn');
+  if(addInvestEntryBtn) addInvestEntryBtn.addEventListener('click', ()=>openInvestmentEntryEditor(null));
+  document.querySelectorAll('.investEntryEditBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>openInvestmentEntryEditor(btn.dataset.id));
   });
   const oeCharterLabel = document.getElementById('oe_charterLabel');
   const oeRecycledLabel = document.getElementById('oe_recycledLabel');
@@ -17485,12 +17689,10 @@ function renderCashFlowBreakdownDetailPage(){
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">6 khoản này lấy từ Cài Đặt/Linh Chí Thành theo tháng (không phải sổ giao dịch rời rạc từng ngày) — xem đúng số gốc ở đúng mục tương ứng.</div>
     </section>
 
     <section class="group">
       <h3>🧮 Cách Tính Ra Dòng Tiền Ròng Tính Đến Hôm Nay</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:8px;">Cộng đúng 9 khoản ở trên, tính lại MỖI LẦN mở trang này — luôn khớp dữ liệu mới nhất. Đây là tiền mặt/ngân hàng THỰC đã ra/vào — không phải Lợi Nhuận kế toán (xem chú thích ở từng khoản phía trên).</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <tbody>
