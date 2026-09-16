@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #256';
+const APP_BUILD = '2026-09-14 · #257';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -16631,6 +16631,7 @@ function renderCompanyDashboardPage(){
             </tbody>
           </table>
         </div>
+        <div class="hint" style="margin-top:8px;">Muốn xem ĐÚNG từng khoản (kèm nhãn tiền đảo/Vốn Điều Lệ/nguồn/trước-sau mốc chốt) — bấm "📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra" bên dưới, đây là nơi DUY NHẤT hiện đủ mọi chi tiết của từng khoản, các bảng khác chỉ là tổng đã lọc theo 1 góc nhìn.</div>
       </div>
       ` : ''}
       <button class="btn btn-ghost btn-block" id="cashFlowLedgerBtn" style="margin-top:2px;">📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra</button>
@@ -17055,7 +17056,8 @@ function computeCompanyCashFlowLedger(){
   });
   state.ownerEquityEntries.forEach(e=>{
     entries.push({ date:e.date, category: e.type==='contribution' ? 'Góp vốn' : 'Rút vốn',
-      amount:Number(e.amount)||0, sign: e.type==='contribution' ? 1 : -1, desc: e.note||'', id:e.id, method: e.method||'bank' });
+      amount:Number(e.amount)||0, sign: e.type==='contribution' ? 1 : -1, desc: e.note||'', id:e.id, method: e.method||'bank',
+      isRecycled: !!e.isRecycled, isCharterCapital: !!e.isCharterCapital });
   });
   // SỬA 2026-09-14 (audit "Kế Toán Nội Bộ"): thêm 2 nguồn tiền THẬT trước
   // đây chưa từng hiện ở bảng kê này — Ứng Riêng Cho Tài Xế + Tip/Thưởng
@@ -17083,6 +17085,17 @@ function renderCompanyCashFlowLedgerPage(){
   scrollMainToTop();
   const entries = computeCompanyCashFlowLedger();
   const cashFlowBreakdown = computeCumulativeCashFlowBreakdown();
+  // SỬA 2026-09-14 (Ông Chủ báo — "thấy khoản Góp/Rút Vốn hiện nhiều nơi,
+  // không biết xếp vào hạng mục nào, không yên tâm"): BẮT ĐÚNG NGUYÊN
+  // NHÂN — cùng 1 khoản Góp/Rút Vốn có tới 4 NHÃN khác nhau (Tiền đảo hay
+  // không / Tính vào Vốn Điều Lệ hay không / Ngân hàng hay Tiền mặt /
+  // Trước hay sau mốc chốt Kế Toán Nội Bộ), nhưng mỗi trang trong app chỉ
+  // lọc/hiện ĐÚNG 1 nhãn — nên cùng 1 khoản "trông khác nhau" ở mỗi nơi.
+  // Sửa tận gốc: gộp về ĐÚNG 1 nơi duy nhất (trang này) hiện ĐỦ CẢ 4 nhãn
+  // cùng lúc trên mỗi dòng — không cần đoán, không cần nhớ, nhìn 1 dòng
+  // là biết hết.
+  const latestBankCheckpoint = [...state.bankBalanceCheckpoints].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const checkpointDate = latestBankCheckpoint ? latestBankCheckpoint.date : null;
   const totalFromCustomers = state.sitePayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const totalContributed = state.ownerEquityEntries.filter(e=>e.type==='contribution').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const totalToSuppliersNet = state.supplierPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
@@ -17110,23 +17123,33 @@ function renderCompanyCashFlowLedgerPage(){
   ];
   const groupTableHtml = g => {
     const total = g.rows.reduce((s,e)=>s+(e.sign>0?1:-1)*e.amount, 0);
+    const isEquityGroup = g.title.includes('Góp Vốn') || g.title.includes('Rút Vốn');
     return `
     <section class="group">
       <h3 style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
         <span>${g.title}</span>
         <span style="font-size:14px; font-weight:800; color:${g.color || (total>=0?'var(--profit)':'var(--loss)')};">${total>=0?'+':'−'}${fmtVND(Math.abs(total))}</span>
       </h3>
+      ${isEquityGroup ? `<div class="hint" style="margin-top:-6px; margin-bottom:8px;">Mỗi dòng hiện ĐỦ 4 nhãn: 🔄/✅ tiền đảo hay tiền mới, 📜 có tính vào Vốn Điều Lệ không, 🏦/💵 nguồn, ⏰ trước/sau mốc chốt Kế Toán Nội Bộ${checkpointDate?` (${formatDateVN(checkpointDate)})`:''}.</div>` : ''}
       ${g.rows.length===0 ? '<div class="hint">Chưa có giao dịch nào.</div>' : `
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Ngày</th><th>Nội Dung</th><th>Phương Thức</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            ${g.rows.map(e=>`<tr>
+            ${g.rows.map(e=>{
+              const badges = [];
+              if(isEquityGroup){
+                badges.push(e.isRecycled ? '🔄 Tiền đảo' : '✅ Tiền mới');
+                if(e.isCharterCapital) badges.push('📜 Tính vào Vốn Điều Lệ');
+                if(checkpointDate) badges.push(e.date<=checkpointDate ? '⏰ Trước mốc chốt' : '⏰ Sau mốc chốt');
+              }
+              return `<tr>
               <td>${formatDateVN(e.date)}</td>
-              <td>${e.desc?escapeHtml(e.desc):'—'}${e.category==='Mỏ hoàn tiền'?' <span class="hint" style="margin:0;">(hoàn tiền)</span>':''}</td>
+              <td>${e.desc?escapeHtml(e.desc):'—'}${e.category==='Mỏ hoàn tiền'?' <span class="hint" style="margin:0;">(hoàn tiền)</span>':''}${badges.length?`<div class="hint" style="margin-top:3px;">${badges.join(' · ')}</div>`:''}</td>
               <td>${e.method==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</td>
               <td class="num" style="font-weight:700; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</td>
-            </tr>`).join('')}
+            </tr>`;
+            }).join('')}
             <tr class="grid-total-row"><td colspan="3" style="text-align:left;">TỔNG ${g.title.replace(/^[^\s]+\s/,'')}</td><td class="num">${total>=0?'+':'−'}${fmtVND(Math.abs(total))}</td></tr>
           </tbody>
         </table>
@@ -17949,6 +17972,7 @@ function renderBankReconDetailPage(mode){
     ${showBank ? `
     <section class="group">
       <div style="font-weight:800; font-size:13px; margin:0 0 8px 2px;">🏦 Khách Trả / Trả NCC / Góp-Rút Vốn (Ngân Hàng)</div>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Chỉ hiện giao dịch SAU mốc chốt. Riêng khoản Góp/Rút Vốn muốn xem ĐỦ mọi nhãn (tiền đảo, Vốn Điều Lệ...) và cả lịch sử TRƯỚC mốc chốt — xem ở "🏢 Linh Chí Thành → 📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra".</div>
       ${entries.length===0 ? '<div class="hint">Chưa có giao dịch ngân hàng nào sau mốc chốt.</div>' : `
       <div class="grid-table-wrap">
         <table class="grid-table">
@@ -17983,6 +18007,7 @@ function renderBankReconDetailPage(mode){
     ${showCash ? `
     <section class="group">
       <div style="font-weight:800; font-size:13px; margin:0 0 8px 2px;">💵 Khách Trả / Trả NCC / Góp-Rút Vốn (Tiền Mặt)</div>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Chỉ hiện giao dịch SAU mốc chốt. Riêng khoản Góp/Rút Vốn muốn xem ĐỦ mọi nhãn (tiền đảo, Vốn Điều Lệ...) và cả lịch sử TRƯỚC mốc chốt — xem ở "🏢 Linh Chí Thành → 📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra".</div>
       ${cashEntries.length===0 ? '<div class="hint">Chưa có giao dịch tiền mặt nào sau mốc chốt.</div>' : `
       <div class="grid-table-wrap">
         <table class="grid-table">
