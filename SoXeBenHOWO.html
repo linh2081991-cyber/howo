@@ -690,7 +690,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #251';
+const APP_BUILD = '2026-09-14 · #252';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -15325,6 +15325,7 @@ function openLoanEditor(loanId){
           ${r.isPaidOff ? '' : `
           <div class="formula-divider" style="margin:10px 0;"></div>
           <div style="font-weight:700; font-size:13px; margin-bottom:2px;">✅ Xác Nhận Đã Trả Từng Kỳ</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Hiện ĐỦ mọi kỳ đã tới hạn từ trước tới nay (không giới hạn số dòng, không ẩn kỳ nào), cộng thêm đúng 1 kỳ sắp tới để tick sớm nếu muốn.</div>
           <div id="loanPaidChecklistWrap">
             ${(()=>{
               const todayD = new Date(todayLocalDateStr()+'T00:00:00');
@@ -15334,24 +15335,33 @@ function openLoanEditor(loanId){
               const duePeriods = schedule.filter(row=>row.dueDate<=todayD || row.periodIndex===nextUnpaidIdx);
               if(duePeriods.length===0) return `<div class="hint" style="margin:0;">Chưa tới hạn kỳ đầu tiên.</div>`;
               const paidSet = new Set(Array.isArray(draft.paidMonths)?draft.paidMonths:[]);
-              return duePeriods.map(row=>{
-                const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
-                const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-                const checked = paidSet.has(ym);
-                const notYetDue = row.dueDate>todayD;
-                const periodMethod = (draft.paidMethods && draft.paidMethods[ym]) || 'bank';
-                return `
-                <div class="summary-row" style="align-items:center;">
-                  <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)}${notYetDue?' <span style="color:var(--ink-soft); font-weight:400;">(chưa tới hạn)</span>':''} <span style="color:var(--ink-soft); font-weight:400;">(${fmtVND(row.total)})</span></span>
-                  <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-                    <select class="loan-period-method" data-ym="${ym}" style="width:auto; padding:4px 6px; font-size:12.5px; ${checked?'':'display:none;'}">
-                      <option value="bank" ${periodMethod==='bank'?'selected':''}>🏦</option>
-                      <option value="cash" ${periodMethod==='cash'?'selected':''}>💵</option>
-                    </select>
-                    <input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="flex-shrink:0; width:20px; height:20px;">
-                  </span>
-                </div>`;
-              }).join('');
+              return `
+              <div class="grid-table-wrap">
+                <table class="grid-table">
+                  <thead><tr><th>Kỳ</th><th style="white-space:nowrap;">Hạn</th><th class="num">Số Tiền</th><th>Nguồn</th><th style="text-align:center;">Đã Trả</th></tr></thead>
+                  <tbody>
+                    ${duePeriods.map(row=>{
+                      const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+                      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+                      const checked = paidSet.has(ym);
+                      const notYetDue = row.dueDate>todayD;
+                      const periodMethod = (draft.paidMethods && draft.paidMethods[ym]) || 'bank';
+                      return `<tr>
+                        <td>Kỳ ${row.periodIndex+1}${notYetDue?'<br><span class="hint" style="margin:0;">(chưa tới hạn)</span>':''}</td>
+                        <td style="white-space:nowrap;">${formatDateVN(dueStr)}</td>
+                        <td class="num">${fmtVND(row.total)}</td>
+                        <td>
+                          <select class="loan-period-method" data-ym="${ym}" style="width:auto; padding:4px 6px; font-size:12.5px; ${checked?'':'display:none;'}">
+                            <option value="bank" ${periodMethod==='bank'?'selected':''}>🏦</option>
+                            <option value="cash" ${periodMethod==='cash'?'selected':''}>💵</option>
+                          </select>
+                        </td>
+                        <td style="text-align:center;"><input type="checkbox" class="loan-period-paid-chk" data-ym="${ym}" ${checked?'checked':''} style="width:20px; height:20px;"></td>
+                      </tr>`;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>`;
             })()}
           </div>
           `}
@@ -15405,19 +15415,26 @@ function openLoanEditor(loanId){
     const nextUnpaidIndex = loanPaidPeriodsCount(draft); // kỳ đã tick 0..N-1 → kỳ tiếp theo cần đóng là đúng index này
     wrap.innerHTML = `
       <h3 style="margin-top:0;">📅 Lịch Trả Nợ Chi Tiết Từng Tháng</h3>
-      <div class="hint" style="margin-bottom:10px;">Đủ ${rows.length} kỳ suốt vòng đời khoản vay — dòng tô đậm là kỳ TIẾP THEO cần đóng (theo đúng các kỳ đã tick ở khối "Xác Nhận Đã Trả Từng Kỳ" phía trên).</div>
-      <div style="max-height:340px; overflow-y:auto;">
-        ${rows.map(row=>{
-          const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-          const isCurrent = row.periodIndex===nextUnpaidIndex;
-          return `
-          <div class="kv" style="padding:6px 0; ${isCurrent?'font-weight:800; color:var(--accent);':''}">
-            <span>Kỳ ${row.periodIndex+1} — hạn ${formatDateVN(dueStr)} (${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm)${row.inGracePeriod?' <span style="color:var(--accent); font-weight:800;">— Ân Hạn</span>':''}</span>
-            <span class="val">${fmtVND(row.total)}</span>
-          </div>
-          <div class="hint" style="margin:0 0 6px; ${isCurrent?'font-weight:800;':''}">Gốc ${fmtVND(row.monthlyPrincipal)}${row.inGracePeriod?' (ân hạn, chưa trả gốc)':''} + Lãi ${fmtVND(row.interest)} · Dư nợ sau kỳ: ${fmtVND(row.remainingBalanceAfter)}</div>
-          `;
-        }).join('')}
+      <div class="hint" style="margin-bottom:10px;">Đủ ${rows.length} kỳ suốt vòng đời khoản vay, không ẩn kỳ nào — dòng tô đậm là kỳ TIẾP THEO cần đóng (theo đúng các kỳ đã tick ở khối "Xác Nhận Đã Trả Từng Kỳ" phía trên).</div>
+      <div class="grid-table-wrap" style="max-height:400px; overflow-y:auto;">
+        <table class="grid-table">
+          <thead><tr><th>Kỳ</th><th style="white-space:nowrap;">Hạn</th><th class="num">Gốc</th><th class="num">Lãi</th><th class="num">Tổng</th><th class="num">Dư Nợ Sau Kỳ</th></tr></thead>
+          <tbody>
+            ${rows.map(row=>{
+              const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+              const isCurrent = row.periodIndex===nextUnpaidIndex;
+              const rowStyle = isCurrent ? 'font-weight:800; color:var(--accent); background:var(--accent-soft);' : '';
+              return `<tr style="${rowStyle}">
+                <td>Kỳ ${row.periodIndex+1}${row.inGracePeriod?'<br><span style="font-size:11px; font-weight:800;">Ân Hạn</span>':''}</td>
+                <td style="white-space:nowrap;">${formatDateVN(dueStr)}<br><span class="hint" style="margin:0; ${isCurrent?'color:inherit;':''}">${row.daysInPeriod} ngày, ${row.annualRatePercent.toFixed(2)}%/năm</span></td>
+                <td class="num">${fmtVND(row.monthlyPrincipal)}</td>
+                <td class="num">${fmtVND(row.interest)}</td>
+                <td class="num" style="font-weight:700;">${fmtVND(row.total)}</td>
+                <td class="num">${fmtVND(row.remainingBalanceAfter)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
     `;
   }
@@ -16839,13 +16856,13 @@ function renderCompanyDashboardPage(){
   // mới ngay trong đó (xem renderBankReconDetailPage()). Không còn card
   // Retro cũ để cuộn tới nữa.
   const ktnbGoBankBtn = document.getElementById('ktnbGoBankBtn');
-  if(ktnbGoBankBtn) ktnbGoBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  if(ktnbGoBankBtn) ktnbGoBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('bank'); });
   const ktnbDetailBankBtn = document.getElementById('ktnbDetailBankBtn');
-  if(ktnbDetailBankBtn) ktnbDetailBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  if(ktnbDetailBankBtn) ktnbDetailBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('bank'); });
   const ktnbGoCashBtn = document.getElementById('ktnbGoCashBtn');
-  if(ktnbGoCashBtn) ktnbGoCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  if(ktnbGoCashBtn) ktnbGoCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('cash'); });
   const ktnbDetailCashBtn = document.getElementById('ktnbDetailCashBtn');
-  if(ktnbDetailCashBtn) ktnbDetailCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage(); });
+  if(ktnbDetailCashBtn) ktnbDetailCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('cash'); });
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
@@ -17419,7 +17436,17 @@ function renderLedgerItemsTable(title, items){
         </table>
       </div>`;
 }
-function renderBankReconDetailPage(){
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "luồng tiền bên nào thì bên ấy hiển
+// thị chứ không hiển thị chung"): thêm tham số `mode` ('bank'|'cash').
+// Phần chung (Tổng Giá Trị Hiện Có + bảng kê) vẫn hiện cả 2 bên như cũ —
+// đây là con số TỔNG, không thuộc riêng bên nào. Nhưng khối "🏦 TCB
+// Bank" (mốc chốt + form khai báo + lịch sử + toàn bộ bảng ngân hàng)
+// CHỈ hiện khi mode='bank', và khối "💵 Tiền Mặt" tương ứng CHỈ hiện khi
+// mode='cash' — không còn trộn chung cả 2 bên trên cùng 1 lần bấm nữa.
+function renderBankReconDetailPage(mode){
+  mode = mode==='cash' ? 'cash' : 'bank';
+  const showBank = mode==='bank';
+  const showCash = mode==='cash';
   scrollMainToTop();
   const bankRecon = computeBankBalanceReconciliation();
   // SỬA 2026-09-14 LẦN 4 (Ông Chủ báo lỗi hệ thống thật — "Cannot access
@@ -17619,8 +17646,8 @@ function renderBankReconDetailPage(){
       <button class="btn btn-ghost btn-sm" id="bankReconDetailBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
-      <h2 style="margin-bottom:2px;">🧾 Chi Tiết Dòng Tiền — Kế Toán Nội Bộ</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Tính từ sau mốc chốt ${formatDateVN(bankRecon.checkpoint.date)} tới hôm nay. TCB Bank và Tiền Mặt đều là tài sản THẬT của công ty — Tổng Giá Trị Hiện Có dưới đây cộng đủ cả 2 (không riêng ngân hàng). Xuống các mục bên dưới mới tách riêng từng dòng tiền Ngân hàng và Tiền mặt để dễ đối chiếu.`:'Chưa khai mốc chốt nào'}</div>
+      <h2 style="margin-bottom:2px;">🧾 Chi Tiết Dòng Tiền — ${showBank?'🏦 Ngân Hàng':'💵 Tiền Mặt'}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${bankRecon?`Tính từ sau mốc chốt ${formatDateVN((showBank?bankRecon:cashRecon)?(showBank?bankRecon:cashRecon).checkpoint.date:bankRecon.checkpoint.date)} tới hôm nay. TCB Bank và Tiền Mặt đều là tài sản THẬT của công ty — Tổng Giá Trị Hiện Có dưới đây cộng đủ cả 2 (không riêng ${showBank?'ngân hàng':'tiền mặt'}). Trang này chỉ hiện riêng dòng tiền ${showBank?'🏦 Ngân Hàng':'💵 Tiền Mặt'} — xem bên còn lại thì quay về bấm đúng nút "Chi tiết" của bên đó.`:'Chưa khai mốc chốt nào'}</div>
       ${bankRecon ? `
       <div class="card" style="text-align:center; border:2px solid var(--accent); background:var(--accent-soft);">
         <div style="font-size:13px; font-weight:700;">💰 TỔNG GIÁ TRỊ HIỆN CÓ</div>
@@ -17641,6 +17668,7 @@ function renderBankReconDetailPage(){
       ` : ''}
     </section>
 
+    ${showBank ? `
     <section class="group">
       <div class="card" style="border:1.5px solid var(--accent);">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🏦 TCB Bank</div>
@@ -17688,7 +17716,9 @@ function renderBankReconDetailPage(){
           </div>`).join('')}
       </div>` : ''}
     </section>
+    ` : ''}
 
+    ${showCash ? `
     <section class="group">
       <div class="card" style="border:1.5px solid var(--accent);">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">💵 Tiền Mặt</div>
@@ -17755,8 +17785,14 @@ function renderBankReconDetailPage(){
             </div>
           </div>`).join('')}
       </div>` : ''}
-      <button class="btn btn-ghost btn-block" id="ktnbTransferShortcutBtn2" style="margin-top:14px;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</button>
     </section>
+    ` : ''}
+
+    <section class="group">
+      <button class="btn btn-ghost btn-block" id="ktnbTransferShortcutBtn2">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</button>
+    </section>
+
+    ${showBank ? `
     <section class="group">
       <div style="font-weight:800; font-size:13px; margin:0 0 8px 2px;">🏦 Khách Trả / Trả NCC / Góp-Rút Vốn (Ngân Hàng)</div>
       ${entries.length===0 ? '<div class="hint">Chưa có giao dịch ngân hàng nào sau mốc chốt.</div>' : `
@@ -17788,7 +17824,9 @@ function renderBankReconDetailPage(){
       ${renderLedgerItemsTable('🏦 Đã Nộp Thuế VAT', bankVatPaymentItems)}
       ${renderLedgerItemsTable('🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)', bankTransferItems)}
     </section>
+    ` : ''}
 
+    ${showCash ? `
     <section class="group">
       <div style="font-weight:800; font-size:13px; margin:0 0 8px 2px;">💵 Khách Trả / Trả NCC / Góp-Rút Vốn (Tiền Mặt)</div>
       ${cashEntries.length===0 ? '<div class="hint">Chưa có giao dịch tiền mặt nào sau mốc chốt.</div>' : `
@@ -17814,52 +17852,64 @@ function renderBankReconDetailPage(){
       ${renderLedgerItemsTable('💵 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)', cashInsuranceRegItems)}
       ${renderLedgerItemsTable('💵 Đã Nộp Thuế VAT', cashVatPaymentItems)}
     </section>
+    ` : ''}
   `;
   // SỬA 2026-09-14 LẦN 2 (chuyển form khai mốc chốt + lịch sử từ dashboard
   // sang thẳng trang Chi Tiết này, theo yêu cầu Ông Chủ "bỏ hẳn khối bảng
   // cũ ở màn chính"): giữ NGUYÊN VẸN logic lưu/xoá — chỉ đổi noi gọi lại
   // là renderBankReconDetailPage() (ở lại đúng trang này) thay vì
   // renderCompanyDashboardPage() như trước.
-  let bbcBalanceVal = 0;
-  attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
-  document.getElementById('bbc_addBtn').addEventListener('click', async ()=>{
-    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const date = document.getElementById('bbc_date').value;
-    const note = document.getElementById('bbc_note').value.trim();
-    if(!date){ showToast('Chọn ngày trước đã.'); return; }
-    if(state.bankBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
-    state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
-    if(!(await saveBankBalanceCheckpoints())) return;
-    showToast('Đã khai báo mốc chốt.');
-    renderBankReconDetailPage();
-  });
+  // SỬA 2026-09-14 LẦN 9 (tách trang theo mode — xem chú thích ở đầu hàm):
+  // form/lịch sử mốc chốt Ngân Hàng CHỈ tồn tại trong DOM khi showBank,
+  // Tiền Mặt CHỈ tồn tại khi showCash — thêm guard tồn-tại cho cả 2, và
+  // mọi renderBankReconDetailPage() gọi lại đều truyền đúng `mode` hiện
+  // tại để không bị nhảy nhầm sang trang kia sau khi lưu/xoá.
+  const bbc_addBtn = document.getElementById('bbc_addBtn');
+  if(bbc_addBtn){
+    let bbcBalanceVal = 0;
+    attachMoneyInput(document.getElementById('bbc_balance'), 0, v=>bbcBalanceVal=v);
+    bbc_addBtn.addEventListener('click', async ()=>{
+      if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      const date = document.getElementById('bbc_date').value;
+      const note = document.getElementById('bbc_note').value.trim();
+      if(!date){ showToast('Chọn ngày trước đã.'); return; }
+      if(state.bankBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
+      state.bankBalanceCheckpoints.push({ id: uid('bankcp'), date, balance: bbcBalanceVal, note });
+      if(!(await saveBankBalanceCheckpoints())) return;
+      showToast('Đã khai báo mốc chốt.');
+      renderBankReconDetailPage(mode);
+    });
+  }
   document.querySelectorAll('[data-del-bankcheckpoint]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.bankBalanceCheckpoints = state.bankBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delBankcheckpoint);
       if(!(await saveBankBalanceCheckpoints())) return;
       showToast('Đã xoá mốc chốt.');
-      renderBankReconDetailPage();
+      renderBankReconDetailPage(mode);
     });
   });
-  let cbcBalanceVal = 0;
-  attachMoneyInput(document.getElementById('cbc_balance'), 0, v=>cbcBalanceVal=v);
-  document.getElementById('cbc_addBtn').addEventListener('click', async ()=>{
-    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const date = document.getElementById('cbc_date').value;
-    const note = document.getElementById('cbc_note').value.trim();
-    if(!date){ showToast('Chọn ngày trước đã.'); return; }
-    if(state.cashBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
-    state.cashBalanceCheckpoints.push({ id: uid('cashcp'), date, balance: cbcBalanceVal, note });
-    if(!(await saveCashBalanceCheckpoints())) return;
-    showToast('Đã khai báo mốc chốt tiền mặt.');
-    renderBankReconDetailPage();
-  });
+  const cbc_addBtn = document.getElementById('cbc_addBtn');
+  if(cbc_addBtn){
+    let cbcBalanceVal = 0;
+    attachMoneyInput(document.getElementById('cbc_balance'), 0, v=>cbcBalanceVal=v);
+    cbc_addBtn.addEventListener('click', async ()=>{
+      if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      const date = document.getElementById('cbc_date').value;
+      const note = document.getElementById('cbc_note').value.trim();
+      if(!date){ showToast('Chọn ngày trước đã.'); return; }
+      if(state.cashBalanceCheckpoints.some(c=>c.date===date)){ showToast('Ngày này đã có mốc chốt rồi — xoá mốc cũ trước nếu muốn ghi lại.'); return; }
+      state.cashBalanceCheckpoints.push({ id: uid('cashcp'), date, balance: cbcBalanceVal, note });
+      if(!(await saveCashBalanceCheckpoints())) return;
+      showToast('Đã khai báo mốc chốt tiền mặt.');
+      renderBankReconDetailPage(mode);
+    });
+  }
   document.querySelectorAll('[data-del-cashcheckpoint]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.cashBalanceCheckpoints = state.cashBalanceCheckpoints.filter(c=>c.id!==btn.dataset.delCashcheckpoint);
       if(!(await saveCashBalanceCheckpoints())) return;
       showToast('Đã xoá mốc chốt.');
-      renderBankReconDetailPage();
+      renderBankReconDetailPage(mode);
     });
   });
   const ktnbTransferShortcutBtn2 = document.getElementById('ktnbTransferShortcutBtn2');
