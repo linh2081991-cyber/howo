@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #260';
+const APP_BUILD = '2026-09-14 · #261';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -16604,6 +16604,43 @@ function openInvestmentEntryEditor(id){
     afterWrite('Đã xoá.');
   });
 }
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "Ảnh 1 trùng lặp với Ảnh 2, gộp lại
+// + thêm nút bổ sung vốn điều lệ phòng sau này tăng vốn"): modal sửa
+// riêng "Vốn điều lệ đã đăng ký" + "Hạn góp đủ" — mở NGAY TỪ đúng thẻ
+// "📜 Vốn Điều Lệ" đang hiển thị (không còn form riêng ở "Thông Tin Dự
+// Án" nữa, tránh 2 nơi cùng sửa 1 dữ liệu). Dùng lại được bất cứ lúc nào
+// vốn điều lệ tăng thêm sau này — không giới hạn chỉ khai 1 lần đầu.
+function openCharterCapitalEditor(){
+  let regVal = Number(state.equityProjectInfo.registeredCharterCapital)||0;
+  openModal(`
+    <h3>📜 Sửa Vốn Điều Lệ</h3>
+    <div class="field">
+      <label>Vốn điều lệ đã đăng ký (theo Giấy CN Đăng Ký Doanh Nghiệp)</label>
+      <input type="text" inputmode="decimal" id="cce_amount">
+    </div>
+    <div class="hint" style="margin-top:0; margin-bottom:10px;">Vốn điều lệ TĂNG THÊM sau này (đăng ký bổ sung với Sở KH-ĐT) — quay lại đúng đây, sửa số này thành số MỚI là xong, không cần thao tác gì khác.</div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Hạn góp đủ vốn điều lệ (để trống = không cảnh báo hạn)</label>
+      <input type="date" id="cce_deadline" value="${state.equityProjectInfo.charterCapitalDeadline||''}">
+    </div>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      <button class="btn btn-ghost" id="cce_cancelBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="cce_saveBtn">Lưu</button>
+    </div>
+  `);
+  attachMoneyInput(document.getElementById('cce_amount'), regVal, v=>regVal=v);
+  document.getElementById('cce_cancelBtn').addEventListener('click', closeModal);
+  document.getElementById('cce_saveBtn').addEventListener('click', async ()=>{
+    state.equityProjectInfo.registeredCharterCapital = regVal;
+    state.equityProjectInfo.charterCapitalDeadline = document.getElementById('cce_deadline').value || null;
+    if(!(await saveEquityProjectInfo())) return;
+    closeModal();
+    showToast('Đã lưu Vốn Điều Lệ.');
+    saveMainScroll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    restoreMainScroll();
+  });
+}
 function renderCompanyDashboardPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
@@ -16749,7 +16786,10 @@ function renderCompanyDashboardPage(){
 
       ${charterStatus.registered>0 ? `
       <div class="card" style="margin-top:12px; border:1.5px solid ${charterStatus.isPastDeadline?'var(--loss)':'var(--accent)'};">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📜 Vốn Điều Lệ</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="font-weight:800; font-size:13px;">📜 Vốn Điều Lệ</div>
+          <button class="btn btn-ghost btn-sm" id="charterCapitalEditBtn" style="width:auto; padding:5px 10px;">✏️ Sửa</button>
+        </div>
         <div class="grid-table-wrap" style="margin-bottom:8px;">
           <table class="grid-table">
             <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
@@ -16767,7 +16807,8 @@ function renderCompanyDashboardPage(){
       ` : `
       <div class="card" style="margin-top:12px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:6px;">📜 Vốn Điều Lệ</div>
-        <div class="hint">Chưa khai "Vốn điều lệ đã đăng ký" ở mục "⚙️ Thông Tin Dự Án" bên dưới — khai vào đó để app tự theo dõi tiến độ góp đủ, tránh bị Cơ Quan Thuế xử phạt do góp thiếu/trễ hạn.</div>
+        <div class="hint" style="margin-bottom:10px;">Chưa khai "Vốn điều lệ đã đăng ký" — khai ngay tại đây để app tự theo dõi tiến độ góp đủ, tránh bị Cơ Quan Thuế xử phạt do góp thiếu/trễ hạn.</div>
+        <button class="btn btn-accent btn-block" id="charterCapitalEditBtn">📜➕ Khai Vốn Điều Lệ</button>
       </div>
       `}
 
@@ -16957,20 +16998,13 @@ function renderCompanyDashboardPage(){
         })()}
       </div>
       <div class="card" style="margin-top:12px;">
-        <div class="field">
+        <div class="field" style="margin-bottom:0;">
           <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
           <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
         </div>
-        <div class="field">
-          <label>Vốn điều lệ đã đăng ký (theo Giấy CN Đăng Ký Doanh Nghiệp)</label>
-          <input type="text" inputmode="decimal" id="epi_charterCapital">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Hạn góp đủ vốn điều lệ (để trống = không cảnh báo hạn)</label>
-          <input type="date" id="epi_charterDeadline" value="${state.equityProjectInfo.charterCapitalDeadline||''}">
-        </div>
         <button class="btn btn-ghost btn-block" id="epi_saveBtn" style="margin-top:12px;">Lưu Thông Tin Dự Án</button>
       </div>
+      <div class="hint" style="margin-top:6px;">Vốn Điều Lệ (số đã đăng ký + hạn góp đủ) giờ sửa ngay tại thẻ "📜 Vốn Điều Lệ" phía trên — bấm "✏️ Sửa" ở đó.</div>
     </section>
 
     <section class="group">
@@ -17128,14 +17162,12 @@ function renderCompanyDashboardPage(){
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
+  const charterCapitalEditBtn = document.getElementById('charterCapitalEditBtn');
+  if(charterCapitalEditBtn) charterCapitalEditBtn.addEventListener('click', openCharterCapitalEditor);
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
-  let epiCharterCapitalVal = state.equityProjectInfo.registeredCharterCapital||0;
-  attachMoneyInput(document.getElementById('epi_charterCapital'), epiCharterCapitalVal, v=>epiCharterCapitalVal=v);
   document.getElementById('epi_saveBtn').addEventListener('click', async ()=>{
     state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
-    state.equityProjectInfo.registeredCharterCapital = epiCharterCapitalVal;
-    state.equityProjectInfo.charterCapitalDeadline = document.getElementById('epi_charterDeadline').value || null;
     if(!(await saveEquityProjectInfo())) return;
     showToast('Đã lưu thông tin dự án.');
     saveMainScroll();
