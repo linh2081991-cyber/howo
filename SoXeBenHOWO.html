@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #261';
+const APP_BUILD = '2026-09-14 · #262';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2520,7 +2520,17 @@ function computeCumulativeAccrualProfit(toOverride, fromOverride){
   // `inRange` (từ allShiftsCompanyWide(), gộp ĐÚNG mọi xe) thay vì
   // allShiftsForLedger() (chỉ 1 xe) — giờ đã đúng cho cả trường hợp có
   // nhiều xe, không chỉ đúng cho hiện tại (1 xe).
-  const invoiceSupplementCost = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  const invoiceSupplementCostGross = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  // SỬA 2026-09-14 (Ông Chủ đối chiếu — "Chi phí thật cuối cùng phải trừ
+  // đúng phần VAT được khấu trừ lại, vì VAT không mất vĩnh viễn"): ĐÚNG
+  // theo bản chất kế toán — VAT nằm trong giá mua lô hoá đơn bù sẽ được
+  // khấu trừ ngược vào VAT phải nộp sau này, không phải chi phí thật mất
+  // đi. Trừ đúng phần VAT Hưởng (shiftInvoiceSupplementVatCredit — CÙNG
+  // NGUỒN với cột "VAT Hưởng" ở bảng "💰 Chi Phí & VAT Hưởng Theo Ca")
+  // khỏi chi phí trước khi đưa vào Lợi Nhuận Gộp — không tính lại công
+  // thức nào khác, chỉ trừ thêm đúng 1 khoản.
+  const invoiceSupplementVatCredit = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementVatCredit(sh),0);
+  const invoiceSupplementCost = invoiceSupplementCostGross - invoiceSupplementVatCredit;
   const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
   const netProfit = grossProfit - breakEven.fixedCost - tollFee;
   return { from, to, totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee, tollFee, invoiceSupplementCost, netProfit };
@@ -2559,7 +2569,12 @@ function computeVehicleAccrualProfit(vid, from, to){
   const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
   const accrualFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
   const breakEven = computeBreakEvenDetailed(shifts, roadFee, repairTotal, accrualFixedMonthly, 0, 0);
-  const invoiceSupplementCost = shifts.reduce((sum,sh)=>sum+shiftInvoiceSupplementCost(sh),0);
+  // SỬA 2026-09-14 (đồng bộ với computeCumulativeAccrualProfit() ở trên —
+  // trừ đúng VAT Hưởng khỏi chi phí mua hoá đơn bù, không tính gộp VAT
+  // như trước): xem chú thích đầy đủ ở hàm kia.
+  const invoiceSupplementCostGross = shifts.reduce((sum,sh)=>sum+shiftInvoiceSupplementCost(sh),0);
+  const invoiceSupplementVatCredit = shifts.reduce((sum,sh)=>sum+shiftInvoiceSupplementVatCredit(sh),0);
+  const invoiceSupplementCost = invoiceSupplementCostGross - invoiceSupplementVatCredit;
   const grossProfit = breakEven.grossProfit - invoiceSupplementCost;
   const netProfit = grossProfit - breakEven.fixedCost;
   return { totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost, invoiceSupplementCost, netProfit, tripCount: shifts.length };
@@ -12690,7 +12705,15 @@ function computePeriodSummary(from, to){
     : proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
   const otherFixedMonthlyForCashFlow = (state.settings.bankLoans||[]).reduce((sum,loan)=>sum+bankLoanRealCostForRange(loan, from, to), 0)
     + fullMonthlyCostIfTouched(()=>insuranceAndRegistrationMonthly, from, to);
-  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly;
+  // SỬA 2026-09-14 (Ông Chủ đối chiếu — "chi phí thật cuối cùng phải trừ
+  // đúng VAT được khấu trừ lại, VAT không mất vĩnh viễn"): đồng bộ với
+  // computeCumulativeAccrualProfit() đã sửa — gTotal.grossProfit (qua
+  // shiftTotalCost→shiftInvoiceSupplementCost) đang trừ ĐỦ giá GỘP VAT
+  // của lô hoá đơn bù. Trừ thêm đúng phần VAT Hưởng để LỢI NHUẬN THỰC TẾ
+  // ở tab Kết Quả khớp đúng với "Hiệu Quả Đầu Tư" — không tính lại công
+  // thức nào khác, chỉ cộng ngược đúng 1 khoản.
+  const invoiceSupplementVatCredit = inRange.reduce((s,sh)=>s+shiftInvoiceSupplementVatCredit(sh),0);
+  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly + invoiceSupplementVatCredit;
   const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
   const citPeriodKey = `${from}_${to}`;
   const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey] || 0;
@@ -12718,7 +12741,7 @@ function computePeriodSummary(from, to){
     cashFlowFixedMonthly = otherFixedMonthlyForCashFlow;
   }
   netOperatingCashFlow = cashIn - cashOutToSuppliers - operatingCashCost - cashFlowRepairTotal - cashFlowRoadFee - houseRent - utilities - tollFee - cashFlowFixedMonthly;
-  return { from, to, inRange, gTotal, repairTotal, roadFee, houseRent, utilities, tollFee, otherFixedMonthly, otherFixedMonthlyForCashFlow, finalNetProfit,
+  return { from, to, inRange, gTotal, repairTotal, roadFee, houseRent, utilities, tollFee, otherFixedMonthly, otherFixedMonthlyForCashFlow, finalNetProfit, invoiceSupplementVatCredit,
            vatPayableInRange, manualCitValue, cashIn, cashOutToSuppliers, operatingCashCost, netOperatingCashFlow,
            isCompanyWide, cashFlowRepairTotal, cashFlowRoadFee, cashFlowFixedMonthly };
 }
@@ -13151,7 +13174,9 @@ function renderResults(){
   // roadFee có thể bị Ông Chủ ghi đè riêng cho màn hình này (state.resultsRoadFeeOverride)
   // nên finalNetProfit tính lại tại đây thay vì lấy thẳng periodSummary.finalNetProfit,
   // để tôn trọng đúng giá trị đang hiển thị trên màn hình.
-  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly;
+  // SỬA 2026-09-14: cộng ngược đúng invoiceSupplementVatCredit đã tính sẵn
+  // ở periodSummary — không tính lại, đảm bảo khớp tuyệt đối với chỗ kia.
+  const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly + periodSummary.invoiceSupplementVatCredit;
   // Thuế TNDN dự kiến — ước tính tham khảo, tính trên đúng khoảng ngày
   // đang chọn (Ông Chủ đổi Từ ngày/Đến ngày thành đúng quý/năm cần xem là
   // ra số của mốc đó, không cần làm riêng từng mốc cố định). Không áp
@@ -13285,6 +13310,7 @@ function renderResults(){
             <tr><td>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.loanInterest)}</td></tr>
             <tr><td>− Bảo hiểm xe / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.insurance)}</td></tr>
             <tr><td>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.registration)}</td></tr>
+            <tr><td>+ VAT được khấu trừ (Lô Hoá Đơn Bù — không mất vĩnh viễn, trừ lại vào VAT phải nộp sau)</td><td class="num" style="color:var(--profit);">+${fmtVND(periodSummary.invoiceSupplementVatCredit)}</td></tr>
             <tr class="grid-total-row"><td>= LỢI NHUẬN THỰC TẾ</td><td class="num" style="color:${finalNetProfit>=0?'var(--profit)':'var(--loss)'}">${finalNetProfit>=0?'+':''}${fmtVND(finalNetProfit)}</td></tr>
           </tbody>
         </table>
