@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #266';
+const APP_BUILD = '2026-09-14 · #268';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2440,18 +2440,37 @@ function companyWideInsuranceRegCashOut(from, to, fixedCostFromForTouch){
 // đúng tổng hiển thị): hàm DUY NHẤT tính đủ 4 khoản, TÁI SỬ DỤNG cho cả
 // tổng (companyWideAccrualFixedMonthly gọi lại đúng .total ở đây) LẪN 4
 // dòng hiển thị riêng — đảm bảo không bao giờ lệch nhau vì cùng 1 nguồn.
+// SỬA 2026-09-14 (Ông Chủ giải thích rõ — "xe mua sau này, thời gian bắt
+// đầu vận hành chính là khi nhập ca mới của xe đó, không phải chung 1
+// ngày bắt đầu dự án"): BẮT ĐƯỢC NGUYÊN NHÂN CHÍNH gây lệch 136tr đối
+// chiếu — trước đây MỌI xe trong state.allVehiclesSettings (kể cả xe
+// ĐANG ĐỂ TEST, CHƯA hoạt động thật, chưa có ca nào) đều bị tính khấu
+// hao/lãi vay/bảo hiểm/đăng kiểm ÁP DỤNG TỪ đúng 1 ngày bắt đầu dự án
+// chung — dù xe đó CHƯA HỀ tồn tại/hoạt động trong khoảng thời gian đó.
+// Sửa: mỗi xe chỉ tính các khoản chi phí cố định này kể từ ĐÚNG ngày ca
+// đầu tiên của chính xe đó — xe chưa có ca nào (như xe test) đóng góp
+// ĐÚNG 0đ, không tính khống.
+function vehicleOperatingStartDate(vid){
+  const shifts = state.allVehiclesShifts[vid];
+  if(!Array.isArray(shifts) || shifts.length===0) return null;
+  return shifts.map(sh=>sh.date).sort()[0];
+}
 function companyWideAccrualFixedMonthlyBreakdown(from, to){
   let depreciation=0, loanInterest=0, insurance=0, registration=0;
-  Object.values(state.allVehiclesSettings).forEach(s=>{
+  Object.entries(state.allVehiclesSettings).forEach(([vid,s])=>{
+    const vehicleStartDate = vehicleOperatingStartDate(vid);
+    if(!vehicleStartDate) return; // Chưa có ca nào — xe chưa hoạt động, đóng góp 0đ.
+    const effectiveFrom = vehicleStartDate>from ? vehicleStartDate : from;
+    if(effectiveFrom>to) return; // Xe bắt đầu hoạt động SAU khoảng đang xem — chưa góp gì trong kỳ này.
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
     const liveLoanInterestMonthly = loans.reduce((sum2,loan)=>{
       const r = computeBankLoanAmortization(loan, new Date());
       return sum2 + (Number(r.monthlyInterestCurrent)||0);
     }, 0);
-    depreciation += proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, from, to);
-    loanInterest += proratedMonthlyCost(()=>liveLoanInterestMonthly, from, to);
-    insurance += proratedMonthlyCost(()=>Number(s.monthlyInsurance)||0, from, to);
-    registration += proratedMonthlyCost(()=>Number(s.monthlyRegistrationFee)||0, from, to);
+    depreciation += proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, effectiveFrom, to);
+    loanInterest += proratedMonthlyCost(()=>liveLoanInterestMonthly, effectiveFrom, to);
+    insurance += proratedMonthlyCost(()=>Number(s.monthlyInsurance)||0, effectiveFrom, to);
+    registration += proratedMonthlyCost(()=>Number(s.monthlyRegistrationFee)||0, effectiveFrom, to);
   });
   return { depreciation, loanInterest, insurance, registration, total: depreciation+loanInterest+insurance+registration };
 }
@@ -2507,10 +2526,25 @@ function companyWideEquityLoanAdjustment(refDate){
 // mua lô CHỈ CÓ 2 khả năng: đã dùng (đã trừ vào Chi Phí) hoặc còn tồn —
 // phép trừ này luôn đúng, dùng LẠI đúng 2 con số đã có sẵn, không tính
 // công thức mới nào khác.
+// SỬA 2026-09-14 (Ông Chủ báo lệch 136tr giữa Tổng Giá Trị Ròng và Vốn Chủ
+// Sở Hữu — rà ra 1 nguyên nhân thật): Hàng Tồn Kho trước đây định giá
+// GỘP CẢ VAT (totalPurchasedNet - totalConsumed, cả 2 số đều gồm VAT) —
+// trong khi "Chi phí mua hoá đơn bù" bên Lợi Nhuận Thực Tế đã trừ đúng
+// VAT Hưởng ra khỏi phần ĐÃ DÙNG (từ lần sửa VAT trước) — nghĩa là 2 bên
+// đang định giá theo 2 CHUẨN KHÁC NHAU (1 bên gồm VAT, 1 bên đã tách
+// VAT). Sửa: trừ thêm đúng phần VAT CÒN NẰM TRONG hàng tồn kho (chưa
+// được khấu trừ vì hàng chưa dùng) — khớp đúng chuẩn NET-OF-VAT với bên
+// Lợi Nhuận Thực Tế.
 function companyWideInvoiceLotInventoryValue(){
   const totalPurchasedNet = state.invoiceLots.reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
   const totalConsumed = allShiftsCompanyWide().reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
-  return Math.max(0, totalPurchasedNet - totalConsumed);
+  const totalVatAllLots = state.invoiceLots.reduce((s,l)=>{
+    const vatRate = Number(l.vatRatePercent)||0;
+    return s + (Number(l.totalInvoiceValue)||0) * vatRate/(100+vatRate);
+  }, 0);
+  const totalVatRecovered = allShiftsCompanyWide().reduce((s,sh)=>s+shiftInvoiceSupplementVatCredit(sh),0);
+  const remainingVatInInventory = Math.max(0, totalVatAllLots - totalVatRecovered);
+  return Math.max(0, totalPurchasedNet - totalConsumed - remainingVatInInventory);
 }
 // SỬA 2026-09-14 (Ông Chủ yêu cầu tách "Tiền Lãi Ròng" ra khỏi "Khấu Hao
 // Xe Đã Thu" — chuyên gia phản biện: khấu hao không phải tiền mặt rời
@@ -16232,32 +16266,37 @@ function openFixedCostsEditor(){
 // renderCompanyDashboardPage(), đảm bảo 2 nơi LUÔN khớp tuyệt đối, không
 // lệch 1 đồng — và cũng đúng yêu cầu "hiện số real time".
 function computeDepreciationMonthlyHistory(){
-  const allShifts = allShiftsCompanyWide();
-  const earliestShiftDate = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : null;
-  const startDate = state.equityProjectInfo.startDate || earliestShiftDate;
-  if(!startDate) return [];
   const today = todayLocalDateStr();
+  // SỬA 2026-09-14 (đồng bộ với companyWideAccrualFixedMonthlyBreakdown()
+  // đã sửa — mỗi xe tính khấu hao từ ĐÚNG ngày ca đầu tiên của chính xe
+  // đó, không dùng chung 1 "Ngày Bắt Đầu Dự Án" cho mọi xe nữa, vì xe
+  // mua/thêm sau (hoặc xe để test, chưa có ca nào) không được tính khống
+  // khấu hao cho khoảng thời gian nó chưa hề tồn tại/hoạt động).
+  const vehicleStarts = Object.keys(state.allVehiclesSettings)
+    .map(vid=>vehicleOperatingStartDate(vid))
+    .filter(Boolean);
+  if(vehicleStarts.length===0) return [];
+  const startDate = vehicleStarts.sort()[0];
   if(startDate>today) return [];
-  const monthlyRate = Object.values(state.allVehiclesSettings).reduce((s,v)=>s+(Number(v.monthlyVehicleDepreciation)||0), 0);
   const currentMonthStr = today.slice(0,7);
-  // SỬA 2026-09-14 LẦN 2 (tiếp — đảm bảo khớp TUYỆT ĐỐI, kể cả trường hợp
-  // Ngày Bắt Đầu Dự Án rơi GIỮA tháng): tính từng tháng bằng ĐÚNG cùng
-  // 1 cách clamp [startDate,today] mà proratedMonthlyCost() dùng bên
-  // trong depreciationPortionForRange() — nên cộng dồn lại LUÔN bằng
-  // chính xác depreciationPortionForRange(startDate, today), không có
-  // đường tính nào khác, không thể lệch dù 1 đồng.
   const months = monthsBetween(startDate, today);
   let cumulative = 0;
-  return months.map(ym=>{
+  return months.map((ym,idx)=>{
     const dim = daysInMonth(`${ym}-01`);
     const monthStart = `${ym}-01`;
     const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
-    const rangeStart = startDate > monthStart ? startDate : monthStart;
-    const rangeEnd = today < monthEnd ? today : monthEnd;
-    const overlapDays = daysBetweenDates(new Date(rangeStart+'T00:00:00'), new Date(rangeEnd+'T00:00:00')) + 1;
-    const amount = monthlyRate * (overlapDays/dim);
+    let amount = 0;
+    Object.entries(state.allVehiclesSettings).forEach(([vid,s])=>{
+      const vStart = vehicleOperatingStartDate(vid);
+      if(!vStart) return;
+      const rangeStart = vStart > monthStart ? vStart : monthStart;
+      const rangeEnd = today < monthEnd ? today : monthEnd;
+      if(rangeStart>rangeEnd) return;
+      const overlapDays = daysBetweenDates(new Date(rangeStart+'T00:00:00'), new Date(rangeEnd+'T00:00:00')) + 1;
+      amount += (Number(s.monthlyVehicleDepreciation)||0) * (overlapDays/dim);
+    });
     cumulative += amount;
-    return { month: ym, amount, cumulative, isPartial: ym===currentMonthStr || rangeStart>monthStart };
+    return { month: ym, amount, cumulative, isPartial: ym===currentMonthStr || idx===0 };
   });
 }
 /// Trang riêng "Chi Tiết Thu Hồi Khấu Hao" — mở từ Linh Chí Thành.
