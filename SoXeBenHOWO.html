@@ -2525,6 +2525,40 @@ function companyWideAccrualFixedMonthly(from, to){
 // vay CÁ NHÂN (đứng tên Ông Chủ, nhưng theo Ông Chủ xác nhận vẫn là nợ
 // THẬT của dự án) thì trừ đúng Gốc Đã Trả Thật đó — dự án đã "trả bớt"
 // đúng bấy nhiêu, không phải chờ tới đúng ngày lịch.
+// MỚI (Ông Chủ yêu cầu — tách rõ Vay Mua Xe / Vay Vận Hành trong dòng
+// "Lãi vay ngân hàng" ở bảng Lợi Nhuận Thực Tế, tránh hiểu nhầm là 1
+// khoản): CHỈ dùng để HIỂN THỊ — dùng lại NGUYÊN VẸN đúng điều kiện lọc
+// paidMonths/effectiveFrom đã có ở companyWideAccrualFixedMonthlyBreakdown()
+// và actualLoanInterestForDisplay — không đổi bất kỳ điều kiện nào, chỉ
+// đổi cách CỘNG DỒN (theo từng khoản vay có tên riêng, thay vì gộp 1 số)
+// — cộng ngược các dòng này lại LUÔN khớp tuyệt đối tổng loanInterest
+// đang hiển thị, không đụng hàm gốc nào đã đóng băng.
+function loanInterestBreakdownForDisplay(from, to, isCompanyWide){
+  const rows = [];
+  const addLoanRow = (vehicleLabel, loan, effFrom)=>{
+    const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+    const interest = computeFullLoanSchedule(loan).reduce((s3,row)=>{
+      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+      const ym = dueStr.slice(0,7);
+      if(paidSet.has(ym) && dueStr>=effFrom && dueStr<=to) return s3 + (Number(row.interest)||0);
+      return s3;
+    }, 0);
+    if(interest>0) rows.push({ label: `${loan.name||'Khoản vay'}${vehicleLabel?` — 🚛 ${vehicleLabel}`:''}`, interest });
+  };
+  if(isCompanyWide){
+    Object.entries(state.allVehiclesSettings).forEach(([vid,s])=>{
+      const vehicleStartDate = vehicleOperatingStartDate(vid);
+      if(!vehicleStartDate) return;
+      const effectiveFrom = vehicleStartDate>from ? vehicleStartDate : from;
+      if(effectiveFrom>to) return;
+      const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+      loans.forEach(loan=>addLoanRow(vehicleNameById(vid), loan, effectiveFrom));
+    });
+  } else {
+    (state.settings.bankLoans||[]).forEach(loan=>addLoanRow('', loan, from));
+  }
+  return rows;
+}
 function companyWideEquityLoanAdjustment(){
   let sum = 0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
@@ -13520,7 +13554,11 @@ function renderResults(){
             <tr><td>− Chi phí vận hành (dầu, lương chuyến/cứng, ăn, phát sinh, sửa chữa/khấu hao, luật đường, nhà, điện nước, cầu đường)</td><td class="num">${fmtVND(gTotal.operatingCashCost + repairTotal + roadFee + houseRent + utilities + tollFee)}</td></tr>
             <tr class="grid-total-row"><td>= Lợi nhuận gộp vận hành</td><td class="num" style="color:${(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities-tollFee)>=0?'var(--profit)':'var(--loss)'}">${fmtVND(gTotal.grossProfit-repairTotal-roadFee-houseRent-utilities-tollFee)}</td></tr>
             <tr><td>− Khấu hao xe dự kiến / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.depreciation)}</td></tr>
-            <tr><td>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.loanInterest)}</td></tr>
+            ${(()=>{
+              const loanRows = loanInterestBreakdownForDisplay(from, to, periodSummary.isCompanyWide);
+              if(loanRows.length===0) return `<tr><td>− Lãi vay ngân hàng / tháng (chỉ phần lãi)</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.loanInterest)}</td></tr>`;
+              return loanRows.map(r=>`<tr><td>− Lãi vay ngân hàng — ${escapeHtml(r.label)}</td><td class="num">${fmtVND(r.interest)}</td></tr>`).join('');
+            })()}
             <tr><td>− Bảo hiểm xe / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.insurance)}</td></tr>
             <tr><td>− Đăng kiểm/Đăng ký/Phù hiệu vận tải / tháng</td><td class="num">${fmtVND(fixedCostBreakdownForDisplay.registration)}</td></tr>
             <tr><td>+ VAT được khấu trừ (Lô Hoá Đơn Bù — không mất vĩnh viễn, trừ lại vào VAT phải nộp sau)</td><td class="num" style="color:var(--profit);">+${fmtVND(periodSummary.invoiceSupplementVatCredit)}</td></tr>
