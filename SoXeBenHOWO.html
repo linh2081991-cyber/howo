@@ -17215,7 +17215,7 @@ function renderCompanyDashboardPage(){
 
       <div class="card" style="margin-top:12px; padding:18px 12px 20px;">
         <div style="text-align:center;">
-          <div style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft);">
+          <button id="ktnbFullLedgerBtn" style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
             <div style="display:flex; justify-content:center;">
               <svg width="34" height="34" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="18" cy="10" r="5" fill="var(--accent)"/>
@@ -17230,7 +17230,8 @@ function renderCompanyDashboardPage(){
               </svg>
             </div>
             <div style="font-weight:900; margin-top:6px; color:var(--accent); font-size:14px; letter-spacing:0.3px;">🧾 KẾ TOÁN NỘI BỘ</div>
-          </div>
+            <div style="font-weight:600; margin-top:2px; color:var(--accent); font-size:11px;">👆 Bấm xem toàn bộ dòng tiền chi tiết</div>
+          </button>
         </div>
         <div style="text-align:center; margin-top:2px;">
           <div style="display:inline-block; width:2px; height:16px; background:var(--border);"></div>
@@ -17504,6 +17505,8 @@ function renderCompanyDashboardPage(){
   // bảng Ngân hàng/Tiền mặt riêng, và giờ còn có luôn form khai mốc chốt
   // mới ngay trong đó (xem renderBankReconDetailPage()). Không còn card
   // Retro cũ để cuộn tới nữa.
+  const ktnbFullLedgerBtn = document.getElementById('ktnbFullLedgerBtn');
+  if(ktnbFullLedgerBtn) ktnbFullLedgerBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
   const ktnbGoBankBtn = document.getElementById('ktnbGoBankBtn');
   if(ktnbGoBankBtn) ktnbGoBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('bank'); });
   const ktnbDetailBankBtn = document.getElementById('ktnbDetailBankBtn');
@@ -17710,12 +17713,81 @@ function renderCompanyCashFlowLedgerPage(){
   });
   const cargoPayments = state.sitePayments.filter(p=>!p.customerId).map(p=>
     ({ date:p.date, amount:Number(p.amount)||0, sign:1, desc: p.partnerName || p.siteName || '', method:p.method||'bank' }));
+  // MỚI (Ông Chủ yêu cầu — "Kế Toán Nội Bộ phải hoạt động, bấm vào phải
+  // hiện ĐỦ toàn bộ dòng tiền công ty thật chi tiết, đúng bản chất Kế
+  // Toán Nội Bộ"): trước đây trang này (dù tên là "Toàn Bộ Sao Kê") chỉ
+  // gộp ĐÚNG 3 nguồn (Khách trả/Trả NCC/Góp-Rút Vốn) — thiếu hẳn mọi
+  // khoản chi phí vận hành thật (dầu, sửa chữa, luật đường, vay, bảo
+  // hiểm, lô hoá đơn bù, VAT, chuyển nội bộ...). Thêm ĐỦ các nhóm còn
+  // thiếu bên dưới — lấy TRỰC TIẾP từ đúng nguồn dữ liệu gốc, KHÔNG tính
+  // lại bất kỳ công thức tài chính nào (không đụng gì tới các hàm đã
+  // đóng băng) — chỉ liệt kê lại đúng những gì đã có, ĐỦ TOÀN BỘ LỊCH SỬ
+  // (không giới hạn theo mốc chốt như trang "Chi Tiết" của riêng Bank/Cash).
+  const ALL_TIME_FROM = '2000-01-01';
+  const fuelRows = allShiftsCompanyWide().map(sh=>({ date: sh.date, desc: `Tiền dầu — 🚛 ${vehicleNameById(sh._vehicleId)}`, method:'bank', amount: shiftFuelRefillCost(sanitizeShiftForRevenue(sh)), sign:-1 })).filter(r=>r.amount>0);
+  const advanceShiftRows = allShiftsCompanyWide().filter(sh=>(Number(sh.advanceAmount)||0)>0).map(sh=>{ const driver = driverById(sh.driverId); return { date: sh.date, desc: `Tạm ứng lương — ${driver?driver.name:(sh.driverNameSnapshot||'')}`, method:'bank', amount: Number(sh.advanceAmount)||0, sign:-1 }; });
+  const repairRows = repairsInRangeCompanyWide(ALL_TIME_FROM, todayLocalDateStr()).map(r=>({ date:r.date, desc: r.item||'Sửa chữa', method: r.method||'bank', amount: Number(r.amount)||0, sign:-1 }));
+  const roadFeeRows = state.vehicles.flatMap(v=>(state.allVehiclesRoadFee[v.id]||[]).filter(e=>Number(e.amount)>0).map(e=>({ date:`${e.month}-01`, desc:`Luật đường (tháng ${monthLabelVN(e.month)}) — 🚛 ${v.name||v.plate}`, method:e.method||'bank', amount:Number(e.amount)||0, sign:-1 })));
+  const houseRentRows = state.housingUtilitiesByMonth.filter(e=>Number(e.rentAmount)>0).map(e=>({ date:`${e.month}-01`, desc:`Thuê nhà (tháng ${monthLabelVN(e.month)})`, method:e.method||'bank', amount:Number(e.rentAmount)||0, sign:-1 }));
+  const utilitiesRows = state.housingUtilitiesByMonth.filter(e=>Number(e.utilitiesAmount)>0).map(e=>({ date:`${e.month}-01`, desc:`Điện nước (tháng ${monthLabelVN(e.month)})`, method:e.method||'bank', amount:Number(e.utilitiesAmount)||0, sign:-1 }));
+  const tollFeeRows = state.tollFeeByMonth.filter(e=>Number(e.amount)>0).map(e=>({ date:`${e.month}-01`, desc:`Cầu đường (tháng ${monthLabelVN(e.month)})`, method:e.method||'bank', amount:Number(e.amount)||0, sign:-1 }));
+  const loanPaymentRows = state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    return loans.flatMap(loan=>{
+      const paidSet = new Set(Array.isArray(loan.paidMonths)?loan.paidMonths:[]);
+      return computeFullLoanSchedule(loan).map(p=>{
+        const d = `${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth()+1).padStart(2,'0')}-${String(p.dueDate.getDate()).padStart(2,'0')}`;
+        const ym = d.slice(0,7);
+        if(!paidSet.has(ym)) return null;
+        const method = (loan.paidMethods && loan.paidMethods[ym]) || 'bank';
+        return { date:d, desc:`${loan.name||'Khoản vay'} — 🚛 ${v.name||v.plate} (Gốc ${fmtVND(p.monthlyPrincipal)} + Lãi ${fmtVND(p.interest)})`, method, amount:p.total, sign:-1 };
+      }).filter(Boolean);
+    });
+  });
+  const loanDisbursedRows = state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    return loans.filter(loan=>(loan.ownerType||'personal')==='company' && loan.disbursementDate)
+      .map(loan=>({ date:loan.disbursementDate, desc:`Giải ngân ${loan.name||'Khoản vay'} — 🚛 ${v.name||v.plate}`, method:'bank', amount:Number(loan.principal)||0, sign:1 }));
+  });
+  const insuranceRegRows = state.vehicles.flatMap(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const startDate = vehicleOperatingStartDate(v.id);
+    if(!startDate) return [];
+    const months = monthsBetween(startDate, todayLocalDateStr());
+    const method = s.insuranceMethod || 'bank';
+    const items = [];
+    if(Number(s.monthlyInsurance)>0) months.forEach(ym=>items.push({ date:`${ym}-01`, desc:`Bảo hiểm (tháng ${monthLabelVN(ym)}) — 🚛 ${v.name||v.plate}`, method, amount:Number(s.monthlyInsurance), sign:-1 }));
+    if(Number(s.monthlyRegistrationFee)>0) months.forEach(ym=>items.push({ date:`${ym}-01`, desc:`Đăng kiểm/Đăng ký (tháng ${monthLabelVN(ym)}) — 🚛 ${v.name||v.plate}`, method, amount:Number(s.monthlyRegistrationFee), sign:-1 }));
+    return items;
+  });
+  const invoiceLotOutRows = state.invoiceLots.map(l=>({ date:l.purchaseDate, desc: l.sourceName||l.goodsType||'Lô hoá đơn bù', method:l.method||'bank', amount:Number(l.totalInvoiceValue)||0, sign:-1 }));
+  const invoiceLotInRows = state.invoiceLots.filter(l=>Number(l.cashReturned)>0).map(l=>({ date:l.purchaseDate, desc: l.sourceName||l.goodsType||'Lô hoá đơn bù', method:l.cashReturnedMethod||'cash', amount:Number(l.cashReturned)||0, sign:1 }));
+  const vatPaymentRows = (state.vatPayments||[]).map(p=>({ date:p.date, desc:`Đã nộp thuế VAT${p.notes?' — '+p.notes:''}`, method:p.method||'bank', amount:Number(p.amount)||0, sign:-1 }));
+  const transferRows = (state.internalTransfers||[]).map(t=>({ date:t.date, desc:`${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt':'💵→🏦 Nộp tiền mặt vào'}${t.note?' — '+t.note:''}`, method:'internal', amount:Number(t.amount)||0, sign: t.direction==='bankToCash'?-1:1 }));
   const groups = [
     { title: '🏦 Ông Chủ Góp Vốn Vào Công Ty', rows: entries.filter(e=>e.category==='Góp vốn'), color: 'var(--profit)' },
     { title: '⬇️ Ông Chủ Rút Vốn Ra Khỏi Công Ty', rows: entries.filter(e=>e.category==='Rút vốn'), color: 'var(--loss)' },
     { title: '🏪 Khách Hàng Thương Mại Trả Tiền', rows: commercialPayments, color: 'var(--profit)' },
     { title: '🚚 Khách Hàng Chạy Cước Trả Tiền', rows: cargoPayments, color: 'var(--profit)' },
     { title: '⛏️ Giao Dịch Với Mỏ (Trả Tiền / Mỏ Hoàn Lại)', rows: entries.filter(e=>e.category==='Trả nhà cung cấp (mỏ)' || e.category==='Mỏ hoàn tiền'), color: null },
+    { title: '👤 Ứng Riêng Cho Tài Xế', rows: entries.filter(e=>e.category==='Ứng riêng cho tài xế'), color: 'var(--loss)' },
+    { title: '🎁 Tip/Thưởng Tháng', rows: entries.filter(e=>e.category==='Tip/Thưởng tháng'), color: 'var(--loss)' },
+    { title: '⛽ Tiền Dầu', rows: fuelRows, color: 'var(--loss)' },
+    { title: '💵 Tạm Ứng Lương Tài Xế (Theo Ca)', rows: advanceShiftRows, color: 'var(--loss)' },
+    { title: '🔧 Sửa Chữa', rows: repairRows, color: 'var(--loss)' },
+    { title: '🚧 Luật Đường', rows: roadFeeRows, color: 'var(--loss)' },
+    { title: '🏠 Thuê Nhà', rows: houseRentRows, color: 'var(--loss)' },
+    { title: '💡 Điện Nước', rows: utilitiesRows, color: 'var(--loss)' },
+    { title: '🌉 Cầu Đường', rows: tollFeeRows, color: 'var(--loss)' },
+    { title: '🏦 Gốc + Lãi Vay Ngân Hàng (từng khoản, từng kỳ)', rows: loanPaymentRows, color: 'var(--loss)' },
+    { title: '🏦 Nhận Tiền Vay Ngân Hàng Mới (Giải Ngân)', rows: loanDisbursedRows, color: 'var(--profit)' },
+    { title: '🛡️ Bảo Hiểm + Đăng Kiểm', rows: insuranceRegRows, color: 'var(--loss)' },
+    { title: '📄 Mua Lô Hoá Đơn Bù (đủ 100%, chưa trừ tiền nhận lại)', rows: invoiceLotOutRows, color: 'var(--loss)' },
+    { title: '📄 Tiền Nhận Lại Từ Lô Hoá Đơn Bù', rows: invoiceLotInRows, color: 'var(--profit)' },
+    { title: '🧾 Đã Nộp Thuế VAT', rows: vatPaymentRows, color: 'var(--loss)' },
+    { title: '🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)', rows: transferRows, color: null },
   ];
   const groupTableHtml = g => {
     const total = g.rows.reduce((s,e)=>s+(e.sign>0?1:-1)*e.amount, 0);
@@ -17742,7 +17814,7 @@ function renderCompanyCashFlowLedgerPage(){
               return `<tr>
               <td>${formatDateVN(e.date)}</td>
               <td>${e.desc?escapeHtml(e.desc):'—'}${e.category==='Mỏ hoàn tiền'?' <span class="hint" style="margin:0;">(hoàn tiền)</span>':''}${badges.length?`<div class="hint" style="margin-top:3px;">${badges.join(' · ')}</div>`:''}</td>
-              <td>${e.method==='cash'?'💵 Tiền mặt':'🏦 Ngân hàng'}</td>
+              <td>${e.method==='cash'?'💵 Tiền mặt':(e.method==='internal'?'🔄 Nội bộ':'🏦 Ngân hàng')}</td>
               <td class="num" style="font-weight:700; color:${e.sign>0?'var(--profit)':'var(--loss)'};">${e.sign>0?'+':'−'}${fmtVND(e.amount)}</td>
             </tr>`;
             }).join('')}
@@ -17758,8 +17830,8 @@ function renderCompanyCashFlowLedgerPage(){
       <button class="btn btn-ghost btn-sm" id="ledgerBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
-      <h2 style="margin-bottom:2px;">📋 Sao Kê Toàn Bộ Dòng Tiền</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp CẢ 3 nguồn: Tiền khách trả + Tiền trả nhà cung cấp + Góp/Rút Vốn Chủ Sở Hữu — chia thành 5 bảng riêng theo đúng khu vực bên dưới, mỗi bảng có dòng TỔNG. 🏦 = chuyển khoản ngân hàng, 💵 = tiền mặt.</div>
+      <h2 style="margin-bottom:2px;">📋 Kế Toán Nội Bộ — Toàn Bộ Dòng Tiền Chi Tiết</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">ĐỦ toàn bộ tiền ra/vào công ty từ trước tới nay — khách trả, trả mỏ, góp/rút vốn, dầu, tạm ứng/tip tài xế, sửa chữa, luật đường, nhà/điện nước, cầu đường, gốc+lãi vay, bảo hiểm/đăng kiểm, lô hoá đơn bù, thuế VAT, chuyển nội bộ — chia theo từng khu vực bên dưới, mỗi bảng có dòng TỔNG riêng. 🏦 = ngân hàng, 💵 = tiền mặt, 🔄 = chuyển nội bộ (không phải tiền ra/vào công ty thật).</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Tổng Quan Các Khu Vực</th><th class="num">Số Tiền</th></tr></thead>
