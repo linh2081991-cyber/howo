@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #268';
+const APP_BUILD = '2026-09-14 · #269';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2496,23 +2496,38 @@ function companyWideAccrualFixedMonthly(from, to){
 // nhưng Vốn Chủ Sở Hữu không giảm theo — lệch dần theo thời gian. Đổi tên
 // hàm cho đúng bản chất (không còn chỉ là "dư nợ còn lại" nữa) và xử lý
 // ĐÚNG CÔNG THỨC theo từng loại vay — không áp chung 1 công thức cho cả 2.
-function companyWideEquityLoanAdjustment(refDate){
-  refDate = refDate || new Date();
+// SỬA 2026-09-14 LẦN 3 (Ông Chủ báo số 18,5tr sai — "phải chuẩn xác theo
+// các gói vay đang ghi nhận trong app"): BẮT ĐƯỢC ĐÚNG LỖI GỐC — giống
+// hệt lỗi đã gặp trước đây với bankLoanRealCostForRange(): dùng
+// computeBankLoanAmortization().remainingBalance là tính theo LỊCH (khớp
+// đúng tháng của refDate), KHÔNG dựa vào những kỳ Ông Chủ ĐÃ TICK XÁC
+// NHẬN thật (paidMonths) — nếu Ông Chủ tick sớm/muộn hơn lịch, số này sai
+// ngay. Sửa: tính "Gốc Đã Trả THẬT" trực tiếp từ paidMonths — CĂN CỨ DUY
+// NHẤT là đã tick hay chưa, không phải lịch. Áp dụng thống nhất cho cả 2
+// loại vay: vay CÔNG TY thì Dư Nợ Còn Lại = Gốc gốc − Gốc Đã Trả Thật;
+// vay CÁ NHÂN (đứng tên Ông Chủ, nhưng theo Ông Chủ xác nhận vẫn là nợ
+// THẬT của dự án) thì trừ đúng Gốc Đã Trả Thật đó — dự án đã "trả bớt"
+// đúng bấy nhiêu, không phải chờ tới đúng ngày lịch.
+function companyWideEquityLoanAdjustment(){
   let sum = 0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
     loans.forEach(loan=>{
-      const r = computeBankLoanAmortization(loan, refDate);
       const originalPrincipal = Number(loan.principal)||0;
-      const remainingBalance = r.hasBasis ? (Number(r.remainingBalance)||0) : originalPrincipal;
+      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+      const actualPrincipalPaid = computeFullLoanSchedule(loan).reduce((s2,row)=>{
+        const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+        return paidSet.has(ym) ? s2 + (Number(row.monthlyPrincipal)||0) : s2;
+      }, 0);
       if((loan.ownerType||'personal')==='company'){
-        // Vay CÔNG TY: nợ thật của công ty — trừ đúng dư nợ CÒN LẠI.
-        sum += remainingBalance;
+        // Vay CÔNG TY: nợ thật của công ty — trừ đúng dư nợ CÒN LẠI, tính
+        // từ gốc gốc trừ đúng phần ĐÃ TRẢ THẬT (không phải theo lịch).
+        sum += Math.max(0, originalPrincipal - actualPrincipalPaid);
       } else {
-        // Vay CÁ NHÂN: công ty không nợ gì cả — chỉ trừ đúng phần GỐC ĐÃ
-        // TRẢ luỹ kế (tiền công ty đã dùng trả hộ, coi như rút vốn từng
-        // kỳ). Lãi đã trừ riêng vào Lợi Nhuận Thực Tế rồi, không trừ lại.
-        sum += Math.max(0, originalPrincipal - remainingBalance);
+        // Vay CÁ NHÂN nhưng LÀ nợ của dự án (Ông Chủ xác nhận): trừ đúng
+        // phần GỐC ĐÃ TRẢ THẬT — dự án đã tự thanh toán bớt đúng bấy
+        // nhiêu, không phải chờ đúng ngày lịch mới tính.
+        sum += actualPrincipalPaid;
       }
     });
   });
@@ -2796,7 +2811,7 @@ function computeOwnerEquity(){
   // sang hàm xử lý ĐÚNG theo từng loại vay (cá nhân trừ gốc đã trả, công
   // ty trừ dư nợ còn lại) — không còn áp chung "dư nợ còn lại" cho mọi
   // khoản vay như bản sửa lần 1 (SAI với vay cá nhân).
-  const remainingLoanBalance = companyWideEquityLoanAdjustment(new Date());
+  const remainingLoanBalance = companyWideEquityLoanAdjustment();
   return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, remainingLoanBalance,
     equity: contributed - withdrawn + cumulativeProfit - remainingLoanBalance,
     contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled };
@@ -2827,11 +2842,16 @@ function computeMonthlyEquityTimeline(){
     // với số Vốn Chủ Sở Hữu hiện tại"): đổi cùng nguồn, không còn dùng
     // Dòng Tiền Ròng nữa.
     const cumulativeProfit = computeCumulativeAccrualProfit(snapshotDate).netProfit;
-    // SỬA 2026-09-14 (đồng bộ với computeOwnerEquity() vừa trừ thêm Dư Nợ
-    // Vay Ngân Hàng còn lại — xem chú thích đầy đủ ở đó): dùng dư nợ CÒN
-    // LẠI tại ĐÚNG thời điểm cuối tháng đang vẽ (snapshotDate), không phải
-    // dư nợ hôm nay — biểu đồ mới đúng diễn biến thật qua từng tháng.
-    const remainingLoanBalance = companyWideEquityLoanAdjustment(new Date(snapshotDate+'T00:00:00'));
+    // SỬA 2026-09-14 LẦN 3 (đồng bộ với companyWideEquityLoanAdjustment()
+    // vừa sửa sang dùng ĐÚNG paidMonths thay vì lịch): hàm này giờ không
+    // còn nhận tham số ngày nữa (paidMonths không lưu MỐC NGÀY đã tick,
+    // chỉ lưu kỳ nào ĐÃ tick) — biểu đồ từng tháng vì vậy dùng CHUNG 1
+    // trạng thái "đã tick tới đâu" của HÔM NAY cho mọi tháng quá khứ
+    // (không dựng lại được đúng trạng thái CŨ từng tháng) — sai số này
+    // chỉ ảnh hưởng hình dạng đường biểu đồ LỊCH SỬ, không ảnh hưởng con
+    // số "Vốn Chủ Sở Hữu Hiện Tại" chính (luôn đúng, dùng đúng trạng thái
+    // đã tick THẬT tính đến hôm nay).
+    const remainingLoanBalance = companyWideEquityLoanAdjustment();
     const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit - remainingLoanBalance;
     return { month: ym, equity, cumulativeProfit, remainingLoanBalance, snapshotDate };
   });
