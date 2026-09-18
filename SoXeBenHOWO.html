@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #263';
+const APP_BUILD = '2026-09-14 · #264';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2458,6 +2458,37 @@ function companyWideAccrualFixedMonthlyBreakdown(from, to){
 function companyWideAccrualFixedMonthly(from, to){
   return companyWideAccrualFixedMonthlyBreakdown(from, to).total;
 }
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "Kế Toán Nội Bộ phải theo dõi ĐỦ toàn
+// bộ tiền công ty, đối chiếu chuẩn xác với Hiệu Quả Đầu Tư"): Vốn Đầu Tư
+// Ban Đầu tính ĐỦ cả phần vay ngân hàng (Ông Chủ xác nhận) — nên "Vốn Chủ
+// Sở Hữu" phải trừ đúng Dư Nợ Vay Ngân Hàng CÒN LẠI (mọi khoản, mọi xe),
+// nếu không sẽ tính khống phần vay thành vốn tự có. Hàm DUY NHẤT tính dư
+// nợ còn lại CỘNG DỒN mọi xe, mọi khoản vay, tại ĐÚNG 1 thời điểm — dùng
+// LẠI CHO CẢ "Vốn Chủ Sở Hữu" (equity) LẪN "Tổng Giá Trị Ròng" (asset) để
+// 2 bên luôn trừ đúng CÙNG 1 con số, không lệch nhau vì tính 2 công thức
+// khác nhau ở 2 nơi.
+function companyWideRemainingLoanBalance(refDate){
+  refDate = refDate || new Date();
+  let sum = 0;
+  Object.values(state.allVehiclesSettings).forEach(s=>{
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    loans.forEach(loan=>{ sum += Number(computeBankLoanAmortization(loan, refDate).remainingBalance)||0; });
+  });
+  return sum;
+}
+// SỬA 2026-09-14 (Ông Chủ yêu cầu bảng "Tổng Giá Trị Ròng" đầy đủ cho Kế
+// Toán Nội Bộ): Hàng Tồn Kho = Tổng tiền THẬT đã mua lô hoá đơn bù (NET,
+// mọi lô, mọi thời gian) − Tổng đã DÙNG THẬT (shiftInvoiceSupplementCost,
+// mọi ca, mọi thời gian). Phần chênh lệch CHÍNH LÀ giá trị hàng còn tồn
+// kho, CHƯA tiêu thụ — không cần lần theo từng lô/FIFO, vì mỗi đồng chi
+// mua lô CHỈ CÓ 2 khả năng: đã dùng (đã trừ vào Chi Phí) hoặc còn tồn —
+// phép trừ này luôn đúng, dùng LẠI đúng 2 con số đã có sẵn, không tính
+// công thức mới nào khác.
+function companyWideInvoiceLotInventoryValue(){
+  const totalPurchasedNet = state.invoiceLots.reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
+  const totalConsumed = allShiftsCompanyWide().reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
+  return Math.max(0, totalPurchasedNet - totalConsumed);
+}
 // SỬA 2026-09-14 (Ông Chủ yêu cầu tách "Tiền Lãi Ròng" ra khỏi "Khấu Hao
 // Xe Đã Thu" — chuyên gia phản biện: khấu hao không phải tiền mặt rời
 // túi, cộng ngược lại mới ra đúng tiền mặt THẬT đã thu hồi): tách riêng
@@ -2703,7 +2734,16 @@ function computeOwnerEquity(){
   const withdrawnRaw = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const contributedRecycled = contributedRaw - contributedExtra;
   const withdrawnRecycled = withdrawnRaw - withdrawn;
-  return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, equity: contributed - withdrawn + cumulativeProfit,
+  // SỬA 2026-09-14 (Ông Chủ xác nhận — "Vốn Đầu Tư Ban Đầu tính ĐỦ cả
+  // phần vay ngân hàng mua xe, và vay vận hành sau này cũng là nợ, không
+  // phải vốn tự có"): trừ đúng TOÀN BỘ dư nợ vay ngân hàng CÒN LẠI (mọi
+  // khoản, mọi xe, tính LIVE hôm nay) — nếu không trừ, phần tiền vay sẽ
+  // bị tính khống thành vốn tự có của Ông Chủ. Dùng ĐÚNG 1 hàm chung
+  // (companyWideRemainingLoanBalance) với "Tổng Giá Trị Ròng" bên Kế Toán
+  // Nội Bộ để 2 bên luôn đối chiếu khớp tuyệt đối.
+  const remainingLoanBalance = companyWideRemainingLoanBalance(new Date());
+  return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, remainingLoanBalance,
+    equity: contributed - withdrawn + cumulativeProfit - remainingLoanBalance,
     contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled };
 }
 /// Dựng dãy [{month, equity, cumulativeProfit}] từ THÁNG BẮT ĐẦU DỰ ÁN
@@ -2732,8 +2772,13 @@ function computeMonthlyEquityTimeline(){
     // với số Vốn Chủ Sở Hữu hiện tại"): đổi cùng nguồn, không còn dùng
     // Dòng Tiền Ròng nữa.
     const cumulativeProfit = computeCumulativeAccrualProfit(snapshotDate).netProfit;
-    const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit;
-    return { month: ym, equity, cumulativeProfit, snapshotDate };
+    // SỬA 2026-09-14 (đồng bộ với computeOwnerEquity() vừa trừ thêm Dư Nợ
+    // Vay Ngân Hàng còn lại — xem chú thích đầy đủ ở đó): dùng dư nợ CÒN
+    // LẠI tại ĐÚNG thời điểm cuối tháng đang vẽ (snapshotDate), không phải
+    // dư nợ hôm nay — biểu đồ mới đúng diễn biến thật qua từng tháng.
+    const remainingLoanBalance = companyWideRemainingLoanBalance(new Date(snapshotDate+'T00:00:00'));
+    const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit - remainingLoanBalance;
+    return { month: ym, equity, cumulativeProfit, remainingLoanBalance, snapshotDate };
   });
 }
 /// SỬA 2026-09-08 (Ông Chủ phát hiện — "Hiệu Quả Đầu Tư không nên dùng
@@ -16835,7 +16880,7 @@ function renderCompanyDashboardPage(){
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
-        <div class="hint" style="margin-top:6px;">= Vốn đầu tư + Góp thêm − Rút ra + Lợi Nhuận Thực Tế (chuẩn kế toán — tồn kho/tạm ứng chưa quyết toán vẫn tính là tài sản, không trừ như đã mất). Xem đúng phần đang nằm dưới dạng hàng tồn kho ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp".</div>
+        <div class="hint" style="margin-top:6px;">= Vốn đầu tư + Góp thêm − Rút ra + Lợi Nhuận Thực Tế (chuẩn kế toán — tồn kho/tạm ứng chưa quyết toán vẫn tính là tài sản, không trừ như đã mất) − Dư Nợ Vay Ngân Hàng còn lại (${fmtVND(eq.remainingLoanBalance)} — Vốn Đầu Tư Ban Đầu tính ĐỦ cả phần vay, phải trừ ra để không tính khống vay thành vốn tự có). Xem đúng phần đang nằm dưới dạng hàng tồn kho ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp", đối chiếu đầy đủ ở "Kế Toán Nội Bộ → Tổng Giá Trị Ròng".</div>
       </div>
 
       ${charterStatus.registered>0 ? `
@@ -16992,6 +17037,44 @@ function renderCompanyDashboardPage(){
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="group">
+      <h3>📊 Tổng Giá Trị Ròng Toàn Công Ty</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đủ TOÀN BỘ tài sản và nợ phải trả — đối chiếu chuẩn xác với "Vốn Chủ Sở Hữu" (Hiệu Quả Đầu Tư). Lệch dù 1đ sẽ báo ngay bên dưới.</div>
+      ${(()=>{
+        const inventoryValue = companyWideInvoiceLotInventoryValue();
+        const depHistory = computeDepreciationMonthlyHistory();
+        const depreciationSoFar = depHistory.length ? depHistory[depHistory.length-1].cumulative : 0;
+        const vehicleNetBookValue = Math.max(0, eq.initialInvestment - depreciationSoFar);
+        const remainingLoanBalance = eq.remainingLoanBalance;
+        const netAssetValue = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
+          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed
+          + inventoryValue + vehicleNetBookValue - remainingLoanBalance;
+        const diff = Math.round(netAssetValue - eq.equity);
+        return `
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
+              <tr><td>🏦 TCB Bank</td><td class="num">${fmtVND(bankRecon?bankRecon.computedBalance:0)}</td></tr>
+              <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
+              <tr><td>${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
+              <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
+              <tr><td>📦 Hàng Tồn Kho (Lô Hoá Đơn Bù chưa dùng)</td><td class="num" style="color:var(--profit);">+${fmtVND(inventoryValue)}</td></tr>
+              <tr><td>🚛 Giá Trị Còn Lại Của Xe (Vốn Đầu Tư − Khấu Hao Luỹ Kế)</td><td class="num" style="color:var(--profit);">+${fmtVND(vehicleNetBookValue)}</td></tr>
+              <tr><td>🏦 Dư Nợ Vay Ngân Hàng (còn lại, mọi khoản)</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card" style="text-align:center; margin-top:10px; border:1.5px solid ${diff===0?'var(--profit)':'var(--loss)'};">
+          <div style="font-size:12.5px; font-weight:700; color:var(--ink-soft);">ĐỐI CHIẾU VỚI VỐN CHỦ SỞ HỮU (Hiệu Quả Đầu Tư)</div>
+          <div style="font-size:20px; font-weight:900; margin-top:4px;">${fmtVND(netAssetValue)} <span style="font-weight:400; font-size:14px;">vs</span> ${fmtVND(eq.equity)}</div>
+          ${diff===0 ? `<div style="color:var(--profit); font-weight:700; margin-top:4px;">✅ KHỚP TUYỆT ĐỐI — không lệch 1 đồng nào.</div>` : `<div style="color:var(--loss); font-weight:700; margin-top:4px;">⚠️ LỆCH ${fmtVND(Math.abs(diff))} — có khoản đang tính ở 1 bên nhưng thiếu ở bên kia, báo lại đúng số này để tra tiếp.</div>`}
+        </div>
+        `;
+      })()}
     </section>
 
     <section class="group">
