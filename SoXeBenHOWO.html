@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #264';
+const APP_BUILD = '2026-09-14 · #266';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2467,12 +2467,35 @@ function companyWideAccrualFixedMonthly(from, to){
 // LẠI CHO CẢ "Vốn Chủ Sở Hữu" (equity) LẪN "Tổng Giá Trị Ròng" (asset) để
 // 2 bên luôn trừ đúng CÙNG 1 con số, không lệch nhau vì tính 2 công thức
 // khác nhau ở 2 nơi.
-function companyWideRemainingLoanBalance(refDate){
+// SỬA 2026-09-14 LẦN 2 (Ông Chủ xác nhận — CẢ 2 khoản vay hiện có đều
+// ĐỨNG TÊN CÁ NHÂN, không phải công ty): BẮT ĐƯỢC LỖI Ở CHÍNH LẦN SỬA
+// TRƯỚC — trừ "Dư Nợ Còn Lại" chỉ đúng cho vay ĐỨNG TÊN CÔNG TY (nợ thật
+// của công ty). Vay ĐỨNG TÊN CÁ NHÂN thì công ty KHÔNG hề nợ ngân hàng
+// đồng nào — nhưng công ty vẫn dùng tiền công ty trả GỐC hộ Ông Chủ mỗi
+// kỳ, tương đương công ty "rút vốn" đưa cho Ông Chủ từng đợt. Nếu không
+// trừ đúng phần GỐC ĐÃ TRẢ này, TCB/Tiền Mặt giảm dần theo từng kỳ trả nợ
+// nhưng Vốn Chủ Sở Hữu không giảm theo — lệch dần theo thời gian. Đổi tên
+// hàm cho đúng bản chất (không còn chỉ là "dư nợ còn lại" nữa) và xử lý
+// ĐÚNG CÔNG THỨC theo từng loại vay — không áp chung 1 công thức cho cả 2.
+function companyWideEquityLoanAdjustment(refDate){
   refDate = refDate || new Date();
   let sum = 0;
   Object.values(state.allVehiclesSettings).forEach(s=>{
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    loans.forEach(loan=>{ sum += Number(computeBankLoanAmortization(loan, refDate).remainingBalance)||0; });
+    loans.forEach(loan=>{
+      const r = computeBankLoanAmortization(loan, refDate);
+      const originalPrincipal = Number(loan.principal)||0;
+      const remainingBalance = r.hasBasis ? (Number(r.remainingBalance)||0) : originalPrincipal;
+      if((loan.ownerType||'personal')==='company'){
+        // Vay CÔNG TY: nợ thật của công ty — trừ đúng dư nợ CÒN LẠI.
+        sum += remainingBalance;
+      } else {
+        // Vay CÁ NHÂN: công ty không nợ gì cả — chỉ trừ đúng phần GỐC ĐÃ
+        // TRẢ luỹ kế (tiền công ty đã dùng trả hộ, coi như rút vốn từng
+        // kỳ). Lãi đã trừ riêng vào Lợi Nhuận Thực Tế rồi, không trừ lại.
+        sum += Math.max(0, originalPrincipal - remainingBalance);
+      }
+    });
   });
   return sum;
 }
@@ -2734,14 +2757,12 @@ function computeOwnerEquity(){
   const withdrawnRaw = state.ownerEquityEntries.filter(e=>e.type==='withdrawal').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const contributedRecycled = contributedRaw - contributedExtra;
   const withdrawnRecycled = withdrawnRaw - withdrawn;
-  // SỬA 2026-09-14 (Ông Chủ xác nhận — "Vốn Đầu Tư Ban Đầu tính ĐỦ cả
-  // phần vay ngân hàng mua xe, và vay vận hành sau này cũng là nợ, không
-  // phải vốn tự có"): trừ đúng TOÀN BỘ dư nợ vay ngân hàng CÒN LẠI (mọi
-  // khoản, mọi xe, tính LIVE hôm nay) — nếu không trừ, phần tiền vay sẽ
-  // bị tính khống thành vốn tự có của Ông Chủ. Dùng ĐÚNG 1 hàm chung
-  // (companyWideRemainingLoanBalance) với "Tổng Giá Trị Ròng" bên Kế Toán
-  // Nội Bộ để 2 bên luôn đối chiếu khớp tuyệt đối.
-  const remainingLoanBalance = companyWideRemainingLoanBalance(new Date());
+  // SỬA 2026-09-14 LẦN 2 (Ông Chủ xác nhận CẢ 2 khoản vay đứng tên CÁ
+  // NHÂN — xem chú thích đầy đủ ở companyWideEquityLoanAdjustment()): đổi
+  // sang hàm xử lý ĐÚNG theo từng loại vay (cá nhân trừ gốc đã trả, công
+  // ty trừ dư nợ còn lại) — không còn áp chung "dư nợ còn lại" cho mọi
+  // khoản vay như bản sửa lần 1 (SAI với vay cá nhân).
+  const remainingLoanBalance = companyWideEquityLoanAdjustment(new Date());
   return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, remainingLoanBalance,
     equity: contributed - withdrawn + cumulativeProfit - remainingLoanBalance,
     contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled };
@@ -2776,7 +2797,7 @@ function computeMonthlyEquityTimeline(){
     // Vay Ngân Hàng còn lại — xem chú thích đầy đủ ở đó): dùng dư nợ CÒN
     // LẠI tại ĐÚNG thời điểm cuối tháng đang vẽ (snapshotDate), không phải
     // dư nợ hôm nay — biểu đồ mới đúng diễn biến thật qua từng tháng.
-    const remainingLoanBalance = companyWideRemainingLoanBalance(new Date(snapshotDate+'T00:00:00'));
+    const remainingLoanBalance = companyWideEquityLoanAdjustment(new Date(snapshotDate+'T00:00:00'));
     const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit - remainingLoanBalance;
     return { month: ym, equity, cumulativeProfit, remainingLoanBalance, snapshotDate };
   });
@@ -12236,9 +12257,21 @@ function computeBankBalanceReconciliation(){
   // khoản, tiền vào tài khoản thật nhưng app không cộng, làm số app tính
   // THẤP HƠN số thật. Cộng thêm — quét TẤT CẢ khoản vay của MỌI xe, khoản
   // nào có Ngày Giải Ngân rơi vào đúng khoảng sau mốc chốt tới hôm nay.
+  // SỬA 2026-09-14 (Ông Chủ chỉ ra — "vay cá nhân thì tiền vay KHÔNG chảy
+  // thẳng vào TCB công ty lúc giải ngân, mà về TK cá nhân Ông Chủ trước —
+  // muốn đưa vào công ty phải GHI RIÊNG qua Góp Vốn"): BẮT ĐƯỢC LỖI TIỀM
+  // ẨN — trước đây COI MỌI khoản vay (không phân biệt cá nhân/công ty) là
+  // tự động "Giải Ngân" thẳng vào TCB đúng ngày giải ngân. Với vay CÔNG TY
+  // điều này đúng (ngân hàng giải ngân thẳng vào TK công ty). Với vay CÁ
+  // NHÂN thì SAI — nếu Ông Chủ ĐÃ ghi khoản đó qua "Góp Vốn" (như đã làm),
+  // tính thêm cả "Giải Ngân" tự động ở đây sẽ TÍNH TRÙNG 2 lần cùng 1
+  // khoản tiền. Chỉ tự động tính "Giải Ngân" cho khoản vay ĐỨNG TÊN CÔNG
+  // TY — vay cá nhân, tiền vào công ty lúc nào, bao nhiêu, phải do chính
+  // Ông Chủ ghi tay qua Góp Vốn (đúng thời điểm/số tiền THẬT đã chuyển
+  // vào, có thể khác hẳn ngày/số tiền giải ngân gốc).
   const loanDisbursedBank = Object.values(state.allVehiclesSettings).reduce((sum,s)=>{
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    return sum + loans.filter(loan=>loan.disbursementDate && loan.disbursementDate>=from && loan.disbursementDate<=today)
+    return sum + loans.filter(loan=>(loan.ownerType||'personal')==='company' && loan.disbursementDate && loan.disbursementDate>=from && loan.disbursementDate<=today)
       .reduce((s2,loan)=>s2+(Number(loan.principal)||0), 0);
   }, 0);
   // SỬA 2026-09-08 LẦN 2 (Ông Chủ hỏi — "Khớp Số Dư đã biểu thị hết luồng
@@ -15463,8 +15496,8 @@ function openLoanEditor(loanId){
   // amortization thường). Khoản vay CŨ chưa từng có field này → mặc định
   // 0 (tương thích ngược tuyệt đối — hành vi y hệt trước đây, không suy ra
   // ân hạn bừa cho khoản vay nào chưa từng khai).
-  const draft = existing ? { ...existing, graceMonths: Number(existing.graceMonths)||0, rateSchedule: [...(existing.rateSchedule||[])], paidMonths: [...(existing.paidMonths||[])] }
-    : { id: uid('loan'), name: '', principal: 0, termMonths: 0, graceMonths: 0, disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [], paidMonths: [] };
+  const draft = existing ? { ...existing, graceMonths: Number(existing.graceMonths)||0, ownerType: existing.ownerType||'personal', rateSchedule: [...(existing.rateSchedule||[])], paidMonths: [...(existing.paidMonths||[])] }
+    : { id: uid('loan'), name: '', principal: 0, termMonths: 0, graceMonths: 0, ownerType: 'personal', disbursementDate: null, dueDayOfMonth: 20, lastPaidMonth: null, rateSchedule: [], paidMonths: [] };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -15478,6 +15511,14 @@ function openLoanEditor(loanId){
           <label>Tên khoản vay (VD "Vay mua xe 29E-691.12", "Vay vốn lưu động")</label>
           <input type="text" id="loan_name" value="${escapeHtml(draft.name)}" placeholder="Đặt tên để dễ phân biệt các khoản vay">
         </div>
+        <div class="field">
+          <label>Khoản vay này đứng tên ai với ngân hàng?</label>
+          <select id="loan_ownerType">
+            <option value="personal" ${draft.ownerType!=='company'?'selected':''}>👤 Cá nhân Ông Chủ (vay riêng, đem góp/dùng cho công ty)</option>
+            <option value="company" ${draft.ownerType==='company'?'selected':''}>🏢 Công ty (LLC đứng tên vay trực tiếp)</option>
+          </select>
+        </div>
+        <div class="hint" style="margin-top:0; margin-bottom:10px;">Vay CÁ NHÂN: công ty không nợ ngân hàng khoản này — Vốn Chủ Sở Hữu chỉ trừ đúng phần GỐC ĐÃ TRẢ (coi như công ty trả hộ, tương đương rút vốn từng kỳ), không trừ dư nợ còn lại. Vay CÔNG TY: trừ đúng DƯ NỢ CÒN LẠI (nợ thật của công ty).</div>
         <div class="two-col">
           <div class="field">
             <label>Số tiền vay ngân hàng (đ)</label>
@@ -15732,6 +15773,7 @@ function openLoanEditor(loanId){
   document.getElementById('loanCancelBtn').addEventListener('click', goBack);
   document.getElementById('loanSaveBtn').addEventListener('click', async ()=>{
     draft.name = document.getElementById('loan_name').value.trim() || `Khoản vay ${(state.settings.bankLoans||[]).length+1}`;
+    draft.ownerType = document.getElementById('loan_ownerType').value;
     if(!(draft.principal>0)){ showToast('Nhập số tiền vay trước đã.'); return; }
     if(!(draft.termMonths>0)){ showToast('Nhập thời hạn vay trước đã.'); return; }
     if(draft.graceMonths>=draft.termMonths){ showToast('Số tháng ân hạn phải nhỏ hơn Tổng thời hạn vay (phải còn ít nhất 1 tháng để trả gốc).'); return; }
@@ -16880,7 +16922,7 @@ function renderCompanyDashboardPage(){
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
-        <div class="hint" style="margin-top:6px;">= Vốn đầu tư + Góp thêm − Rút ra + Lợi Nhuận Thực Tế (chuẩn kế toán — tồn kho/tạm ứng chưa quyết toán vẫn tính là tài sản, không trừ như đã mất) − Dư Nợ Vay Ngân Hàng còn lại (${fmtVND(eq.remainingLoanBalance)} — Vốn Đầu Tư Ban Đầu tính ĐỦ cả phần vay, phải trừ ra để không tính khống vay thành vốn tự có). Xem đúng phần đang nằm dưới dạng hàng tồn kho ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp", đối chiếu đầy đủ ở "Kế Toán Nội Bộ → Tổng Giá Trị Ròng".</div>
+        <div class="hint" style="margin-top:6px;">= Vốn đầu tư + Góp thêm − Rút ra + Lợi Nhuận Thực Tế (chuẩn kế toán — tồn kho/tạm ứng chưa quyết toán vẫn tính là tài sản, không trừ như đã mất) − Điều Chỉnh Vay Ngân Hàng (${fmtVND(eq.remainingLoanBalance)} — vay đứng tên công ty thì trừ dư nợ còn lại; vay đứng tên cá nhân thì trừ đúng phần gốc công ty đã trả hộ, coi như rút vốn từng kỳ). Xem đúng phần đang nằm dưới dạng hàng tồn kho ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp", đối chiếu đầy đủ ở "Kế Toán Nội Bộ → Tổng Giá Trị Ròng".</div>
       </div>
 
       ${charterStatus.registered>0 ? `
@@ -17063,7 +17105,7 @@ function renderCompanyDashboardPage(){
               <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>📦 Hàng Tồn Kho (Lô Hoá Đơn Bù chưa dùng)</td><td class="num" style="color:var(--profit);">+${fmtVND(inventoryValue)}</td></tr>
               <tr><td>🚛 Giá Trị Còn Lại Của Xe (Vốn Đầu Tư − Khấu Hao Luỹ Kế)</td><td class="num" style="color:var(--profit);">+${fmtVND(vehicleNetBookValue)}</td></tr>
-              <tr><td>🏦 Dư Nợ Vay Ngân Hàng (còn lại, mọi khoản)</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
+              <tr><td>🏦 Điều Chỉnh Vay Ngân Hàng (dư nợ vay công ty + gốc đã trả hộ vay cá nhân)</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
             </tbody>
           </table>
@@ -18125,7 +18167,7 @@ function renderBankReconDetailPage(mode){
   const bankLoanDisbursedItems = bankRecon ? state.vehicles.flatMap(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    return loans.filter(loan=>loan.disbursementDate && loan.disbursementDate>bankRecon.checkpoint.date && loan.disbursementDate<=rangeTo)
+    return loans.filter(loan=>(loan.ownerType||'personal')==='company' && loan.disbursementDate && loan.disbursementDate>bankRecon.checkpoint.date && loan.disbursementDate<=rangeTo)
       .map(loan=>({ date:loan.disbursementDate, label:`Giải ngân ${escapeHtml(loan.name||'Khoản vay')} — 🚛 ${v.name||v.plate}`, amount: Number(loan.principal)||0, sign:1 }));
   }) : [];
   // SỬA 2026-09-08 (Ông Chủ "logic thật kỹ" — coi đây như 1 kế toán nội bộ
