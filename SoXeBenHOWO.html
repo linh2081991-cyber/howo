@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #272';
+const APP_BUILD = '2026-09-14 · #273';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17031,6 +17031,36 @@ function renderCompanyDashboardPage(){
       <button class="btn btn-accent btn-block" id="openBizReportBtn" style="font-size:15.5px; padding:14px; margin-bottom:10px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</button>
       <button class="btn btn-ghost btn-block" id="openPerVehicleBtn" style="margin-bottom:14px;">🚛 Kết Quả Từng Xe</button>
 
+      ${(()=>{
+        // SỬA 2026-09-14 (Ông Chủ yêu cầu — "Kế Toán Nội Bộ là chuyên gia
+        // tài chính, khi click vào thấy toàn bộ thống kê tài chính của cả
+        // dự án"): thêm đúng mảnh còn thiếu — Doanh Thu/Chi Phí/Lợi Nhuận
+        // luỹ kế CHƯA từng hiện ở trang này (chỉ có ở tab Kết Quả riêng),
+        // giờ đưa lên ĐẦU TRANG này làm bức tranh tổng quan đầy đủ: Doanh
+        // Thu → Chi Phí → Lợi Nhuận → Vốn Chủ Sở Hữu → Dòng Tiền Ròng →
+        // Công Nợ → TCB/TM → Tổng Giá Trị Ròng — đúng thứ tự 1 báo cáo
+        // tài chính chuẩn đi từ P&L xuống bảng cân đối.
+        const pnl = computeCumulativeAccrualProfit();
+        const totalCost = pnl.totalRevenue - pnl.netProfit;
+        return `
+      <div style="margin-bottom:16px;">
+        <h3>📈 Kết Quả Kinh Doanh Luỹ Kế</h3>
+        <div class="hint" style="margin-top:-6px; margin-bottom:10px;">${pnl.from?`Cộng dồn từ ${formatDateVN(pnl.from)} tới hôm nay — LỢI NHUẬN chuẩn kế toán (khác Dòng Tiền Ròng bên dưới).`:'Chưa có ca nào được ghi'}</div>
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
+              <tr><td>Doanh Thu</td><td class="num" style="color:var(--profit);">+${fmtVND(pnl.totalRevenue)}</td></tr>
+              <tr><td>Tổng Chi Phí (vận hành + cố định + khấu hao + lãi vay)</td><td class="num" style="color:var(--loss);">−${fmtVND(totalCost)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= LỢI NHUẬN THỰC TẾ</td><td class="num" style="color:${pnl.netProfit>=0?'var(--profit)':'var(--loss)'}">${pnl.netProfit>=0?'+':''}${fmtVND(pnl.netProfit)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <button class="btn btn-ghost btn-block" id="pnlDetailLinkBtn" style="margin-top:10px;">📋 Chi Tiết — Xem Đầy Đủ Ở Tab Kết Quả</button>
+      </div>
+        `;
+      })()}
+
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
@@ -17516,6 +17546,11 @@ function renderCompanyDashboardPage(){
     saveMainScroll();
     renderBusinessReportPage(mr.from, mr.to);
     restoreMainScroll();
+  });
+  const pnlDetailLinkBtn = document.getElementById('pnlDetailLinkBtn');
+  if(pnlDetailLinkBtn) pnlDetailLinkBtn.addEventListener('click', ()=>{
+    state.currentTab = 'results';
+    renderAll();
   });
   document.getElementById('openPerVehicleBtn').addEventListener('click', ()=>{
     const mr = currentMonthRange();
