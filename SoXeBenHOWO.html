@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #271';
+const APP_BUILD = '2026-09-14 · #272';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17034,7 +17034,7 @@ function renderCompanyDashboardPage(){
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
-        <div class="hint" style="margin-top:6px;">= Vốn đầu tư + Góp thêm − Rút ra + Lợi Nhuận Thực Tế (chuẩn kế toán — tồn kho/tạm ứng chưa quyết toán vẫn tính là tài sản, không trừ như đã mất) − Điều Chỉnh Vay Ngân Hàng (${fmtVND(eq.remainingLoanBalance)} — vay đứng tên công ty thì trừ dư nợ còn lại; vay đứng tên cá nhân thì trừ đúng phần gốc công ty đã trả hộ, coi như rút vốn từng kỳ). Xem đúng phần đang nằm dưới dạng hàng tồn kho ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp", đối chiếu đầy đủ ở "Kế Toán Nội Bộ → Tổng Giá Trị Ròng".</div>
+        <button class="btn btn-ghost btn-block" id="equityDetailBtn" style="margin-top:12px;">📋 Chi Tiết</button>
       </div>
 
       ${charterStatus.registered>0 ? `
@@ -17449,6 +17449,8 @@ function renderCompanyDashboardPage(){
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
   const charterCapitalEditBtn = document.getElementById('charterCapitalEditBtn');
   if(charterCapitalEditBtn) charterCapitalEditBtn.addEventListener('click', openCharterCapitalEditor);
+  const equityDetailBtn = document.getElementById('equityDetailBtn');
+  if(equityDetailBtn) equityDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderEquityDetailPage(); });
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
   document.getElementById('epi_saveBtn').addEventListener('click', async ()=>{
@@ -18639,6 +18641,120 @@ function renderBankReconDetailPage(mode){
 /// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
 /// để Ông Chủ tự đối chiếu đúng đã góp bao nhiêu, còn thiếu bao nhiêu so
 /// với số đã đăng ký, tránh bị Cơ Quan Thuế/Sở KH-ĐT xử phạt do góp thiếu.
+// SỬA 2026-09-14 (Ông Chủ yêu cầu — "bỏ chú thích dài, tạo nút Chi Tiết
+// hiện bảng sạch đẹp khoa học mô tả từng khoản"): trang chi tiết riêng
+// cho "Vốn Chủ Sở Hữu" — liệt kê ĐỦ từng khoản cấu thành, kèm bảng riêng
+// cho "Điều Chỉnh Vay Ngân Hàng" (tách theo TỪNG khoản vay, đúng cách
+// tính của từng loại — công ty trừ dư nợ còn lại, cá nhân trừ gốc đã trả
+// thật) — không giấu công thức ở đâu cả, mọi con số đều truy được ra
+// nguồn.
+function renderEquityDetailPage(){
+  scrollMainToTop();
+  const eq = computeOwnerEquity();
+  const investEntries = [...(state.initialInvestmentEntries||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  const loanRows = [];
+  state.vehicles.forEach(v=>{
+    const s = state.allVehiclesSettings[v.id] || {};
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    loans.forEach(loan=>{
+      const originalPrincipal = Number(loan.principal)||0;
+      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+      const actualPrincipalPaid = computeFullLoanSchedule(loan).reduce((s2,row)=>{
+        const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+        return paidSet.has(ym) ? s2 + (Number(row.monthlyPrincipal)||0) : s2;
+      }, 0);
+      const isCompany = (loan.ownerType||'personal')==='company';
+      const adjustment = isCompany ? Math.max(0, originalPrincipal - actualPrincipalPaid) : actualPrincipalPaid;
+      loanRows.push({ vehicleName: v.name||v.plate, loanName: loan.name||'Khoản vay', isCompany, originalPrincipal, actualPrincipalPaid, adjustment });
+    });
+  });
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="equityDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">📋 Chi Tiết — Vốn Chủ Sở Hữu</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đủ từng khoản cấu thành, cộng lại đúng ra số hiện ở "Hiệu Quả Đầu Tư".</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Vốn Đầu Tư Ban Đầu</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
+            <tr><td>+ Đã Góp Thêm (tiền thật)</td><td class="num" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</td></tr>
+            <tr><td>− Đã Rút Ra (tiền thật)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</td></tr>
+            <tr><td>+ Lợi Nhuận Thực Tế (luỹ kế)</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'};">${eq.cumulativeProfit>=0?'+':'−'}${fmtVND(Math.abs(eq.cumulativeProfit))}</td></tr>
+            <tr><td>− Điều Chỉnh Vay Ngân Hàng</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.remainingLoanBalance)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= VỐN CHỦ SỞ HỮU HIỆN TẠI</td><td class="num" style="color:${eq.equity>=0?'var(--profit)':'var(--loss)'}">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🚛 Vốn Đầu Tư Ban Đầu — Từng Lần</h3>
+      ${investEntries.length===0 ? `<div class="hint">Chưa có lần đầu tư nào — xem ở "⚙️ Thông Tin Dự Án".</div>` : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Ghi Chú</th><th class="num">Số Tiền</th></tr></thead>
+          <tbody>
+            ${investEntries.map(e=>`<tr><td>${formatDateVN(e.date)}</td><td>${escapeHtml(e.note||'—')}</td><td class="num">${fmtVND(e.amount)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">TỔNG</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
+          </tbody>
+        </table>
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>🏦 Điều Chỉnh Vay Ngân Hàng — Từng Khoản</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Vay đứng tên CÔNG TY: trừ Dư Nợ CÒN LẠI (gốc gốc − gốc đã trả thật). Vay đứng tên CÁ NHÂN: trừ đúng Gốc Đã Trả THẬT (dự án đã tự thanh toán bớt đúng bấy nhiêu cho Ông Chủ). Cả 2 loại đều chỉ tính theo đúng những kỳ ĐÃ TICK "Đã trả", không theo lịch.</div>
+      ${loanRows.length===0 ? `<div class="hint">Chưa có khoản vay nào.</div>` : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Khoản vay</th><th>Đứng tên</th><th class="num">Gốc đã trả thật</th><th class="num">Điều chỉnh</th></tr></thead>
+          <tbody>
+            ${loanRows.map(r=>`<tr>
+              <td>${escapeHtml(r.loanName)}<div class="hint" style="margin:2px 0 0;">🚛 ${escapeHtml(r.vehicleName)}</div></td>
+              <td>${r.isCompany?'🏢 Công ty':'👤 Cá nhân'}</td>
+              <td class="num">${fmtVND(r.actualPrincipalPaid)}</td>
+              <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(r.adjustment)}</td>
+            </tr>`).join('')}
+            <tr class="grid-total-row"><td colspan="3" style="text-align:left;">TỔNG ĐIỀU CHỈNH</td><td class="num">−${fmtVND(eq.remainingLoanBalance)}</td></tr>
+          </tbody>
+        </table>
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>ℹ️ Vì Sao "Tiền Thật" Khác Với Sổ Kê Thô?</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Tổng đã góp (kể cả tiền đảo)</td><td class="num">${fmtVND(eq.contributedRaw)}</td></tr>
+            <tr><td>− Trong đó là tiền đảo (không phải tiền mới)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.contributedRecycled)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Đã góp thêm THẬT</td><td class="num">${fmtVND(eq.contributedExtra)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid-table-wrap" style="margin-top:10px;">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Tổng đã rút (kể cả tiền đảo)</td><td class="num">${fmtVND(eq.withdrawnRaw)}</td></tr>
+            <tr><td>− Trong đó là tiền đảo (rút ra rồi góp lại ngay)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawnRecycled)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Đã rút THẬT</td><td class="num">${fmtVND(eq.withdrawn)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="group">
+      <button class="btn btn-ghost btn-block" id="equityDetailNetAssetLinkBtn">📊 Xem Tổng Giá Trị Ròng (Kế Toán Nội Bộ)</button>
+    </section>
+  `;
+  document.getElementById('equityDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  const netAssetLink = document.getElementById('equityDetailNetAssetLinkBtn');
+  if(netAssetLink) netAssetLink.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyDashboardPage(); });
+}
 function renderCharterCapitalDetailPage(){
   scrollMainToTop();
   const status = computeCharterCapitalStatus();
