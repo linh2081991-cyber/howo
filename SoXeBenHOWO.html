@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #269';
+const APP_BUILD = '2026-09-14 · #271';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2463,12 +2463,29 @@ function companyWideAccrualFixedMonthlyBreakdown(from, to){
     const effectiveFrom = vehicleStartDate>from ? vehicleStartDate : from;
     if(effectiveFrom>to) return; // Xe bắt đầu hoạt động SAU khoảng đang xem — chưa góp gì trong kỳ này.
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-    const liveLoanInterestMonthly = loans.reduce((sum2,loan)=>{
-      const r = computeBankLoanAmortization(loan, new Date());
-      return sum2 + (Number(r.monthlyInterestCurrent)||0);
+    // SỬA 2026-09-14 (Ông Chủ chỉ ra — "lãi vay cũng là chi phí đúng của
+    // dự án, đang tính thiếu"): BẮT ĐƯỢC LỖI THẬT, CÙNG LOẠI với lỗi Gốc
+    // vừa sửa — trước đây lấy 1 MỨC LÃI CỐ ĐỊNH của ĐÚNG kỳ hôm nay
+    // (monthlyInterestCurrent), rồi DÀN ĐỀU mức đó cho MỌI THÁNG trong cả
+    // khoảng [from,to] (kể cả những tháng ĐÃ QUA từ lâu) — trong khi lãi
+    // vay GIẢM DẦN theo từng kỳ (dư nợ giảm dần), nên tháng nào càng xa
+    // quá khứ thì lãi THẬT càng CAO hơn mức hôm nay. Với khoảng tính luỹ
+    // kế nhiều tháng (Hiệu Quả Đầu Tư, Vốn Chủ Sở Hữu), lỗi này làm Lãi
+    // Vay bị tính THIẾU, khiến Lợi Nhuận Thực Tế bị tính CAO hơn thực tế.
+    // Sửa: cộng đúng LÃI THẬT của TỪNG KỲ ĐÃ TICK "Đã trả" (paidMonths),
+    // rơi đúng vào khoảng [effectiveFrom,to] đang xét — không còn dùng 1
+    // mức lãi cố định dàn đều nữa.
+    const actualLoanInterestInRange = loans.reduce((sum2,loan)=>{
+      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+      return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
+        const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+        const ym = dueStr.slice(0,7);
+        if(paidSet.has(ym) && dueStr>=effectiveFrom && dueStr<=to) return s3 + (Number(row.interest)||0);
+        return s3;
+      }, 0);
     }, 0);
     depreciation += proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, effectiveFrom, to);
-    loanInterest += proratedMonthlyCost(()=>liveLoanInterestMonthly, effectiveFrom, to);
+    loanInterest += actualLoanInterestInRange;
     insurance += proratedMonthlyCost(()=>Number(s.monthlyInsurance)||0, effectiveFrom, to);
     registration += proratedMonthlyCost(()=>Number(s.monthlyRegistrationFee)||0, effectiveFrom, to);
   });
@@ -2660,17 +2677,25 @@ function computeVehicleAccrualProfit(vid, from, to){
     return e ? (Number(e.amount)||0) : 0;
   }, from, to);
   const repairTotal = (state.allVehiclesRepairs[vid]||[]).filter(r=>r.date>=from && r.date<=to).reduce((sum,r)=>sum+(Number(r.amount)||0),0);
-  // SỬA 2026-09-14 (cùng đợt "truy quét sâu khi có xe 2,3..." — sinh đôi
-  // với companyWideAccrualFixedMonthly() đã sửa): s.monthlyLoanInterest
-  // là snapshot CHỈ được làm mới cho xe đang xem gần đây nhất — xem đúng
-  // 1 xe CỤ THỂ qua hàm này (Kết Quả Từng Xe) mà lâu rồi chưa mở tab Cài
-  // Đặt của ĐÚNG xe đó thì số lãi vay có thể cũ. Tính LIVE thay vì đọc
-  // field đã lưu, y hệt cách companyWideAccrualFixedMonthly() đã sửa.
-  const liveLoanInterestMonthly = (Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []))
-    .reduce((sum2,loan)=>{ const r = computeBankLoanAmortization(loan, new Date()); return sum2 + (Number(r.monthlyInterestCurrent)||0); }, 0);
-  const depreciationAndInterestMonthly = (Number(s.monthlyVehicleDepreciation)||0) + liveLoanInterestMonthly;
+  // SỬA 2026-09-14 LẦN 2 (Ông Chủ chỉ ra tiếp — "lãi vay cũng là chi phí
+  // đúng của dự án, đang tính thiếu" — cùng lỗi với companyWideAccrualFixedMonthlyBreakdown()
+  // đã sửa): mức lãi CỐ ĐỊNH của đúng kỳ hôm nay không được dàn đều cho
+  // MỌI THÁNG trong [from,to] — lãi vay GIẢM DẦN theo từng kỳ, tháng càng
+  // xa quá khứ lãi THẬT càng cao hơn mức hôm nay. Cộng đúng lãi THẬT của
+  // từng kỳ ĐÃ TICK "Đã trả", rơi đúng vào [from,to] đang xét.
+  const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+  const actualLoanInterestInRange = loans.reduce((sum2,loan)=>{
+    const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+    return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
+      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+      const ym = dueStr.slice(0,7);
+      if(paidSet.has(ym) && dueStr>=from && dueStr<=to) return s3 + (Number(row.interest)||0);
+      return s3;
+    }, 0);
+  }, 0);
+  const depreciationMonthly = Number(s.monthlyVehicleDepreciation)||0;
   const insuranceAndRegistration = (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
-  const accrualFixedMonthly = proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistration, from, to);
+  const accrualFixedMonthly = proratedMonthlyCost(()=>depreciationMonthly+insuranceAndRegistration, from, to) + actualLoanInterestInRange;
   const breakEven = computeBreakEvenDetailed(shifts, roadFee, repairTotal, accrualFixedMonthly, 0, 0);
   // SỬA 2026-09-14 (đồng bộ với computeCumulativeAccrualProfit() ở trên —
   // trừ đúng VAT Hưởng khỏi chi phí mua hoá đơn bù, không tính gộp VAT
@@ -12849,7 +12874,22 @@ function computePeriodSummary(from, to){
   //    kỳ hiện tại). Bảo hiểm + đăng kiểm lấy đủ nguyên tháng
   //    (fullMonthlyCostIfTouched), không chia nhỏ theo ngày nữa.
   const insuranceAndRegistrationMonthly = (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
-  const depreciationAndInterestMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0);
+  // SỬA 2026-09-14 LẦN 3 (Ông Chủ chỉ ra — "lãi vay cũng là chi phí đúng
+  // của dự án, đang tính thiếu" — cùng lỗi với computeVehicleAccrualProfit()/
+  // companyWideAccrualFixedMonthlyBreakdown() đã sửa): state.settings.monthlyLoanInterest
+  // là mức lãi CỐ ĐỊNH của đúng kỳ hôm nay, không được dàn đều cho MỌI
+  // THÁNG trong [from,to] — lãi vay GIẢM DẦN theo từng kỳ. Cộng đúng lãi
+  // THẬT của từng kỳ ĐÃ TICK "Đã trả", rơi đúng vào [from,to] đang xét.
+  const actualLoanInterestInRangeSingleVehicle = (state.settings.bankLoans||[]).reduce((sum2,loan)=>{
+    const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+    return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
+      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+      const ym = dueStr.slice(0,7);
+      if(paidSet.has(ym) && dueStr>=from && dueStr<=to) return s3 + (Number(row.interest)||0);
+      return s3;
+    }, 0);
+  }, 0);
+  const depreciationMonthlyOnly = Number(state.settings.monthlyVehicleDepreciation)||0;
   // SỬA 2026-09-14 (Ông Chủ yêu cầu "truy quét sâu khi có xe 2,3..."): BẮT
   // ĐƯỢC LỖI THẬT — `otherFixedMonthly` (dùng cho LỢI NHUẬN THỰC TẾ) trước
   // đây LUÔN đọc `state.settings` (đúng 1 xe đang cache trong bộ nhớ),
@@ -12862,7 +12902,7 @@ function computePeriodSummary(from, to){
   // xe cụ thể, giữ NGUYÊN cách tính cũ (đúng, vì đang xem đúng CHI PHÍ
   // CỦA XE ĐÓ).
   const otherFixedMonthly = isCompanyWide ? companyWideAccrualFixedMonthly(from, to)
-    : proratedMonthlyCost(()=>depreciationAndInterestMonthly+insuranceAndRegistrationMonthly, from, to);
+    : proratedMonthlyCost(()=>depreciationMonthlyOnly+insuranceAndRegistrationMonthly, from, to) + actualLoanInterestInRangeSingleVehicle;
   const otherFixedMonthlyForCashFlow = (state.settings.bankLoans||[]).reduce((sum,loan)=>sum+bankLoanRealCostForRange(loan, from, to), 0)
     + fullMonthlyCostIfTouched(()=>insuranceAndRegistrationMonthly, from, to);
   // SỬA 2026-09-14 (Ông Chủ đối chiếu — "chi phí thật cuối cùng phải trừ
@@ -13325,10 +13365,23 @@ function renderResults(){
   // dùng breakdown cộng dồn TẤT CẢ xe (companyWideAccrualFixedMonthlyBreakdown,
   // CÙNG NGUỒN với otherFixedMonthly); khi xem riêng 1 xe, giữ nguyên
   // state.settings của đúng xe đó.
+  // SỬA 2026-09-14 LẦN 4 (đồng bộ hiển thị với otherFixedMonthly đã sửa —
+  // dòng "Lãi vay/tháng" hiển thị phải cộng khớp đúng bằng tổng, không
+  // còn dùng state.settings.monthlyLoanInterest (mức cố định của đúng kỳ
+  // hôm nay, dàn đều sai cho khoảng nhiều tháng) nữa).
+  const actualLoanInterestForDisplay = (state.settings.bankLoans||[]).reduce((sum2,loan)=>{
+    const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+    return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
+      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
+      const ym = dueStr.slice(0,7);
+      if(paidSet.has(ym) && dueStr>=from && dueStr<=to) return s3 + (Number(row.interest)||0);
+      return s3;
+    }, 0);
+  }, 0);
   const fixedCostBreakdownForDisplay = periodSummary.isCompanyWide
     ? companyWideAccrualFixedMonthlyBreakdown(from, to)
     : { depreciation: Number(state.settings.monthlyVehicleDepreciation)||0,
-        loanInterest: Number(state.settings.monthlyLoanInterest)||0,
+        loanInterest: actualLoanInterestForDisplay,
         insurance: Number(state.settings.monthlyInsurance)||0,
         registration: Number(state.settings.monthlyRegistrationFee)||0 };
   // roadFee có thể bị Ông Chủ ghi đè riêng cho màn hình này (state.resultsRoadFeeOverride)
@@ -17142,7 +17195,7 @@ function renderCompanyDashboardPage(){
 
     <section class="group">
       <h3>📊 Tổng Giá Trị Ròng Toàn Công Ty</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đủ TOÀN BỘ tài sản và nợ phải trả — đối chiếu chuẩn xác với "Vốn Chủ Sở Hữu" (Hiệu Quả Đầu Tư). Lệch dù 1đ sẽ báo ngay bên dưới.</div>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đủ TOÀN BỘ tài sản và nợ phải trả của công ty.</div>
       ${(()=>{
         const inventoryValue = companyWideInvoiceLotInventoryValue();
         const depHistory = computeDepreciationMonthlyHistory();
@@ -17152,7 +17205,6 @@ function renderCompanyDashboardPage(){
         const netAssetValue = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
           + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed
           + inventoryValue + vehicleNetBookValue - remainingLoanBalance;
-        const diff = Math.round(netAssetValue - eq.equity);
         return `
         <div class="grid-table-wrap">
           <table class="grid-table">
@@ -17168,11 +17220,6 @@ function renderCompanyDashboardPage(){
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
             </tbody>
           </table>
-        </div>
-        <div class="card" style="text-align:center; margin-top:10px; border:1.5px solid ${diff===0?'var(--profit)':'var(--loss)'};">
-          <div style="font-size:12.5px; font-weight:700; color:var(--ink-soft);">ĐỐI CHIẾU VỚI VỐN CHỦ SỞ HỮU (Hiệu Quả Đầu Tư)</div>
-          <div style="font-size:20px; font-weight:900; margin-top:4px;">${fmtVND(netAssetValue)} <span style="font-weight:400; font-size:14px;">vs</span> ${fmtVND(eq.equity)}</div>
-          ${diff===0 ? `<div style="color:var(--profit); font-weight:700; margin-top:4px;">✅ KHỚP TUYỆT ĐỐI — không lệch 1 đồng nào.</div>` : `<div style="color:var(--loss); font-weight:700; margin-top:4px;">⚠️ LỆCH ${fmtVND(Math.abs(diff))} — có khoản đang tính ở 1 bên nhưng thiếu ở bên kia, báo lại đúng số này để tra tiếp.</div>`}
         </div>
         `;
       })()}
