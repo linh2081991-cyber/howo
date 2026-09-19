@@ -1616,6 +1616,11 @@ function withTimeout(promise, ms=15000){
   ]);
 }
 
+// Số phiên bản build — Ông Chủ yêu cầu hiện rõ ở Cài Đặt để đối chiếu
+// đúng bản đang dùng sau mỗi lần tải file mới đè lên GitHub Pages. Mỗi
+// lần bàn giao file mới, đổi ĐÚNG dòng này (ngày-giờ hoặc mô tả ngắn thay
+// đổi chính) — không cần đổi gì khác.
+const APP_BUILD_VERSION = '2026-09-19 — Tài xế dùng chung công ty + Kế Toán Nội Bộ đầy đủ';
 async function loadAll(){
   try {
     const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, initialInvestmentEntriesSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap] = await Promise.all([
@@ -1895,8 +1900,13 @@ function openEditVehicleModal(vid){
 /// chung toàn công ty nên KHÔNG nằm trong hàm này, giữ nguyên không đổi.
 async function loadVehicleWorkingSet(vehicleId){
   try {
-    const [dSnap, sSnap, rSnap, roadFeeSnap, docSnap, maintSnap, bonusSnap, stSnap, companySettingsSnap] = await Promise.all([
-      vehicleDataRef(vehicleId, 'drivers').get(),
+    // SỬA (Ông Chủ yêu cầu — tài xế dùng CHUNG toàn công ty, không theo
+    // xe): trước đây hàm này TẢI LẠI drivers riêng theo vehicleId mỗi lần
+    // chuyển xe, làm mỗi xe có 1 sổ tài xế khác nhau. Bỏ hẳn việc tải lại
+    // drivers ở đây — state.drivers giữ nguyên đúng danh sách CHUNG đã
+    // nạp 1 lần duy nhất ở loadAll() (từ sharedDataRef('drivers')), không
+    // đổi theo xe đang xem nữa.
+    const [sSnap, rSnap, roadFeeSnap, docSnap, maintSnap, bonusSnap, stSnap, companySettingsSnap] = await Promise.all([
       vehicleDataRef(vehicleId, 'shifts').get(),
       vehicleDataRef(vehicleId, 'repairs').get(),
       vehicleDataRef(vehicleId, 'roadFeeByMonth').get(),
@@ -1906,7 +1916,6 @@ async function loadVehicleWorkingSet(vehicleId){
       vehicleDataRef(vehicleId, 'settings').get(),
       sharedDataRef('companySettings').get()
     ]);
-    state.drivers = dSnap.exists && Array.isArray(dSnap.data().list) ? dSnap.data().list : [];
     state.shifts = sSnap.exists && Array.isArray(sSnap.data().list) ? sSnap.data().list : [];
     state.repairs = rSnap.exists && Array.isArray(rSnap.data().list) ? rSnap.data().list : [];
     state.roadFeeByMonth = roadFeeSnap.exists && Array.isArray(roadFeeSnap.data().list) ? roadFeeSnap.data().list : [];
@@ -2011,8 +2020,17 @@ function activeVehicleIdForEditing(){
   if(state.vehicles.length<=1) return (state.vehicles[0]||{}).id || null;
   return null;
 }
+// SỬA (Ông Chủ yêu cầu — "tài xế là chung của công ty, không thuộc riêng
+// xe nào, hôm nay lái xe này mai lái xe khác"): trước đây dùng
+// vehicleDataRef(activeVehicleIdForEditing(),'drivers') — xe #2 trở đi sẽ
+// lưu vào 1 document TÁCH RIÊNG, tạo ra 2 sổ tài xế độc lập, sai bản chất
+// công việc. Đổi hẳn sang sharedDataRef('drivers') CỐ ĐỊNH — đúng document
+// Xe #1 (29E-691.12) đã và đang dùng từ trước tới giờ (vehicleDataRef()
+// vốn đã trả về đúng sharedDataRef('drivers') cho xe #1/isPrimary), nên 4
+// tài xế thật hiện có KHÔNG hề bị di chuyển hay ghi đè — chỉ là từ nay
+// MỌI xe, kể cả xe thêm sau, đều đọc/ghi đúng 1 document DUY NHẤT này.
 async function saveDrivers(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'drivers').set({ list: state.drivers }); return true; }
+  try { await withTimeout(sharedDataRef('drivers').set({ list: state.drivers })); return true; }
   catch(e){ showToast('Lỗi lưu dữ liệu tài xế: ' + (e?.message || e)); return false; }
 }
 async function saveSuppliers(){
@@ -8582,7 +8600,12 @@ async function saveDraftShift(){
 // ========================= DRIVERS TAB =========================
 
 function renderDrivers(){
-  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
+  // SỬA (Ông Chủ yêu cầu — tài xế dùng CHUNG cả công ty): bỏ hẳn yêu cầu
+  // "phải chọn đúng 1 xe trước" — trước đây renderChooseVehiclePrompt()
+  // hiện ra chặn màn này khi đang ở "🏢 Linh Chí Thành" với ≥2 xe, vì
+  // drivers từng là dữ liệu riêng theo xe. Giờ drivers là 1 sổ DUY NHẤT
+  // của cả công ty nên không còn lý do phải hỏi "xem xe nào" nữa — mở tab
+  // Tài Xế là thấy ngay đủ danh sách, bất kể đang đứng ở xe nào.
   const app=document.getElementById('app');
   const s = state.settings;
   app.innerHTML = `
@@ -8605,6 +8628,7 @@ function renderDrivers(){
       <button class="btn btn-accent btn-block" id="addDriverBtn" style="margin-top:10px;">+ Thêm Tài Xế</button>
     </section>
 
+    ${activeVehicleIdForEditing() ? `
     <section class="group">
       <h3>📅 Công Chuẩn Toàn Đội</h3>
       <div class="card">
@@ -8637,6 +8661,11 @@ function renderDrivers(){
       </div>
       <button class="btn btn-ghost btn-sm" id="saveTaxRatesBtn" style="margin-top:10px;">💾 Lưu Thuế Suất</button>
     </section>
+    ` : `
+    <section class="group">
+      <div class="hint" style="margin:0;">📅 Công Chuẩn Toàn Đội & 🧾 Thuế Suất áp dụng RIÊNG theo từng xe — vào đúng 1 xe cụ thể (không phải "🏢 Linh Chí Thành") để chỉnh 2 mục này. Danh sách tài xế bên dưới vẫn dùng CHUNG cho mọi xe.</div>
+    </section>
+    `}
 
     <section class="group">
       <h3>👥 Danh Sách Tài Xế</h3>
@@ -8680,7 +8709,8 @@ function renderDrivers(){
   const wdVals = { extraDaySalary: Number(s.extraDayBaseSalary)||1000000 };
   attachMoneyInput(document.getElementById('wd_extraDaySalary'), wdVals.extraDaySalary, v=>wdVals.extraDaySalary=v);
 
-  document.getElementById('saveWorkDaysBtn').addEventListener('click', async ()=>{
+  const saveWorkDaysBtn = document.getElementById('saveWorkDaysBtn');
+  if(saveWorkDaysBtn) saveWorkDaysBtn.addEventListener('click', async ()=>{
     s.standardWorkDaysPerMonth = Number(document.getElementById('wd_workDays').value)||28;
     s.extraDayBaseSalary = wdVals.extraDaySalary;
     if(!(await saveSettings())) return;
@@ -8700,7 +8730,8 @@ function renderDrivers(){
     showToast('Đã lưu Công Chuẩn Toàn Đội.');
   });
 
-  document.getElementById('saveTaxRatesBtn').addEventListener('click', async ()=>{
+  const saveTaxRatesBtn = document.getElementById('saveTaxRatesBtn');
+  if(saveTaxRatesBtn) saveTaxRatesBtn.addEventListener('click', async ()=>{
     s.vatRatePercent = Number(document.getElementById('tax_vatRate').value)||0;
     s.citRatePercent = Number(document.getElementById('tax_citRate').value)||0;
     if(!(await saveSettings())) return;
@@ -19060,7 +19091,8 @@ function renderSettings(){
       <button class="btn btn-danger btn-block" id="resetBtn">Khôi Phục Cài Đặt Gốc</button>
     </section>
 
-    <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:24px;">Lưu Cài Đặt</button>
+    <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:10px;">Lưu Cài Đặt</button>
+    <div class="hint" style="text-align:center; margin-bottom:24px;">📦 Phiên bản: ${escapeHtml(APP_BUILD_VERSION)}</div>
   `;
 
   // SỬA 2026-09-08 (yêu cầu Ông Chủ — "toàn bộ khoản vay ngân hàng là
