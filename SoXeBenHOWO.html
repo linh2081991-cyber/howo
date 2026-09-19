@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-14 · #273';
+const APP_BUILD = '2026-09-19 · #274';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1616,11 +1616,6 @@ function withTimeout(promise, ms=15000){
   ]);
 }
 
-// Số phiên bản build — Ông Chủ yêu cầu hiện rõ ở Cài Đặt để đối chiếu
-// đúng bản đang dùng sau mỗi lần tải file mới đè lên GitHub Pages. Mỗi
-// lần bàn giao file mới, đổi ĐÚNG dòng này (ngày-giờ hoặc mô tả ngắn thay
-// đổi chính) — không cần đổi gì khác.
-const APP_BUILD_VERSION = '2026-09-19 — Tài xế dùng chung công ty + Kế Toán Nội Bộ đầy đủ';
 async function loadAll(){
   try {
     const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, initialInvestmentEntriesSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap] = await Promise.all([
@@ -3443,6 +3438,25 @@ async function saveSettings(){
   catch(e){ showToast('Lỗi lưu cài đặt: ' + (e?.message || e)); return false; }
 }
 
+// MỚI (Ông Chủ chỉ ra đúng — Thuế Suất VAT/TNDN nằm trong đúng 4 field
+// SHARED_SETTINGS_FIELDS, tức là DÙNG CHUNG cho cả công ty, không phải
+// riêng theo xe — trước đây bị đặt lẫn trong tab Tài Xế và còn bị chặn
+// sau "phải chọn 1 xe cụ thể" dù bản chất không cần chọn xe nào cả, lại
+// trùng với chỗ chỉnh nhanh VAT ở trang Thẩm Định Công Trình). Chuyển hẳn
+// sang Cài Đặt — và lưu THẲNG vào companySettings, KHÔNG gọi saveSettings()
+// (hàm đó còn ghi cả vào document RIÊNG của xe đang xem qua
+// activeVehicleIdForEditing(), nên nếu gọi lúc đang ở "🏢 Linh Chí Thành"
+// chưa chọn xe cụ thể sẽ có rủi ro ghi nhầm vào đúng xe #1) — tách hẳn ra
+// để chỉnh Thuế Suất ở bất kỳ đâu cũng an toàn tuyệt đối, không đụng tới
+// dữ liệu riêng của bất kỳ xe nào.
+async function saveTaxRates(){
+  try {
+    const shared = {};
+    SHARED_SETTINGS_FIELDS.forEach(f=>{ shared[f]=state.settings[f]; });
+    await withTimeout(sharedDataRef('companySettings').set(shared));
+    return true;
+  } catch(e){ showToast('Lỗi lưu thuế suất: ' + (e?.message || e)); return false; }
+}
 async function startApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('dataLoadingScreen').style.display = 'flex';
@@ -8610,7 +8624,6 @@ function renderDrivers(){
   const s = state.settings;
   app.innerHTML = `
     <section class="group">
-      <h3>➕ Thêm Tài Xế Mới</h3>
       <div class="card">
         <div class="field">
           <label>Tên tài xế</label>
@@ -8644,26 +8657,9 @@ function renderDrivers(){
       <button class="btn btn-ghost btn-sm" id="saveWorkDaysBtn" style="margin-top:10px;">💾 Lưu Công Chuẩn</button>
       <div class="hint" style="margin-top:6px;">Áp dụng chung cho toàn đội (không riêng từng tài xế) — dùng để chia lương cứng mỗi ca, tính Điểm Hoà Vốn và Thẩm Định Công Trình. Ca nào vượt quá số ngày công chuẩn trong tháng của đúng tài xế đó (VD chuẩn 28 ca thì ca thứ 29 trở đi) sẽ tính lương cứng theo mức cố định riêng ở trên thay vì chia đều.</div>
     </section>
-
-    <section class="group">
-      <h3>🧾 Thuế Suất Áp Dụng</h3>
-      <div class="card">
-        <div class="field" style="margin-bottom:14px;">
-          <label>Thuế suất VAT mặc định (%)</label>
-          <input type="number" inputmode="decimal" id="tax_vatRate" value="${Number(s.vatRatePercent)||0}">
-          <div class="hint" style="margin-top:4px;">Dùng khi 1 công trình thương mại không tự khai riêng thuế suất — có thể ghi đè riêng từng công trình ở form nhập ca.</div>
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Thuế suất TNDN dự kiến (%)</label>
-          <input type="number" inputmode="decimal" id="tax_citRate" value="${Number(s.citRatePercent)||0}">
-          <div class="hint" style="margin-top:4px;">Mặc định 20% (mức phổ thông) — sửa lại nếu KT thuế xác định công ty thuộc diện ưu đãi khác. Chỉ dùng để ước tính tham khảo ở Kết Quả Kinh Doanh, không phải số quyết toán chính thức.</div>
-        </div>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="saveTaxRatesBtn" style="margin-top:10px;">💾 Lưu Thuế Suất</button>
-    </section>
     ` : `
     <section class="group">
-      <div class="hint" style="margin:0;">📅 Công Chuẩn Toàn Đội & 🧾 Thuế Suất áp dụng RIÊNG theo từng xe — vào đúng 1 xe cụ thể (không phải "🏢 Linh Chí Thành") để chỉnh 2 mục này. Danh sách tài xế bên dưới vẫn dùng CHUNG cho mọi xe.</div>
+      <div class="hint" style="margin:0;">📅 Công Chuẩn Toàn Đội áp dụng RIÊNG theo từng xe — vào đúng 1 xe cụ thể (không phải "🏢 Linh Chí Thành") để chỉnh mục này. Danh sách tài xế bên dưới vẫn dùng CHUNG cho mọi xe.</div>
     </section>
     `}
 
@@ -8728,15 +8724,6 @@ function renderDrivers(){
     }
     renderAll();
     showToast('Đã lưu Công Chuẩn Toàn Đội.');
-  });
-
-  const saveTaxRatesBtn = document.getElementById('saveTaxRatesBtn');
-  if(saveTaxRatesBtn) saveTaxRatesBtn.addEventListener('click', async ()=>{
-    s.vatRatePercent = Number(document.getElementById('tax_vatRate').value)||0;
-    s.citRatePercent = Number(document.getElementById('tax_citRate').value)||0;
-    if(!(await saveSettings())) return;
-    renderAll();
-    showToast('Đã lưu Thuế Suất.');
   });
 
   document.getElementById('addDriverBtn').addEventListener('click', async ()=>{
@@ -10846,17 +10833,13 @@ function renderProjectAppraisal(){
         ${avgFoodPerShift<=0 ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Chưa đủ lịch sử vận hành để gợi ý tiền ăn trung bình — hãy tự nhập tay khoản này khi thêm công trình.</div>` : ''}
       </div>
       <div class="card" style="margin-top:8px;">
-        <div class="field">
+        <div class="field" style="margin-bottom:0;">
           <label>Đơn giá dầu dùng để mô phỏng (đ/lít)</label>
           <input type="text" inputmode="decimal" id="aps_fuelPrice">
         </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Thuế suất VAT (%)</label>
-          <input type="number" inputmode="decimal" id="aps_vatRate" value="${Number(state.settings.vatRatePercent)||0}">
-        </div>
         <button class="btn btn-ghost btn-sm" id="saveAppraisalParamsBtn" style="margin-top:12px;">💾 Lưu Thông Số Mô Phỏng</button>
       </div>
-      <div class="hint" style="margin-top:8px;">2 thông số này chỉ dùng riêng để mô phỏng thẩm định công trình ở đây, không ảnh hưởng tới đơn giá dầu ghi nhận trên từng ca thực tế. ${fuelPrice===0?'Chưa có đơn giá nào để mô phỏng — nhập ở trên rồi bấm "Lưu Thông Số Mô Phỏng".':'Để trống rồi Lưu sẽ khiến app tự lấy đơn giá dầu của ca gần nhất đã ghi.'}</div>
+      <div class="hint" style="margin-top:8px;">Thông số này chỉ dùng riêng để mô phỏng thẩm định công trình ở đây, không ảnh hưởng tới đơn giá dầu ghi nhận trên từng ca thực tế. ${fuelPrice===0?'Chưa có đơn giá nào để mô phỏng — nhập ở trên rồi bấm "Lưu Thông Số Mô Phỏng".':'Để trống rồi Lưu sẽ khiến app tự lấy đơn giá dầu của ca gần nhất đã ghi.'} Thuế suất VAT lấy chung theo đúng số đã khai ở tab "⚙️ Cài Đặt".</div>
     </section>
 
     <section class="group">
@@ -10943,7 +10926,6 @@ function renderProjectAppraisal(){
   attachMoneyInput(document.getElementById('aps_fuelPrice'), apsFuelVal, v=>{ apsFuelVal=v; });
   document.getElementById('saveAppraisalParamsBtn').addEventListener('click', async ()=>{
     state.settings.currentFuelUnitPrice = apsFuelVal;
-    state.settings.vatRatePercent = Number(document.getElementById('aps_vatRate').value)||0;
     if(!(await saveSettings())) return;
     showToast('Đã lưu thông số mô phỏng.');
     renderProjectAppraisal();
@@ -19018,6 +19000,24 @@ function renderSettings(){
     </section>
 
     <section class="group">
+      <h3>🧾 Thuế Suất Áp Dụng</h3>
+      <div class="card">
+        <div class="field" style="margin-bottom:14px;">
+          <label>Thuế suất VAT mặc định (%)</label>
+          <input type="number" inputmode="decimal" id="tax_vatRate" value="${Number(state.settings.vatRatePercent)||0}">
+          <div class="hint" style="margin-top:4px;">Dùng khi 1 công trình thương mại không tự khai riêng thuế suất — có thể ghi đè riêng từng công trình ở form nhập ca.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Thuế suất TNDN dự kiến (%)</label>
+          <input type="number" inputmode="decimal" id="tax_citRate" value="${Number(state.settings.citRatePercent)||0}">
+          <div class="hint" style="margin-top:4px;">Mặc định 20% (mức phổ thông) — sửa lại nếu KT thuế xác định công ty thuộc diện ưu đãi khác. Chỉ dùng để ước tính tham khảo ở Kết Quả Kinh Doanh, không phải số quyết toán chính thức.</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="saveTaxRatesBtn" style="margin-top:10px;">💾 Lưu Thuế Suất</button>
+      <div class="hint" style="margin-top:6px;">Dùng CHUNG cho cả công ty, áp dụng như nhau cho mọi xe — không cần chọn xe cụ thể mới chỉnh được.</div>
+    </section>
+
+    <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
       <div style="display:flex; justify-content:flex-end;">
@@ -19091,8 +19091,7 @@ function renderSettings(){
       <button class="btn btn-danger btn-block" id="resetBtn">Khôi Phục Cài Đặt Gốc</button>
     </section>
 
-    <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:10px;">Lưu Cài Đặt</button>
-    <div class="hint" style="text-align:center; margin-bottom:24px;">📦 Phiên bản: ${escapeHtml(APP_BUILD_VERSION)}</div>
+    <button class="btn btn-accent btn-block" id="saveSettingsBtn" style="margin-bottom:24px;">Lưu Cài Đặt</button>
   `;
 
   // SỬA 2026-09-08 (yêu cầu Ông Chủ — "toàn bộ khoản vay ngân hàng là
@@ -19129,6 +19128,14 @@ function renderSettings(){
   if(changeKeyBtn) changeKeyBtn.addEventListener('click', ()=>{ showGeminiKeyInput = true; renderAll(); });
   const cancelKeyEditBtn = document.getElementById('cancelGeminiKeyEditBtn');
   if(cancelKeyEditBtn) cancelKeyEditBtn.addEventListener('click', ()=>{ showGeminiKeyInput = false; renderAll(); });
+
+  document.getElementById('saveTaxRatesBtn').addEventListener('click', async ()=>{
+    state.settings.vatRatePercent = Number(document.getElementById('tax_vatRate').value)||0;
+    state.settings.citRatePercent = Number(document.getElementById('tax_citRate').value)||0;
+    if(!(await saveTaxRates())) return;
+    renderAll();
+    showToast('Đã lưu Thuế Suất.');
+  });
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
     const keyInput = document.getElementById('s_geminiKey');
