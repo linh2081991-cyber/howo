@@ -10248,7 +10248,7 @@ function renderHiringAdvisor(){
     document.getElementById('ha_preview').innerHTML = renderHiringAdvisorPreviewHtml(computeHiringAdvisorMetrics(draft));
   };
 
-  document.getElementById('hiringBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('hiringBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
   document.getElementById('ha_from').addEventListener('change', e=>{ draft.from=e.target.value; updatePreview(); });
   document.getElementById('ha_to').addEventListener('change', e=>{ draft.to=e.target.value; updatePreview(); });
   document.getElementById('ha_tripsDay').addEventListener('input', e=>{ draft.tripsPerDayShift=Number(e.target.value)||0; updatePreview(); });
@@ -10358,7 +10358,7 @@ function renderStrategy(){
     activeStrategyTruckRun = null;
   }
 
-  document.getElementById('strategyBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('strategyBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
   document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
@@ -10435,7 +10435,7 @@ function renderBonusAdvisor(){
     activeBonusTruckRun = null;
   }
 
-  document.getElementById('bonusBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('bonusBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
   document.getElementById('bonus_from').addEventListener('change', e=>{ ba.from = e.target.value || ba.from; ba.result=null; ba.error=null; });
   document.getElementById('bonus_to').addEventListener('change', e=>{ ba.to = e.target.value || ba.to; ba.result=null; ba.error=null; });
   document.getElementById('bonus_budgetPct').addEventListener('input', e=>{ ba.budgetPercent = Number(String(e.target.value).replace(',','.'))||0; });
@@ -10757,6 +10757,129 @@ function computeAppraisalMetrics(p){
            projectedMonthlyProfit, roiPercent };
 }
 
+/// SONG SINH với computeAppraisalMetrics() ở trên — dùng riêng cho "Công
+/// Trình Thương Mại" (mua vật liệu từ mỏ, bán lại cho khách xây dựng),
+/// theo đúng yêu cầu Ông Chủ (2026-09-19): logic thật kỹ để mô phỏng sát
+/// thực tế nhất. TRẢ VỀ ĐÚNG CÙNG BỘ TÊN TRƯỜNG cốt lõi (netRevenuePerTrip,
+/// variableCostPerTrip, grossProfitPerTrip, fixedCostMonthly, breakEvenTrips,
+/// breakEvenShifts, feasible, projectedMonthlyProfit, roiPercent...) như
+/// computeAppraisalMetrics() để bảng So Sánh Song Song/Xếp Hạng Đề
+/// Xuất/Prompt AI dùng CHUNG được cho cả 2 loại công trình, không cần sửa
+/// gì thêm ở những chỗ đó — chỉ khác đúng phần thay vì "Khối lượng × Đơn
+/// giá cước" là LÃI GỘP MUA-BÁN/chuyến, tính ĐÚNG cấu trúc P&L thật đang
+/// dùng ở Kết Quả Kinh Doanh (Doanh thu bán − Giá vốn hàng mua − Chi phí
+/// mua hoá đơn bù + VAT được khấu trừ = Lãi Gộp Mua-Bán) — không bịa công
+/// thức mới. Phần chi phí vận hành/chuyến (dầu+lương chuyến+ăn+luật
+/// đường) và chi phí cố định/tháng GIỮ NGUYÊN Y HỆT logic cargo, vì xe vẫn
+/// phải chạy chuyến thật để chở hàng — không có gì khác biệt ở phần này.
+function computeCommercialAppraisalMetrics(p){
+  const fuelPerKm = historicalAvgFuelPerKm();
+  const fuelPrice = currentFuelUnitPriceForAppraisal();
+  const avgWagePerTripReal = historicalAvgWagePerTrip();
+  const avgFoodPerShiftReal = historicalAvgFoodPerShift();
+
+  const kmPerTrip = (Number(p.kmOneWay)||0) + (Number(p.kmReturn)||0);
+  const fuelLitersPerTrip = fuelPerKm * kmPerTrip;
+  const fuelCostPerTrip = fuelLitersPerTrip * fuelPrice;
+
+  const vatRate = (Number(state.settings.vatRatePercent)||0)/100;
+
+  // ----- LÃI GỘP MUA-BÁN/CHUYẾN — đúng cấu trúc Doanh thu − Giá vốn − Chi
+  // phí hoá đơn bù + VAT khấu trừ, y hệt bản chất P&L thật ở Kết Quả Kinh
+  // Doanh. Mua theo TẤN, bán theo KHỐI — 2 khối lượng tách riêng vì đơn vị
+  // khác nhau, không quy đổi 1:1.
+  const buyVolumePerTrip = Number(p.buyVolumePerTrip)||0; // tấn/chuyến
+  const grossBuyPerTrip = buyVolumePerTrip * (Number(p.buyPricePerTon)||0);
+  const netBuyPerTrip = p.buyPriceIncludesVat ? grossBuyPerTrip/(1+vatRate) : grossBuyPerTrip;
+
+  const sellVolumePerTrip = Number(p.sellVolumePerTrip)||0; // khối/chuyến
+  const grossSellPerTrip = sellVolumePerTrip * (Number(p.sellPricePerM3)||0);
+  const netSellPerTrip = p.sellPriceIncludesVat ? grossSellPerTrip/(1+vatRate) : grossSellPerTrip;
+
+  // Chi phí mua hoá đơn bù/chuyến = đúng phần giá trị mua KHÔNG có hoá đơn
+  // × đơn giá mua hoá đơn bù ước tính (% giá trị phần đó) — Ông Chủ tự
+  // nhập cả 2 tỷ lệ này theo đúng đặc thù mỏ/công trình dự kiến.
+  const noInvoicePercent = Math.max(0, Math.min(100, Number(p.noInvoicePercent)||0));
+  const invoiceBuCostRatePercent = Math.max(0, Number(p.invoiceBuCostRatePercent)||0);
+  const noInvoiceValuePerTrip = netBuyPerTrip * (noInvoicePercent/100);
+  const invoiceBuCostPerTrip = noInvoiceValuePerTrip * (invoiceBuCostRatePercent/100);
+  // + VAT được khấu trừ: đúng bản chất "không mất vĩnh viễn, trừ lại vào
+  // VAT phải nộp sau" đang ghi ở Kết Quả Kinh Doanh thật — giả định chi phí
+  // mua hoá đơn bù đã gồm VAT theo đúng thuế suất chung, phần VAT trong đó
+  // được khấu trừ lại, không phải chi phí thật 100%.
+  const vatCreditPerTrip = invoiceBuCostPerTrip * vatRate/(1+vatRate);
+
+  const grossTradingProfitPerTrip = netSellPerTrip - netBuyPerTrip - invoiceBuCostPerTrip + vatCreditPerTrip;
+
+  // ----- Chi phí vận hành/chuyến + chi phí cố định/tháng + hoà vốn/khả
+  // thi/ROI — GIỮ NGUYÊN Y HỆT logic cargo phía trên (xem chú thích đầy đủ
+  // ở computeAppraisalMetrics()), không đổi bất kỳ điều kiện nào.
+  const tripsPerShift = Math.max(0, Number(p.estimatedTripsPerShift)||0);
+  const standardWorkDays = Number(state.settings.standardWorkDaysPerMonth)||0;
+  const shiftStructure = p.shiftStructure==='double' ? 'double' : 'single';
+  const shiftsPerDay = shiftStructure==='double' ? 2 : 1;
+  const capacityShifts = standardWorkDays * shiftsPerDay;
+  const monthlyTripsEstimate = (tripsPerShift>0 && capacityShifts>0) ? tripsPerShift*capacityShifts : 0;
+
+  const wagePerTrip = Number(p.wagePerTripEstimate)||0;
+  const foodPerShiftEstimate = Number(p.foodPerShiftEstimate)||0;
+  const foodPerTrip = tripsPerShift>0 ? foodPerShiftEstimate/tripsPerShift : 0;
+  const roadFeeMonthly = Number(p.roadFeeEstimate)||0;
+  const roadFeePerTripEquivalent = monthlyTripsEstimate>0 ? roadFeeMonthly/monthlyTripsEstimate : 0;
+
+  const variableCostPerTrip = fuelCostPerTrip + wagePerTrip + foodPerTrip + roadFeePerTripEquivalent;
+  const grossProfitPerTrip = grossTradingProfitPerTrip - variableCostPerTrip;
+  const grossProfitPerShift = tripsPerShift>0 ? (tripsPerShift*grossProfitPerTrip) : null;
+
+  const fixedBaseSalaryMonthly = Number(p.fixedBaseSalaryMonthly)||0;
+  const fixedHousingMonthly = Number(p.fixedHousingMonthly)||0;
+  const fixedDepreciationMonthly = Number(p.fixedDepreciationMonthly)||0;
+  const fixedLoanMonthly = Number(state.settings.monthlyLoanInterest)||0;
+  const fixedInsuranceMonthly = Number(p.fixedInsuranceMonthly)||0;
+  const fixedRegistrationMonthly = Number(p.fixedRegistrationMonthly)||0;
+  const fixedOtherMonthly = Number(p.fixedOtherMonthly)||0;
+  const fixedCostMonthly = fixedBaseSalaryMonthly + fixedHousingMonthly + fixedDepreciationMonthly
+    + fixedLoanMonthly + fixedInsuranceMonthly + fixedRegistrationMonthly + fixedOtherMonthly;
+
+  const breakEvenTrips = grossProfitPerTrip>0 ? Math.ceil(fixedCostMonthly/grossProfitPerTrip) : null;
+  const breakEvenShifts = (breakEvenTrips!==null && tripsPerShift>0) ? Math.ceil(breakEvenTrips/tripsPerShift) : null;
+  const feasible = (breakEvenShifts!==null && capacityShifts>0) ? (breakEvenShifts<=capacityShifts) : null;
+  const shortfallShifts = (feasible===false) ? (breakEvenShifts-capacityShifts) : 0;
+
+  const monthlyGrossProfitAtCapacity = (grossProfitPerShift!==null && capacityShifts>0) ? capacityShifts*grossProfitPerShift : null;
+  const projectedMonthlyProfit = (monthlyGrossProfitAtCapacity!==null)
+    ? (monthlyGrossProfitAtCapacity - fixedCostMonthly) : null;
+  const roiPercent = (fixedCostMonthly>0 && projectedMonthlyProfit!==null)
+    ? (projectedMonthlyProfit/fixedCostMonthly*100) : null;
+
+  const hasWageBasis = wagePerTrip>0;
+  const hasFoodBasis = foodPerTrip>0;
+  const hasRoadFeeBasis = monthlyTripsEstimate>0;
+
+  return { fuelPerKm, fuelPrice, avgWagePerTripReal, avgFoodPerShiftReal, hasWageBasis, hasFoodBasis, hasRoadFeeBasis,
+           kmPerTrip, fuelLitersPerTrip, fuelCostPerTrip,
+           // netRevenuePerTrip ở đây mang ý nghĩa "Lãi gộp mua-bán/chuyến"
+           // (đã trừ giá vốn+hoá đơn bù, cộng VAT khấu trừ) — không phải
+           // doanh thu thô — để bảng So Sánh/Xếp Hạng/AI đọc được y hệt
+           // cargo mà không cần sửa thêm gì.
+           grossCargoRevenuePerTrip: grossSellPerTrip, netRevenuePerTrip: grossTradingProfitPerTrip,
+           buyVolumePerTrip, sellVolumePerTrip, netBuyPerTrip, netSellPerTrip,
+           noInvoicePercent, invoiceBuCostRatePercent, invoiceBuCostPerTrip, vatCreditPerTrip, grossTradingProfitPerTrip,
+           wagePerTrip, foodPerTrip, foodPerShiftEstimate, roadFeePerTripEquivalent, monthlyTripsEstimate,
+           variableCostPerTrip, grossProfitPerTrip, tripsPerShift, grossProfitPerShift,
+           shiftStructure, shiftsPerDay, capacityShifts, monthlyGrossProfitAtCapacity,
+           roadFeeMonthly, fixedBaseSalaryMonthly, fixedHousingMonthly, fixedDepreciationMonthly,
+           fixedLoanMonthly, fixedInsuranceMonthly, fixedRegistrationMonthly, fixedOtherMonthly, fixedCostMonthly,
+           breakEvenTrips, breakEvenShifts, standardWorkDays, feasible, shortfallShifts,
+           projectedMonthlyProfit, roiPercent };
+}
+/// Dispatcher — đọc đúng p.projectType để gọi hàm tính phù hợp, dùng
+/// CHUNG ở mọi nơi hiển thị (danh sách, so sánh, prompt AI) để không nơi
+/// nào bị lệch loại công trình.
+function computeApprMetrics(p){
+  return (p && p.projectType==='commercial') ? computeCommercialAppraisalMetrics(p) : computeAppraisalMetrics(p);
+}
+
 /// Full-screen module: intro card (fuel efficiency + price source), the
 /// list of saved prospective projects, and — once 2 or more exist — the
 /// side-by-side comparison grid. Reached from a button in the "Trợ Lý" tab
@@ -10778,7 +10901,7 @@ function renderProjectAppraisal(){
   const avgFoodPerShift = historicalAvgFoodPerShift();
   const projects = state.siteAppraisals || [];
   const metricsById = {};
-  projects.forEach(p=>{ metricsById[p.id] = computeAppraisalMetrics(p); });
+  projects.forEach(p=>{ metricsById[p.id] = computeApprMetrics(p); });
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
   const aa = state.appraisalAnalysis;
 
@@ -10844,7 +10967,10 @@ function renderProjectAppraisal(){
 
     <section class="group">
       <h3>📋 Danh Sách Công Trình Dự Kiến</h3>
-      <button class="btn btn-accent btn-block" id="addAppraisalBtn">+ Thêm Công Trình Dự Kiến</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-accent" id="addAppraisalCargoBtn" style="flex:1; white-space:normal; line-height:1.3;">🚚 + Chạy Cước</button>
+        <button class="btn btn-accent" id="addAppraisalCommercialBtn" style="flex:1; white-space:normal; line-height:1.3;">🏪 + Thương Mại</button>
+      </div>
       <div id="appraisalListWrap" style="margin-top:10px;"></div>
     </section>
 
@@ -10860,9 +10986,9 @@ function renderProjectAppraisal(){
             <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">
               <input type="checkbox" class="ap-compare-select" data-id="${p.id}" ${appraisalCompareSelection.has(p.id)?'checked':''}> Đang chạy đồng thời
             </label>
-            <h4>${escapeHtml(p.name||'(chưa đặt tên)')}${p.id===bestId?' <span class="rating-badge good">Đề xuất</span>':''}</h4>
+            <h4>${p.projectType==='commercial'?'🏪':'🚚'} ${escapeHtml(p.name||'(chưa đặt tên)')}${p.id===bestId?' <span class="rating-badge good">Đề xuất</span>':''}</h4>
             <div class="compare-row"><span>Cơ cấu ca chạy</span><span class="val">${m.shiftsPerDay} ca/ngày</span></div>
-            <div class="compare-row"><span>Doanh thu thuần/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
+            <div class="compare-row"><span>${p.projectType==='commercial'?'Lãi gộp mua-bán/chuyến':'Doanh thu thuần/chuyến'}</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
             <div class="compare-row"><span>Dầu+lương chuyến+ăn+luật đường/chuyến</span><span class="val">${fmtVND(m.variableCostPerTrip)}</span></div>
             <div class="compare-row"><span>Lãi gộp/chuyến</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
             <div class="compare-row"><span>Số chuyến/ca dự tính</span><span class="val">${m.tripsPerShift>0?m.tripsPerShift+' chuyến':'Chưa nhập'}</span></div>
@@ -10911,8 +11037,9 @@ function renderProjectAppraisal(){
   } else {
     activeAppraisalTruckRun = null;
   }
-  document.getElementById('appraisalBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
-  document.getElementById('addAppraisalBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null));
+  document.getElementById('appraisalBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
+  document.getElementById('addAppraisalCargoBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null, 'cargo'));
+  document.getElementById('addAppraisalCommercialBtn').addEventListener('click', ()=>openProjectAppraisalEditor(null, 'commercial'));
   document.querySelectorAll('.ap-compare-select').forEach(cb=>{
     cb.addEventListener('change', ()=>{
       if(cb.checked) appraisalCompareSelection.add(cb.dataset.id); else appraisalCompareSelection.delete(cb.dataset.id);
@@ -10944,18 +11071,27 @@ function renderAppraisalList(metricsById){
     return;
   }
   wrap.innerHTML = projects.map(p=>{
-    const m = metricsById[p.id] || computeAppraisalMetrics(p);
+    const m = metricsById[p.id] || computeApprMetrics(p);
     return `
     <div class="card appraisal-project-card" data-id="${p.id}">
       <div class="driver-row">
-        <strong>${escapeHtml(p.name||'(chưa đặt tên)')}</strong>
+        <strong>${p.projectType==='commercial'?'🏪':'🚚'} ${escapeHtml(p.name||'(chưa đặt tên)')}</strong>
         <span>
           <button class="link-btn editAppraisalBtn" data-id="${p.id}">Sửa</button>
           <button class="link-btn delAppraisalBtn" data-id="${p.id}" style="color:var(--loss);">Xoá</button>
         </span>
       </div>
+      ${p.projectType==='commercial' ? `
+      <div class="hint" style="margin:6px 0;">${m.kmPerTrip.toLocaleString('vi-VN')} km/chuyến (khứ hồi) · Mua ${(m.buyVolumePerTrip||0).toLocaleString('vi-VN')} tấn/chuyến · Bán ${(m.sellVolumePerTrip||0).toLocaleString('vi-VN')} khối/chuyến${p.goodsType?' · '+escapeHtml(p.goodsType):''}</div>
+      <div class="summary-row"><span>Doanh thu bán ước tính/chuyến</span><span class="val">${fmtVND(m.netSellPerTrip)}</span></div>
+      <div class="summary-row"><span>− Giá vốn hàng mua/chuyến</span><span class="val">${fmtVND(m.netBuyPerTrip)}</span></div>
+      <div class="summary-row"><span>− Chi phí mua hoá đơn bù/chuyến (${(m.noInvoicePercent||0)}% không hoá đơn)</span><span class="val">${fmtVND(m.invoiceBuCostPerTrip)}</span></div>
+      <div class="summary-row"><span>+ VAT được khấu trừ/chuyến</span><span class="val">${fmtVND(m.vatCreditPerTrip)}</span></div>
+      <div class="summary-row total"><span>LÃI GỘP MUA-BÁN / CHUYẾN</span><span class="val" style="color:${m.grossTradingProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossTradingProfitPerTrip)}</span></div>
+      ` : `
       <div class="hint" style="margin:6px 0;">${m.kmPerTrip.toLocaleString('vi-VN')} km/chuyến (khứ hồi) · ${(Number(p.loadPerTrip)||0).toLocaleString('vi-VN')} tấn/khối mỗi chuyến · Giá cước ${p.priceIncludesVat?'đã có VAT':'chưa VAT'}</div>
       <div class="summary-row"><span>Doanh thu thuần ước tính/chuyến</span><span class="val">${fmtVND(m.netRevenuePerTrip)}</span></div>
+      `}
       <div class="summary-row"><span>Chi phí dầu thực tế/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
       <div class="summary-row"><span>Lương chuyến dự kiến</span><span class="val">${fmtVND(m.wagePerTrip)}</span></div>
       <div class="summary-row"><span>Tiền ăn dự kiến/chuyến (${fmtVND(m.foodPerShiftEstimate)}/ca ÷ ${m.tripsPerShift>0?m.tripsPerShift:'?'} chuyến/ca)</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
@@ -10988,16 +11124,24 @@ function renderAppraisalList(metricsById){
 /// spec plus a live "Mô Phỏng Nhanh" preview that recomputes on every
 /// keystroke via computeAppraisalMetrics(), so Ông Chủ sees the impact
 /// immediately instead of only after saving.
-function openProjectAppraisalEditor(id){
+function openProjectAppraisalEditor(id, newType){
   saveMainScroll();
+  const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
+  // MỚI (Ông Chủ yêu cầu — tách "Công Trình Chạy Cước" / "Công Trình
+  // Thương Mại" thành 2 mô hình riêng): công trình cũ không có projectType
+  // (tạo trước khi có tính năng này) mặc định 'cargo' — giữ đúng hành vi
+  // cũ, không đổi kết quả đã lưu. Sửa 1 công trình luôn mở ĐÚNG loại nó đã
+  // được tạo, không phụ thuộc newType (chỉ dùng khi THÊM MỚI).
+  const resolvedType = existing ? (existing.projectType||'cargo') : (newType==='commercial'?'commercial':'cargo');
+  if(resolvedType==='commercial'){ openCommercialAppraisalEditor(id); return; }
   // Số liệu CHI PHÍ CỐ ĐỊNH THẬT hiện tại của đội xe (đọc lại mỗi lần mở
   // màn hình này) — dùng làm số gợi ý điền sẵn cho công trình MỚI, và
   // dùng làm số tham chiếu hiển thị dưới mỗi ô ngay cả khi Sửa công
   // trình cũ, để Ông Chủ luôn biết "số thật hiện giờ" là bao nhiêu.
   const realFixed = historicalMonthlyFixedCostReal();
-  const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
   const draft = existing ? {
     ...existing,
+    projectType: 'cargo',
     wagePerTripEstimate: existing.wagePerTripEstimate!=null ? existing.wagePerTripEstimate : 0,
     // Tiền ăn: công trình cũ chỉ có foodPerTripEstimate (đ/chuyến) — suy
     // ngược ra đúng tổng tiền ăn/ca (= đ/chuyến cũ × Số Chuyến/Ca) để hiện
@@ -11025,7 +11169,7 @@ function openProjectAppraisalEditor(id){
   } : (()=>{
     const activeDriverCount = Math.max(1, realFixed.activeDriverCount||1);
     return {
-      id: uid('appraisal'), name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
+      id: uid('appraisal'), projectType: 'cargo', name:'', kmOneWay:0, kmReturn:0, loadPerTrip:0,
       priceIncludesVat:false, cargoUnitPrice:0,
       // Lương chuyến: để TRỐNG, luôn do Ông Chủ tự điền tay vì phụ thuộc
       // từng cung đường — không còn lấy số gợi ý từ lịch sử vận hành nữa.
@@ -11311,6 +11455,348 @@ function openProjectAppraisalEditor(id){
   });
 }
 
+// ========================= COMMERCIAL PROJECT APPRAISAL EDITOR =========================
+/// SONG SINH với openProjectAppraisalEditor() ở trên — dành riêng cho
+/// "Công Trình Thương Mại" (mua vật liệu từ mỏ, bán lại cho khách xây
+/// dựng). Theo đúng yêu cầu Ông Chủ (2026-09-19): Ông Chủ tự nhập tay đầy
+/// đủ mọi thông số, không cần app tự gợi ý giá mua/bán/tỷ lệ hoá đơn bù
+/// (khác biệt hoàn toàn theo từng mỏ/khách hàng, không có "mức trung bình
+/// thực tế" nào phù hợp để gợi ý như dầu/tiền ăn). Phần thông số lái xe/
+/// chi phí cố định vẫn gợi ý y hệt cargo vì đó là chi phí CHUNG của đội
+/// xe, không phụ thuộc loại công trình.
+function openCommercialAppraisalEditor(id){
+  saveMainScroll();
+  const realFixed = historicalMonthlyFixedCostReal();
+  const existing = id ? state.siteAppraisals.find(p=>p.id===id) : null;
+  const draft = existing ? {
+    ...existing,
+    projectType: 'commercial',
+    goodsType: existing.goodsType||'',
+    buyVolumePerTrip: existing.buyVolumePerTrip||0,
+    buyPricePerTon: existing.buyPricePerTon||0,
+    buyPriceIncludesVat: !!existing.buyPriceIncludesVat,
+    sellVolumePerTrip: existing.sellVolumePerTrip||0,
+    sellPricePerM3: existing.sellPricePerM3||0,
+    sellPriceIncludesVat: !!existing.sellPriceIncludesVat,
+    noInvoicePercent: existing.noInvoicePercent||0,
+    invoiceBuCostRatePercent: existing.invoiceBuCostRatePercent||0,
+    wagePerTripEstimate: existing.wagePerTripEstimate!=null ? existing.wagePerTripEstimate : 0,
+    foodPerShiftEstimate: existing.foodPerShiftEstimate!=null ? existing.foodPerShiftEstimate : 0,
+    fixedBaseSalaryMonthly: existing.fixedBaseSalaryMonthly||0,
+    fixedHousingMonthly: existing.fixedHousingMonthly||0,
+    fixedDepreciationMonthly: existing.fixedDepreciationMonthly||0,
+    fixedInsuranceMonthly: existing.fixedInsuranceMonthly||0,
+    fixedRegistrationMonthly: existing.fixedRegistrationMonthly||0,
+    fixedOtherMonthly: existing.fixedOtherMonthly||0,
+    shiftStructure: existing.shiftStructure==='double' ? 'double' : 'single',
+    fixedStaffAutoManaged: false,
+    foodAutoManaged: false
+  } : (()=>{
+    const activeDriverCount = Math.max(1, realFixed.activeDriverCount||1);
+    return {
+      id: uid('appraisal'), projectType:'commercial', name:'', goodsType:'',
+      kmOneWay:0, kmReturn:0,
+      buyVolumePerTrip:0, buyPricePerTon:0, buyPriceIncludesVat:false,
+      sellVolumePerTrip:0, sellPricePerM3:0, sellPriceIncludesVat:false,
+      noInvoicePercent:0, invoiceBuCostRatePercent:0,
+      wagePerTripEstimate:0,
+      foodPerShiftEstimate: Math.round(historicalAvgFoodPerShift()),
+      foodAutoManaged: true,
+      shiftStructure: 'single',
+      fixedStaffAutoManaged: true,
+      fixedBaseSalaryMonthly: Math.round(realFixed.baseSalaryMonthly/activeDriverCount),
+      fixedHousingMonthly: Math.round(realFixed.housingMonthly/activeDriverCount),
+      fixedDepreciationMonthly: Math.round(realFixed.depreciationMonthly),
+      fixedInsuranceMonthly:0, fixedRegistrationMonthly:0, fixedOtherMonthly:0,
+      roadFeeEstimate: roadFeeForRange(todayLocalDateStr(), todayLocalDateStr()),
+      estimatedTripsPerShift:0
+    };
+  })();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <h3>🏗️ ${existing?'Sửa':'Thêm'} Công Trình Thương Mại Dự Kiến</h3>
+      <div class="card">
+        <div class="field">
+          <label>Tên công trình dự kiến</label>
+          <input type="text" id="ap_name" value="${escapeHtml(draft.name)}" placeholder="VD: Công trình Khu Công Nghiệp X">
+        </div>
+        <div class="field">
+          <label>Loại hàng</label>
+          <input type="text" id="ap_goodsType" list="goodsTypesList" value="${escapeHtml(draft.goodsType||'')}" placeholder="VD: Base A">
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>Số km lượt đi</label>
+            <input type="number" inputmode="decimal" id="ap_kmGo" placeholder="0" value="${blankIfZero(draft.kmOneWay)}">
+          </div>
+          <div class="field">
+            <label>Số km lượt về</label>
+            <input type="number" inputmode="decimal" id="ap_kmBack" placeholder="0" value="${blankIfZero(draft.kmReturn)}">
+          </div>
+        </div>
+        <div class="field">
+          <label>Số chuyến dự tính chạy được trong 1 ca</label>
+          <input type="number" inputmode="decimal" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
+          <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế — đây là chỉ số quyết định công trình cần bao nhiêu CA mới hoà vốn, không chỉ bao nhiêu chuyến.</div>
+        </div>
+        <div class="field">
+          <label>Cơ Cấu Ca Chạy</label>
+          <div class="seg" id="ap_shiftStructureToggle">
+            <button data-val="single" class="${draft.shiftStructure!=='double'?'active':''}">1 Ca/Ngày</button>
+            <button data-val="double" class="${draft.shiftStructure==='double'?'active':''}">2 Ca/Ngày (Ngày + Đêm)</button>
+          </div>
+          <div class="hint">Công trình này chỉ cho phép xe chạy 1 ca/ngày, hay được chạy cả 2 ca? Chọn đúng để app tự tính Ngưỡng Năng Lực/Tháng (28 hay 56 ca) và Lợi Nhuận Dự Kiến/Tháng đúng thực tế, không cần tự nhân tay.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>⛏️ Mua Vào (Từ Mỏ / Nhà Cung Cấp)</h3>
+      <div class="card">
+        <div class="field">
+          <label>Khối lượng mua mỗi chuyến (tấn)</label>
+          <input type="number" inputmode="decimal" id="ap_buyVolume" placeholder="0" value="${blankIfZero(draft.buyVolumePerTrip)}">
+        </div>
+        <div class="field">
+          <label>Giá mua</label>
+          <div class="seg" id="ap_buyVatToggle">
+            <button data-val="0" class="${!draft.buyPriceIncludesVat?'active':''}">Giá mua chưa VAT</button>
+            <button data-val="1" class="${draft.buyPriceIncludesVat?'active':''}">Giá mua có VAT</button>
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Đơn giá mua (đ/tấn, theo lựa chọn VAT ở trên)</label>
+          <input type="text" inputmode="decimal" id="ap_buyPrice">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🏪 Bán Ra (Cho Khách / Công Trình)</h3>
+      <div class="card">
+        <div class="field">
+          <label>Khối lượng bán mỗi chuyến (khối)</label>
+          <input type="number" inputmode="decimal" id="ap_sellVolume" placeholder="0" value="${blankIfZero(draft.sellVolumePerTrip)}">
+          <div class="hint">Mua theo TẤN, bán theo KHỐI — 2 khối lượng này KHÔNG cần bằng nhau, nhập đúng số thực tế mỗi bên.</div>
+        </div>
+        <div class="field">
+          <label>Giá bán</label>
+          <div class="seg" id="ap_sellVatToggle">
+            <button data-val="0" class="${!draft.sellPriceIncludesVat?'active':''}">Giá bán chưa VAT</button>
+            <button data-val="1" class="${draft.sellPriceIncludesVat?'active':''}">Giá bán có VAT</button>
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Đơn giá bán (đ/khối, theo lựa chọn VAT ở trên)</label>
+          <input type="text" inputmode="decimal" id="ap_sellPrice">
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🧾 Hoá Đơn Bù (Phần Mua Không Có Hoá Đơn)</h3>
+      <div class="card">
+        <div class="field">
+          <label>Tỷ lệ giá trị hàng mua KHÔNG có hoá đơn (%)</label>
+          <input type="number" inputmode="decimal" id="ap_noInvoicePercent" placeholder="0" value="${blankIfZero(draft.noInvoicePercent)}">
+          <div class="hint">VD mỏ chỉ xuất hoá đơn được 70% giá trị thật → nhập 30.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Chi phí mua hoá đơn bù ước tính (% giá trị phần không hoá đơn)</label>
+          <input type="number" inputmode="decimal" id="ap_invoiceBuRate" placeholder="0" value="${blankIfZero(draft.invoiceBuCostRatePercent)}">
+          <div class="hint">Đơn giá thị trường để mua 1 hoá đơn bù hợp lệ, tính theo % giá trị cần bù — app tự trừ vào lãi gộp, đồng thời tự cộng lại đúng phần VAT được khấu trừ (không mất vĩnh viễn).</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>👷 Thông Số Lái Xe</h3>
+      <div class="card">
+        <div class="field">
+          <label>Lương cứng dự kiến phân bổ cho công trình (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_baseSalary">
+          <div class="hint">Tự động điền sẵn bằng tổng lương cứng THẬT/tháng của toàn bộ tài xế đang hoạt động (${fmtVND(realFixed.baseSalaryMonthly)}) — sửa lại nếu công trình này cần thêm/bớt người.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Lương chuyến dự kiến (đ/chuyến)</label>
+          <input type="text" inputmode="decimal" id="ap_wagePerTrip">
+          <div class="hint">Ông Chủ tự nhập tay số này vì lương chuyến phụ thuộc từng cung đường, không lấy số bình quân từ nơi khác.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🍚 Tiền Ăn</h3>
+      <div class="card">
+        <div class="field" style="margin-bottom:0;">
+          <label>Tiền ăn dự kiến (đ/ca)</label>
+          <input type="text" inputmode="decimal" id="ap_foodPerShift">
+          <div class="hint">Tự động gợi ý cố định = Tiền ăn TB thực tế toàn đội xe (${fmtVND(historicalAvgFoodPerShift())}/ca) — tự nhân đôi nếu chọn "2 Ca/Ngày". App tự quy đổi ra đúng mỗi chuyến khi tính lãi gộp. Gõ tay đè lên là app giữ nguyên số đã nhập.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>🏗️ Chi Phí Cố Định Dự Kiến Phân Bổ Cho Công Trình (đóng theo THÁNG)</h3>
+      <div class="card">
+        <div class="field">
+          <label>Nhà ở / phụ cấp nhà dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_housing">
+          <div class="hint">Tự động điền sẵn bằng Tiền Thuê Nhà + Điện Nước THẬT/tháng đang cài ở Cài Đặt (${fmtVND(realFixed.housingMonthly)}, CHUNG CÔNG TY — chia theo Cơ Cấu Ca Chạy bên dưới) — sửa lại nếu khác.</div>
+        </div>
+        <div class="field">
+          <label>Khấu hao xe dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_depreciation">
+          <div class="hint">Tự động điền sẵn bằng đúng mức Khấu Hao Xe cố định đang cấu hình ở Cài Đặt (${fmtVND(realFixed.depreciationMonthly)}/tháng) — sửa lại nếu dự kiến khác.</div>
+        </div>
+        <div class="field">
+          <label>Bảo hiểm xe dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_insurance">
+          <div class="hint">App chưa có sổ riêng theo dõi khoản này — Ông Chủ tự nhập tay.</div>
+        </div>
+        <div class="field">
+          <label>Đăng kiểm / đăng ký / phù hiệu vận tải dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_registration">
+          <div class="hint">App chưa có sổ riêng theo dõi khoản này — Ông Chủ tự nhập tay.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Chi phí cố định khác dự kiến (đ/tháng)</label>
+          <input type="text" inputmode="decimal" id="ap_otherFixed">
+        </div>
+      </div>
+      <div class="card" style="margin-top:8px;">
+        <div class="field" style="margin-bottom:0;">
+          <label>Tiền luật đường dự kiến (đóng theo THÁNG — mặc định lấy từ Cài Đặt)</label>
+          <input type="text" inputmode="decimal" id="ap_roadFee">
+          <div class="hint">Tiền luật đường là khoản đóng cả tháng — app tự quy đổi về tương đương mỗi chuyến để trừ thẳng vào lãi gộp/chuyến bên dưới, không cộng trùng vào chi phí cố định/tháng.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>⚡ Mô Phỏng Nhanh</h3>
+      <div class="card" id="ap_preview"></div>
+      <div class="hint" style="margin-top:8px;">Dầu ${historicalAvgFuelPerKm().toFixed(2)} lít/km · Đơn giá dầu ${fmtVND(currentFuelUnitPriceForAppraisal())}/lít · VAT ${Number(state.settings.vatRatePercent)||0}% (theo Cài Đặt) — lấy từ số liệu thực tế/Cài Đặt. Riêng lương chuyến, giá mua/bán, tỷ lệ hoá đơn bù do Ông Chủ tự nhập tay theo đúng đặc thù công trình.</div>
+    </section>
+
+    <section class="group" style="display:flex; gap:10px;">
+      ${existing ? '<button class="btn btn-danger" id="delAppraisalEditBtn">Xoá</button>' : ''}
+      <button class="btn btn-ghost" id="cancelAppraisalBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="saveAppraisalBtn">Lưu</button>
+    </section>
+  `;
+
+  const updatePreview = ()=>{
+    const m = computeCommercialAppraisalMetrics(draft);
+    document.getElementById('ap_preview').innerHTML = `
+      <div class="summary-row"><span>Doanh thu bán/chuyến</span><span class="val">${fmtVND(m.netSellPerTrip)}</span></div>
+      <div class="summary-row"><span>− Giá vốn hàng mua/chuyến</span><span class="val">${fmtVND(m.netBuyPerTrip)}</span></div>
+      <div class="summary-row"><span>− Chi phí mua hoá đơn bù/chuyến</span><span class="val">${fmtVND(m.invoiceBuCostPerTrip)}</span></div>
+      <div class="summary-row"><span>+ VAT được khấu trừ/chuyến</span><span class="val">${fmtVND(m.vatCreditPerTrip)}</span></div>
+      <div class="summary-row total"><span>= LÃI GỘP MUA-BÁN/CHUYẾN</span><span class="val" style="color:${m.grossTradingProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossTradingProfitPerTrip)}</span></div>
+      <div class="formula-divider" style="margin:8px 0;"></div>
+      <div class="summary-row"><span>Chi phí dầu thực tế/chuyến (${m.fuelLitersPerTrip.toFixed(1)} lít)</span><span class="val">${fmtVND(m.fuelCostPerTrip)}</span></div>
+      <div class="summary-row"><span>Lương chuyến dự kiến</span><span class="val">${fmtVND(m.wagePerTrip)}</span></div>
+      <div class="summary-row"><span>Tiền ăn dự kiến/chuyến</span><span class="val">${fmtVND(m.foodPerTrip)}</span></div>
+      <div class="summary-row"><span>Tiền luật đường quy đổi/chuyến</span><span class="val">${fmtVND(m.roadFeePerTripEquivalent)}</span></div>
+      <div class="summary-row total" style="margin-top:6px;"><span>LỢI NHUẬN GỘP VẬN HÀNH/CHUYẾN</span><span class="val" style="color:${m.grossProfitPerTrip>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.grossProfitPerTrip)}</span></div>
+      ${m.breakEvenTrips===null ? `<div class="hint" style="color:var(--loss); margin-top:6px;">Lợi nhuận gộp vận hành/chuyến hiện đang ≤ 0 — KHÔNG thể hoà vốn với cơ cấu giá này dù chạy bao nhiêu chuyến. Cần thương lượng lại giá mua/bán.</div>` : `
+      <div class="summary-row" style="margin-top:6px;"><span>Số chuyến tối thiểu để hoà vốn</span><span class="val">${m.fixedCostMonthly.toLocaleString('vi-VN')} ÷ ${Math.round(m.grossProfitPerTrip).toLocaleString('vi-VN')} = <strong>${m.breakEvenTrips} chuyến</strong></span></div>
+      ${m.breakEvenShifts!==null ? `
+      <div class="summary-row"><span>Số ca tối thiểu để hoà vốn</span><span class="val">${m.breakEvenTrips} ÷ ${m.tripsPerShift} = <strong>${m.breakEvenShifts} ca</strong></span></div>
+      <div class="summary-row"><span>Ngưỡng năng lực/tháng (${m.standardWorkDays} ngày công chuẩn × ${m.shiftsPerDay} ca/ngày)</span><span class="val">${m.capacityShifts} ca</span></div>
+      <div class="summary-row total"><span>KẾT LUẬN KHẢ THI</span><span class="val">${m.feasible ? `<span class="rating-badge good">Khả thi — dư ${m.capacityShifts-m.breakEvenShifts} ca</span>` : `<span class="rating-badge warn">Không khả thi trong 1 tháng — thiếu ${m.shortfallShifts} ca</span>`}</span></div>
+      <div class="summary-row"><span>Lợi nhuận dự kiến/tháng (chạy đủ ${m.capacityShifts} ca)</span><span class="val" style="color:${m.projectedMonthlyProfit>=0?'var(--profit)':'var(--loss)'}">${fmtVND(m.projectedMonthlyProfit)}</span></div>
+      <div class="summary-row"><span>ROI/tháng (lợi nhuận ÷ chi phí cố định)</span><span class="val">${m.roiPercent!==null?m.roiPercent.toFixed(1)+'%':'—'}</span></div>
+      ` : `<div class="hint">Nhập "Số chuyến dự tính chạy được trong 1 ca" để quy đổi ra số CA hoà vốn và kiểm tra có khả thi trong 1 tháng hay không.</div>`}
+      `}
+    `;
+  };
+
+  document.getElementById('ap_name').addEventListener('input', e=>{ draft.name=e.target.value; });
+  document.getElementById('ap_goodsType').addEventListener('input', e=>{ draft.goodsType=e.target.value; });
+  document.getElementById('ap_kmGo').addEventListener('input', e=>{ draft.kmOneWay=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_kmBack').addEventListener('input', e=>{ draft.kmReturn=Number(e.target.value)||0; updatePreview(); });
+  const applyFoodSuggestion = ()=>{
+    if(!draft.foodAutoManaged) return;
+    const suggested = Math.round(historicalAvgFoodPerShift() * (draft.shiftStructure==='double' ? 2 : 1));
+    draft.foodPerShiftEstimate = suggested;
+    const el = document.getElementById('ap_foodPerShift');
+    if(el) el.value = suggested ? suggested.toLocaleString('vi-VN') : '';
+  };
+  document.getElementById('ap_tripsPerShift').addEventListener('input', e=>{ draft.estimatedTripsPerShift=Number(e.target.value)||0; applyFoodSuggestion(); updatePreview(); });
+  document.getElementById('ap_buyVolume').addEventListener('input', e=>{ draft.buyVolumePerTrip=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_sellVolume').addEventListener('input', e=>{ draft.sellVolumePerTrip=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_noInvoicePercent').addEventListener('input', e=>{ draft.noInvoicePercent=Number(e.target.value)||0; updatePreview(); });
+  document.getElementById('ap_invoiceBuRate').addEventListener('input', e=>{ draft.invoiceBuCostRatePercent=Number(e.target.value)||0; updatePreview(); });
+  document.querySelectorAll('#ap_buyVatToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      draft.buyPriceIncludesVat = btn.dataset.val==='1';
+      document.querySelectorAll('#ap_buyVatToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+      updatePreview();
+    });
+  });
+  document.querySelectorAll('#ap_sellVatToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      draft.sellPriceIncludesVat = btn.dataset.val==='1';
+      document.querySelectorAll('#ap_sellVatToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+      updatePreview();
+    });
+  });
+  document.querySelectorAll('#ap_shiftStructureToggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      draft.shiftStructure = btn.dataset.val==='double' ? 'double' : 'single';
+      document.querySelectorAll('#ap_shiftStructureToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+      if(draft.fixedStaffAutoManaged){
+        const activeDriverCount = Math.max(1, realFixed.activeDriverCount||1);
+        const suggestedSalary = draft.shiftStructure==='double' ? Math.round(realFixed.baseSalaryMonthly) : Math.round(realFixed.baseSalaryMonthly/activeDriverCount);
+        const suggestedHousing = draft.shiftStructure==='double' ? Math.round(realFixed.housingMonthly) : Math.round(realFixed.housingMonthly/activeDriverCount);
+        draft.fixedBaseSalaryMonthly = suggestedSalary;
+        draft.fixedHousingMonthly = suggestedHousing;
+        document.getElementById('ap_baseSalary').value = suggestedSalary.toLocaleString('vi-VN');
+        document.getElementById('ap_housing').value = suggestedHousing.toLocaleString('vi-VN');
+      }
+      applyFoodSuggestion();
+      updatePreview();
+    });
+  });
+  applyFoodSuggestion();
+  attachMoneyInput(document.getElementById('ap_buyPrice'), draft.buyPricePerTon, v=>{ draft.buyPricePerTon=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_sellPrice'), draft.sellPricePerM3, v=>{ draft.sellPricePerM3=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_baseSalary'), draft.fixedBaseSalaryMonthly, v=>{ draft.fixedBaseSalaryMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_wagePerTrip'), draft.wagePerTripEstimate, v=>{ draft.wagePerTripEstimate=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_foodPerShift'), draft.foodPerShiftEstimate, v=>{ draft.foodPerShiftEstimate=v; draft.foodAutoManaged=false; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_housing'), draft.fixedHousingMonthly, v=>{ draft.fixedHousingMonthly=v; draft.fixedStaffAutoManaged=false; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_depreciation'), draft.fixedDepreciationMonthly, v=>{ draft.fixedDepreciationMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_insurance'), draft.fixedInsuranceMonthly, v=>{ draft.fixedInsuranceMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_registration'), draft.fixedRegistrationMonthly, v=>{ draft.fixedRegistrationMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_otherFixed'), draft.fixedOtherMonthly, v=>{ draft.fixedOtherMonthly=v; updatePreview(); });
+  attachMoneyInput(document.getElementById('ap_roadFee'), draft.roadFeeEstimate, v=>{ draft.roadFeeEstimate=v; updatePreview(); });
+  updatePreview();
+
+  document.getElementById('saveAppraisalBtn').addEventListener('click', async ()=>{
+    if(!draft.name.trim()){ showToast('Nhập tên công trình dự kiến trước.'); return; }
+    const idx = state.siteAppraisals.findIndex(p=>p.id===draft.id);
+    if(idx>=0) state.siteAppraisals[idx]=draft; else state.siteAppraisals.push(draft);
+    if(!(await saveSiteAppraisals())) return;
+    renderProjectAppraisal();
+    restoreMainScroll();
+    showToast('Đã lưu công trình dự kiến.');
+  });
+  document.getElementById('cancelAppraisalBtn').addEventListener('click', ()=>{ renderProjectAppraisal(); restoreMainScroll(); });
+  const delBtn = document.getElementById('delAppraisalEditBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(confirm('Xoá công trình dự kiến này?')){
+      state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==draft.id);
+      if(!(await saveSiteAppraisals())) return;
+      renderProjectAppraisal();
+      restoreMainScroll();
+      showToast('Đã xoá.');
+    }
+  });
+}
+
 // ========================= APPRAISAL EXPERT ANALYSIS (AI PROS/CONS + RECOMMENDATION) =========================
 // Reuses the exact same Gemini call plumbing as the Strategy Assistant
 // (callGeminiText / callGeminiWithRetry / startTruckRun) but with its own
@@ -11338,6 +11824,8 @@ function buildAppraisalComparisonPrompt(payload, fuelPerKm, fuelPrice){
   return `Mày là Chuyên gia Thẩm định & Tư vấn Vận tải xe ben (nhiều năm kinh nghiệm ngành vận tải vật liệu xây dựng, tư duy thận trọng, không phán đoán cảm tính). Dưới đây là số liệu MÔ PHỎNG các công trình dự kiến — CHƯA nhận chạy — đã được tính sẵn bằng công thức kế toán chính xác của app (không cần và không được tính lại). Mức tiêu hao dầu dùng chung cho mọi công trình là ${fuelPerKm.toFixed(2)} lít/km với đơn giá dầu ${fmtVND(fuelPrice)}/lít (đây là số thực tế của đội xe); còn lương chuyến, tiền ăn/chuyến, tiền luật đường quy đổi/chuyến và chi phí cố định/tháng là số Ông Chủ tự ước tính riêng cho TỪNG công trình (đã có sẵn trong dữ liệu bên dưới):
 
 ${JSON.stringify(payload, null, 2)}
+
+Lưu ý về "loaiCongTrinh": công trình "chạy cước thuần" thì "doanhThuThuanMoiChuyen" là doanh thu cước thật; công trình "thương mại (mua-bán vật liệu)" thì "doanhThuThuanMoiChuyen" thực chất là LÃI GỘP MUA-BÁN/chuyến (đã trừ giá vốn hàng mua + chi phí mua hoá đơn bù, cộng VAT khấu trừ — xem thêm "giaVonHangMuaMoiChuyen"/"chiPhiMuaHoaDonBuMoiChuyen"/"laiGopMuaBanMoiChuyen" của đúng công trình đó), không phải doanh thu thô — đừng nhầm 2 khái niệm này khi so sánh giữa 2 loại công trình khác nhau.
 
 Nhiệm vụ: đọc đúng các số liệu trên (doanh thu thuần/chuyến, chi phí dầu thực tế, lương chuyến dự kiến, tiền ăn dự kiến, tiền luật đường quy đổi/chuyến, lãi gộp/chuyến đã trừ đủ 4 khoản này, lãi gộp/ca, chi phí cố định/tháng, số chuyến VÀ số ca hoà vốn, có khả thi trong 1 tháng hay không so với ngày công chuẩn, lợi nhuận dự kiến/tháng, ROI/tháng) để nêu ưu điểm/nhược điểm khách quan của TỪNG công trình, rồi đưa ra định hướng nên ưu tiên nhận công trình nào. Lưu ý: "lợi nhuận dự kiến/tháng" và "khả thi trong tháng" là căn cứ quyết định quan trọng hơn lãi gộp/chuyến đơn lẻ — công trình lãi/chuyến cao nhưng không đủ ca trong tháng để hoà vốn vẫn là một rủi ro cần nêu rõ. Nếu một công trình có "soChuyenDuTinhMoiCa" là null (chưa nhập), PHẢI nêu rõ đây là thiếu sót dữ liệu khiến chưa đánh giá được tính khả thi trong tháng của công trình đó.
 
@@ -11372,12 +11860,24 @@ async function runAppraisalAnalysis(){
     const fuelPerKm = historicalAvgFuelPerKm();
     const fuelPrice = currentFuelUnitPriceForAppraisal();
     const payload = projects.map(p=>{
-      const m = computeAppraisalMetrics(p);
+      const m = computeApprMetrics(p);
+      const isCommercial = p.projectType==='commercial';
       return {
         name: p.name || '(chưa đặt tên)',
+        loaiCongTrinh: isCommercial ? 'thương mại (mua-bán vật liệu)' : 'chạy cước thuần',
         kmPerTripKhuHoi: Math.round(m.kmPerTrip),
-        khoiLuongMoiChuyen: Number(p.loadPerTrip)||0,
-        giaCuocDaCoVat: !!p.priceIncludesVat,
+        ...(isCommercial ? {
+          loaiHang: p.goodsType||'',
+          khoiLuongMuaMoiChuyenTan: m.buyVolumePerTrip,
+          khoiLuongBanMoiChuyenKhoi: m.sellVolumePerTrip,
+          giaVonHangMuaMoiChuyen: Math.round(m.netBuyPerTrip),
+          chiPhiMuaHoaDonBuMoiChuyen: Math.round(m.invoiceBuCostPerTrip),
+          vatKhauTruMoiChuyen: Math.round(m.vatCreditPerTrip),
+          laiGopMuaBanMoiChuyen: Math.round(m.grossTradingProfitPerTrip)
+        } : {
+          khoiLuongMoiChuyen: Number(p.loadPerTrip)||0,
+          giaCuocDaCoVat: !!p.priceIncludesVat
+        }),
         doanhThuThuanMoiChuyen: Math.round(m.netRevenuePerTrip),
         chiPhiDauThucTeMoiChuyen: Math.round(m.fuelCostPerTrip),
         luongChuyenDuKienMoiChuyen: Math.round(m.wagePerTrip),
@@ -20565,7 +21065,23 @@ function renderAll(){
     } else if(state.currentTab==='drivers'){
       renderDrivers();
     } else if(state.currentTab==='strategy'){
-      renderStrategyHub();
+      // SỬA (Ông Chủ báo — bấm vào Thẩm Định Công Trình bị văng ra màn
+      // Chọn Xe rồi về Linh Chí Thành): GỐC RỄ THẬT — dispatcher này TRƯỚC
+      // ĐÂY luôn gọi thẳng renderStrategyHub() bất kể đang đứng ở sub-màn
+      // nào bên trong tab Trợ Lý, bỏ qua hẳn state.strategyView (biến đã
+      // có sẵn, đúng mục đích để nhớ sub-màn hiện tại). Bất kỳ lượt gọi
+      // renderAll() chung nào xảy ra giữa lúc đang xem 1 sub-màn (ví dụ
+      // switchVehicle() sau khi chọn xe ở màn Chọn Xe) đều bị hất thẳng về
+      // Hub thay vì quay lại đúng sub-màn đang xem dở — y hệt lỗi "quên
+      // trạng thái" đã từng sửa cho tab Ca Làm Việc (view/shiftArchiveMonth).
+      // Sửa tận gốc: kiểm tra strategyView y hệt cách các nơi khác trong
+      // app đã làm (dòng ~9977/10011/11369), để MỌI lượt renderAll() đều
+      // trả về đúng sub-màn đang xem, không riêng gì trường hợp đổi xe.
+      if(state.strategyView==='appraisal') renderProjectAppraisal();
+      else if(state.strategyView==='bonus') renderBonusAdvisor();
+      else if(state.strategyView==='ai') renderStrategy();
+      else if(state.strategyView==='hiring') renderHiringAdvisor();
+      else renderStrategyHub();
     } else if(state.currentTab==='results'){
       renderResults();
     } else {
