@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-19 · #274';
+const APP_BUILD = '2026-09-20 · #275';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3114,7 +3114,7 @@ function openMonthlyAmountEditor(kind, id, presetMonth){
     closeModal();
     showToast(msg);
     saveMainScroll();
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   };
   document.getElementById('mae_saveBtn').addEventListener('click', async ()=>{
@@ -3177,7 +3177,7 @@ function openHousingUtilEditor(id, presetMonth){
     closeModal();
     showToast(msg);
     saveMainScroll();
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   };
   document.getElementById('hue_saveBtn').addEventListener('click', async ()=>{
@@ -3689,17 +3689,14 @@ function statusLabel(key){ return (STATUS_OPTIONS.find(s=>s.key===key)||{}).labe
 ///  - Nghỉ Mưa: xám trung tính
 ///  - Bảo Trì / Sửa Chữa & Nằm Bãi: vàng đậm (mustard) — đủ tối để chữ
 ///    trắng vẫn tương phản tốt, tránh vàng chanh chói mắt kém đọc được.
+const STATUS_COLOR_MAP = { active:'#2F8F5B', onLeave:'#B23A2E', weatherOff:'#6B7280', maintenance:'#B8860B', idle:'#B8860B' };
 function statusColorStyle(key){
-  const map = {
-    active:      '#2F8F5B',
-    onLeave:     '#B23A2E',
-    weatherOff:  '#6B7280',
-    maintenance: '#B8860B',
-    idle:        '#B8860B'
-  };
-  const bg = map[key] || '#6B7280';
+  const bg = STATUS_COLOR_MAP[key] || '#6B7280';
   return `background:${bg}; color:#FFFFFF;`;
 }
+// MỚI: màu CHỮ thuần (không nền) — dùng để tô số tiền theo đúng tình
+// trạng ca, tái dùng NGUYÊN bảng màu ở trên cho nhất quán toàn app.
+function statusTextColor(key){ return STATUS_COLOR_MAP[key] || '#6B7280'; }
 function shiftTypeLabel(key){ return (SHIFT_TYPES.find(s=>s.key===key)||{}).label || key; }
 
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
@@ -6979,6 +6976,11 @@ function renderChooseVehiclePrompt(){
       </div>
       <div style="width:2px; height:18px; background:var(--border); margin:0 auto;"></div>
       <div style="border-left:2px solid var(--border); margin-left:22px;">
+        <!-- SỬA 2026-09-20 (Ông Chủ yêu cầu — xe đã có ca thật thì không
+        còn là giả lập nữa, bỏ hẳn nút Sửa/Xoá để tránh xoá nhầm xe đang
+        vận hành thật; nút Sửa/Xoá giờ CHỈ hiện cho xe thêm để giả lập,
+        tức chưa từng có ca nào ghi nhận — dùng đúng state.allVehiclesShifts
+        đã nạp sẵn từ lúc mở app, không cần tải thêm gì). -->
         ${state.vehicles.map(v=>`
           <div style="position:relative; padding:2px 0 2px 22px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
             <div style="position:absolute; left:0; top:24px; width:20px; height:2px; background:var(--border);"></div>
@@ -6986,7 +6988,7 @@ function renderChooseVehiclePrompt(){
               <span style="font-size:30px; line-height:1;">🚛</span>
               <span style="font-weight:800; font-size:19px; flex:1;">${escapeHtml(v.plate||v.name||'Xe')}</span>
             </button>
-            ${!v.isPrimary ? `<button class="vehicle-map-edit" data-vid="${v.id}" style="background:none; border:none; color:var(--ink-soft); font-size:18px; padding:4px 6px; flex-shrink:0;">✏️</button>
+            ${(!v.isPrimary && (state.allVehiclesShifts[v.id]||[]).length===0) ? `<button class="vehicle-map-edit" data-vid="${v.id}" style="background:none; border:none; color:var(--ink-soft); font-size:18px; padding:4px 6px; flex-shrink:0;">✏️</button>
             <button class="vehicle-map-delete" data-vid="${v.id}" data-vname="${escapeHtml(v.name||v.plate||'')}" style="background:none; border:none; color:var(--loss); font-size:18px; padding:4px 6px; flex-shrink:0;">🗑️</button>` : ''}
           </div>`).join('')}
       </div>
@@ -9073,9 +9075,11 @@ function renderDriverExpenseReportHistoryHtml(driverId){
 // trong khoảng Ông Chủ chọn (không phải cả lịch sử), để đối chiếu 1 giai
 // đoạn cụ thể với tài xế khi có tranh cãi, tách biệt với số dư cộng dồn
 // toàn thời gian ở trên.
-function openDriverAdvanceDetail(driverId, fromOverride, toOverride){
-  scrollMainToTop();
-  saveMainScroll();
+function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScroll){
+  // SỬA 2026-09-20 — song sinh đúng lỗi/cách sửa của openCustomerDetail()
+  // (xem chú thích đầy đủ tại đó): "Quay Lại" từ Sửa Khoản Ứng/Báo Cáo Chi
+  // Khác gọi thẳng hàm này làm mất vị trí cuộn đã lưu trước đó.
+  if(!preserveScroll){ scrollMainToTop(); saveMainScroll(); }
   const d = driverById(driverId);
   const app = document.getElementById('app');
   if(!d){ renderAll(); return; }
@@ -9138,10 +9142,10 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride){
   document.getElementById('addAdvanceBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceEditor(null, driverId); });
   document.getElementById('addExpenseReportBtn').addEventListener('click', ()=>{ saveMainScroll(); openDriverExpenseReportEditor(null, driverId); });
   document.getElementById('advFromPicker').addEventListener('change', e=>{
-    if(e.target.value) openDriverAdvanceDetail(driverId, e.target.value, to);
+    if(e.target.value){ saveMainScroll(); openDriverAdvanceDetail(driverId, e.target.value, to, true); restoreMainScroll(); }
   });
   document.getElementById('advToPicker').addEventListener('change', e=>{
-    if(e.target.value) openDriverAdvanceDetail(driverId, from, e.target.value);
+    if(e.target.value){ saveMainScroll(); openDriverAdvanceDetail(driverId, from, e.target.value, true); restoreMainScroll(); }
   });
 }
 function openDriverAdvanceEditor(id, driverId){
@@ -9150,7 +9154,7 @@ function openDriverAdvanceEditor(id, driverId){
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
   const draft = existing ? {...existing, method: existing.method || 'bank'} : { id: uid('advc'), driverId: did, date: todayLocalDateStr(), amount:0, note:'', method:'bank' };
-  const goBack = () => { openDriverAdvanceDetail(draft.driverId); restoreMainScroll(); };
+  const goBack = () => { openDriverAdvanceDetail(draft.driverId, undefined, undefined, true); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -9232,7 +9236,7 @@ function openDriverExpenseReportEditor(id, driverId){
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
   const draft = existing ? {...existing} : { id: uid('dexp'), driverId: did, date: todayLocalDateStr(), amount:0, item:'', note:'' };
-  const goBack = () => { openDriverAdvanceDetail(draft.driverId); restoreMainScroll(); };
+  const goBack = () => { openDriverAdvanceDetail(draft.driverId, undefined, undefined, true); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -9866,9 +9870,25 @@ async function callGeminiText(promptText, onRetry){
   if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  // SỬA 2026-09-20 (Ông Chủ báo — sau khi lên bản Gemini mới nhất, trả lời
+  // chậm hẳn và liên tục báo "mạng chập chờn" dù mạng rất khoẻ — ĐÃ TRA
+  // RA GỐC RỄ THẬT): dòng Gemini 3 (gồm cả 3.6/3.7/3.8-flash đang dùng)
+  // MẶC ĐỊNH suy luận ở mức "high" (sâu nhất, chậm nhất) nếu không khai
+  // báo gì — App TỪ TRƯỚC TỚI GIỜ chưa từng khai báo, nên luôn chạy ở mức
+  // chậm nhất mà không biết. Bản 3.8 "chịu khó suy nghĩ" hơn hẳn 3.6/3.7 ở
+  // cùng mức "high" (Google công bố: tự thêm bước suy luận, tự gọi công cụ
+  // lặp lại khi gặp việc khó) — khiến 1 lượt gọi giờ mất nhiều chục giây,
+  // dễ vượt quá thời gian chờ thực tế trên mạng di động và bị coi là lỗi
+  // mạng, dẫn tới lặp lại retry liên tục ("chập chờn" chỉ là tên gọi
+  // chung cho MỌI lỗi cần thử lại, không hẳn là mạng yếu thật). Việc app
+  // đang làm (đọc số đã tính sẵn, viết nhận xét JSON) không cần suy luận
+  // sâu — set "low" (đủ để suy luận cơ bản, nhanh & rẻ hơn nhiều so với
+  // "high") để trả lời nhanh trở lại, giảm hẳn tần suất phải retry. Dùng
+  // ĐÚNG tên field "thinkingLevel" (không phải "thinkingBudget" — đó là
+  // field CŨ của dòng Gemini 2.5, dùng nhầm sẽ báo lỗi với Gemini 3).
   const requestBody = {
     contents: [{ parts: [{ text: promptText }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 }
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3, thinkingConfig: { thinkingLevel: 'low' } }
   };
 
   return callGeminiWithRetry(async ()=>{
@@ -9982,7 +10002,7 @@ async function runBonusAnalysis(){
       if(activeBonusTruckRun) activeBonusTruckRun.retry();
       if(attempt>=3){
         const hintEl = document.getElementById('bonusRetryHint');
-        if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
+        if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
       }
     });
     ba.result = result;
@@ -10024,7 +10044,7 @@ async function runStrategyAnalysis(){
       // line appear, so Ông Chủ never wonders if the app has frozen.
       if(attempt>=3){
         const hintEl = document.getElementById('strategyRetryHint');
-        if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
+        if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
       }
     });
     sa.result = result;
@@ -10885,15 +10905,16 @@ function computeApprMetrics(p){
 /// side-by-side comparison grid. Reached from a button in the "Trợ Lý" tab
 /// and returns there via renderAll()+restoreMainScroll(), matching every
 /// other full-screen drill-down in the app (openPartnerDetail, etc).
-function renderProjectAppraisal(){
-  // SỬA 2026-09-08 (PHÁT HIỆN MỚI trong đợt audit đa xe, báo cáo thêm cho
-  // Ông Chủ — không nằm trong 2 lỗi đã duyệt ban đầu): màn "Thẩm Định Dự
-  // Án" có nút "Cập nhật thông số" gọi thẳng saveSettings() (giá dầu/VAT
-  // mô phỏng) — dính ĐÚNG lỗi ghi đè Xe #1 y hệt Cài Đặt nếu có ≥2 xe và
-  // đang ở "LINH CHÍ THÀNH". Thêm lá chắn y hệt. Với Ông Chủ hiện tại
-  // (đúng 1 xe), không đổi gì hành vi app đang chạy.
+function renderProjectAppraisal(preserveScroll){
+  // SỬA 2026-09-08 (PHÁT HIỆN MỚI trong đợt audit đa xe): màn "Thẩm Định
+  // Dự Án" có nút "Cập nhật thông số" gọi thẳng saveSettings() (giá dầu/VAT
+  // mô phỏng) — dính lỗi ghi đè Xe #1 y hệt Cài Đặt nếu có ≥2 xe và đang ở
+  // "LINH CHÍ THÀNH". Thêm lá chắn dưới đây.
   if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
-  scrollMainToTop();
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như renderCompanyDashboardPage():
+  // nút "Huỷ" ở 2 màn Sửa/Thêm Công Trình (Chạy Cước + Thương Mại) gọi
+  // thẳng hàm này để quay lại, vô tình reset cuộn trang danh sách.
+  if(!preserveScroll) scrollMainToTop();
   state.strategyView = 'appraisal';
   const app = document.getElementById('app');
   const fuelPerKm = historicalAvgFuelPerKm();
@@ -11043,7 +11064,7 @@ function renderProjectAppraisal(){
   document.querySelectorAll('.ap-compare-select').forEach(cb=>{
     cb.addEventListener('change', ()=>{
       if(cb.checked) appraisalCompareSelection.add(cb.dataset.id); else appraisalCompareSelection.delete(cb.dataset.id);
-      renderProjectAppraisal();
+      saveMainScroll(); renderProjectAppraisal(true); restoreMainScroll();
     });
   });
   const runBtn = document.getElementById('runAppraisalAnalysisBtn');
@@ -11055,7 +11076,7 @@ function renderProjectAppraisal(){
     state.settings.currentFuelUnitPrice = apsFuelVal;
     if(!(await saveSettings())) return;
     showToast('Đã lưu thông số mô phỏng.');
-    renderProjectAppraisal();
+    saveMainScroll(); renderProjectAppraisal(true); restoreMainScroll();
   });
 }
 
@@ -11114,7 +11135,7 @@ function renderAppraisalList(metricsById){
     if(confirm('Xoá công trình dự kiến này khỏi bảng so sánh?')){
       state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==btn.dataset.id);
       if(!(await saveSiteAppraisals())) return;
-      renderProjectAppraisal();
+      saveMainScroll(); renderProjectAppraisal(true); restoreMainScroll();
       showToast('Đã xoá.');
     }
   }));
@@ -11438,17 +11459,17 @@ function openProjectAppraisalEditor(id, newType){
     const idx = state.siteAppraisals.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.siteAppraisals[idx]=draft; else state.siteAppraisals.push(draft);
     if(!(await saveSiteAppraisals())) return;
-    renderProjectAppraisal();
+    renderProjectAppraisal(true);
     restoreMainScroll();
     showToast('Đã lưu công trình dự kiến.');
   });
-  document.getElementById('cancelAppraisalBtn').addEventListener('click', ()=>{ renderProjectAppraisal(); restoreMainScroll(); });
+  document.getElementById('cancelAppraisalBtn').addEventListener('click', ()=>{ renderProjectAppraisal(true); restoreMainScroll(); });
   const delBtn = document.getElementById('delAppraisalEditBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá công trình dự kiến này?')){
       state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==draft.id);
       if(!(await saveSiteAppraisals())) return;
-      renderProjectAppraisal();
+      renderProjectAppraisal(true);
       restoreMainScroll();
       showToast('Đã xoá.');
     }
@@ -11780,17 +11801,17 @@ function openCommercialAppraisalEditor(id){
     const idx = state.siteAppraisals.findIndex(p=>p.id===draft.id);
     if(idx>=0) state.siteAppraisals[idx]=draft; else state.siteAppraisals.push(draft);
     if(!(await saveSiteAppraisals())) return;
-    renderProjectAppraisal();
+    renderProjectAppraisal(true);
     restoreMainScroll();
     showToast('Đã lưu công trình dự kiến.');
   });
-  document.getElementById('cancelAppraisalBtn').addEventListener('click', ()=>{ renderProjectAppraisal(); restoreMainScroll(); });
+  document.getElementById('cancelAppraisalBtn').addEventListener('click', ()=>{ renderProjectAppraisal(true); restoreMainScroll(); });
   const delBtn = document.getElementById('delAppraisalEditBtn');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     if(confirm('Xoá công trình dự kiến này?')){
       state.siteAppraisals = state.siteAppraisals.filter(p=>p.id!==draft.id);
       if(!(await saveSiteAppraisals())) return;
-      renderProjectAppraisal();
+      renderProjectAppraisal(true);
       restoreMainScroll();
       showToast('Đã xoá.');
     }
@@ -11900,7 +11921,7 @@ async function runAppraisalAnalysis(){
     const result = await callGeminiText(prompt, (attempt)=>{
       if(attempt>=3){
         const hintEl = document.getElementById('appraisalRetryHint');
-        if(hintEl) hintEl.textContent = `Mạng đang chập chờn — đang tự động thử kết nối lại với Gemini (lần ${attempt})...`;
+        if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
       }
     });
     aa.result = result;
@@ -12592,7 +12613,15 @@ function computeDailyBreakdown(inRangeShifts){
     const shifts = byDate[date];
     const revenue = shifts.reduce((s,sh)=>s+shiftTotalRevenue(sh),0);
     const cost = shifts.reduce((s,sh)=>s+shiftTotalCost(sh),0);
-    return { date, revenue, cost, profit: revenue-cost, shiftCount: shifts.length };
+    // MỚI (Ông Chủ yêu cầu — tô màu cột Lợi Nhuận đúng theo nhãn tình
+    // trạng ca, không chỉ theo dấu +/-): nếu CẢ NGÀY chỉ có đúng 1 loại
+    // trạng thái và đó KHÔNG phải "Hoạt Động" (nghỉ phép/nghỉ mưa/bảo
+    // trì/nằm bãi), gắn cờ dayStatus đúng trạng thái đó để tô màu riêng.
+    // Ngày có ca Hoạt Động (dù lẫn ca khác) hoặc nhiều trạng thái khác
+    // nhau vẫn tô theo lãi/lỗ như cũ, không đổi hành vi.
+    const statuses = new Set(shifts.map(sh=>sh.status));
+    const dayStatus = (statuses.size===1 && !statuses.has('active')) ? shifts[0].status : 'active';
+    return { date, revenue, cost, profit: revenue-cost, shiftCount: shifts.length, dayStatus };
   });
 }
 
@@ -14289,6 +14318,7 @@ function renderResults(){
 
     <section class="group">
       <h3>📊 Thống Kê Theo Từng Ngày</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:8px;">Cột Lợi Nhuận tô theo đúng tình trạng ca hôm đó — ngày Hoạt Động vẫn theo lãi (xanh)/lỗ (đỏ) như cũ; ngày Nghỉ Phép/Nghỉ Mưa/Bảo Trì/Nằm Bãi tô đúng màu nhãn trạng thái đó, y hệt màu ở Danh Sách Ca.</div>
       <div class="card dash-wrap">
         ${dailyBreakdown.length===0 ? '<div class="hint">Không có ca nào trong khoảng thời gian này.</div>' : `
         <table class="dash">
@@ -14299,7 +14329,7 @@ function renderResults(){
                 <td>${formatDateVN(d.date)}</td>
                 <td>${fmtVND(d.revenue)}</td>
                 <td>${fmtVND(d.cost)}</td>
-                <td style="color:${d.profit>=0?'var(--profit)':'var(--loss)'}; font-weight:700;">${d.profit>=0?'+':''}${fmtVND(d.profit)}</td>
+                <td style="color:${d.dayStatus==='active' ? (d.profit>=0?'var(--profit)':'var(--loss)') : statusTextColor(d.dayStatus)}; font-weight:700;">${d.profit>=0?'+':''}${fmtVND(d.profit)}</td>
               </tr>`).join('')}
           </tbody>
         </table>`}
@@ -14483,8 +14513,12 @@ function renderMonthLedgerDetailModal(m, customerName){
 /// tới ngày"): trang riêng cho "Chi Tiết Giao Dịch (Thương Mại)" — dùng
 /// lại NGUYÊN partnerTransactionTableHtml() (không đổi cấu trúc bảng),
 /// chỉ thêm bộ lọc ngày linh hoạt phía trên.
-function renderCustomerTransactionDetailPage(customerId, filterFrom, filterTo){
-  scrollMainToTop();
+function renderCustomerTransactionDetailPage(customerId, filterFrom, filterTo, preserveScroll){
+  // SỬA 2026-09-20 (rà toàn app theo yêu cầu Ông Chủ) — cùng lỗi/cách sửa
+  // như openCustomerDetail(): đổi bộ lọc ngày ngay trên trang này cũng tự
+  // gọi lại chính nó, vốn LUÔN scrollMainToTop() nên vô hiệu hoá luôn
+  // saveMainScroll()/restoreMainScroll() bọc ngoài. Thêm preserveScroll.
+  if(!preserveScroll) scrollMainToTop();
   const cus = customerById(customerId);
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -14512,22 +14546,22 @@ function renderCustomerTransactionDetailPage(customerId, filterFrom, filterTo){
       ${partnerTransactionTableHtml(customerId, 'customer', filterFrom, filterTo)}
     </section>
   `;
-  document.getElementById('custTxnBackBtn').addEventListener('click', ()=>{ openCustomerDetail(customerId); restoreMainScroll(); });
+  document.getElementById('custTxnBackBtn').addEventListener('click', ()=>{ openCustomerDetail(customerId, true); restoreMainScroll(); });
   document.getElementById('custTxnSearchDate').addEventListener('change', e=>{
     const d = e.target.value;
     if(!d) return;
-    saveMainScroll(); renderCustomerTransactionDetailPage(customerId, d, d); restoreMainScroll();
+    saveMainScroll(); renderCustomerTransactionDetailPage(customerId, d, d, true); restoreMainScroll();
   });
   document.getElementById('custTxnApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('custTxnFrom').value;
     const t = document.getElementById('custTxnTo').value;
-    saveMainScroll(); renderCustomerTransactionDetailPage(customerId, f||undefined, t||undefined); restoreMainScroll();
+    saveMainScroll(); renderCustomerTransactionDetailPage(customerId, f||undefined, t||undefined, true); restoreMainScroll();
   });
   document.querySelectorAll('#custTxnPreset button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('#custTxnPreset button').forEach(b=>b.classList.toggle('active', b===btn));
-      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); showToast('Đang xem: Tháng này.'); saveMainScroll(); renderCustomerTransactionDetailPage(customerId, mr.from, mr.to); restoreMainScroll(); }
-      else { showToast('Đang xem: Tất cả.'); saveMainScroll(); renderCustomerTransactionDetailPage(customerId, undefined, undefined); restoreMainScroll(); }
+      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); showToast('Đang xem: Tháng này.'); saveMainScroll(); renderCustomerTransactionDetailPage(customerId, mr.from, mr.to, true); restoreMainScroll(); }
+      else { showToast('Đang xem: Tất cả.'); saveMainScroll(); renderCustomerTransactionDetailPage(customerId, undefined, undefined, true); restoreMainScroll(); }
     });
   });
 }
@@ -14567,11 +14601,22 @@ function renderCustomerPaymentHistoryPage(customerId){
       `}
     </section>
   `;
-  document.getElementById('custPayHistBackBtn').addEventListener('click', ()=>{ openCustomerDetail(customerId); restoreMainScroll(); });
+  document.getElementById('custPayHistBackBtn').addEventListener('click', ()=>{ openCustomerDetail(customerId, true); restoreMainScroll(); });
 }
-function openCustomerDetail(customerId){
-  scrollMainToTop();
-  saveMainScroll();
+function openCustomerDetail(customerId, preserveScroll){
+  // SỬA 2026-09-20 (Ông Chủ báo — "quay lại từ Chi Tiết Giao Dịch bị nhảy
+  // lên đầu trang", rà toàn app thấy lỗi y hệt ở nhiều nút Quay Lại khác):
+  // GỐC RỄ THẬT — hàm này vốn là điểm VÀO trang Chi Tiết Khách Hàng, nên
+  // luôn tự scrollMainToTop()+saveMainScroll() để bắt đầu sạch từ đầu
+  // trang. Nhưng nhiều nút "Quay Lại" từ các trang con (Chi Tiết Giao
+  // Dịch, Lịch Sử Đã Thu, Sửa Khoản Thu, đổi khoảng ngày...) lại gọi
+  // THẲNG hàm này để "quay lại" — vô tình kích hoạt lại đúng 2 dòng reset
+  // đó, XOÁ MẤT vị trí cuộn đã lưu đúng từ trước khi rẽ vào trang con, rồi
+  // restoreMainScroll() chạy sau đó chỉ khôi phục về vị trí vừa bị ghi đè
+  // (gần như luôn là đầu trang). Thêm cờ preserveScroll — bật khi đây là
+  // lượt "quay lại" (không phải vào trang lần đầu) để bỏ qua đúng 2 dòng
+  // reset, giữ nguyên vị trí đã lưu cho restoreMainScroll() dùng đúng.
+  if(!preserveScroll){ scrollMainToTop(); saveMainScroll(); }
   const cus = customerById(customerId);
   const app = document.getElementById('app');
   if(!cus){ renderAll(); return; }
@@ -14772,11 +14817,11 @@ function openCustomerDetail(customerId){
     if(f>t){ alert('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
     state.customerDetailRange = {from:f, to:t};
     saveMainScroll();
-    openCustomerDetail(customerId);
+    openCustomerDetail(customerId, true);
     restoreMainScroll();
   });
   const custRangeResetBtn = document.getElementById('cus_rangeResetBtn');
-  if(custRangeResetBtn) custRangeResetBtn.addEventListener('click', ()=>{ state.customerDetailRange=null; saveMainScroll(); openCustomerDetail(customerId); restoreMainScroll(); });
+  if(custRangeResetBtn) custRangeResetBtn.addEventListener('click', ()=>{ state.customerDetailRange=null; saveMainScroll(); openCustomerDetail(customerId, true); restoreMainScroll(); });
 }
 function openCustomerPaymentEditor(id, customerId){
   scrollMainToTop();
@@ -14785,7 +14830,7 @@ function openCustomerPaymentEditor(id, customerId){
   const cus = customerById(cid);
   const draft = existing ? {...existing} : { id: uid('pay'), siteName: cus?cus.name:'', customerId: cid, partnerName: cus?cus.name:'', date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
   if(!draft.method) draft.method = 'bank';
-  const goBack = () => { openCustomerDetail(draft.customerId); restoreMainScroll(); };
+  const goBack = () => { openCustomerDetail(draft.customerId, true); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -14887,8 +14932,10 @@ function openBulkInvoiceTickModal(partyId, kind){
 /// Đồng bộ y hệt bên Khách Hàng — trang riêng "Chi Tiết Giao Dịch" cho
 /// Nhà Cung Cấp, cùng bộ lọc kính lúp tìm ngày + Tháng này + Từ ngày tới
 /// ngày.
-function renderSupplierTransactionDetailPage(supplierId, filterFrom, filterTo){
-  scrollMainToTop();
+function renderSupplierTransactionDetailPage(supplierId, filterFrom, filterTo, preserveScroll){
+  // SỬA 2026-09-20 — song sinh đúng lỗi/cách sửa của
+  // renderCustomerTransactionDetailPage() ở trên.
+  if(!preserveScroll) scrollMainToTop();
   const sup = supplierById(supplierId);
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -14916,22 +14963,22 @@ function renderSupplierTransactionDetailPage(supplierId, filterFrom, filterTo){
       ${partnerTransactionTableHtml(supplierId, 'supplier', filterFrom, filterTo)}
     </section>
   `;
-  document.getElementById('supTxnBackBtn').addEventListener('click', ()=>{ openSupplierDetail(supplierId); restoreMainScroll(); });
+  document.getElementById('supTxnBackBtn').addEventListener('click', ()=>{ openSupplierDetail(supplierId, true); restoreMainScroll(); });
   document.getElementById('supTxnSearchDate').addEventListener('change', e=>{
     const d = e.target.value;
     if(!d) return;
-    saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, d, d); restoreMainScroll();
+    saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, d, d, true); restoreMainScroll();
   });
   document.getElementById('supTxnApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('supTxnFrom').value;
     const t = document.getElementById('supTxnTo').value;
-    saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, f||undefined, t||undefined); restoreMainScroll();
+    saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, f||undefined, t||undefined, true); restoreMainScroll();
   });
   document.querySelectorAll('#supTxnPreset button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('#supTxnPreset button').forEach(b=>b.classList.toggle('active', b===btn));
-      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); showToast('Đang xem: Tháng này.'); saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, mr.from, mr.to); restoreMainScroll(); }
-      else { showToast('Đang xem: Tất cả.'); saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, undefined, undefined); restoreMainScroll(); }
+      if(btn.dataset.val==='month'){ const mr=currentMonthRange(); showToast('Đang xem: Tháng này.'); saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, mr.from, mr.to, true); restoreMainScroll(); }
+      else { showToast('Đang xem: Tất cả.'); saveMainScroll(); renderSupplierTransactionDetailPage(supplierId, undefined, undefined, true); restoreMainScroll(); }
     });
   });
 }
@@ -14970,11 +15017,12 @@ function renderSupplierPaymentHistoryPage(supplierId){
       `}
     </section>
   `;
-  document.getElementById('supPayHistBackBtn').addEventListener('click', ()=>{ openSupplierDetail(supplierId); restoreMainScroll(); });
+  document.getElementById('supPayHistBackBtn').addEventListener('click', ()=>{ openSupplierDetail(supplierId, true); restoreMainScroll(); });
 }
-function openSupplierDetail(supplierId){
-  scrollMainToTop();
-  saveMainScroll();
+function openSupplierDetail(supplierId, preserveScroll){
+  // SỬA 2026-09-20 — song sinh đúng lỗi/cách sửa của openCustomerDetail()
+  // ở trên (xem chú thích đầy đủ tại đó).
+  if(!preserveScroll){ scrollMainToTop(); saveMainScroll(); }
   const sup = supplierById(supplierId);
   const app = document.getElementById('app');
   if(!sup){ renderAll(); return; }
@@ -15110,11 +15158,11 @@ function openSupplierDetail(supplierId){
     if(f>t){ alert('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
     state.supplierDetailRange = {from:f, to:t};
     saveMainScroll();
-    openSupplierDetail(supplierId);
+    openSupplierDetail(supplierId, true);
     restoreMainScroll();
   });
   const supRangeResetBtn = document.getElementById('sup_rangeResetBtn');
-  if(supRangeResetBtn) supRangeResetBtn.addEventListener('click', ()=>{ state.supplierDetailRange=null; saveMainScroll(); openSupplierDetail(supplierId); restoreMainScroll(); });
+  if(supRangeResetBtn) supRangeResetBtn.addEventListener('click', ()=>{ state.supplierDetailRange=null; saveMainScroll(); openSupplierDetail(supplierId, true); restoreMainScroll(); });
 }
 function openSupplierPaymentEditor(id, supplierId){
   scrollMainToTop();
@@ -15132,7 +15180,7 @@ function openSupplierPaymentEditor(id, supplierId){
   const isRefundExisting = existing && Number(existing.amount)<0;
   const draft = existing ? {...existing, amount: Math.abs(existing.amount)} : { id: uid('spay'), supplierId: sid, date: todayLocalDateStr(), amount:0, notes:'', method:'bank' };
   if(!draft.method) draft.method = 'bank'; // khoản cũ trước khi có trường này -> mặc định NGÂN HÀNG, giữ đúng hành vi cũ
-  const goBack = () => { openSupplierDetail(draft.supplierId); restoreMainScroll(); };
+  const goBack = () => { openSupplierDetail(draft.supplierId, true); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -15289,8 +15337,9 @@ function renderPartnersFullDetailPage(){
 /// collected vs owed, ageing (since when the oldest unpaid amount is
 /// outstanding), reliability rating, per-site breakdown, and the complete
 /// payment history across every site tied to them.
-function openPartnerDetail(partnerName){
-  scrollMainToTop();
+function openPartnerDetail(partnerName, preserveScroll){
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như openCustomerDetail().
+  if(!preserveScroll) scrollMainToTop();
   const app = document.getElementById('app');
   const partners = computePartnersOverview();
   const P = partners.find(x=>x.name===partnerName);
@@ -15354,8 +15403,10 @@ function openPartnerDetail(partnerName){
   });
 }
 
-function openSiteDetail(siteName, from, to){
-  scrollMainToTop();
+function openSiteDetail(siteName, from, to, preserveScroll){
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như openCustomerDetail(): lưu giá
+  // trị hợp đồng xong tự gọi lại chính hàm này, vốn luôn reset cuộn.
+  if(!preserveScroll) scrollMainToTop();
   const app = document.getElementById('app');
   const det = computeSiteDetail(siteName, from, to);
   const driverRows = Object.entries(det.tripsByDriver).sort((a,b)=>b[1].trips-a[1].trips);
@@ -15435,7 +15486,7 @@ function openSiteDetail(siteName, from, to){
     if(idx>=0) state.siteContracts[idx]=record; else state.siteContracts.push(record);
     if(!(await saveSiteContracts())) return;
     saveMainScroll();
-    openSiteDetail(siteName, from, to);
+    openSiteDetail(siteName, from, to, true);
     restoreMainScroll();
     showToast('Đã lưu giá trị hợp đồng.');
   });
@@ -15506,7 +15557,7 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
   const resolvedSiteName = existing ? existing.siteName : siteName;
   const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'', method:'bank' };
   if(!draft.method) draft.method = 'bank';
-  const goBack = () => { openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName); restoreMainScroll(); };
+  const goBack = () => { openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName, true); restoreMainScroll(); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -16452,7 +16503,7 @@ function openLoanEditor(loanId){
     recomputeBankLoanMonthlyPayment();
     if(!(await saveSettings())) return;
     showToast(existing ? 'Đã lưu khoản vay.' : 'Đã thêm khoản vay mới.');
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   });
   const delBtn = document.getElementById('loanDelBtn');
@@ -16462,7 +16513,7 @@ function openLoanEditor(loanId){
     recomputeBankLoanMonthlyPayment();
     if(!(await saveSettings())) return;
     showToast('Đã xoá khoản vay.');
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   });
   renderLoanRateScheduleList();
@@ -16598,7 +16649,7 @@ function openROICalculationDetail(){
       <div class="hint" style="margin-top:8px;">Đây là ước tính DỰA THEO NHỊP GẦN NHẤT, không phải cam kết — nếu sản lượng/chi phí thay đổi, số tháng này sẽ tự cập nhật lại theo đúng nhịp mới mỗi lần Ông Chủ mở lại trang này.</div>
     </section>
   `;
-  document.getElementById('roiCalcBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('roiCalcBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
 }
 function renderLoanList(){
   const wrap = document.getElementById('loanListWrap');
@@ -16667,8 +16718,9 @@ function renderLoanList(){
 /// thị hết luồng tiền"): sổ ghi nhận từng lần ĐÃ NỘP THẬT tiền VAT cho
 /// nhà nước — CHUNG CÔNG TY, LUÔN qua ngân hàng (nộp thuế điện tử), dùng
 /// cho Khớp Số Dư Ngân Hàng. Trang riêng, đặt trong Linh Chí Thành.
-function renderVatPaymentListPage(){
-  scrollMainToTop();
+function renderVatPaymentListPage(preserveScroll){
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như openCustomerDetail().
+  if(!preserveScroll) scrollMainToTop();
   const sorted = [...state.vatPayments].sort((a,b)=>b.date.localeCompare(a.date));
   const total = sorted.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const app = document.getElementById('app');
@@ -16697,7 +16749,7 @@ function renderVatPaymentListPage(){
       </div>
     </section>
   `;
-  document.getElementById('vatPayBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('vatPayBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   document.getElementById('addVatPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openVatPaymentEditor(null); });
   document.querySelectorAll('.editVatPaymentBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{ saveMainScroll(); openVatPaymentEditor(btn.dataset.id); });
@@ -16740,7 +16792,7 @@ function openVatPaymentEditor(id){
     </section>
   `;
   attachMoneyInput(document.getElementById('vp_amount'), draft.amount, v=>draft.amount=v);
-  const goBack = () => { renderVatPaymentListPage(); restoreMainScroll(); };
+  const goBack = () => { renderVatPaymentListPage(true); restoreMainScroll(); };
   document.getElementById('cancelVatPaymentBtn').addEventListener('click', goBack);
   document.getElementById('saveVatPaymentBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('vp_date').value;
@@ -16815,7 +16867,7 @@ function openInternalTransferModal(){
     showToast('Đã ghi nhận chuyển tiền.');
     closeModal();
     saveMainScroll();
-    renderCompanyDashboardPage();
+    renderCompanyDashboardPage(true);
     restoreMainScroll();
   });
 }
@@ -16864,7 +16916,7 @@ function openFixedCostsEditor(){
     closeModal();
     showToast('Đã lưu.');
     saveMainScroll();
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   });
 }
@@ -17048,8 +17100,9 @@ function computeBusinessReport(from, to){
     avgTripsPerDay, equity, allTimeCashFlow, totalCapitalIn, cumulativeAccrual, trueProfitAfterDepreciation, charterStatus, debtSummary, bankRecon, warnings, notes };
 }
 
-function renderBusinessReportPage(from, to){
-  scrollMainToTop();
+function renderBusinessReportPage(from, to, preserveScroll){
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như renderCustomerTransactionDetailPage().
+  if(!preserveScroll) scrollMainToTop();
   const r = computeBusinessReport(from, to);
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -17202,7 +17255,7 @@ function renderBusinessReportPage(from, to){
       ` : ''}
     </section>
   `;
-  document.getElementById('bizReportBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('bizReportBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   document.getElementById('bizCashDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   document.getElementById('bizApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('bizFrom').value;
@@ -17210,7 +17263,7 @@ function renderBusinessReportPage(from, to){
     if(!f || !t){ showToast('Chọn đủ Từ ngày và Đến ngày.'); return; }
     if(f>t){ showToast('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
     saveMainScroll();
-    renderBusinessReportPage(f, t);
+    renderBusinessReportPage(f, t, true);
     restoreMainScroll();
   });
   document.querySelectorAll('#bizReportPreset button').forEach(btn=>{
@@ -17224,13 +17277,13 @@ function renderBusinessReportPage(from, to){
       if(btn.dataset.val==='month'){
         const mr=currentMonthRange();
         showToast('Đang xem: Tháng này.');
-        saveMainScroll(); renderBusinessReportPage(mr.from, mr.to); restoreMainScroll();
+        saveMainScroll(); renderBusinessReportPage(mr.from, mr.to, true); restoreMainScroll();
       } else if(btn.dataset.val==='all'){
         const allShifts = allShiftsCompanyWide();
         const earliest = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : todayLocalDateStr();
         const start = state.equityProjectInfo.startDate || earliest;
         showToast('Đang xem: Từ đầu dự án tới hôm nay.');
-        saveMainScroll(); renderBusinessReportPage(start, todayLocalDateStr()); restoreMainScroll();
+        saveMainScroll(); renderBusinessReportPage(start, todayLocalDateStr(), true); restoreMainScroll();
       }
     });
   });
@@ -17245,8 +17298,9 @@ function renderBusinessReportPage(from, to){
 /// khớp tuyệt đối với computeCumulativeAccrualProfit() (đã hiện ở "Hiệu
 /// Quả Đầu Tư"), tự đối chiếu ngay trên trang để Ông Chủ luôn kiểm tra
 /// được, không phải tin suông.
-function renderPerVehicleResultsPage(from, to){
-  scrollMainToTop();
+function renderPerVehicleResultsPage(from, to, preserveScroll){
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như renderBusinessReportPage().
+  if(!preserveScroll) scrollMainToTop();
   const vehicles = state.vehicles;
   const perVehicle = vehicles.map(v=>({ vehicle: v, r: computeVehicleAccrualProfit(v.id, from, to) }));
   const sharedCost = houseRentForRange(from, to) + utilitiesForRange(from, to) + tollFeeForRange(from, to);
@@ -17311,14 +17365,14 @@ function renderPerVehicleResultsPage(from, to){
       <div class="hint" style="margin-top:8px; color:${matches?'var(--profit)':'var(--loss)'}; font-weight:${matches?'400':'700'};">${matches ? '✅ Đã tự đối chiếu — khớp tuyệt đối với số ở "Hiệu Quả Đầu Tư".' : '⚠️ LỆCH với số ở "Hiệu Quả Đầu Tư" ('+fmtVND(companyWide.netProfit)+') — báo lại ngay cho tao kiểm tra.'}</div>
     </section>
   `;
-  document.getElementById('perVehicleBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('perVehicleBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   document.getElementById('pvApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('pvFrom').value;
     const t = document.getElementById('pvTo').value;
     if(!f || !t){ showToast('Chọn đủ Từ ngày và Đến ngày.'); return; }
     if(f>t){ showToast('"Từ ngày" phải trước hoặc bằng "Đến ngày".'); return; }
     saveMainScroll();
-    renderPerVehicleResultsPage(f, t);
+    renderPerVehicleResultsPage(f, t, true);
     restoreMainScroll();
   });
   document.querySelectorAll('#pvReportPreset button').forEach(btn=>{
@@ -17327,13 +17381,13 @@ function renderPerVehicleResultsPage(from, to){
       if(btn.dataset.val==='month'){
         const mr=currentMonthRange();
         showToast('Đang xem: Tháng này.');
-        saveMainScroll(); renderPerVehicleResultsPage(mr.from, mr.to); restoreMainScroll();
+        saveMainScroll(); renderPerVehicleResultsPage(mr.from, mr.to, true); restoreMainScroll();
       } else if(btn.dataset.val==='all'){
         const allShifts = allShiftsCompanyWide();
         const earliest = allShifts.length ? allShifts.map(sh=>sh.date).sort()[0] : todayLocalDateStr();
         const start = state.equityProjectInfo.startDate || earliest;
         showToast('Đang xem: Từ đầu dự án tới hôm nay.');
-        saveMainScroll(); renderPerVehicleResultsPage(start, todayLocalDateStr()); restoreMainScroll();
+        saveMainScroll(); renderPerVehicleResultsPage(start, todayLocalDateStr(), true); restoreMainScroll();
       }
     });
   });
@@ -17384,7 +17438,7 @@ function openInvestmentEntryEditor(id){
     closeModal();
     showToast(msg);
     saveMainScroll();
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   };
   document.getElementById('ie_saveBtn').addEventListener('click', async ()=>{
@@ -17441,12 +17495,22 @@ function openCharterCapitalEditor(){
     closeModal();
     showToast('Đã lưu Vốn Điều Lệ.');
     saveMainScroll();
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(); else renderAll();
+    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
   });
 }
-function renderCompanyDashboardPage(){
-  scrollMainToTop();
+function renderCompanyDashboardPage(preserveScroll){
+  // SỬA 2026-09-20 (rà sâu toàn app theo yêu cầu Ông Chủ — đây là nguồn
+  // gây lỗi NHIỀU NHẤT): hàm này là màn "🏢 Linh Chí Thành" — vốn đúng khi
+  // là ĐIỂM VÀO (từ sơ đồ chọn xe) thì cần scrollMainToTop(). Nhưng RẤT
+  // NHIỀU nút "← Quay Lại" ở các trang con của Linh Chí Thành (ROI, Thuế
+  // VAT, Sổ Cái, Lịch Sử Vốn, Công Nợ, Dòng Tiền, Khớp Số Dư Bank, Chi
+  // Tiết Vốn Chủ, Vốn Điều Lệ, Kết Quả Toàn Công Ty, Kết Quả Từng Xe...)
+  // gọi THẲNG hàm này để "quay lại" — kích hoạt lại đúng dòng reset đó,
+  // xoá mất vị trí cuộn đã lưu trước khi rẽ vào trang con. Thêm
+  // preserveScroll để các nút Quay Lại dùng, không đụng gì tới lượt vào
+  // MỚI từ sơ đồ chọn xe (renderAll() vẫn gọi hàm này không tham số như cũ).
+  if(!preserveScroll) scrollMainToTop();
   const eq = computeOwnerEquity();
   const charterStatus = computeCharterCapitalStatus();
   const timeline = computeMonthlyEquityTimeline();
@@ -18042,7 +18106,7 @@ function renderCompanyDashboardPage(){
     if(!(await saveEquityProjectInfo())) return;
     showToast('Đã lưu thông tin dự án.');
     saveMainScroll();
-    renderCompanyDashboardPage();
+    renderCompanyDashboardPage(true);
     restoreMainScroll();
   });
   const addInvestEntryBtn = document.getElementById('addInvestEntryBtn');
@@ -18076,7 +18140,7 @@ function renderCompanyDashboardPage(){
     if(!(await saveOwnerEquityEntries())) return;
     showToast('Đã ghi khoản mới.');
     saveMainScroll();
-    renderCompanyDashboardPage();
+    renderCompanyDashboardPage(true);
     restoreMainScroll();
   });
   document.getElementById('equityHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderEquityHistoryDetailPage(); });
@@ -18087,7 +18151,7 @@ function renderCompanyDashboardPage(){
       if(!(await saveInternalTransfers())) return;
       showToast('Đã xoá.');
       saveMainScroll();
-      renderCompanyDashboardPage();
+      renderCompanyDashboardPage(true);
       restoreMainScroll();
     });
   });
@@ -18097,9 +18161,12 @@ function renderCompanyDashboardPage(){
   renderLoanList();
   document.getElementById('openBizReportBtn').addEventListener('click', ()=>{
     const mr = currentMonthRange();
+    // SỬA 2026-09-20 (rà sâu toàn app): đây là ĐI TỚI trang mới (không
+    // phải quay lại) — trước đây lỡ gọi thêm restoreMainScroll() ngay sau,
+    // khiến trang MỚI mở ra bị kéo xuống ĐÚNG độ sâu cũ của Linh Chí
+    // Thành thay vì bắt đầu từ đầu trang. Bỏ hẳn dòng thừa này.
     saveMainScroll();
     renderBusinessReportPage(mr.from, mr.to);
-    restoreMainScroll();
   });
   const pnlDetailLinkBtn = document.getElementById('pnlDetailLinkBtn');
   if(pnlDetailLinkBtn) pnlDetailLinkBtn.addEventListener('click', ()=>{
@@ -18108,9 +18175,9 @@ function renderCompanyDashboardPage(){
   });
   document.getElementById('openPerVehicleBtn').addEventListener('click', ()=>{
     const mr = currentMonthRange();
+    // SỬA 2026-09-20 — cùng lỗi/cách sửa như openBizReportBtn ở trên.
     saveMainScroll();
     renderPerVehicleResultsPage(mr.from, mr.to);
-    restoreMainScroll();
   });
   // SỬA 2026-09-14 (thêm lời nhắc "chọn xe" khi ≥2 xe chưa chọn xe nào —
   // xem renderPerVehicleDataNotice()): 3 nút dưới đây CHỈ tồn tại trong
@@ -18381,7 +18448,7 @@ function renderCompanyCashFlowLedgerPage(){
     </section>
     ${groups.map(groupTableHtml).join('')}
   `;
-  document.getElementById('ledgerBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('ledgerBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
 }
 /// Chi Tiết Công Nợ — liệt kê TỪNG khách hàng/nhà cung cấp đang còn nợ
 /// (owed khác 0), bấm vào từng dòng mở đúng trang chi tiết đối tác đã có
@@ -18426,7 +18493,7 @@ function renderEquityHistoryDetailPage(){
       </div>
     </section>
   `;
-  document.getElementById('equityHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('equityHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   document.querySelectorAll('[data-del-equity]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       state.ownerEquityEntries = state.ownerEquityEntries.filter(e=>e.id!==btn.dataset.delEquity);
@@ -18505,7 +18572,7 @@ function renderDebtDetailPage(filterType){
       </div>`:''}
     </section>
   `;
-  document.getElementById('debtDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('debtDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   document.querySelectorAll('[data-open-customer]').forEach(el=>{
     el.addEventListener('click', ()=>{ saveMainScroll(); openCustomerDetail(el.dataset.openCustomer); });
   });
@@ -18626,10 +18693,11 @@ function openCashFlowGroupDetail(category, key){
       }).join('')}
     </section>
   `;
-  document.getElementById('cfGroupDetailBackBtn').addEventListener('click', ()=>{ renderCashFlowBreakdownDetailPage(); restoreMainScroll(); });
+  document.getElementById('cfGroupDetailBackBtn').addEventListener('click', ()=>{ renderCashFlowBreakdownDetailPage(true); restoreMainScroll(); });
 }
-function renderCashFlowBreakdownDetailPage(){
-  scrollMainToTop();
+function renderCashFlowBreakdownDetailPage(preserveScroll){
+  // SỬA 2026-09-20 — cùng lỗi/cách sửa như renderCompanyDashboardPage().
+  if(!preserveScroll) scrollMainToTop();
   const breakdown = computeCumulativeCashFlowBreakdown();
   const from = breakdown.from, to = breakdown.to;
   const section = (title, total, bodyHtml) => `
@@ -18688,7 +18756,7 @@ function renderCashFlowBreakdownDetailPage(){
       </div>
     </section>
   `;
-  document.getElementById('cashFlowDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('cashFlowDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   document.querySelectorAll('.cashFlowGroupDetailBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{ saveMainScroll(); openCashFlowGroupDetail(btn.dataset.category, btn.dataset.key); });
   });
@@ -19293,7 +19361,7 @@ function renderBankReconDetailPage(mode){
   });
   const ktnbTransferShortcutBtn2 = document.getElementById('ktnbTransferShortcutBtn2');
   if(ktnbTransferShortcutBtn2) ktnbTransferShortcutBtn2.addEventListener('click', openInternalTransferModal);
-  document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
 }
 /// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
 /// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
@@ -19409,7 +19477,7 @@ function renderEquityDetailPage(){
       <button class="btn btn-ghost btn-block" id="equityDetailNetAssetLinkBtn">📊 Xem Tổng Giá Trị Ròng (Kế Toán Nội Bộ)</button>
     </section>
   `;
-  document.getElementById('equityDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('equityDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
   const netAssetLink = document.getElementById('equityDetailNetAssetLinkBtn');
   if(netAssetLink) netAssetLink.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyDashboardPage(); });
 }
@@ -19453,7 +19521,7 @@ function renderCharterCapitalDetailPage(){
       </div>
     </section>
   `;
-  document.getElementById('charterDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(); restoreMainScroll(); });
+  document.getElementById('charterDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
 }
 function renderSettings(){
   // SỬA 2026-09-08 (audit đa xe, yêu cầu Ông Chủ — LỖI NGHIÊM TRỌNG NHẤT
