@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #275';
+const APP_BUILD = '2026-09-20 · #277';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17111,7 +17111,6 @@ function renderBusinessReportPage(from, to, preserveScroll){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Gộp toàn bộ dữ liệu Dòng Tiền, Kết Quả, Vốn, Công Nợ, Cảnh Báo đã có sẵn trong app thành 1 báo cáo — chọn giai đoạn bất kỳ để tra soát.</div>
     </section>
 
     <section class="group">
@@ -17841,29 +17840,62 @@ function renderCompanyDashboardPage(preserveScroll){
 
     <section class="group">
       <h3>📊 Tổng Giá Trị Ròng Toàn Công Ty</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đủ TOÀN BỘ tài sản và nợ phải trả của công ty.</div>
       ${(()=>{
         const inventoryValue = companyWideInvoiceLotInventoryValue();
         const depHistory = computeDepreciationMonthlyHistory();
         const depreciationSoFar = depHistory.length ? depHistory[depHistory.length-1].cumulative : 0;
         const vehicleNetBookValue = Math.max(0, eq.initialInvestment - depreciationSoFar);
         const remainingLoanBalance = eq.remainingLoanBalance;
-        const netAssetValue = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
-          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed
-          + inventoryValue + vehicleNetBookValue - remainingLoanBalance;
+        // MỚI (Ông Chủ yêu cầu 2026-09-20 — "tách rõ phần tiền góp vào vận
+        // hành đang ra sao, và tài sản xe đang ra sao, cho khoa học minh
+        // bạch"): tách hẳn 2 bảng theo đúng bản chất — Bảng 1 gồm mọi
+        // khoản THUỘC VỐN VẬN HÀNH (tiền mặt/ngân hàng/công nợ/tồn kho —
+        // những khoản đổi giá trị theo hoạt động hàng ngày); Bảng 2 gồm
+        // TÀI SẢN CỐ ĐỊNH CỦA XE và khoản vay gắn liền với nó (đổi giá trị
+        // chậm, theo khấu hao/trả nợ). KHÔNG đổi bất kỳ số liệu hay công
+        // thức nào — netAssetValue vẫn tính Y HỆT như cũ, chỉ nhóm lại
+        // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
+        // trước.
+        const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
+          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue;
+        const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
+        const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
         return `
+        <h4 style="margin:0 0 4px;">💰 Vốn Vận Hành (Tiền + Công Nợ + Tồn Kho)</h4>
+        <div class="hint" style="margin-top:0; margin-bottom:8px;">Phần tiền Ông Chủ góp vào vận hành hàng ngày đang nằm ở đâu — hiện trạng thay đổi liên tục theo hoạt động.</div>
         <div class="grid-table-wrap">
           <table class="grid-table">
             <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
             <tbody>
               <tr><td>🏦 TCB Bank</td><td class="num">${fmtVND(bankRecon?bankRecon.computedBalance:0)}</td></tr>
               <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
-              <tr><td>${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
-              <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
+              <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
+              <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>📦 Hàng Tồn Kho (Lô Hoá Đơn Bù chưa dùng)</td><td class="num" style="color:var(--profit);">+${fmtVND(inventoryValue)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4 style="margin:16px 0 4px;">🚛 Tài Sản Xe & Vay Nợ</h4>
+        <div class="hint" style="margin-top:0; margin-bottom:8px;">Giá trị chiếc xe đang còn lại bao nhiêu sau khấu hao, và khoản vay gắn liền với nó — hiện trạng đổi chậm, theo tháng.</div>
+        <div class="grid-table-wrap">
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
               <tr><td>🚛 Giá Trị Còn Lại Của Xe (Vốn Đầu Tư − Khấu Hao Luỹ Kế)</td><td class="num" style="color:var(--profit);">+${fmtVND(vehicleNetBookValue)}</td></tr>
               <tr><td>🏦 Điều Chỉnh Vay Ngân Hàng (dư nợ vay công ty + gốc đã trả hộ vay cá nhân)</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= GIÁ TRỊ TÀI SẢN XE (RÒNG)</td><td class="num" style="color:${vehicleAssetNetTotal>=0?'var(--profit)':'var(--loss)'}">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-table-wrap" style="margin-top:16px;">
+          <table class="grid-table">
+            <tbody>
+              <tr><td>Tổng Vốn Vận Hành</td><td class="num">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
+              <tr><td>+ Giá Trị Tài Sản Xe (Ròng)</td><td class="num">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG TOÀN CÔNG TY</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
             </tbody>
           </table>
         </div>
@@ -18714,13 +18746,10 @@ function renderCashFlowBreakdownDetailPage(preserveScroll){
       <div class="hint" style="margin-top:0; margin-bottom:12px;">${from?`Cộng dồn từ ${formatDateVN(from)} tới hôm nay — mỗi mục nhóm theo đối tác/hạng mục, bấm 🔍 xem chi tiết từng khoản. Đây là DÒNG TIỀN THỰC (tiền mặt/ngân hàng thật ra/vào), KHÔNG PHẢI Lợi Nhuận kế toán — xem giải thích đầy đủ bên dưới.`:'Chưa có dữ liệu'}</div>
       ${section('💵 + Tiền khách chuyển vào', breakdown.cashIn, groupedCashFlowSummaryHtml('customer'))}
       ${section('⛰️ − Tiền chuyển cho mỏ', -breakdown.cashOutToSuppliers, groupedCashFlowSummaryHtml('supplier'))}
-      <div class="hint" style="margin-top:-4px;">⚠️ Đây là ĐỦ số tiền đã chuyển cho mỏ — có thể gồm cả phần ứng trước/trả dư (mỏ đang giữ hộ). Xem đúng phần mỏ còn nợ lại ở "Kế Toán Nội Bộ → Nhà cung cấp đang nợ Ông Chủ".</div>
       ${section('⛽ − Chi phí vận hành', -breakdown.operatingCashCost, groupedCashFlowSummaryHtml('operating'))}
       ${section('🔧 − Sửa chữa', -breakdown.repairTotal, groupedCashFlowSummaryHtml('repair'))}
       ${section('📦 − Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác)', -breakdown.invoiceLotCashOut, groupedCashFlowSummaryHtml('invoiceLot'))}
-      <div class="hint" style="margin-top:-4px;">⚠️ Đây là ĐỦ số tiền đã trả mua CẢ LÔ, kể cả phần CHƯA DÙNG (vẫn là hàng tồn kho — tài sản của công ty, không phải mất). Xem đúng phần ĐÃ DÙNG THẬT (tính vào chi phí) ở tab Kết Quả → "Chi phí mua hoá đơn bù".</div>
       ${section('💵 − Tạm ứng lương tài xế', -breakdown.advanceCashOut, groupedCashFlowSummaryHtml('advance'))}
-      <div class="hint" style="margin-top:-4px;">⚠️ Đây KHÔNG phải chi phí — chỉ là tiền đã rời ngân hàng/tiền mặt để đưa tay tài xế, sẽ được trừ lại đúng vào lương thật khi quyết toán cuối kỳ (không bị tính 2 lần).</div>
       <h3 style="margin-top:16px;">🚧 − Luật Đường + Nhà/Điện + Cầu Đường + Gốc/Lãi Vay + Bảo Hiểm + Đăng Kiểm</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
