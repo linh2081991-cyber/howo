@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #279';
+const APP_BUILD = '2026-09-20 · #280';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14150,6 +14150,7 @@ function renderResults(){
         <div class="field" style="margin-bottom:0;">
           <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
           <input type="text" inputmode="decimal" id="res_roadFee">
+          ${state.resultsRoadFeeOverride!==null ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Đang HIỂN THỊ SỐ TỰ GÕ TAY ở trên, không tự cập nhật theo Luật Đường thật đã sửa ở Linh Chí Thành nữa, cho tới khi bấm nút dưới đây. <button class="link-btn" id="res_roadFeeResetBtn" style="padding:0; margin-left:2px;">↺ Dùng lại số tự động (${fmtVND(periodSummary.roadFee)})</button></div>` : ''}
         </div>
       </div>
     </section>
@@ -14381,10 +14382,19 @@ function renderResults(){
     </section>` : ''}
   `;
 
+  // SỬA 2026-09-20 (Ông Chủ báo — gõ số vào ô này "bị văng ra": TÌM RA
+  // ĐÚNG GỐC RỄ): trước đây callback này gọi renderResults() (vẽ lại
+  // TOÀN BỘ trang Kết Quả, trang rất dài) ngay mỗi lần gõ 1 KÝ TỰ — input
+  // vừa gõ bị THAY BẰNG 1 <input> HOÀN TOÀN MỚI mỗi ký tự, mất focus/con
+  // trỏ ngay lập tức, đúng cảm giác "bị văng ra" dù không hề đổi màn
+  // hình. Tách làm 2: gõ chữ chỉ lưu vào state (rẻ, không vẽ lại gì) —
+  // đợi rời khỏi ô (sự kiện change) mới thật sự tính lại + vẽ lại trang.
   attachMoneyInput(document.getElementById('res_roadFee'), roadFee, v=>{
     state.resultsRoadFeeOverride = v;
-    renderResults();
   });
+  document.getElementById('res_roadFee').addEventListener('change', ()=>{ renderResults(); });
+  const res_roadFeeResetBtn = document.getElementById('res_roadFeeResetBtn');
+  if(res_roadFeeResetBtn) res_roadFeeResetBtn.addEventListener('click', ()=>{ state.resultsRoadFeeOverride=null; renderResults(); });
   attachMoneyInput(document.getElementById('res_manualCit'), manualCitValue||0, async v=>{
     if(!state.settings.manualCitByPeriod) state.settings.manualCitByPeriod = {};
     state.settings.manualCitByPeriod[citPeriodKey] = v;
