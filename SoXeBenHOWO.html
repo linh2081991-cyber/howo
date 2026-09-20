@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #281';
+const APP_BUILD = '2026-09-20 · #282';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3919,7 +3919,10 @@ function renderMineInvoiceManagerModal(editingId, defaultGoodsType){
     </section>
   `;
 
-  document.getElementById('mineInvBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('mineInvBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
 
   const supplierSelEl = document.getElementById('mi_supplierId');
   const volumeInputEl = document.getElementById('mi_volume');
@@ -4154,7 +4157,10 @@ function renderInvoiceLotManagerModal(editingId, opts){
       <button class="btn btn-accent btn-block" id="saveLotBtn" style="margin-top:10px;">${editing?'💾 Lưu Thay Đổi':'+ Thêm Lô'}</button>
     </section>
   `;
-  document.getElementById('lotMgrBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('lotMgrBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
   // ---- Đồng bộ 2 chiều % nhận lại ⇄ Tiền mặt nhận lại thực tế, cả 2 ô
   // tiền đều hiển thị dấu chấm ngăn cách hàng nghìn (yêu cầu Ông Chủ
   // 2026-08-10). Dùng biến cục bộ curTotalValue/curCashReturned làm nguồn
@@ -4684,7 +4690,10 @@ function renderInvoiceLotFullDetailPage(goodsType, from, to){
       </div>`}
     </section>
   `;
-  document.getElementById('lotFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('lotFullDetailBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
   document.getElementById('lotFullDetailMineInvBtn').addEventListener('click', ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null, goodsType); });
   document.getElementById('lotFullDetailScrollToLotsBtn').addEventListener('click', ()=>{
     saveMainScroll();
@@ -4958,7 +4967,10 @@ function renderCombinedStockDetailPage(goodsType, from, to){
       </div>`}
     </section>
   `;
-  document.getElementById('combinedDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('combinedDetailBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
   document.querySelectorAll('[data-open-lot]').forEach(el=>{
     el.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(el.dataset.openLot); });
   });
@@ -12554,7 +12566,10 @@ function renderInvoiceLotGapDiagnosisPage(from, to){
       ${bodyHtml}
     </section>
   `;
-  document.getElementById('invoiceLotGapDiagBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('invoiceLotGapDiagBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
 }
 function renderCostPerKmChartSVG(buckets){
   const validValues = buckets.filter(b=>b.totalKm>0).map(b=>b.costPerKm);
@@ -14344,18 +14359,6 @@ function renderResults(){
       </div>
     </section>
 
-    <section class="group">
-      <h3>📦 Kho Hoá Đơn Bù</h3>
-
-      <div id="invoiceLotOverviewWrap"></div>
-    </section>
-
-    <section class="group">
-      <h3>🔒 Đối Soát Hoá Đơn Theo Tháng</h3>
-
-      <div id="monthlyInvoiceReconWrap"></div>
-    </section>
-
     ${insights.length>0 ? `
     <section class="group">
       <h3>🧭 Tư Vấn Chiến Lược</h3>
@@ -14391,8 +14394,6 @@ function renderResults(){
   });
 
   renderRepairList(repairsHere);
-  renderInvoiceLotOverview();
-  renderMonthlyInvoiceReconciliation();
 
   document.getElementById('res_thisMonth').addEventListener('click', ()=>{
     state.resultsRange = currentMonthRange(); state.resultsRoadFeeOverride=null; renderResults();
@@ -17805,6 +17806,16 @@ function renderCompanyDashboardPage(preserveScroll){
         <div id="customerSupplierDebtWrap"></div>
       </div>
 
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📦 Kho Hoá Đơn Bù</div>
+        <div id="invoiceLotOverviewWrap"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🔒 Đối Soát Hoá Đơn Theo Tháng</div>
+        <div id="monthlyInvoiceReconWrap"></div>
+      </div>
+
       <div class="card" style="margin-top:12px; padding:18px 12px 20px;">
         <div style="text-align:center;">
           <button id="ktnbFullLedgerBtn" style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
@@ -18133,6 +18144,8 @@ function renderCompanyDashboardPage(preserveScroll){
   // dung "Nhà Cung Cấp & Khách Hàng (Thương Mại)" mới chuyển vào).
   renderPartnersOverview();
   renderCustomerSupplierDebtOverview();
+  renderInvoiceLotOverview();
+  renderMonthlyInvoiceReconciliation();
   // SỬA 2026-09-14 LẦN 2 (Ông Chủ — "bỏ hẳn khối bảng cũ, mỗi nhánh chỉ cần
   // nút Chi Tiết gọn gàng"): bấm icon HOẶC nút "📋 Chi tiết" của nhánh nào
   // đều mở thẳng trang renderBankReconDetailPage() — trang đó đã tách rõ
