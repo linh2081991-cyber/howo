@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #277';
+const APP_BUILD = '2026-09-20 · #278';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17861,9 +17861,14 @@ function renderCompanyDashboardPage(preserveScroll){
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
         return `
-        <h4 style="margin:0 0 4px;">💰 Vốn Vận Hành (Tiền + Công Nợ + Tồn Kho)</h4>
-        <div class="hint" style="margin-top:0; margin-bottom:8px;">Phần tiền Ông Chủ góp vào vận hành hàng ngày đang nằm ở đâu — hiện trạng thay đổi liên tục theo hoạt động.</div>
-        <div class="grid-table-wrap">
+        <!-- MỚI (Ông Chủ yêu cầu 2026-09-20 — "gói vào 1 bảng tổng nền
+        trắng để hiểu các dữ liệu liên quan tới nhau, không rời rạc"):
+        gộp cả 3 bảng nhỏ vào CHUNG 1 khối .card duy nhất (bỏ viền/bo góc
+        riêng từng bảng .grid-table-wrap) — số liệu và công thức giữ
+        NGUYÊN VẸN như bản vừa tách, chỉ đổi cách bọc khung ngoài. -->
+        <div class="card">
+          <div style="font-weight:800; font-size:15px; margin-bottom:2px;">💰 Vốn Vận Hành (Tiền + Công Nợ + Tồn Kho)</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Phần tiền Ông Chủ góp vào vận hành hàng ngày đang nằm ở đâu — hiện trạng thay đổi liên tục theo hoạt động.</div>
           <table class="grid-table">
             <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
             <tbody>
@@ -17875,11 +17880,9 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
             </tbody>
           </table>
-        </div>
 
-        <h4 style="margin:16px 0 4px;">🚛 Tài Sản Xe & Vay Nợ</h4>
-        <div class="hint" style="margin-top:0; margin-bottom:8px;">Giá trị chiếc xe đang còn lại bao nhiêu sau khấu hao, và khoản vay gắn liền với nó — hiện trạng đổi chậm, theo tháng.</div>
-        <div class="grid-table-wrap">
+          <div style="font-weight:800; font-size:15px; margin:18px 0 2px;">🚛 Tài Sản Xe & Vay Nợ</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Giá trị chiếc xe đang còn lại bao nhiêu sau khấu hao, và khoản vay gắn liền với nó — hiện trạng đổi chậm, theo tháng.</div>
           <table class="grid-table">
             <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
             <tbody>
@@ -17888,10 +17891,8 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr class="grid-total-row"><td style="text-align:left;">= GIÁ TRỊ TÀI SẢN XE (RÒNG)</td><td class="num" style="color:${vehicleAssetNetTotal>=0?'var(--profit)':'var(--loss)'}">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
             </tbody>
           </table>
-        </div>
 
-        <div class="grid-table-wrap" style="margin-top:16px;">
-          <table class="grid-table">
+          <table class="grid-table" style="margin-top:18px;">
             <tbody>
               <tr><td>Tổng Vốn Vận Hành</td><td class="num">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
               <tr><td>+ Giá Trị Tài Sản Xe (Ròng)</td><td class="num">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
