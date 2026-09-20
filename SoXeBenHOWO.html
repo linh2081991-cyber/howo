@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #278';
+const APP_BUILD = '2026-09-20 · #279';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10906,16 +10906,23 @@ function computeApprMetrics(p){
 /// and returns there via renderAll()+restoreMainScroll(), matching every
 /// other full-screen drill-down in the app (openPartnerDetail, etc).
 function renderProjectAppraisal(preserveScroll){
-  // SỬA 2026-09-08 (PHÁT HIỆN MỚI trong đợt audit đa xe): màn "Thẩm Định
-  // Dự Án" có nút "Cập nhật thông số" gọi thẳng saveSettings() (giá dầu/VAT
-  // mô phỏng) — dính lỗi ghi đè Xe #1 y hệt Cài Đặt nếu có ≥2 xe và đang ở
-  // "LINH CHÍ THÀNH". Thêm lá chắn dưới đây.
-  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
-  // SỬA 2026-09-20 — cùng lỗi/cách sửa như renderCompanyDashboardPage():
-  // nút "Huỷ" ở 2 màn Sửa/Thêm Công Trình (Chạy Cước + Thương Mại) gọi
-  // thẳng hàm này để quay lại, vô tình reset cuộn trang danh sách.
-  if(!preserveScroll) scrollMainToTop();
+  // SỬA 2026-09-20 (Ông Chủ báo LẦN NỮA — "Thẩm Định Công Trình vẫn bị
+  // văng sang màn Chọn Xe": TÌM RA ĐÚNG GỐC RỄ THẬT, khác lỗi đã sửa lần
+  // trước). Lần trước đã sửa cho dispatcher renderAll() biết ĐỌC đúng
+  // state.strategyView để quay lại đúng sub-màn — nhưng hàm này lại GHI
+  // state.strategyView='appraisal' SAU dòng chặn "chưa chọn xe cụ thể" ở
+  // dưới. Nghĩa là mỗi lần bị chặn (đang ở "Linh Chí Thành", chưa chọn xe)
+  // hàm return NGAY, strategyView KHÔNG BAO GIỜ được ghi thành 'appraisal'
+  // — vẫn giữ nguyên giá trị cũ ('hub', từ lúc đang đứng ở Trợ Lý gốc).
+  // Chọn xe xong, dispatcher đọc đúng strategyView (đã sửa lần trước) —
+  // nhưng vì nó vẫn là 'hub' (chưa từng được ghi) nên quay về HUB, không
+  // phải Thẩm Định Công Trình như Ông Chủ mong đợi. Sửa tận gốc: ghi
+  // strategyView TRƯỚC dòng chặn, để dù có bị chặn hỏi chọn xe, ý định
+  // "đang muốn vào Thẩm Định Công Trình" vẫn được nhớ đúng, chọn xe xong
+  // dispatcher mới quay lại đúng chỗ.
   state.strategyView = 'appraisal';
+  if(!activeVehicleIdForEditing()){ renderChooseVehiclePrompt(); return; }
+  if(!preserveScroll) scrollMainToTop();
   const app = document.getElementById('app');
   const fuelPerKm = historicalAvgFuelPerKm();
   const fuelPrice = currentFuelUnitPriceForAppraisal();
