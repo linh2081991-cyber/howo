@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #280';
+const APP_BUILD = '2026-09-20 · #281';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14345,17 +14345,6 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</h3>
-      <div id="partnersOverviewWrap"></div>
-    </section>
-
-    <section class="group">
-      <h3>🏔️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</h3>
-
-      <div id="customerSupplierDebtWrap"></div>
-    </section>
-
-    <section class="group">
       <h3>📦 Kho Hoá Đơn Bù</h3>
 
       <div id="invoiceLotOverviewWrap"></div>
@@ -14402,8 +14391,6 @@ function renderResults(){
   });
 
   renderRepairList(repairsHere);
-  renderPartnersOverview();
-  renderCustomerSupplierDebtOverview();
   renderInvoiceLotOverview();
   renderMonthlyInvoiceReconciliation();
 
@@ -14814,7 +14801,10 @@ function openCustomerDetail(customerId, preserveScroll){
   // gì tới trang chi tiết vừa mở).
   getActualScrollEl().scrollTop = 0;
   document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{
-    if(state.showCompanyDashboard){ renderDebtDetailPage(); } else { renderAll(); }
+    // SỬA 2026-09-20: renderDebtDetailPage() đã bị thay hẳn bằng khối
+    // Công Nợ mới trong renderCompanyDashboardPage() — quay lại đúng
+    // trang đó (preserveScroll=true để không mất vị trí đang xem).
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
     restoreMainScroll();
   });
   document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openCustomerPaymentEditor(null, customerId); });
@@ -15161,7 +15151,8 @@ function openSupplierDetail(supplierId, preserveScroll){
   `;
   getActualScrollEl().scrollTop = 0;
   document.getElementById('supDetailBackBtn').addEventListener('click', ()=>{
-    if(state.showCompanyDashboard){ renderDebtDetailPage(); } else { renderAll(); }
+    // SỬA 2026-09-20 — cùng lý do như custDetailBackBtn ở trên.
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
     restoreMainScroll();
   });
   document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openSupplierPaymentEditor(null, supplierId); });
@@ -15341,7 +15332,15 @@ function renderPartnersFullDetailPage(){
       </div>
     </section>` : ''}
   `;
-  document.getElementById('partnersFullDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('partnersFullDetailBackBtn').addEventListener('click', ()=>{
+    // SỬA 2026-09-20 (rà tiếp cùng đợt chuyển Công Nợ vào Linh Chí Thành):
+    // renderAll() một mình không giữ đúng vị trí cuộn của Linh Chí Thành
+    // khi quay lại (renderCompanyDashboardPage() bên trong nó luôn tự
+    // cuộn về đầu) — gọi thẳng, đúng cờ preserveScroll, y hệt các nút
+    // Quay Lại khác đã sửa.
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
   document.querySelectorAll('.partner-detail-row').forEach(row=>{
     row.addEventListener('click', (e)=>{ if(e.target.closest('.partner-chitiet-btn')) return; saveMainScroll(); openPartnerDetail(row.dataset.partner); });
   });
@@ -15368,7 +15367,7 @@ function openPartnerDetail(partnerName, preserveScroll){
 
   app.innerHTML = `
     <section class="group">
-      <button class="btn btn-ghost btn-sm" id="partnerDetailBackBtn">← Quay Lại Kết Quả</button>
+      <button class="btn btn-ghost btn-sm" id="partnerDetailBackBtn">← Quay Lại</button>
     </section>
 
     <section class="group">
@@ -15413,7 +15412,10 @@ function openPartnerDetail(partnerName, preserveScroll){
 
   renderSitePaymentList(allPayments, partnerName);
 
-  document.getElementById('partnerDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
+  document.getElementById('partnerDetailBackBtn').addEventListener('click', ()=>{
+    if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
+    restoreMainScroll();
+  });
   document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openAddSitePaymentForPartner(partnerName); });
   app.querySelectorAll('.site-detail-row[data-site]').forEach(row=>{
     row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO); });
@@ -17794,16 +17796,13 @@ function renderCompanyDashboardPage(preserveScroll){
       <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-bottom:12px;">📋 Chi Tiết — Từng Khoản Cấu Thành Dòng Tiền Ròng Luỹ Kế</button>
 
       <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Công Nợ Hiện Tại (Toàn Công Ty)</div>
-        <div class="grid-table-wrap" style="margin-bottom:8px;">
-          <table class="grid-table">
-            <thead><tr><th>Đối tượng</th><th class="num">Số tiền</th><th></th></tr></thead>
-            <tbody>
-              <tr><td>${custDebtLine.label}</td><td class="num" style="color:${custDebtLine.color};">${fmtVND(custDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" data-filter="customer" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
-              <tr><td>${supDebtLine.label}</td><td class="num" style="color:${supDebtLine.color};">${fmtVND(supDebtLine.value)}</td><td><button class="btn btn-ghost btn-sm debtDetailBtn" data-filter="supplier" style="width:auto; padding:5px 10px;">🔍</button></td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</div>
+        <div id="partnersOverviewWrap"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
+        <div id="customerSupplierDebtWrap"></div>
       </div>
 
       <div class="card" style="margin-top:12px; padding:18px 12px 20px;">
@@ -18123,9 +18122,17 @@ function renderCompanyDashboardPage(preserveScroll){
     restoreMainScroll();
   });
   document.getElementById('cashFlowLedgerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
-  document.querySelectorAll('.debtDetailBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ saveMainScroll(); renderDebtDetailPage(btn.dataset.filter); });
-  });
+  // SỬA 2026-09-20 (Ông Chủ yêu cầu — "Đối Tác & Công Nợ (Chở Cước)" và
+  // "Nhà Cung Cấp & Khách Hàng (Thương Mại)" là dữ liệu công ty, không
+  // của riêng xe nào, vốn đang nằm lẫn trong tab Kết Quả từng xe): chuyển
+  // hẳn 2 khối này vào đây — GIỮ NGUYÊN VẸN đúng 2 hàm hiển thị đã có sẵn
+  // (renderPartnersOverview/renderCustomerSupplierDebtOverview), không
+  // đổi công thức/số liệu gì, chỉ đổi nơi gọi. 2 hàm này tự tìm đúng
+  // #partnersOverviewWrap/#customerSupplierDebtWrap vừa thêm ở trên. Đồng
+  // thời bỏ hẳn nút/hàm renderDebtDetailPage() cũ (đã trùng y hệt nội
+  // dung "Nhà Cung Cấp & Khách Hàng (Thương Mại)" mới chuyển vào).
+  renderPartnersOverview();
+  renderCustomerSupplierDebtOverview();
   // SỬA 2026-09-14 LẦN 2 (Ông Chủ — "bỏ hẳn khối bảng cũ, mỗi nhánh chỉ cần
   // nút Chi Tiết gọn gàng"): bấm icon HOẶC nút "📋 Chi tiết" của nhánh nào
   // đều mở thẳng trang renderBankReconDetailPage() — trang đó đã tách rõ
