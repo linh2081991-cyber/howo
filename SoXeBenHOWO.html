@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #286';
+const APP_BUILD = '2026-09-21 · #287';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17506,6 +17506,16 @@ function openInvestmentEntryEditor(id){
     const idx = state.initialInvestmentEntries.findIndex(e=>e.id===draft.id);
     if(idx>=0) state.initialInvestmentEntries[idx]=draft; else state.initialInvestmentEntries.push(draft);
     if(!(await saveInitialInvestmentEntries())) return;
+    // SỬA 2026-09-21 (Ông Chủ yêu cầu — bỏ hẳn ô "Ngày bắt đầu dự án" tự
+    // gõ tay riêng, dùng LUÔN đúng ngày của lần đầu tư SỚM NHẤT làm ngày
+    // bắt đầu dự án — tự động đồng bộ mỗi khi thêm/sửa 1 lần đầu tư, thay
+    // vì phải nhớ tự sửa 2 nơi): chỉ cập nhật khi ngày này SỚM HƠN ngày
+    // đang lưu (thêm xe SAU không được phép kéo lùi ngày bắt đầu dự án).
+    const earliestEntryDate = state.initialInvestmentEntries.reduce((min,e)=>(!min||e.date<min)?e.date:min, null);
+    if(earliestEntryDate && (!state.equityProjectInfo.startDate || earliestEntryDate<state.equityProjectInfo.startDate)){
+      state.equityProjectInfo.startDate = earliestEntryDate;
+      await saveEquityProjectInfo();
+    }
     afterWrite(existing?'Đã lưu.':'Đã thêm.');
   });
   const delBtn = document.getElementById('ie_delBtn');
@@ -17695,7 +17705,6 @@ function renderCompanyDashboardPage(preserveScroll){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">🏢 LINH CHÍ THÀNH</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Dự Án Đầu Tư Xe — Toàn Công Ty, không tách riêng theo xe</div>
 
       <button class="btn btn-accent btn-block" id="openBizReportBtn" style="font-size:15.5px; padding:14px; margin-bottom:10px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</button>
       <button class="btn btn-ghost btn-block" id="openPerVehicleBtn" style="margin-bottom:14px;">🚛 Kết Quả Từng Xe</button>
@@ -17734,6 +17743,68 @@ function renderCompanyDashboardPage(preserveScroll){
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
         <button class="btn btn-ghost btn-block" id="equityDetailBtn" style="margin-top:12px;">📋 Chi Tiết</button>
+      </div>
+
+      <!-- MỚI (Ông Chủ yêu cầu 2026-09-21 — "đưa Kế Toán Nội Bộ lên nằm
+      dưới Vốn Chủ Sở Hữu, trên Vốn Điều Lệ; gộp luôn Chuyển Tiền Nội Bộ
+      vào gọn trong khối này"): chuyển nguyên khối Kế Toán Nội Bộ (vốn nằm
+      tít dưới, sau cả Công Nợ/Kho Hoá Đơn Bù) lên đây — KHÔNG đổi bất kỳ
+      số liệu/logic nào bên trong, chỉ đổi vị trí + gộp thêm phần Chuyển
+      Tiền Nội Bộ (đã thu gọn: lịch sử chuyển tiền giờ xem qua nút "Chi
+      Tiết" riêng thay vì liệt kê thẳng 10 dòng gần nhất ngay trên trang
+      chính — xem renderInternalTransferHistoryPage() mới thêm). -->
+      <div class="card" style="margin-top:12px; padding:18px 12px 20px;">
+        <div style="text-align:center;">
+          <button id="ktnbFullLedgerBtn" style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
+            <div style="display:flex; justify-content:center;">
+              <svg width="34" height="34" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="18" cy="10" r="5" fill="var(--accent)"/>
+                <path d="M9 41 C9 26 13 19 21 17 C29 19 33 25 33 33" stroke="var(--accent)" stroke-width="3" fill="none" stroke-linecap="round"/>
+                <path d="M19 21 L28 30" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
+                <rect x="26" y="29" width="17" height="12" rx="1.5" fill="var(--bg,#fff)" stroke="var(--accent)" stroke-width="2"/>
+                <line x1="34.5" y1="29" x2="34.5" y2="41" stroke="var(--accent)" stroke-width="1.3"/>
+                <line x1="29" y1="33.5" x2="32.3" y2="33.5" stroke="var(--accent)" stroke-width="1.2"/>
+                <line x1="36.7" y1="33.5" x2="40" y2="33.5" stroke="var(--accent)" stroke-width="1.2"/>
+                <line x1="29" y1="37" x2="32.3" y2="37" stroke="var(--accent)" stroke-width="1.2"/>
+                <line x1="36.7" y1="37" x2="40" y2="37" stroke="var(--accent)" stroke-width="1.2"/>
+              </svg>
+            </div>
+            <div style="font-weight:900; margin-top:6px; color:var(--accent); font-size:14px; letter-spacing:0.3px;">🧾 KẾ TOÁN NỘI BỘ</div>
+            <div style="font-weight:600; margin-top:2px; color:var(--accent); font-size:11px;">👆 Bấm xem toàn bộ dòng tiền chi tiết</div>
+          </button>
+        </div>
+        <div style="text-align:center; margin-top:2px;">
+          <div style="display:inline-block; width:2px; height:16px; background:var(--border);"></div>
+        </div>
+        <div style="max-width:230px; height:2px; background:var(--border); margin:0 auto;"></div>
+        <div style="display:flex; justify-content:space-between; max-width:230px; margin:0 auto;">
+          <div style="width:2px; height:14px; background:var(--border);"></div>
+          <div style="width:2px; height:14px; background:var(--border);"></div>
+        </div>
+        <div style="display:flex; gap:14px; justify-content:center;">
+          <div style="flex:1; max-width:150px; text-align:center;">
+            <button id="ktnbGoBankBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+              <div style="font-size:26px; line-height:1;">🏦</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">TCB Bank</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
+            </button>
+            <button id="ktnbDetailBankBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
+          </div>
+          <div style="flex:1; max-width:150px; text-align:center;">
+            <button id="ktnbGoCashBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+              <div style="font-size:26px; line-height:1;">💵</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Tiền Mặt</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
+            </button>
+            <button id="ktnbDetailCashBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
+          </div>
+        </div>
+        <div class="formula-divider" style="margin:16px 0 12px;"></div>
+        <div style="font-weight:800; font-size:13px; margin-bottom:8px; text-align:center;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn btn-accent" id="addInternalTransferBtn" style="flex:1;">🔄➕ Ghi Nhận</button>
+          <button class="btn btn-ghost" id="internalTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
+        </div>
       </div>
 
       ${charterStatus.registered>0 ? `
@@ -17850,54 +17921,6 @@ function renderCompanyDashboardPage(preserveScroll){
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🔒 Đối Soát Hoá Đơn Theo Tháng</div>
         <div id="monthlyInvoiceReconWrap"></div>
       </div>
-
-      <div class="card" style="margin-top:12px; padding:18px 12px 20px;">
-        <div style="text-align:center;">
-          <button id="ktnbFullLedgerBtn" style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
-            <div style="display:flex; justify-content:center;">
-              <svg width="34" height="34" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="18" cy="10" r="5" fill="var(--accent)"/>
-                <path d="M9 41 C9 26 13 19 21 17 C29 19 33 25 33 33" stroke="var(--accent)" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M19 21 L28 30" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
-                <rect x="26" y="29" width="17" height="12" rx="1.5" fill="var(--bg,#fff)" stroke="var(--accent)" stroke-width="2"/>
-                <line x1="34.5" y1="29" x2="34.5" y2="41" stroke="var(--accent)" stroke-width="1.3"/>
-                <line x1="29" y1="33.5" x2="32.3" y2="33.5" stroke="var(--accent)" stroke-width="1.2"/>
-                <line x1="36.7" y1="33.5" x2="40" y2="33.5" stroke="var(--accent)" stroke-width="1.2"/>
-                <line x1="29" y1="37" x2="32.3" y2="37" stroke="var(--accent)" stroke-width="1.2"/>
-                <line x1="36.7" y1="37" x2="40" y2="37" stroke="var(--accent)" stroke-width="1.2"/>
-              </svg>
-            </div>
-            <div style="font-weight:900; margin-top:6px; color:var(--accent); font-size:14px; letter-spacing:0.3px;">🧾 KẾ TOÁN NỘI BỘ</div>
-            <div style="font-weight:600; margin-top:2px; color:var(--accent); font-size:11px;">👆 Bấm xem toàn bộ dòng tiền chi tiết</div>
-          </button>
-        </div>
-        <div style="text-align:center; margin-top:2px;">
-          <div style="display:inline-block; width:2px; height:16px; background:var(--border);"></div>
-        </div>
-        <div style="max-width:230px; height:2px; background:var(--border); margin:0 auto;"></div>
-        <div style="display:flex; justify-content:space-between; max-width:230px; margin:0 auto;">
-          <div style="width:2px; height:14px; background:var(--border);"></div>
-          <div style="width:2px; height:14px; background:var(--border);"></div>
-        </div>
-        <div style="display:flex; gap:14px; justify-content:center;">
-          <div style="flex:1; max-width:150px; text-align:center;">
-            <button id="ktnbGoBankBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
-              <div style="font-size:26px; line-height:1;">🏦</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">TCB Bank</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
-            </button>
-            <button id="ktnbDetailBankBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
-          </div>
-          <div style="flex:1; max-width:150px; text-align:center;">
-            <button id="ktnbGoCashBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
-              <div style="font-size:26px; line-height:1;">💵</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Tiền Mặt</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
-            </button>
-            <button id="ktnbDetailCashBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
-          </div>
-        </div>
-      </div>
     </section>
 
     <section class="group">
@@ -17967,29 +17990,9 @@ function renderCompanyDashboardPage(preserveScroll){
     </section>
 
     <section class="group">
-      <h3>🔄 Chuyển Tiền Nội Bộ: Ngân Hàng ↔ Tiền Mặt</h3>
-      <button class="btn btn-accent btn-block" id="addInternalTransferBtn" style="margin-bottom:10px;">🔄➕ Ghi Nhận Chuyển Tiền</button>
-      ${state.internalTransfers.length>0 ? `
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${[...state.internalTransfers].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10).map(t=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt từ ngân hàng':'💵→🏦 Nộp tiền mặt vào ngân hàng'} — ${formatDateVN(t.date)}</div>
-              ${t.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(t.note)}</div>` : ''}
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-weight:800; white-space:nowrap;">${fmtVND(t.amount)}</span>
-              <button class="link-btn" data-del-transfer="${t.id}" style="color:var(--loss); padding:0;">Xoá</button>
-            </div>
-          </div>`).join('')}
-      </div>` : ''}
-    </section>
-
-    <section class="group">
       <h3>⚙️ Thông Tin Dự Án</h3>
       <div class="card">
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🚛 Vốn Đầu Tư Ban Đầu — Lộ Trình Từng Xe</div>
-        <div class="hint" style="margin-top:0; margin-bottom:10px;">Mỗi lần mua thêm xe, chỉ cần bấm "+ Thêm Lần Đầu Tư" — không cần tự cộng tay số cũ. Tổng dưới đây TỰ ĐỘNG cộng dồn tất cả các lần.</div>
         ${(()=>{
           const list = [...(state.initialInvestmentEntries||[])];
           // Tương thích ngược: chưa từng thêm dòng nào (app cũ) — hiện
@@ -17998,6 +18001,12 @@ function renderCompanyDashboardPage(preserveScroll){
           const legacyAmount = Number(state.equityProjectInfo.initialInvestment)||0;
           const showLegacyRow = list.length===0 && legacyAmount>0;
           const total = list.length>0 ? list.reduce((s,e)=>s+(Number(e.amount)||0),0) : legacyAmount;
+          // SỬA 2026-09-21 (Ông Chủ yêu cầu — "hàng đầu mặc định là xe đầu,
+          // ghi chú thay bằng biển số xe"): dòng ảo này đại diện đúng CHIẾC
+          // XE ĐẦU TIÊN (isPrimary) — hiện đúng biển số/tên xe đó thay vì
+          // chữ chung chung "Xe đầu tiên (số cũ...)".
+          const primaryVehicle = state.vehicles.find(v=>v.isPrimary);
+          const legacyNote = primaryVehicle ? (primaryVehicle.plate || primaryVehicle.name || 'Xe đầu tiên') : 'Xe đầu tiên';
           return `
           ${(list.length>0 || showLegacyRow) ? `
           <div class="grid-table-wrap">
@@ -18006,7 +18015,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tbody>
                 ${showLegacyRow ? `<tr>
                   <td>${state.equityProjectInfo.startDate?formatDateVN(state.equityProjectInfo.startDate):'—'}</td>
-                  <td>Xe đầu tiên <span class="hint" style="margin:0;">(số cũ, chưa tách dòng)</span></td>
+                  <td>${escapeHtml(legacyNote)}</td>
                   <td class="num">${fmtVND(legacyAmount)}</td>
                   <td></td>
                 </tr>` : [...list].sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr>
@@ -18022,13 +18031,6 @@ function renderCompanyDashboardPage(preserveScroll){
           <button class="btn btn-accent btn-block" id="addInvestEntryBtn" style="margin-top:10px;">🚛➕ Thêm Lần Đầu Tư (Xe Mới)</button>
           `;
         })()}
-      </div>
-      <div class="card" style="margin-top:12px;">
-        <div class="field" style="margin-bottom:0;">
-          <label>Ngày bắt đầu dự án (để trống = tự lấy ngày ca đầu tiên đã ghi)</label>
-          <input type="date" id="epi_startDate" value="${state.equityProjectInfo.startDate||''}">
-        </div>
-        <button class="btn btn-ghost btn-block" id="epi_saveBtn" style="margin-top:12px;">Lưu Thông Tin Dự Án</button>
       </div>
       <div class="hint" style="margin-top:6px;">Vốn Điều Lệ (số đã đăng ký + hạn góp đủ) giờ sửa ngay tại thẻ "📜 Vốn Điều Lệ" phía trên — bấm "✏️ Sửa" ở đó.</div>
     </section>
@@ -18206,14 +18208,6 @@ function renderCompanyDashboardPage(preserveScroll){
   if(equityDetailBtn) equityDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderEquityDetailPage(); });
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
-  document.getElementById('epi_saveBtn').addEventListener('click', async ()=>{
-    state.equityProjectInfo.startDate = document.getElementById('epi_startDate').value || null;
-    if(!(await saveEquityProjectInfo())) return;
-    showToast('Đã lưu thông tin dự án.');
-    saveMainScroll();
-    renderCompanyDashboardPage(true);
-    restoreMainScroll();
-  });
   const addInvestEntryBtn = document.getElementById('addInvestEntryBtn');
   if(addInvestEntryBtn) addInvestEntryBtn.addEventListener('click', ()=>openInvestmentEntryEditor(null));
   document.querySelectorAll('.investEntryEditBtn').forEach(btn=>{
@@ -18250,16 +18244,7 @@ function renderCompanyDashboardPage(preserveScroll){
   });
   document.getElementById('equityHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderEquityHistoryDetailPage(); });
   document.getElementById('addInternalTransferBtn').addEventListener('click', openInternalTransferModal);
-  document.querySelectorAll('[data-del-transfer]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      state.internalTransfers = state.internalTransfers.filter(t=>t.id!==btn.dataset.delTransfer);
-      if(!(await saveInternalTransfers())) return;
-      showToast('Đã xoá.');
-      saveMainScroll();
-      renderCompanyDashboardPage(true);
-      restoreMainScroll();
-    });
-  });
+  document.getElementById('internalTransferHistoryBtn').addEventListener('click', ()=>{ saveMainScroll(); renderInternalTransferHistoryPage(); });
   renderRoadFeeMonthTable();
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
@@ -18615,6 +18600,48 @@ function renderEquityHistoryDetailPage(){
       if(!(await saveOwnerEquityEntries())) return;
       showToast(entry.isRecycled ? 'Đã đánh dấu là tiền đảo — không tính vào Vốn Chủ Sở Hữu nữa.' : 'Đã bỏ đánh dấu đảo — tính lại vào Vốn Chủ Sở Hữu.');
       renderEquityHistoryDetailPage();
+    });
+  });
+}
+/// MỚI (Ông Chủ yêu cầu 2026-09-21 — gộp Chuyển Tiền Nội Bộ vào khối Kế
+/// Toán Nội Bộ, thu gọn: chỉ còn nút "Ghi Nhận" + "Chi Tiết" trên trang
+/// chính, lịch sử đầy đủ (không giới hạn 10 dòng gần nhất như trước) xem
+/// ở đúng trang riêng này — cùng khuôn mẫu với renderEquityHistoryDetailPage()
+/// ở trên.
+function renderInternalTransferHistoryPage(){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const sorted = [...state.internalTransfers].sort((a,b)=>b.date.localeCompare(a.date));
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="internalTransferHistoryBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🔄 Chi Tiết Lịch Sử Chuyển Tiền Nội Bộ</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${sorted.length} lần chuyển, mới nhất lên đầu.</div>
+      ${sorted.length===0 ? '<div class="hint">Chưa có lần chuyển tiền nội bộ nào.</div>' : `
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${sorted.map(t=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt từ ngân hàng':'💵→🏦 Nộp tiền mặt vào ngân hàng'} — ${formatDateVN(t.date)}</div>
+              ${t.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(t.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap;">${fmtVND(t.amount)}</span>
+              <button class="link-btn" data-del-transfer="${t.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>`}
+    </section>
+  `;
+  document.getElementById('internalTransferHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  document.querySelectorAll('[data-del-transfer]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.internalTransfers = state.internalTransfers.filter(t=>t.id!==btn.dataset.delTransfer);
+      if(!(await saveInternalTransfers())) return;
+      showToast('Đã xoá.');
+      renderInternalTransferHistoryPage();
     });
   });
 }
