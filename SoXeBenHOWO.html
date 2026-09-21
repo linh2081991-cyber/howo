@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #285';
+const APP_BUILD = '2026-09-21 · #286';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4403,23 +4403,26 @@ function renderInvoiceLotOverview(){
     <div style="font-weight:700; margin-bottom:6px;">💰 Chi Phí &amp; VAT Hưởng Theo Ca (${formatDateVN(from)} → ${formatDateVN(to)}, mọi loại hàng)</div>
     <div class="grid-table-wrap" style="margin-bottom:6px;">
       <table class="grid-table">
-        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Chi Phí</th><th>VAT Hưởng</th></tr></thead>
+        <thead><tr><th>Ngày</th><th>Ca</th><th>Tài Xế</th><th>Chi Phí</th><th>VAT Hưởng</th><th>CP Ròng</th></tr></thead>
         <tbody>
-          ${vatByShift.rows.length===0 ? `<tr><td colspan="5" class="hint" style="text-align:center;">Không có ca nào rút Kho Hoá Đơn Bù trong khoảng ngày này.</td></tr>` : vatByShift.rows.map(r=>`<tr>
+          ${vatByShift.rows.length===0 ? `<tr><td colspan="6" class="hint" style="text-align:center;">Không có ca nào rút Kho Hoá Đơn Bù trong khoảng ngày này.</td></tr>` : vatByShift.rows.map(r=>`<tr>
             <td>${formatDateVN(r.date)}</td>
             <td>${shiftTypeLabel(r.shiftType)}</td>
             <td>${escapeHtml(r.driverName)}</td>
             <td class="num" style="color:var(--loss);">${fmtVND(r.cost)}</td>
             <td class="num" style="color:${r.vatCredit>0.5?'var(--profit)':'var(--ink-soft)'};">${fmtVND(r.vatCredit)}</td>
+            <td class="num" style="font-weight:700;">${fmtVND(r.cost-r.vatCredit)}</td>
           </tr>`).join('')}
           <tr class="grid-total-row">
             <td colspan="3">TỔNG CỘNG</td>
             <td class="num" style="color:var(--loss);">${fmtVND(vatByShift.totalCost)}</td>
             <td class="num" style="color:var(--profit);">${fmtVND(vatByShift.totalVatCredit)}</td>
+            <td class="num">${fmtVND(vatByShift.totalCost-vatByShift.totalVatCredit)}</td>
           </tr>
         </tbody>
       </table>
     </div>
+    <div class="hint" style="margin-top:-2px; margin-bottom:10px;">Cột "CP Ròng" = Chi Phí − VAT Hưởng — đúng số tiền THẬT cuối cùng bỏ ra mua hoá đơn bù (VAT không mất, được khấu trừ ngược vào VAT phải nộp sau), y hệt số đang bị trừ vào Lợi Nhuận Thực Tế ở tab Kết Quả.</div>
     ${vatByShift.totalCost>0.5 && vatByShift.totalVatCredit<=0.5 ? `<div class="hint" style="margin-bottom:14px;">Có chi phí kho phát sinh nhưng VAT hưởng = 0đ — kiểm tra lại (các) lô đã rút trong kỳ này ở mục "Sổ Hoá Đơn Thật Từ Mỏ"/"Kho Hoá Đơn Bù" xem ô "VAT suất trên hoá đơn (%)" có đang để trống (= 0%) không.</div>` : ''}
     ${vatByShift.totalCost<=0.5 && vatByShift.totalVatCredit<=0.5 ? `
     <button class="btn btn-primary btn-block" id="forceRefreshLedgerBtn" style="margin-bottom:14px;">🔄 Lấy Lại Dữ Liệu Mới Nhất Từ Máy Chủ</button>
