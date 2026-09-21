@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #287';
+const APP_BUILD = '2026-09-21 · #288';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17742,7 +17742,7 @@ function renderCompanyDashboardPage(preserveScroll){
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
         <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
         <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
-        <button class="btn btn-ghost btn-block" id="equityDetailBtn" style="margin-top:12px;">📋 Chi Tiết</button>
+        <button class="btn btn-ghost btn-sm" id="equityDetailBtn" style="margin-top:12px; width:auto; padding:7px 20px; display:inline-block;">📋 Chi Tiết</button>
       </div>
 
       <!-- MỚI (Ông Chủ yêu cầu 2026-09-21 — "đưa Kế Toán Nội Bộ lên nằm
@@ -17806,7 +17806,100 @@ function renderCompanyDashboardPage(preserveScroll){
           <button class="btn btn-ghost" id="internalTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
         </div>
       </div>
+    </section>
 
+    <!-- MỚI (Ông Chủ yêu cầu 2026-09-21 — "Nhà CC/Khách Hàng + Kho Hoá
+    Đơn Bù nằm dưới Kế Toán Nội Bộ, tiếp theo là Tổng Giá Trị Ròng, để
+    khoa học như báo cáo tài chính thật: cho biết tiền/công nợ/tồn kho ở
+    đâu (đúng đúng thành phần cấu thành), rồi mới tới con số Tổng cộng
+    lại"): chuyển 3 khối Công Nợ (Chở Cước + Thương Mại) + Kho Hoá Đơn Bù
+    lên đây, NGAY SAU Kế Toán Nội Bộ — giữ NGUYÊN VẸN nội dung/công thức,
+    chỉ đổi vị trí. Vốn Điều Lệ (không được nhắc tới trong yêu cầu này)
+    lùi xuống ngay sau khối Tổng Giá Trị Ròng, không đứng giữa nữa. -->
+    <section class="group">
+      <div class="card" style="margin-top:0;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</div>
+        <div id="partnersOverviewWrap"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
+        <div id="customerSupplierDebtWrap"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📦 Kho Hoá Đơn Bù</div>
+        <div id="invoiceLotOverviewWrap"></div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📊 Tổng Giá Trị Ròng Toàn Công Ty</h3>
+      ${(()=>{
+        const inventoryValue = companyWideInvoiceLotInventoryValue();
+        const depHistory = computeDepreciationMonthlyHistory();
+        const depreciationSoFar = depHistory.length ? depHistory[depHistory.length-1].cumulative : 0;
+        const vehicleNetBookValue = Math.max(0, eq.initialInvestment - depreciationSoFar);
+        const remainingLoanBalance = eq.remainingLoanBalance;
+        // MỚI (Ông Chủ yêu cầu 2026-09-20 — "tách rõ phần tiền góp vào vận
+        // hành đang ra sao, và tài sản xe đang ra sao, cho khoa học minh
+        // bạch"): tách hẳn 2 bảng theo đúng bản chất — Bảng 1 gồm mọi
+        // khoản THUỘC VỐN VẬN HÀNH (tiền mặt/ngân hàng/công nợ/tồn kho —
+        // những khoản đổi giá trị theo hoạt động hàng ngày); Bảng 2 gồm
+        // TÀI SẢN CỐ ĐỊNH CỦA XE và khoản vay gắn liền với nó (đổi giá trị
+        // chậm, theo khấu hao/trả nợ). KHÔNG đổi bất kỳ số liệu hay công
+        // thức nào — netAssetValue vẫn tính Y HỆT như cũ, chỉ nhóm lại
+        // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
+        // trước.
+        const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
+          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue;
+        const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
+        const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
+        return `
+        <!-- MỚI (Ông Chủ yêu cầu 2026-09-20 — "gói vào 1 bảng tổng nền
+        trắng để hiểu các dữ liệu liên quan tới nhau, không rời rạc"):
+        gộp cả 3 bảng nhỏ vào CHUNG 1 khối .card duy nhất (bỏ viền/bo góc
+        riêng từng bảng .grid-table-wrap) — số liệu và công thức giữ
+        NGUYÊN VẸN như bản vừa tách, chỉ đổi cách bọc khung ngoài. -->
+        <div class="card">
+          <div style="font-weight:800; font-size:15px; margin-bottom:2px;">💰 Vốn Vận Hành (Tiền + Công Nợ + Tồn Kho)</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Phần tiền Ông Chủ góp vào vận hành hàng ngày đang nằm ở đâu — hiện trạng thay đổi liên tục theo hoạt động.</div>
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
+              <tr><td>🏦 TCB Bank</td><td class="num">${fmtVND(bankRecon?bankRecon.computedBalance:0)}</td></tr>
+              <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
+              <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
+              <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
+              <tr><td>📦 Hàng Tồn Kho (Lô Hoá Đơn Bù chưa dùng)</td><td class="num" style="color:var(--profit);">+${fmtVND(inventoryValue)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
+            </tbody>
+          </table>
+
+          <div style="font-weight:800; font-size:15px; margin:18px 0 2px;">🚛 Tài Sản Xe & Vay Nợ</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Giá trị chiếc xe đang còn lại bao nhiêu sau khấu hao, và khoản vay gắn liền với nó — hiện trạng đổi chậm, theo tháng.</div>
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
+              <tr><td>🚛 Giá Trị Còn Lại Của Xe (Vốn Đầu Tư − Khấu Hao Luỹ Kế)</td><td class="num" style="color:var(--profit);">+${fmtVND(vehicleNetBookValue)}</td></tr>
+              <tr><td>🏦 Điều Chỉnh Vay Ngân Hàng (dư nợ vay công ty + gốc đã trả hộ vay cá nhân)</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= GIÁ TRỊ TÀI SẢN XE (RÒNG)</td><td class="num" style="color:${vehicleAssetNetTotal>=0?'var(--profit)':'var(--loss)'}">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
+            </tbody>
+          </table>
+
+          <table class="grid-table" style="margin-top:18px;">
+            <tbody>
+              <tr><td>Tổng Vốn Vận Hành</td><td class="num">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
+              <tr><td>+ Giá Trị Tài Sản Xe (Ròng)</td><td class="num">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG TOÀN CÔNG TY</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        `;
+      })()}
+    </section>
+
+    <section class="group">
       ${charterStatus.registered>0 ? `
       <div class="card" style="margin-top:12px; border:1.5px solid ${charterStatus.isPastDeadline?'var(--loss)':'var(--accent)'};">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -17903,90 +17996,9 @@ function renderCompanyDashboardPage(preserveScroll){
       <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-bottom:12px;">📋 Chi Tiết — Từng Khoản Cấu Thành Dòng Tiền Ròng Luỹ Kế</button>
 
       <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</div>
-        <div id="partnersOverviewWrap"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
-        <div id="customerSupplierDebtWrap"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📦 Kho Hoá Đơn Bù</div>
-        <div id="invoiceLotOverviewWrap"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🔒 Đối Soát Hoá Đơn Theo Tháng</div>
         <div id="monthlyInvoiceReconWrap"></div>
       </div>
-    </section>
-
-    <section class="group">
-      <h3>📊 Tổng Giá Trị Ròng Toàn Công Ty</h3>
-      ${(()=>{
-        const inventoryValue = companyWideInvoiceLotInventoryValue();
-        const depHistory = computeDepreciationMonthlyHistory();
-        const depreciationSoFar = depHistory.length ? depHistory[depHistory.length-1].cumulative : 0;
-        const vehicleNetBookValue = Math.max(0, eq.initialInvestment - depreciationSoFar);
-        const remainingLoanBalance = eq.remainingLoanBalance;
-        // MỚI (Ông Chủ yêu cầu 2026-09-20 — "tách rõ phần tiền góp vào vận
-        // hành đang ra sao, và tài sản xe đang ra sao, cho khoa học minh
-        // bạch"): tách hẳn 2 bảng theo đúng bản chất — Bảng 1 gồm mọi
-        // khoản THUỘC VỐN VẬN HÀNH (tiền mặt/ngân hàng/công nợ/tồn kho —
-        // những khoản đổi giá trị theo hoạt động hàng ngày); Bảng 2 gồm
-        // TÀI SẢN CỐ ĐỊNH CỦA XE và khoản vay gắn liền với nó (đổi giá trị
-        // chậm, theo khấu hao/trả nợ). KHÔNG đổi bất kỳ số liệu hay công
-        // thức nào — netAssetValue vẫn tính Y HỆT như cũ, chỉ nhóm lại
-        // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
-        // trước.
-        const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
-          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue;
-        const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
-        const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
-        return `
-        <!-- MỚI (Ông Chủ yêu cầu 2026-09-20 — "gói vào 1 bảng tổng nền
-        trắng để hiểu các dữ liệu liên quan tới nhau, không rời rạc"):
-        gộp cả 3 bảng nhỏ vào CHUNG 1 khối .card duy nhất (bỏ viền/bo góc
-        riêng từng bảng .grid-table-wrap) — số liệu và công thức giữ
-        NGUYÊN VẸN như bản vừa tách, chỉ đổi cách bọc khung ngoài. -->
-        <div class="card">
-          <div style="font-weight:800; font-size:15px; margin-bottom:2px;">💰 Vốn Vận Hành (Tiền + Công Nợ + Tồn Kho)</div>
-          <div class="hint" style="margin-top:0; margin-bottom:8px;">Phần tiền Ông Chủ góp vào vận hành hàng ngày đang nằm ở đâu — hiện trạng thay đổi liên tục theo hoạt động.</div>
-          <table class="grid-table">
-            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
-            <tbody>
-              <tr><td>🏦 TCB Bank</td><td class="num">${fmtVND(bankRecon?bankRecon.computedBalance:0)}</td></tr>
-              <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
-              <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
-              <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
-              <tr><td>📦 Hàng Tồn Kho (Lô Hoá Đơn Bù chưa dùng)</td><td class="num" style="color:var(--profit);">+${fmtVND(inventoryValue)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
-            </tbody>
-          </table>
-
-          <div style="font-weight:800; font-size:15px; margin:18px 0 2px;">🚛 Tài Sản Xe & Vay Nợ</div>
-          <div class="hint" style="margin-top:0; margin-bottom:8px;">Giá trị chiếc xe đang còn lại bao nhiêu sau khấu hao, và khoản vay gắn liền với nó — hiện trạng đổi chậm, theo tháng.</div>
-          <table class="grid-table">
-            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
-            <tbody>
-              <tr><td>🚛 Giá Trị Còn Lại Của Xe (Vốn Đầu Tư − Khấu Hao Luỹ Kế)</td><td class="num" style="color:var(--profit);">+${fmtVND(vehicleNetBookValue)}</td></tr>
-              <tr><td>🏦 Điều Chỉnh Vay Ngân Hàng (dư nợ vay công ty + gốc đã trả hộ vay cá nhân)</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= GIÁ TRỊ TÀI SẢN XE (RÒNG)</td><td class="num" style="color:${vehicleAssetNetTotal>=0?'var(--profit)':'var(--loss)'}">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
-            </tbody>
-          </table>
-
-          <table class="grid-table" style="margin-top:18px;">
-            <tbody>
-              <tr><td>Tổng Vốn Vận Hành</td><td class="num">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
-              <tr><td>+ Giá Trị Tài Sản Xe (Ròng)</td><td class="num">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
-              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG TOÀN CÔNG TY</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        `;
-      })()}
     </section>
 
     <section class="group">
