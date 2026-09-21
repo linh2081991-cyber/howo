@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #288';
+const APP_BUILD = '2026-09-21 · #289';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17899,6 +17899,48 @@ function renderCompanyDashboardPage(preserveScroll){
       })()}
     </section>
 
+    <!-- MỚI (Ông Chủ yêu cầu 2026-09-21 — "Hiệu Quả Đầu Tư, Biến Động Vốn
+    Chủ Theo Tháng, Tổng Kết Dòng Tiền Toàn Công Ty (giữ nguyên y hệt nội
+    dung) chuyển xuống dưới Tổng Giá Trị Ròng và trên Vốn Điều Lệ"): chuyển
+    nguyên 2 khối này lên đây, KHÔNG đổi bất kỳ nội dung/công thức nào bên
+    trong — chỉ đổi vị trí. -->
+    <section class="group">
+      ${roiHtml}
+
+      <div class="card" style="margin-top:14px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📈 Biến Động Vốn Chủ Sở Hữu Theo Tháng</div>
+        ${renderEquityTimelineChartSVG(timeline)}
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>📒 Tổng Kết Dòng Tiền Toàn Công Ty</h3>
+      <div class="hint" style="margin-top:-6px; margin-bottom:10px;">${breakdown.from?`Cộng dồn từ ${formatDateVN(breakdown.from)} tới hôm nay — đây là DÒNG TIỀN THỰC (tiền mặt/ngân hàng thật ra/vào), KHÔNG PHẢI Lợi Nhuận kế toán. Xem đúng Lợi Nhuận (đã trừ khấu hao, chỉ tính phần hàng THẬT SỰ ĐÃ DÙNG) ở tab Kết Quả.`:'Chưa có ca nào được ghi'}</div>
+      <div class="grid-table-wrap" style="margin-bottom:10px;">
+        <table class="grid-table">
+          <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>
+            <tr><td>+ Tiền khách đã chuyển vào (thật)</td><td class="num" style="color:var(--profit);">+${fmtVND(breakdown.cashIn)}</td></tr>
+            <tr><td>− Tiền đã chuyển cho mỏ (thật)</td><td class="num">−${fmtVND(breakdown.cashOutToSuppliers)}</td></tr>
+            <tr><td>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</td><td class="num">−${fmtVND(breakdown.operatingCashCost)}</td></tr>
+            <tr><td>− Sửa chữa</td><td class="num">−${fmtVND(breakdown.repairTotal)}</td></tr>
+            <tr><td>− Luật đường</td><td class="num">−${fmtVND(breakdown.roadFee)}</td></tr>
+            <tr><td>− Gốc + Lãi Vay Ngân Hàng (tất cả xe)</td><td class="num">−${fmtVND(breakdown.loanPayment)}</td></tr>
+            <tr><td>− Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num">−${fmtVND(breakdown.insuranceReg)}</td></tr>
+            <tr><td>− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác — ĐỦ cả lô, kể cả phần chưa dùng)</td><td class="num">−${fmtVND(breakdown.invoiceLotCashOut)}</td></tr>
+            <tr><td>− Tạm ứng lương tài xế (chưa phải chi phí — trừ lại khi quyết toán lương)</td><td class="num">−${fmtVND(breakdown.advanceCashOut)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Dòng Tiền Ròng Luỹ Kế</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-bottom:12px;">📋 Chi Tiết — Từng Khoản Cấu Thành Dòng Tiền Ròng Luỹ Kế</button>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🔒 Đối Soát Hoá Đơn Theo Tháng</div>
+        <div id="monthlyInvoiceReconWrap"></div>
+      </div>
+    </section>
+
     <section class="group">
       ${charterStatus.registered>0 ? `
       <div class="card" style="margin-top:12px; border:1.5px solid ${charterStatus.isPastDeadline?'var(--loss)':'var(--accent)'};">
@@ -17964,41 +18006,6 @@ function renderCompanyDashboardPage(preserveScroll){
       </div>
       ` : ''}
       <button class="btn btn-ghost btn-block" id="cashFlowLedgerBtn" style="margin-top:2px;">📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra</button>
-
-      ${roiHtml}
-
-      <div class="card" style="margin-top:14px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📈 Biến Động Vốn Chủ Sở Hữu Theo Tháng</div>
-        ${renderEquityTimelineChartSVG(timeline)}
-      </div>
-    </section>
-
-    <section class="group">
-      <h3>📒 Tổng Kết Dòng Tiền Toàn Công Ty</h3>
-      <div class="hint" style="margin-top:-6px; margin-bottom:10px;">${breakdown.from?`Cộng dồn từ ${formatDateVN(breakdown.from)} tới hôm nay — đây là DÒNG TIỀN THỰC (tiền mặt/ngân hàng thật ra/vào), KHÔNG PHẢI Lợi Nhuận kế toán. Xem đúng Lợi Nhuận (đã trừ khấu hao, chỉ tính phần hàng THẬT SỰ ĐÃ DÙNG) ở tab Kết Quả.`:'Chưa có ca nào được ghi'}</div>
-      <div class="grid-table-wrap" style="margin-bottom:10px;">
-        <table class="grid-table">
-          <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
-          <tbody>
-            <tr><td>+ Tiền khách đã chuyển vào (thật)</td><td class="num" style="color:var(--profit);">+${fmtVND(breakdown.cashIn)}</td></tr>
-            <tr><td>− Tiền đã chuyển cho mỏ (thật)</td><td class="num">−${fmtVND(breakdown.cashOutToSuppliers)}</td></tr>
-            <tr><td>− Chi phí vận hành (dầu, lương, ăn, nhà, phát sinh)</td><td class="num">−${fmtVND(breakdown.operatingCashCost)}</td></tr>
-            <tr><td>− Sửa chữa</td><td class="num">−${fmtVND(breakdown.repairTotal)}</td></tr>
-            <tr><td>− Luật đường</td><td class="num">−${fmtVND(breakdown.roadFee)}</td></tr>
-            <tr><td>− Gốc + Lãi Vay Ngân Hàng (tất cả xe)</td><td class="num">−${fmtVND(breakdown.loanPayment)}</td></tr>
-            <tr><td>− Bảo hiểm + Đăng kiểm (tất cả xe)</td><td class="num">−${fmtVND(breakdown.insuranceReg)}</td></tr>
-            <tr><td>− Mua Lô Hoá Đơn Bù (tiền thật đã trả đối tác — ĐỦ cả lô, kể cả phần chưa dùng)</td><td class="num">−${fmtVND(breakdown.invoiceLotCashOut)}</td></tr>
-            <tr><td>− Tạm ứng lương tài xế (chưa phải chi phí — trừ lại khi quyết toán lương)</td><td class="num">−${fmtVND(breakdown.advanceCashOut)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= Dòng Tiền Ròng Luỹ Kế</td><td class="num" style="color:${breakdown.total>=0?'var(--profit)':'var(--loss)'}">${breakdown.total>=0?'+':''}${fmtVND(breakdown.total)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <button class="btn btn-ghost btn-block" id="cashFlowBreakdownDetailBtn" style="margin-bottom:12px;">📋 Chi Tiết — Từng Khoản Cấu Thành Dòng Tiền Ròng Luỹ Kế</button>
-
-      <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🔒 Đối Soát Hoá Đơn Theo Tháng</div>
-        <div id="monthlyInvoiceReconWrap"></div>
-      </div>
     </section>
 
     <section class="group">
