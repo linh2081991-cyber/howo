@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-20 · #282';
+const APP_BUILD = '2026-09-21 · #283';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4840,7 +4840,27 @@ function renderCombinedStockDetailPage(goodsType, from, to){
       siteRawGoodsTypeGroups(s).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
         const customer = s.customerId ? customerById(s.customerId) : null;
-        const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
+        // SỬA 2026-09-21 (Ông Chủ báo — "Từng Khách Hàng Đã Bán" ra 98
+        // chuyến nhưng "Chi Tiết Từng Ngày" chỉ cộng ra 94, thiếu hẳn ngày
+        // 28/07 — ngày đầu tiên chạy thương mại): TÌM RA ĐÚNG GỐC RỄ — dòng
+        // dưới đây trước đây lọc theo t.goodsType THÔ (đúng loại hàng lúc
+        // MÚC ở mỏ), trong khi customerGoodsBreakdown() (bảng "Từng Khách
+        // Hàng" phía trên) đúng ra phải đếm theo t.sellGoodsTypeEffective —
+        // loại hàng THẬT SỰ giao cho khách (ưu tiên sellGoodsType nếu có
+        // khai khác lúc đổ hàng, không thì mới lấy goodsType) — y hệt logic
+        // ở partnerTripRows() dòng ~13182. Chuyến nào múc 1 loại nhưng đổ
+        // cho khách 1 loại khác (thường gặp ở những chuyến đầu, trước khi
+        // thói quen khai đủ 2 ô được hình thành) bị lọc SAI theo loại múc,
+        // nên biến mất khỏi đúng bảng khách hàng này dù vẫn được tính đúng
+        // ở khối lượng g.sellVolume bên trên (hàm khác, không lỗi). Sửa lại
+        // đúng cùng công thức sellGoodsTypeEffective để 2 bảng khớp tuyệt
+        // đối, không lệch số chuyến nữa.
+        const tripsCount = (s.commercialTrips||[]).filter(t=>{
+          const sellTypeRaw = (t.sellGoodsType||'').trim();
+          const buyType = (t.goodsType||'').trim() || '(chưa khai)';
+          const sellGoodsTypeEffective = sellTypeRaw || buyType;
+          return normGoodsType(sellGoodsTypeEffective)===gt;
+        }).length;
         dailySaleRows.push({ date: sh.date, shiftType: sh.shiftType,
           customerName: customer ? customer.name : '(chưa gắn khách hàng)', trips: tripsCount, vol: g.sellVolume });
       });
@@ -4999,8 +5019,15 @@ function renderWarehouseDrawHistoryPage(goodsType, from, to){
       if(s.siteType!=='commercial') return;
       siteGoodsTypeGroups(s, {sh, idx}).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
-        const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
-        const realNeeded = siteGroupRealMissingVolume(s, g);
+        // SỬA 2026-09-21 — cùng lỗi/cách sửa như renderCombinedStockDetailPage()
+        // (đếm theo t.goodsType thô thay vì đúng loại hàng THẬT SỰ giao
+        // cho khách, làm thiếu chuyến "múc A đổ B"). Xem chú thích đầy đủ
+        // tại đó.
+        const tripsCount = (s.commercialTrips||[]).filter(t=>{
+          const sellTypeRaw = (t.sellGoodsType||'').trim();
+          const buyType = (t.goodsType||'').trim() || '(chưa khai)';
+          return normGoodsType(sellTypeRaw || buyType)===gt;
+        }).length;
         const key = siteLogGroupKey(sh, idx, g.goodsType);
         const rec = ledger.bySiteLog[key] || { allocations:[], shortfall: realNeeded };
         const customer = s.customerId ? customerById(s.customerId) : null;
@@ -5980,8 +6007,13 @@ function invoiceDemandByDateRange(goodsType, from, to){
       const g = siteGoodsTypeGroups(s).find(x=>normGoodsType(x.goodsType)===gt);
       if(!g) return;
       if(g.sellVolume<=0 && g.missingVolume<=0) return;
-      const tripsCount = (s.commercialTrips||[]).filter(t=>normGoodsType(t.goodsType)===gt).length;
-      const driver = driverById(sh.driverId);
+      // SỬA 2026-09-21 — cùng lỗi/cách sửa như renderCombinedStockDetailPage()
+      // (xem chú thích đầy đủ tại đó).
+      const tripsCount = (s.commercialTrips||[]).filter(t=>{
+        const sellTypeRaw = (t.sellGoodsType||'').trim();
+        const buyType = (t.goodsType||'').trim() || '(chưa khai)';
+        return normGoodsType(sellTypeRaw || buyType)===gt;
+      }).length;
       const customer = s.customerId ? customerById(s.customerId) : null;
       const buyConfirmedByHand = buyIsDeductible(s); // ô tick tay "Đã nhận hóa đơn MUA" — căn cứ cao nhất
       const missingVolume = buyConfirmedByHand ? 0 : g.missingVolume;
