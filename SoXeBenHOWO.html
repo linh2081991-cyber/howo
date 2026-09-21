@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #284';
+const APP_BUILD = '2026-09-21 · #285';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4833,28 +4833,11 @@ function renderCombinedStockDetailPage(goodsType, from, to){
   // dữ liệu với totalSoldVolumeAllTime(gt,from,to) nên cộng lại phải khớp
   // tuyệt đối con số ở trên, không tính lại theo công thức khác.
   const dailySaleRows = [];
-  // MỚI (Ông Chủ báo lại — đã kiểm tra kỹ 28/07 không thiếu dữ liệu gì,
-  // và "Chi Tiết Giao Dịch" của khách hàng vẫn hiện đúng 2 chuyến Base B
-  // hôm đó — nghĩa là dữ liệu THẬT SỰ tồn tại và đúng, lỗi phải nằm ở
-  // ĐÚNG bước lọc/gộp của riêng trang này, không phải do thiếu dữ liệu
-  // hay ca đó lỗi thời): thêm bản ghi "bị bỏ qua" để LỘ RÕ NGUYÊN NHÂN
-  // thật — không đoán thêm nữa, để Ông Chủ tự nhìn thấy đúng lý do ngay
-  // trên màn hình, gửi lại là em sửa dứt điểm.
-  const skippedCommercialLogs = [];
   allShiftsForLedgerCompanyWide().forEach(sh=>{
     if(sh.date<from || sh.date>to) return;
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial') return;
-      const rawTripsLen = (s.commercialTrips||[]).length;
-      const groupsHere = siteRawGoodsTypeGroups(s);
-      if(groupsHere.length===0){
-        skippedCommercialLogs.push({ date: sh.date, shiftType: sh.shiftType, reason: `Không tạo được nhóm loại hàng nào (commercialTrips có ${rawTripsLen} dòng thô)`, customerId: s.customerId });
-      }
-      groupsHere.forEach(g=>{
-        if(normGoodsType(g.goodsType)===gt && g.sellVolume>0) return; // sẽ được đẩy vào dailySaleRows bên dưới, không phải bị bỏ qua
-        skippedCommercialLogs.push({ date: sh.date, shiftType: sh.shiftType, reason: `Nhóm ra loại hàng "${g.goodsType||'(trống)'}" (đang xem "${goodsType}") — khối lượng bán ${g.sellVolume}`, customerId: s.customerId });
-      });
-      groupsHere.forEach(g=>{
+      siteRawGoodsTypeGroups(s).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt || g.sellVolume<=0) return;
         const customer = s.customerId ? customerById(s.customerId) : null;
         // SỬA 2026-09-21 (Ông Chủ báo — "Từng Khách Hàng Đã Bán" ra 98
@@ -5003,26 +4986,6 @@ function renderCombinedStockDetailPage(goodsType, from, to){
         </table>
       </div>`}
     </section>
-
-    ${skippedCommercialLogs.length>0 ? `
-    <section class="group">
-      <h3>🔍 Các Ca Thương Mại Bị Bỏ Qua Khỏi Bảng Trên (${skippedCommercialLogs.length})</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:8px;">Mục tạm thời để tìm đúng lý do 1 ngày cụ thể không lên bảng "Chi Tiết Từng Ngày" — mỗi dòng là 1 ca thương mại đã quét qua nhưng KHÔNG được tính vào bảng trên, kèm đúng lý do.</div>
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Ngày</th><th>Ca</th><th>Khách Hàng (ID)</th><th>Lý Do Bị Bỏ Qua</th></tr></thead>
-          <tbody>
-            ${skippedCommercialLogs.map(r=>`<tr>
-              <td>${formatDateVN(r.date)}</td>
-              <td>${shiftTypeLabel(r.shiftType)}</td>
-              <td>${r.customerId ? escapeHtml((customerById(r.customerId)||{}).name || r.customerId) : '(chưa gắn khách hàng)'}</td>
-              <td>${escapeHtml(r.reason)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    ` : ''}
   `;
   document.getElementById('combinedDetailBackBtn').addEventListener('click', ()=>{
     if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
