@@ -701,7 +701,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #289';
+const APP_BUILD = '2026-09-21 · #290';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10334,7 +10334,6 @@ function renderStrategyHub(){
       <div class="card" style="text-align:center; padding:26px 18px;">
         <div style="font-size:42px; margin-bottom:8px;">🧭</div>
         <div style="font-weight:700; font-size:15.5px; margin-bottom:6px;">Trợ Lý Chiến Lược</div>
-        <div class="hint" style="margin-bottom:16px;">AI đọc số liệu vận hành thực tế (7/30 ngày gần nhất) và đưa ra nhận xét: cảnh báo hao dầu theo tài xế, công trình hiệu quả nhất/kém nhất, đề xuất bảo dưỡng.</div>
         <button class="btn btn-accent btn-block" id="hubGoStrategyBtn">🧭 TRỢ LÝ CHIẾN LƯỢC</button>
       </div>
     </section>
@@ -17818,16 +17817,6 @@ function renderCompanyDashboardPage(preserveScroll){
     lùi xuống ngay sau khối Tổng Giá Trị Ròng, không đứng giữa nữa. -->
     <section class="group">
       <div class="card" style="margin-top:0;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</div>
-        <div id="partnersOverviewWrap"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
-        <div id="customerSupplierDebtWrap"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📦 Kho Hoá Đơn Bù</div>
         <div id="invoiceLotOverviewWrap"></div>
       </div>
@@ -17938,6 +17927,21 @@ function renderCompanyDashboardPage(preserveScroll){
       <div class="card" style="margin-top:12px;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🔒 Đối Soát Hoá Đơn Theo Tháng</div>
         <div id="monthlyInvoiceReconWrap"></div>
+      </div>
+    </section>
+
+    <!-- MỚI (Ông Chủ yêu cầu 2026-09-21 — "Đối Tác & Công Nợ nằm ngay
+    trên Vốn Điều Lệ"): chuyển 2 khối Công Nợ (Chở Cước + Thương Mại) tới
+    đây — giữ NGUYÊN VẸN nội dung/công thức, chỉ đổi vị trí. -->
+    <section class="group">
+      <div class="card" style="margin-top:0;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</div>
+        <div id="partnersOverviewWrap"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
+        <div id="customerSupplierDebtWrap"></div>
       </div>
     </section>
 
