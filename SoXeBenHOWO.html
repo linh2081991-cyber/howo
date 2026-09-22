@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #291';
+const APP_BUILD = '2026-09-21 · #292';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14910,9 +14910,6 @@ function openCustomerDetail(customerId, preserveScroll){
   // gì tới trang chi tiết vừa mở).
   getActualScrollEl().scrollTop = 0;
   document.getElementById('custDetailBackBtn').addEventListener('click', ()=>{
-    // SỬA 2026-09-20: renderDebtDetailPage() đã bị thay hẳn bằng khối
-    // Công Nợ mới trong renderCompanyDashboardPage() — quay lại đúng
-    // trang đó (preserveScroll=true để không mất vị trí đang xem).
     if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
     restoreMainScroll();
   });
@@ -18267,15 +18264,8 @@ function renderCompanyDashboardPage(preserveScroll){
     restoreMainScroll();
   });
   document.getElementById('cashFlowLedgerBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
-  // SỬA 2026-09-20 (Ông Chủ yêu cầu — "Đối Tác & Công Nợ (Chở Cước)" và
-  // "Nhà Cung Cấp & Khách Hàng (Thương Mại)" là dữ liệu công ty, không
-  // của riêng xe nào, vốn đang nằm lẫn trong tab Kết Quả từng xe): chuyển
-  // hẳn 2 khối này vào đây — GIỮ NGUYÊN VẸN đúng 2 hàm hiển thị đã có sẵn
-  // (renderPartnersOverview/renderCustomerSupplierDebtOverview), không
-  // đổi công thức/số liệu gì, chỉ đổi nơi gọi. 2 hàm này tự tìm đúng
-  // #partnersOverviewWrap/#customerSupplierDebtWrap vừa thêm ở trên. Đồng
-  // thời bỏ hẳn nút/hàm renderDebtDetailPage() cũ (đã trùng y hệt nội
-  // dung "Nhà Cung Cấp & Khách Hàng (Thương Mại)" mới chuyển vào).
+  // Các hàm dưới tự tìm đúng #partnersOverviewWrap/#customerSupplierDebtWrap/
+  // #invoiceLotOverviewWrap/#monthlyInvoiceReconWrap trong HTML phía trên.
   renderPartnersOverview();
   renderCustomerSupplierDebtOverview();
   renderInvoiceLotOverview();
@@ -18740,73 +18730,6 @@ function renderInternalTransferHistoryPage(){
       showToast('Đã xoá.');
       renderInternalTransferHistoryPage();
     });
-  });
-}
-/// SỬA 2026-09-08 (yêu cầu Ông Chủ — "click kính lúp muốn biết rõ khách
-/// và nhà cung cấp RIÊNG NHAU, chi tiết, không như bảng gộp chung cũ"):
-/// thêm tham số filterType ('customer'|'supplier'|undefined). Có filter
-/// → CHỈ hiện đúng 1 bên; nếu bên đó chỉ có ĐÚNG 1 đối tác đang nợ/dư →
-/// nhảy THẲNG vào trang chi tiết giao dịch của đối tác đó luôn (khỏi phải
-/// bấm thêm 1 lần qua trang danh sách chỉ có 1 dòng). Không filter (gọi
-/// từ nơi khác, không đổi) → vẫn hiện đủ cả 2 bên như cũ.
-function renderDebtDetailPage(filterType){
-  scrollMainToTop();
-  const customersWithDebt = state.customers.map(c=>({...c, debt: computeCustomerDebt(c.id)})).filter(c=>Math.abs(c.debt.owed)>0.5);
-  const suppliersWithDebt = state.suppliers.map(s=>({...s, debt: computeSupplierDebt(s.id)})).filter(s=>Math.abs(s.debt.owed)>0.5);
-  if(filterType==='customer' && customersWithDebt.length===1){ openCustomerDetail(customersWithDebt[0].id); return; }
-  if(filterType==='supplier' && suppliersWithDebt.length===1){ openSupplierDetail(suppliersWithDebt[0].id); return; }
-  const showCustomers = filterType!=='supplier';
-  const showSuppliers = filterType!=='customer';
-  const app = document.getElementById('app');
-  app.innerHTML = `
-    <section class="group">
-      <button class="btn btn-ghost btn-sm" id="debtDetailBackBtn">← Quay Lại</button>
-    </section>
-    <section class="group">
-      <h2 style="margin-bottom:2px;">🤝 Công Nợ Chi Tiết${filterType==='customer'?' — Khách Hàng':filterType==='supplier'?' — Nhà Cung Cấp':''}</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Bấm vào từng dòng để xem đầy đủ lịch sử giao dịch của đúng đối tác đó.</div>
-      ${showCustomers?`
-      <h3>💳 Khách Hàng</h3>
-      <div class="grid-table-wrap" style="margin-bottom:16px;">
-        <table class="grid-table">
-          <thead><tr><th>Khách Hàng</th><th>Chiều</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            ${customersWithDebt.length===0 ? '<tr><td colspan="3" class="hint" style="padding:14px;">Không có khách hàng nào còn nợ/dư.</td></tr>' : customersWithDebt.map(c=>{
-              const isOwedByThem = c.debt.owed>=0;
-              return `<tr data-open-customer="${c.id}" style="cursor:pointer;">
-                <td><strong>${escapeHtml(c.name)}</strong></td>
-                <td>${isOwedByThem?'Nợ Ông Chủ':'Ông Chủ nợ (khách trả dư)'}</td>
-                <td class="num" style="font-weight:800; color:${isOwedByThem?'var(--profit)':'var(--loss)'};">${fmtVND(Math.abs(c.debt.owed))}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`:''}
-      ${showSuppliers?`
-      <h3>💳 Nhà Cung Cấp</h3>
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Nhà Cung Cấp</th><th>Chiều</th><th class="num">Số Tiền</th></tr></thead>
-          <tbody>
-            ${suppliersWithDebt.length===0 ? '<tr><td colspan="3" class="hint" style="padding:14px;">Không có nhà cung cấp nào còn nợ/dư.</td></tr>' : suppliersWithDebt.map(s=>{
-              const weOweThem = s.debt.owed>=0;
-              return `<tr data-open-supplier="${s.id}" style="cursor:pointer;">
-                <td><strong>${escapeHtml(s.name)}</strong></td>
-                <td>${weOweThem?'Ông Chủ nợ':'Nhà cung cấp nợ (đã ứng dư)'}</td>
-                <td class="num" style="font-weight:800; color:${weOweThem?'var(--loss)':'var(--profit)'};">${fmtVND(Math.abs(s.debt.owed))}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`:''}
-    </section>
-  `;
-  document.getElementById('debtDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
-  document.querySelectorAll('[data-open-customer]').forEach(el=>{
-    el.addEventListener('click', ()=>{ saveMainScroll(); openCustomerDetail(el.dataset.openCustomer); });
-  });
-  document.querySelectorAll('[data-open-supplier]').forEach(el=>{
-    el.addEventListener('click', ()=>{ saveMainScroll(); openSupplierDetail(el.dataset.openSupplier); });
   });
 }
 /// Chi Tiết Lợi Nhuận Luỹ Kế — bóc tách ĐỦ từng khoản đã cộng dồn thành
