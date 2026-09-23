@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-21 · #292';
+const APP_BUILD = '2026-09-22 · #293';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -17888,6 +17888,16 @@ function renderCompanyDashboardPage(preserveScroll){
     lùi xuống ngay sau khối Tổng Giá Trị Ròng, không đứng giữa nữa. -->
     <section class="group">
       <div class="card" style="margin-top:0;">
+        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
+        <div id="customerSupplierDebtWrap"></div>
+      </div>
+    </section>
+
+    <!-- MỚI (Ông Chủ yêu cầu 2026-09-22 — "Nhà CC & Khách Hàng lên trên
+    Kho Hoá Đơn Bù"): chuyển khối này lên đây từ chỗ cũ (cạnh Đối Tác
+    Chở Cước) — giữ NGUYÊN VẸN nội dung/công thức, chỉ đổi vị trí. -->
+    <section class="group">
+      <div class="card" style="margin-top:0;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">📦 Kho Hoá Đơn Bù</div>
         <div id="invoiceLotOverviewWrap"></div>
       </div>
@@ -18002,17 +18012,12 @@ function renderCompanyDashboardPage(preserveScroll){
     </section>
 
     <!-- MỚI (Ông Chủ yêu cầu 2026-09-21 — "Đối Tác & Công Nợ nằm ngay
-    trên Vốn Điều Lệ"): chuyển 2 khối Công Nợ (Chở Cước + Thương Mại) tới
-    đây — giữ NGUYÊN VẸN nội dung/công thức, chỉ đổi vị trí. -->
+    trên Vốn Điều Lệ"): chuyển khối Công Nợ (Chở Cước) tới đây — giữ
+    NGUYÊN VẸN nội dung/công thức, chỉ đổi vị trí. -->
     <section class="group">
       <div class="card" style="margin-top:0;">
         <div style="font-weight:800; font-size:13px; margin-bottom:10px;">🤝 Đối Tác & Công Nợ — Chở Cước (Toàn Bộ, Không Theo Kỳ)</div>
         <div id="partnersOverviewWrap"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <div style="font-weight:800; font-size:13px; margin-bottom:10px;">⛰️🧑‍💼 Nhà Cung Cấp & Khách Hàng (Thương Mại)</div>
-        <div id="customerSupplierDebtWrap"></div>
       </div>
     </section>
 
