@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-22 · #293';
+const APP_BUILD = '2026-09-22 · #294';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4934,7 +4934,7 @@ function renderCombinedStockDetailPage(goodsType, from, to){
     </section>
     <section class="group">
       <h2 style="margin-bottom:2px;">🧮 Chi Tiết Tồn Kho Tổng Hợp — ${escapeHtml(goodsType)}</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đối chiếu KT Thuế — PHÁT SINH TRONG KỲ ${formatDateVN(from)} → ${formatDateVN(to)} (đổi khoảng ngày ở trang trước, mọi số ở đây tự cập nhật đúng theo đó). Khoảng ngày thật của từng nguồn xem chi tiết ngay dưới mỗi mục.</div>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Đối chiếu KT Thuế — PHÁT SINH TRONG KỲ ${fmtDateRangeVN(from, to)} (đổi khoảng ngày ở trang trước, mọi số ở đây tự cập nhật đúng theo đó). Khoảng ngày thật của từng nguồn xem chi tiết ngay dưới mỗi mục.</div>
       <div class="card" style="border:1.5px solid var(--accent);">
         <div class="summary-row"><span>Hoá đơn THẬT từ mỏ (÷ tỷ trọng)</span><span class="val">${fmtQty(combined.mineVolKhoi)} khối</span></div>
         <div class="hint" style="margin:-4px 0 8px; padding-left:2px;">↳ ${mineInvRows.length} hoá đơn, ${mineInvRange}</div>
@@ -5693,7 +5693,7 @@ function combinedStockOverview(goodsType, from, to){
     .reduce((sum,l)=>sum+(Number(l.totalVolume)||0), 0);
   const soldVolKhoi = totalSoldVolumeAllTime(gt, from, to);
   const combinedRemaining = mineVolKhoi + lotVolKhoi - soldVolKhoi;
-  const soldDateRange = `từ ${formatDateVN(from)} đến ${formatDateVN(to)}`;
+  const soldDateRange = (from===ALL_TIME_FROM && to===ALL_TIME_TO) ? 'toàn bộ thời gian' : `từ ${formatDateVN(from)} đến ${formatDateVN(to)}`;
   return { mineVolKhoi, lotVolKhoi, soldVolKhoi, combinedRemaining, soldDateRange };
 }
 
@@ -12846,6 +12846,19 @@ function computeSiteDetail(siteName, from, to){
 
 const ALL_TIME_FROM = '1900-01-01';
 const ALL_TIME_TO = '2999-12-31';
+/// MỚI (Ông Chủ báo — "Chi Tiết Tồn Kho Tổng Hợp" hiện "01/01/1900 →
+/// 31/12/2999" nhìn rất sai/kỳ dị): những nơi xem "toàn bộ thời gian,
+/// không giới hạn theo kỳ" (Kho Hoá Đơn Bù, Công Trình, Tạm Ứng Tài Xế…)
+/// đều dùng 2 mốc ẢO ALL_TIME_FROM/ALL_TIME_TO ở trên làm biên lọc —
+/// đúng về mặt tính toán (lọc mọi ngày), nhưng hiển thị THẲNG 2 mốc ảo
+/// đó ra màn hình lại gây hiểu lầm đây là ngày thật đã nhập. Hàm này chỉ
+/// đổi CÁCH HIỂN THỊ (không đụng gì tới lọc/tính toán): gặp đúng cặp
+/// mốc ảo → in "Toàn bộ thời gian"; mọi khoảng ngày thật khác → in y hệt
+/// formatDateVN() như cũ.
+function fmtDateRangeVN(from, to){
+  if(from===ALL_TIME_FROM && to===ALL_TIME_TO) return 'Toàn bộ thời gian';
+  return `${formatDateVN(from)} → ${formatDateVN(to)}`;
+}
 
 /// Every construction site's full, all-time list of billed amounts —
 /// one entry per shift-site contribution, dated by the shift's date.
