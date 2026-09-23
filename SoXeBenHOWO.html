@@ -177,10 +177,10 @@
   .shift-column-head .avatar{ width:48px; height:48px; border-radius:14px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--col-accent, var(--accent)); background:linear-gradient(135deg, color-mix(in srgb, var(--col-accent, var(--accent)) 20%, #fff), color-mix(in srgb, var(--col-accent, var(--accent)) 7%, #fff)); border:1px solid color-mix(in srgb, var(--col-accent, var(--accent)) 30%, transparent); box-shadow:0 2px 8px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.6); }
   .shift-column-head .avatar svg{ width:30px; height:30px; display:block; overflow:visible; }
   .shift-column-head .head-text{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:2px; }
-  .shift-column-head .name{ font-weight:800; font-size:17px; letter-spacing:0; color:#222222; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
-  .shift-column-head .count{ font-size:11.5px; color:#666666; font-weight:600; display:flex; flex-direction:column; gap:1px; max-width:100%; }
+  .shift-column-head .name{ font-weight:800; font-size:17px; letter-spacing:0; color:var(--ink); text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .shift-column-head .count{ font-size:11.5px; color:var(--ink-soft); font-weight:600; display:flex; flex-direction:column; gap:1px; max-width:100%; }
   .shift-column-head .count .cnt-line{ white-space:nowrap; }
-  .shift-column-head .count strong{ color:#333333; font-weight:800; }
+  .shift-column-head .count strong{ color:var(--ink); font-weight:800; }
   .shift-column-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:18px 6px; border:1.5px dashed var(--border); border-radius:12px; }
   .shift-column .shift-card{ margin-bottom:10px; border-radius:12px; }
   .shift-column .shift-card .body{ padding:11px 10px; }
@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-22 · #295';
+const APP_BUILD = '2026-09-23 · #296';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3573,7 +3573,7 @@ function showFatalErrorBanner(err){
     if(!box){
       box = document.createElement('div');
       box.id = 'fatalErrorBanner';
-      box.style.cssText = 'position:fixed; left:10px; right:10px; bottom:80px; z-index:999; background:#FDECEC; border:2px solid #B23A2E; border-radius:12px; padding:12px; max-height:45vh; overflow:auto; font-family:monospace; font-size:11.5px; color:#7A1F1F; white-space:pre-wrap; word-break:break-word;';
+      box.style.cssText = 'position:fixed; left:10px; right:10px; bottom:80px; z-index:999; background:var(--loss-soft); border:2px solid var(--loss); border-radius:12px; padding:12px; max-height:45vh; overflow:auto; font-family:monospace; font-size:11.5px; color:var(--loss); white-space:pre-wrap; word-break:break-word;';
       document.body.appendChild(box);
     }
     const stack = (err && err.stack) || '';
@@ -6990,8 +6990,8 @@ function renderShiftCard(sh){
   // Lộc vừa vừa đổ giúp Thắng vừa tự múc cho Thắng đổ hôm sau): TRƯỚC ĐÂY
   // dùng if/else nên chỉ hiện được 1 trong 2 ghim, ưu tiên "Đổ hộ" và ẩn
   // mất "Múc hộ". Giờ hiện ĐỦ CẢ HAI khi cả hai đều đúng, không còn ẩn.
-  const crossTag = (crossInfo.isDeliveringForOthers ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Đổ hộ</span>' : '')
-    + (crossInfo.isPickingUpForOthers ? '<span class="tag" style="background:#FDECEC; color:#B23A2E;">📌 Múc hộ</span>' : '');
+  const crossTag = (crossInfo.isDeliveringForOthers ? '<span class="tag" style="background:var(--loss-soft); color:var(--loss);">📌 Đổ hộ</span>' : '')
+    + (crossInfo.isPickingUpForOthers ? '<span class="tag" style="background:var(--loss-soft); color:var(--loss);">📌 Múc hộ</span>' : '');
   return `
     <div class="card shift-card" data-id="${sh.id}" onclick="openShift('${sh.id}')">
       <div class="bar" style="background:${positive?'var(--profit)':'var(--loss)'}"></div>
@@ -6999,7 +6999,7 @@ function renderShiftCard(sh){
         <div class="row1">
           <span class="date">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)}</span>
           <div class="row1-right">
-            ${(Number(sh.intensity)||1)===1.5 ? '<span class="tag" style="background:#FDF0D5; color:#B8791A;">1,5 ca</span>' : ''}
+            ${(Number(sh.intensity)||1)===1.5 ? '<span class="tag" style="background:var(--warn-soft); color:var(--warn-text);">1,5 ca</span>' : ''}
             <span class="tag" style="${statusColorStyle(sh.status)}">${statusLabel(sh.status)}</span>
             ${crossTag}
             ${issues.length>0 ? `<button class="shift-issue-btn" data-id="${sh.id}" data-issues="${escapeHtml(issues.join(' | '))}">⚠️ Cảnh Báo Hành Động</button>` : ''}
@@ -7165,8 +7165,8 @@ function renderShiftList(){
         </div>
       ` : ''}
       ${warnings.missingPickupDates && warnings.missingPickupDates.length>0 ? `
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:10px 12px; background:#FDECEC; border-radius:12px;">
-          <span style="font-weight:700; font-size:13.5px; color:#B23A2E;">📌 Chuyến Lấy Hộ Thiếu Ngày Múc (${warnings.missingPickupDates.length})</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:10px 12px; background:var(--loss-soft); border-radius:12px;">
+          <span style="font-weight:700; font-size:13.5px; color:var(--loss);">📌 Chuyến Lấy Hộ Thiếu Ngày Múc (${warnings.missingPickupDates.length})</span>
           <button class="btn btn-ghost btn-sm" id="missingPickupDateDetailBtn" style="flex:none; white-space:nowrap; margin-top:0;">Chi Tiết →</button>
         </div>
       ` : ''}
@@ -9460,7 +9460,7 @@ function openDriverTripDetailModal(driverId, from, to){
         <tbody>
           ${rows.map(r=>`
           <tr>
-            <td>${r.date}${r.notes?` <span style="color:#B23A2E;">📌</span>`:''}</td>
+            <td>${r.date}${r.notes?` <span style="color:var(--loss);">📌</span>`:''}</td>
             <td>${r.shiftType}</td>
             <td>${escapeHtml((r.siteLabel||'').split('\n').join(', '))||(r.notes?escapeHtml(r.notes):'')}</td>
             <td class="num" style="font-weight:700;">${r.tripCount}</td>
@@ -21345,7 +21345,7 @@ function renderAll(){
         <div class="card" style="border:2px solid var(--loss); margin:14px; padding:16px;">
           <div style="font-weight:800; color:var(--loss); font-size:16px; margin-bottom:8px;">⚠️ Có lỗi khi hiện màn "${escapeHtml(state.currentTab||'')}"</div>
           <div class="hint" style="margin-bottom:10px;">Chụp lại TOÀN BỘ khung đỏ này gửi cho đội kỹ thuật — đây là bằng chứng chính xác để tìm và sửa lỗi, không cần làm gì thêm.</div>
-          <div style="background:#FDECEC; border-radius:10px; padding:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; color:#7A1F1F; max-height:340px; overflow:auto;">${escapeHtml((e && e.message) || String(e))}
+          <div style="background:var(--loss-soft); border-radius:10px; padding:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; color:var(--loss); max-height:340px; overflow:auto;">${escapeHtml((e && e.message) || String(e))}
 ${escapeHtml((e && e.stack) || '')}</div>
         </div>`;
     }
