@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-23 · #299';
+const APP_BUILD = '2026-09-23 · #300';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -18022,9 +18022,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
               <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
-              <tr><td>📦 Hàng Tồn Kho (Lô Hoá Đơn Bù chưa dùng)</td><td class="num" style="color:var(--profit);">+${fmtVND(inventoryValue)}</td></tr>
-              <tr><td>📄 Chứng Từ Thật Từ Mỏ Chưa Dùng</td><td class="num" style="color:var(--profit);">+${fmtVND(mineInvoiceInventoryValue)}</td></tr>
-              <tr style="background:var(--bg);"><td style="text-align:left; font-weight:700;">= Tổng Tồn Kho Chứng Từ</td><td class="num" style="font-weight:700;">+${fmtVND(inventoryValue+mineInvoiceInventoryValue)}</td></tr>
+              <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue+mineInvoiceInventoryValue)}</td></tr>
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
             </tbody>
           </table>
@@ -18375,6 +18373,8 @@ function renderCompanyDashboardPage(preserveScroll){
   const ktnbDetailCashBtn = document.getElementById('ktnbDetailCashBtn');
   if(ktnbDetailCashBtn) ktnbDetailCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('cash'); });
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
+  const invoiceInventoryDetailBtn = document.getElementById('invoiceInventoryDetailBtn');
+  if(invoiceInventoryDetailBtn) invoiceInventoryDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceInventoryDetailPage(); });
   const charterCapitalDetailBtn = document.getElementById('charterCapitalDetailBtn');
   if(charterCapitalDetailBtn) charterCapitalDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCharterCapitalDetailPage(); });
   const charterCapitalEditBtn = document.getElementById('charterCapitalEditBtn');
@@ -19599,6 +19599,68 @@ function renderBankReconDetailPage(mode){
   const ktnbTransferShortcutBtn2 = document.getElementById('ktnbTransferShortcutBtn2');
   if(ktnbTransferShortcutBtn2) ktnbTransferShortcutBtn2.addEventListener('click', openInternalTransferModal);
   document.getElementById('bankReconDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+}
+/// MỚI (Ông Chủ yêu cầu 2026-09-23 — "Tổng Tồn Kho Hoá Đơn gọn 1 dòng +
+/// nút Chi Tiết, bấm vào hiện đúng cấu trúc phân nhánh 2 nguồn: Hoá Đơn
+/// Bù chưa dùng / Hoá Đơn Thật Từ Mỏ chưa dùng, chuyên nghiệp thẩm mỹ,
+/// luôn real-time"): dùng lại NGUYÊN VẸN cùng 2 hàm tính đã có
+/// (companyWideInvoiceLotInventoryValue/companyWideMineInvoiceInventoryValue)
+/// — gọi tươi mỗi lần vẽ trang, không cache riêng, nên LUÔN khớp tuyệt
+/// đối với đúng số đang chạy ở "Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp" cùng
+/// thời điểm. Bố cục cây phân nhánh giữ ĐÚNG kiểu đã dùng cho "Kế Toán
+/// Nội Bộ" (gốc ở trên, 2 nhánh dưới nối bằng đường kẻ) để đồng bộ giao
+/// diện toàn app.
+function renderInvoiceInventoryDetailPage(){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const lotValue = companyWideInvoiceLotInventoryValue();
+  const mineValue = companyWideMineInvoiceInventoryValue();
+  const total = lotValue + mineValue;
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="invoiceInventoryDetailBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🗄️ Tổng Tồn Kho Hoá Đơn</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">Toàn bộ chứng từ đã có sẵn nhưng CHƯA dùng tới lần bán nào — tính real-time, luôn khớp đúng số đang chạy ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp".</div>
+      <div class="card">
+        <div style="text-align:center;">
+          <div style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft);">
+            <div style="font-size:26px; line-height:1;">🗄️</div>
+            <div style="font-weight:900; margin-top:6px; color:var(--accent); font-size:14px; letter-spacing:0.3px;">TỔNG TỒN KHO HOÁ ĐƠN</div>
+            <div style="font-weight:900; margin-top:4px; font-size:18px; color:var(--profit);">+${fmtVND(total)}</div>
+          </div>
+        </div>
+        <div style="text-align:center; margin-top:2px;">
+          <div style="display:inline-block; width:2px; height:16px; background:var(--border);"></div>
+        </div>
+        <div style="max-width:230px; height:2px; background:var(--border); margin:0 auto;"></div>
+        <div style="display:flex; justify-content:space-between; max-width:230px; margin:0 auto;">
+          <div style="width:2px; height:14px; background:var(--border);"></div>
+          <div style="width:2px; height:14px; background:var(--border);"></div>
+        </div>
+        <div style="display:flex; gap:14px; justify-content:center;">
+          <div style="flex:1; max-width:170px; text-align:center;">
+            <div style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg);">
+              <div style="font-size:26px; line-height:1;">📦</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Bù Chưa Dùng</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">+${fmtVND(lotValue)}</div>
+            </div>
+            <div class="hint" style="margin-top:6px; font-size:11px;">Mua thêm từ bên thứ 3 để bù thiếu.</div>
+          </div>
+          <div style="flex:1; max-width:170px; text-align:center;">
+            <div style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg);">
+              <div style="font-size:26px; line-height:1;">📄</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Thật Từ Mỏ Chưa Dùng</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">+${fmtVND(mineValue)}</div>
+            </div>
+            <div class="hint" style="margin-top:6px; font-size:11px;">Mỏ tự xuất theo hàng đã múc, không tốn thêm.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+  document.getElementById('invoiceInventoryDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
 }
 /// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
 /// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
