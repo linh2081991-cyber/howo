@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-23 · #296';
+const APP_BUILD = '2026-09-23 · #297';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7115,7 +7115,26 @@ function renderChooseVehiclePrompt(){
       </div>
       <button class="btn btn-ghost btn-block" id="vehicleMapAddBtn" style="margin-top:6px;">+ Thêm Xe</button>
     </section>`;
-  document.getElementById('vehicleMapHubBtn').addEventListener('click', ()=>{ saveMainScroll(); state.showCompanyDashboard = true; renderAll(); });
+  document.getElementById('vehicleMapHubBtn').addEventListener('click', async ()=>{
+    saveMainScroll();
+    state.showCompanyDashboard = true;
+    // SỬA 2026-09-23 (Ông Chủ báo — "vừa nhập 1 CP thật cho xe mới nhưng
+    // Kế Toán Nội Bộ chưa xử lý chuẩn"): rà toàn bộ các hàm cộng dồn công
+    // ty (sửa chữa, luật đường, bảo hiểm/đăng kiểm, vay...) đều ĐÃ đúng —
+    // luôn gộp mọi xe không sót, và mỗi hàm Lưu riêng của từng xe cũng đã
+    // tự đồng bộ ngay lập tức vào đúng bộ nhớ dùng chung. Nhưng có đúng 1
+    // khe hở: nếu xe mới được thêm vào SAU lúc app tải dữ liệu lần đầu
+    // (session đang mở), bộ nhớ dùng chung cho xe đó có thể chưa từng
+    // được nạp — Kế Toán Nội Bộ khi đó tính thiếu đúng xe mới, dù dữ liệu
+    // đã lưu đúng trên Firestore. Sửa TẬN GỐC, không cần đoán thêm: mỗi
+    // lần bấm vào Linh Chí Thành, tải lại MỚI HOÀN TOÀN dữ liệu mọi xe từ
+    // Firestore trước khi vẽ trang — đảm bảo luôn đúng 100% bất kể xe mới
+    // được thêm lúc nào trong phiên đang mở.
+    showToast('Đang cập nhật dữ liệu mọi xe...');
+    try{ await refreshAllVehiclesShiftsCache(); }
+    catch(e){ showToast('Không tải lại được dữ liệu mới nhất (mạng yếu?) — đang hiện số liệu gần nhất đã có sẵn.'); }
+    renderAll();
+  });
   document.getElementById('vehicleMapAddBtn').addEventListener('click', renderAddVehicleModal);
   document.querySelectorAll('.vehicle-map-node').forEach(btn=>{
     btn.addEventListener('click', ()=>switchVehicle(btn.dataset.vid));
