@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-23 · #300';
+const APP_BUILD = '2026-09-24 · #302';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -878,11 +878,12 @@ function defaultCostPolicies(){
 /// ngân hàng, bảo hiểm, đăng kiểm, lương cứng...), theo đúng yêu cầu Ông
 /// Chủ 2026-08-14: "thêm xe nào thêm tiền xe đó... tiền ngân hàng, khấu
 /// hao... chưa nhập thì không thể lấy số bên xe 29E69112".
-const SHARED_SETTINGS_FIELDS = ['geminiApiKey','currentFuelUnitPrice','vatRatePercent','citRatePercent'];
+const SHARED_SETTINGS_FIELDS = ['geminiApiKey','currentFuelUnitPrice','vatRatePercent','citRatePercent','lotPriceOverrides'];
 function defaultSettingsShape(){
   return { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
               monthlyFixedRoadFee: 25000000, geminiApiKey: '',
               currentFuelUnitPrice: 0, vatRatePercent: 10, citRatePercent: 20,
+              lotPriceOverrides: {},
               extraDayBaseSalary: 1000000,
               monthlyVehicleDepreciation: 0,
               monthlyLoanPayment: 0,
@@ -6244,6 +6245,73 @@ function buyIsDeductible(s){
 //   - Trường hợp Ông Chủ: mua giá net + CÓ hoá đơn cuối tháng (khấu trừ
 //     được), bán có VAT → VAT nộp = (bán_net − mua_net) × %VAT. Đúng ví dụ
 //     1 chuyến lãi 200.000đ thì nộp 20.000đ.
+/// MỚI (Ông Chủ yêu cầu 2026-09-24 — Trợ Lý Chiến Lược cần kịch bản THẬT
+/// "giả định tick đủ hoá đơn 2 chiều" cho cả khoảng thời gian, không chỉ
+/// tính tay từng ca): giá trị "tốn bao nhiêu để bù 1 khối hàng thiếu
+/// chứng từ" TUYỆT ĐỐI không được đoán/cứng số — lấy đúng giá NET (đã trừ
+/// tiền mặt nhận lại) của LÔ HOÁ ĐƠN BÙ THẬT gần nhất đã mua đúng loại
+/// hàng đó (state.invoiceLots, cùng nguồn dữ liệu đang dùng cho "Chi Phí
+/// RÒNG Hoá Đơn Bù" ở Kho Hoá Đơn Bù) — mặc định TỰ ĐỘNG, không cần Ông
+/// Chủ nhập tay. Chỉ khi Ông Chủ chủ động ghi đè riêng (state.settings.
+/// lotPriceOverrides, ví dụ muốn giả lập theo giá thị trường mới nghe
+/// ngóng được, chưa mua thật) mới dùng số ghi đè đó thay thế.
+function netCostPerKhoiForGoodsType(goodsType){
+  const gt = normGoodsType(goodsType);
+  const overrides = state.settings.lotPriceOverrides || {};
+  const override = overrides[gt];
+  if(override!==undefined && override!==null && Number(override)>0){
+    return { value: Number(override), source: 'override' };
+  }
+  const lots = state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt && Number(l.totalVolume)>0)
+    .sort((a,b)=>(b.purchaseDate||'').localeCompare(a.purchaseDate||''));
+  if(lots.length===0) return { value: null, source: 'none' };
+  const l = lots[0];
+  const netCost = Math.max(0, (Number(l.totalInvoiceValue)||0) - (Number(l.cashReturned)||0));
+  return { value: netCost/Number(l.totalVolume), source: 'auto', lotDate: l.purchaseDate };
+}
+/// Kịch bản "giả định tick đủ 2 chiều hoá đơn" cho MỌI ca thương mại
+/// trong [from,to] — trả về ĐÚNG 2 khoản CHÊNH LỆCH (không phải tổng lãi
+/// mới, để cộng thẳng vào bất kỳ số lãi kỳ nào Ông Chủ đang xem):
+///  - extraVatCredit: lợi thêm nếu tick "Đã nhận hoá đơn MUA" — dùng lại
+///    NGUYÊN VẸN commercialVatPayable() (công thức lãi/thuế đang chạy),
+///    KHÔNG viết công thức VAT mới — an toàn vì công thức này không phụ
+///    thuộc tồn kho thật, chỉ phụ thuộc % hoá đơn mỏ xuất của nhà cung
+///    cấp (dữ liệu thật đã có).
+///  - extraCompCost: chi phí thêm nếu tick "Đã xuất hoá đơn BÁN" — CỐ Ý
+///    KHÔNG dùng siteInvoiceSupplementCost() (hàm đó giới hạn theo đúng
+///    số lô THẬT đang có sẵn trong kho — đúng cho sổ sách hiện tại nhưng
+///    SAI cho câu hỏi "giả sử mua ĐỦ theo giá thị trường thì sao"). Thay
+///    vào đó: lấy đúng khối lượng CẦN bù (siteGroupRealMissingVolume) rồi
+///    định giá bằng netCostPerKhoiForGoodsType() ở trên.
+function computeInvoiceMismatchWhatIf(from, to){
+  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  let extraVatCredit = 0, extraCompCost = 0, unpricedVolume = 0;
+  const missingByGoodsType = {};
+  inRange.forEach(sh=>{
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      if(s.siteType!=='commercial') return;
+      if(!s.buyHasInvoice){
+        const vatBefore = commercialVatPayable(s);
+        const vatAfter = commercialVatPayable({...s, buyHasInvoice:true});
+        extraVatCredit += Math.max(0, vatBefore-vatAfter);
+      }
+      if(!s.sellHasInvoice){
+        const sTicked = {...s, buyHasInvoice:true, sellHasInvoice:true};
+        siteGoodsTypeGroups(s, {sh, idx}).forEach(g=>{
+          const need = siteGroupRealMissingVolume(sTicked, g);
+          if(need<=0) return;
+          const priceInfo = netCostPerKhoiForGoodsType(g.goodsType);
+          const key = normGoodsType(g.goodsType);
+          if(!missingByGoodsType[key]) missingByGoodsType[key] = { goodsType:g.goodsType, volume:0, priceInfo };
+          missingByGoodsType[key].volume += need;
+          if(priceInfo.value===null) unpricedVolume += need;
+          else extraCompCost += need*priceInfo.value;
+        });
+      }
+    });
+  });
+  return { extraVatCredit, extraCompCost, missingByGoodsType: Object.values(missingByGoodsType), unpricedVolume };
+}
 function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
   const vat = siteVatRateFraction(s);
@@ -10504,6 +10572,62 @@ function renderStrategy(){
     sa.from = r.from; sa.to = r.to;
   }
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
+  // MỚI (Ông Chủ yêu cầu 2026-09-24 — "1 cơ chế rõ hơn, dựa trên số thật,
+  // không cảm tính"): kịch bản "giả định tick đủ hoá đơn 2 chiều" tính
+  // TRỰC TIẾP bằng công thức (không qua AI/Gemini) — luôn có ngay, không
+  // cần chờ phân tích, không phụ thuộc mạng, không có yếu tố "đoán" của
+  // AI. Dùng lại đúng aggregateStrategyData() đã có (cùng nguồn số với
+  // phần AI bên dưới) làm nền TH1, cộng thêm 2 khoản chênh lệch từ
+  // computeInvoiceMismatchWhatIf() để ra TH2.
+  const summaryForWhatIf = aggregateStrategyData(sa.from, sa.to);
+  const whatIf = computeInvoiceMismatchWhatIf(sa.from, sa.to);
+  const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
+  const th1Profit = summaryForWhatIf.grossProfit;
+  const th2Profit = th1Profit + whatIf.extraVatCredit - whatIf.extraCompCost;
+  const fixedCostIfIdle = state.shifts.filter(sh=>sh.date>=sa.from && sh.date<=sa.to)
+    .reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.foodAllowance)||0),0);
+  const whatIfHtml = `
+    <section class="group">
+      <h3>📊 Kịch Bản Thật (Giả Định Tick Đủ Hoá Đơn 2 Chiều)</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Tính trực tiếp bằng công thức, KHÔNG qua AI — luôn có ngay, đúng theo đúng khoảng ngày Ông Chủ đang chọn ở trên. So sánh lãi hiện tại (TH1 — nhiều ca CHƯA tick đủ hoá đơn nên số đang bị lệch) với lãi thật nếu tick đủ (TH2).</div>
+      <div class="grid-table-wrap" style="margin-bottom:10px;">
+        <table class="grid-table">
+          <thead><tr><th>Trường hợp</th><th class="num">Lợi Nhuận Gộp</th></tr></thead>
+          <tbody>
+            <tr><td>TH1 — Hiện tại (chưa tick đủ)</td><td class="num">${fmtVND(th1Profit)}</td></tr>
+            <tr><td>+ VAT khấu trừ thêm nếu tick MUA</td><td class="num" style="color:var(--profit);">+${fmtVND(whatIf.extraVatCredit)}</td></tr>
+            <tr><td>− Chi phí bù thêm nếu tick BÁN</td><td class="num" style="color:var(--loss);">−${fmtVND(whatIf.extraCompCost)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= TH2 — Lãi Thật (giả định tick đủ)</td><td class="num" style="color:${th2Profit>=0?'var(--profit)':'var(--loss)'}">${th2Profit>=0?'+':''}${fmtVND(th2Profit)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ${whatIf.missingByGoodsType.length>0 ? `
+      <div class="hint" style="margin-bottom:10px;">Khối lượng thiếu chứng từ theo từng loại hàng (nguồn gốc khoản −${fmtVND(whatIf.extraCompCost)} ở trên):</div>
+      <div class="grid-table-wrap" style="margin-bottom:10px;">
+        <table class="grid-table">
+          <thead><tr><th>Loại hàng</th><th class="num">Khối lượng thiếu</th><th class="num">Đơn giá dùng</th></tr></thead>
+          <tbody>
+            ${whatIf.missingByGoodsType.map(m=>`<tr>
+              <td>${escapeHtml(m.goodsType)}</td>
+              <td class="num">${fmtQty(m.volume)} khối</td>
+              <td class="num" style="font-size:12px;">${m.priceInfo.value!==null ? `${fmtVND(Math.round(m.priceInfo.value))}/khối (${m.priceInfo.source==='override'?'tự ghi đè':'lô gần nhất '+formatDateVN(m.priceInfo.lotDate)})` : '<span style="color:var(--loss);">chưa có giá — vào Cài Đặt khai</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+      <div class="card" style="border:1.5px solid ${th2Profit>=(-fixedCostIfIdle)?'var(--profit)':'var(--loss)'};">
+        <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🎯 Nên Chạy Tiếp Hay Tạm Nghỉ?</div>
+        <div class="hint" style="margin-top:0; margin-bottom:8px;">Chi phí cố định KHÔNG ĐỔI dù chạy hay nghỉ trong khoảng ngày này (lương cứng + tiền ăn tài xế): <strong>${fmtVND(fixedCostIfIdle)}</strong> — đây là số LỖ chắc chắn nếu nghỉ hẳn, không thu lại được.</div>
+        ${th2Profit>=0 ? `
+        <div style="font-weight:700; color:var(--profit);">→ NÊN CHẠY TIẾP. Lãi thật (TH2) đang dương ${fmtVND(th2Profit)} — cao hơn hẳn mức lỗ chắc chắn ${fmtVND(fixedCostIfIdle)} nếu nghỉ. Chạy đang lợi hơn nghỉ ${fmtVND(th2Profit+fixedCostIfIdle)}.</div>
+        ` : th2Profit > -fixedCostIfIdle ? `
+        <div style="font-weight:700; color:var(--accent);">→ VẪN NÊN CHẠY, dù đang lỗ ${fmtVND(Math.abs(th2Profit))}. Lý do: nghỉ hẳn còn lỗ NẶNG HƠN (mất trắng ${fmtVND(fixedCostIfIdle)} lương cứng + ăn, không thu lại đồng nào) — chạy vẫn "vớt" được ${fmtVND(th2Profit+fixedCostIfIdle)} so với nghỉ. Đây là chiến lược cầm cự ngắn hạn — cần xử lý gốc rễ (lệch loại hàng/giá cước) nếu kéo dài.</div>
+        ` : `
+        <div style="font-weight:700; color:var(--loss);">→ CẢNH BÁO NGHIÊM TRỌNG. Lỗ ${fmtVND(Math.abs(th2Profit))} còn NẶNG HƠN cả mức lỗ nếu nghỉ hẳn (${fmtVND(fixedCostIfIdle)}) — chạy trong khoảng ngày này đang LỖ THÊM so với nghỉ. Cần rà lại ngay giá cước/chi phí vận hành trước khi tiếp tục nhận thêm công trình kiểu này.</div>
+        `}
+      </div>
+    </section>
+  `;
 
   app.innerHTML = `
     <section class="group">
@@ -10531,6 +10655,8 @@ function renderStrategy(){
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
 
+    ${whatIfHtml}
+
     ${sa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(sa.error)}</div></section>` : ''}
 
     ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
@@ -10547,8 +10673,8 @@ function renderStrategy(){
   }
 
   document.getElementById('strategyBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
-  document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
-  document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
+  document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; renderStrategy(); });
+  document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; renderStrategy(); });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
 }
 
@@ -19641,26 +19767,34 @@ function renderInvoiceInventoryDetailPage(){
         </div>
         <div style="display:flex; gap:14px; justify-content:center;">
           <div style="flex:1; max-width:170px; text-align:center;">
-            <div style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg);">
+            <button id="invInvGoLotBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg); cursor:pointer;">
               <div style="font-size:26px; line-height:1;">📦</div>
               <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Bù Chưa Dùng</div>
               <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">+${fmtVND(lotValue)}</div>
-            </div>
-            <div class="hint" style="margin-top:6px; font-size:11px;">Mua thêm từ bên thứ 3 để bù thiếu.</div>
+            </button>
+            <button id="invInvGoLotBtn2" class="link-btn" style="margin-top:6px; font-size:11.5px; padding:2px; width:100%; text-align:center;">📋 Xem Kho Hoá Đơn Bù →</button>
+            <div class="hint" style="margin-top:2px; font-size:11px;">Mua thêm từ bên thứ 3 để bù thiếu.</div>
           </div>
           <div style="flex:1; max-width:170px; text-align:center;">
-            <div style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg);">
+            <button id="invInvGoMineBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg); cursor:pointer;">
               <div style="font-size:26px; line-height:1;">📄</div>
               <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Thật Từ Mỏ Chưa Dùng</div>
               <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">+${fmtVND(mineValue)}</div>
-            </div>
-            <div class="hint" style="margin-top:6px; font-size:11px;">Mỏ tự xuất theo hàng đã múc, không tốn thêm.</div>
+            </button>
+            <button id="invInvGoMineBtn2" class="link-btn" style="margin-top:6px; font-size:11.5px; padding:2px; width:100%; text-align:center;">📋 Xem Sổ Hoá Đơn Thật →</button>
+            <div class="hint" style="margin-top:2px; font-size:11px;">Mỏ tự xuất theo hàng đã múc, không tốn thêm.</div>
           </div>
         </div>
       </div>
     </section>
   `;
   document.getElementById('invoiceInventoryDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  const goLot = ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(null); };
+  const goMine = ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null); };
+  document.getElementById('invInvGoLotBtn').addEventListener('click', goLot);
+  document.getElementById('invInvGoLotBtn2').addEventListener('click', goLot);
+  document.getElementById('invInvGoMineBtn').addEventListener('click', goMine);
+  document.getElementById('invInvGoMineBtn2').addEventListener('click', goMine);
 }
 /// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
 /// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
@@ -19892,6 +20026,30 @@ function renderSettings(){
     </section>
 
     <section class="group">
+      <h3>💲 Giả Định Giá Lô Bù (Cho Trợ Lý Chiến Lược)</h3>
+      <div class="hint" style="margin-bottom:10px;">Dùng để tính kịch bản "giả định tick đủ hoá đơn" ở Trợ Lý Chiến Lược. Mặc định TỰ ĐỘNG lấy đúng giá NET (đã trừ tiền mặt nhận lại) của lô hoá đơn bù THẬT gần nhất đã mua — chỉ điền riêng bên dưới nếu muốn giả lập theo giá khác (VD mới nghe giá thị trường, chưa mua thật).</div>
+      <div class="card">
+        ${(()=>{
+          const goodsTypesList = [...new Set([
+            ...state.invoiceLots.map(l=>l.goodsType),
+            ...state.mineInvoices.map(inv=>inv.goodsType)
+          ].filter(Boolean))];
+          if(goodsTypesList.length===0) return '<div class="hint">Chưa có loại hàng nào từng ghi nhận ở Kho Hoá Đơn Bù/Sổ Hoá Đơn Thật Từ Mỏ.</div>';
+          return goodsTypesList.map((gt,i)=>{
+            const auto = netCostPerKhoiForGoodsType(gt);
+            const overrideVal = (state.settings.lotPriceOverrides||{})[normGoodsType(gt)];
+            return `
+            <div class="field" style="margin-bottom:${i===goodsTypesList.length-1?'0':'14px'};">
+              <label>${escapeHtml(gt)} — ${auto.value!==null ? `tự động: ${fmtVND(Math.round(auto.value))}/khối (lô ${formatDateVN(auto.lotDate)})` : 'chưa có lô nào để tự tính'}</label>
+              <input type="number" inputmode="decimal" class="lotPriceOverrideInput" data-goods-type="${escapeHtml(normGoodsType(gt))}" placeholder="Để trống = dùng số tự động" value="${overrideVal?Math.round(overrideVal):''}">
+            </div>`;
+          }).join('');
+        })()}
+      </div>
+      <button class="btn btn-ghost btn-sm" id="saveLotPriceOverridesBtn" style="margin-top:10px;">💾 Lưu Giả Định Giá</button>
+    </section>
+
+    <section class="group">
       <h3>📋 Giấy Tờ Xe & Tài Xế</h3>
       <div class="hint" style="margin-bottom:10px;">App tự cảnh báo khi còn 30 ngày là hết hạn (hiện ngay ở tab "Ca Làm Việc"), càng gần hạn càng cảnh báo gấp hơn. Nạp ngày hết hạn thật vào đây 1 lần, sau đó chỉ cần cập nhật lại khi gia hạn xong.</div>
       <div style="display:flex; justify-content:flex-end;">
@@ -20009,6 +20167,19 @@ function renderSettings(){
     if(!(await saveTaxRates())) return;
     renderAll();
     showToast('Đã lưu Thuế Suất.');
+  });
+
+  const saveLotPriceOverridesBtn = document.getElementById('saveLotPriceOverridesBtn');
+  if(saveLotPriceOverridesBtn) saveLotPriceOverridesBtn.addEventListener('click', async ()=>{
+    const overrides = {};
+    document.querySelectorAll('.lotPriceOverrideInput').forEach(inp=>{
+      const v = Number(inp.value)||0;
+      if(v>0) overrides[inp.dataset.goodsType] = v;
+    });
+    state.settings.lotPriceOverrides = overrides;
+    if(!(await saveTaxRates())) return;
+    renderAll();
+    showToast('Đã lưu giả định giá.');
   });
 
   document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
