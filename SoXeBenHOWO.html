@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-25 · #308';
+const APP_BUILD = '2026-09-25 · #309';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9968,30 +9968,47 @@ const GEMINI_MODEL = 'gemini-3.8-flash'; // SỬA 2026-09-20 (Ông Chủ hỏi "
 
 // ========================= PERSISTENT RETRY (SHARED BY BOTH GEMINI CALLS) =========================
 // Error codes that will NEVER succeed by simply retrying the exact same
-// request — a missing/invalid API key, a corrupt image, or a rejected key
-// need Ông Chủ to fix something in Cài Đặt, not the network to recover.
+// request — a missing/invalid API key, a corrupt image, a model/endpoint
+// that doesn't exist, or a response that got cut off mid-stream (retrying
+// identically just gets cut off identically again) — need Ông Chủ to fix
+// something in Cài Đặt or shrink the request, not the network to recover.
 // Everything else (connection drop, timeout, Gemini 429/5xx, empty or
-// unparseable model output) is treated as transient and retried FOREVER
-// with capped exponential backoff — per spec, never surface a mid-stream
-// error that forces a manual re-tap of the analyze button.
-const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400','HTTP_401','HTTP_403']);
+// unparseable model output) is treated as transient and retried with
+// capped exponential backoff, UP TO a ceiling (below) — past that, a
+// "transient" error that has failed this many times in a row is no
+// longer transient in any useful sense (most often: daily free-tier quota
+// used up), so it surfaces a clear, actionable message instead of running
+// forever with nothing to show for it.
+const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400','HTTP_401','HTTP_403','HTTP_404','TRUNCATED']);
+// SỬA 2026-09-25 (Ông Chủ báo "luôn báo lỗi, hoặc chạy rất nhiều phiên mà
+// không ra kết quả"): trước đây retry THẬT SỰ vô hạn — nếu gặp đúng 1 lỗi
+// lặp lại y hệt mãi (ví dụ hết hạn mức Gemini miễn phí trong ngày, trả về
+// 429 liên tục), app sẽ "chạy" mãi mãi mà không bao giờ tự nhận ra là vô
+// vọng. Đặt trần 10 lần thử (đủ dư cho lỗi mạng/máy chủ CHẬP CHỜN thật sự
+// tự hồi phục trong ~1 phút) — quá mức đó, dừng lại và báo rõ nguyên nhân
+// nhiều khả năng nhất, thay vì im lặng thử mãi.
+const GEMINI_MAX_ATTEMPTS = 10;
 
 /// Runs one Gemini attempt (`attemptFn`) and keeps retrying on transient
 /// failure with capped exponential backoff (1.5s → 3s → 6s → … → capped at
-/// 20s), indefinitely, until it either succeeds or hits a non-retryable
-/// error above. `onRetry(attemptNumber, error, waitMs)` fires right before
-/// each wait so the caller can keep its loading UI (the truck animation)
-/// alive and, after enough attempts, let Ông Chủ know it's still working
-/// rather than silently stuck — without ever showing a dead-end error.
+/// 20s), up to GEMINI_MAX_ATTEMPTS, until it either succeeds or hits a
+/// non-retryable error above. `onRetry(attemptNumber, error, waitMs)` fires
+/// right before each wait so the caller can keep its loading UI (the truck
+/// animation) alive and, after enough attempts, let Ông Chủ know it's
+/// still working rather than silently stuck — without ever showing a
+/// mid-stream error that forces a manual re-tap of the analyze button.
 async function callGeminiWithRetry(attemptFn, onRetry, shouldCancel){
   let attempt = 0;
-  while(true){
+  let lastErr = null;
+  while(attempt<GEMINI_MAX_ATTEMPTS){
     if(shouldCancel && shouldCancel()){ const e = new Error('Đã huỷ.'); e.code='CANCELLED'; throw e; }
     attempt++;
     try {
       return await attemptFn();
     } catch(err){
       if(GEMINI_NON_RETRYABLE_CODES.has(err.code)) throw err;
+      lastErr = err;
+      if(attempt>=GEMINI_MAX_ATTEMPTS) break;
       const waitMs = Math.min(1500 * Math.pow(2, attempt-1), 20000);
       if(onRetry){ try{ onRetry(attempt, err, waitMs); }catch(_ignored){} }
       // MỚI (Ông Chủ báo "phân tích ngay phản hồi quá chậm" — thêm nút
@@ -10008,6 +10025,17 @@ async function callGeminiWithRetry(attemptFn, onRetry, shouldCancel){
       }
     }
   }
+  // Đã thử đủ 10 lần, lỗi vẫn lặp lại y hệt — báo rõ nguyên nhân nhiều khả
+  // năng nhất theo đúng mã lỗi cuối cùng gặp phải, để Ông Chủ biết hướng xử
+  // lý thay vì chỉ thấy "lỗi chung chung".
+  const code = lastErr && lastErr.code;
+  let msg;
+  if(code==='HTTP_429') msg = 'Gemini báo hết hạn mức (429) liên tục sau 10 lần thử — nhiều khả năng đã dùng hết hạn mức miễn phí trong ngày. Thử lại sau vài giờ, hoặc kiểm tra hạn mức tại aistudio.google.com.';
+  else if(code && code.startsWith('HTTP_5')) msg = `Máy chủ Gemini báo lỗi (${code.replace('HTTP_','')}) liên tục sau 10 lần thử — có thể Google đang gặp sự cố tạm thời trên diện rộng. Thử lại sau ít phút.`;
+  else if(code==='NETWORK') msg = 'Không kết nối được tới Gemini sau 10 lần thử — kiểm tra lại mạng rồi thử lại.';
+  else if(code==='PARSE' || code==='EMPTY') msg = 'Gemini trả về dữ liệu không đọc được liên tục sau 10 lần thử — thử thu hẹp khoảng ngày rồi phân tích lại.';
+  else msg = `Vẫn lỗi sau 10 lần thử (${code||'không rõ mã lỗi'}) — thử lại sau, hoặc dùng "📊 Đọc Kết Quả" (không qua AI) để xem số liệu ngay.`;
+  const finalErr = new Error(msg); finalErr.code = 'MAX_ATTEMPTS'; throw finalErr;
 }
 
 // ========================= STRATEGY ASSISTANT (7/30-DAY AI ANALYSIS) =========================
@@ -10166,9 +10194,20 @@ async function callGeminiText(promptText, onRetry, shouldCancel){
   // "high") để trả lời nhanh trở lại, giảm hẳn tần suất phải retry. Dùng
   // ĐÚNG tên field "thinkingLevel" (không phải "thinkingBudget" — đó là
   // field CŨ của dòng Gemini 2.5, dùng nhầm sẽ báo lỗi với Gemini 3).
+  // SỬA 2026-09-25 (Ông Chủ báo "luôn báo lỗi hoặc chạy rất nhiều phiên mà
+  // không ra kết quả" — TRA RA GỐC RỄ THẬT KHÁC, không phải do tên model):
+  // đã xác nhận lại "gemini-3.8-flash" vẫn là model THẬT, đang hoạt động
+  // (Google khuyến nghị dùng cho dự án mới). Lỗi thật nằm ở chỗ request
+  // CHƯA từng khai maxOutputTokens — prompt bắt AI liệt kê ĐỦ MỌI tài xế +
+  // MỌI công trình (không giới hạn số lượng), nên với tháng nhiều dữ liệu,
+  // JSON trả về có thể dài hơn giới hạn output MẶC ĐỊNH (thường khá thấp)
+  // → bị CẮT NGANG giữa chừng → luôn hỏng JSON.parse, MỌI lần thử lại đều
+  // thất bại y hệt nhau (không phải lỗi mạng chập chờn ngẫu nhiên — đây là
+  // lỗi CỐ ĐỊNH, retry bao nhiêu lần cũng không tự hết). Khai rõ 8192 token
+  // (dư sức cho báo cáo dài nhất từng thấy) để không còn bị cắt.
   const requestBody = {
     contents: [{ parts: [{ text: promptText }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.3, thinkingConfig: { thinkingLevel: 'low' } }
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: 'low' } }
   };
 
   return callGeminiWithRetry(async ()=>{
@@ -10184,6 +10223,12 @@ async function callGeminiText(promptText, onRetry, shouldCancel){
       const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
     }
     const payload = await response.json();
+    const finishReason = payload?.candidates?.[0]?.finishReason;
+    if(finishReason==='MAX_TOKENS'){
+      // Cắt ngang giữa chừng — thử lại y hệt sẽ lại cắt y hệt (lỗi cố định,
+      // không phải chập chờn), nên báo THẲNG, không cần retry vô ích.
+      const e = new Error('Báo cáo quá dài, bị cắt ngang giữa chừng (nhiều dữ liệu tháng này) — thử thu hẹp lại khoảng ngày rồi phân tích lại.'); e.code='TRUNCATED'; throw e;
+    }
     const textOut = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
     if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
     try { return JSON.parse(textOut); }
