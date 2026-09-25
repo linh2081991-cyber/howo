@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-24 · #302';
+const APP_BUILD = '2026-09-24 · #303';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10552,7 +10552,7 @@ function renderStrategyHub(){
       </div>
     </section>
   `;
-  document.getElementById('hubGoStrategyBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategy(); });
+  document.getElementById('hubGoStrategyBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategyBranchHub(); });
   document.getElementById('hubGoAppraisalBtn').addEventListener('click', ()=>{ saveMainScroll(); renderProjectAppraisal(); });
   document.getElementById('hubGoHiringBtn').addEventListener('click', ()=>{ saveMainScroll(); renderHiringAdvisor(); });
   document.getElementById('hubGoBonusBtn').addEventListener('click', ()=>{ saveMainScroll(); renderBonusAdvisor(); });
@@ -10572,25 +10572,207 @@ function renderStrategy(){
     sa.from = r.from; sa.to = r.to;
   }
   const hasKey = !!(state.settings.geminiApiKey || '').trim();
-  // MỚI (Ông Chủ yêu cầu 2026-09-24 — "1 cơ chế rõ hơn, dựa trên số thật,
-  // không cảm tính"): kịch bản "giả định tick đủ hoá đơn 2 chiều" tính
-  // TRỰC TIẾP bằng công thức (không qua AI/Gemini) — luôn có ngay, không
-  // cần chờ phân tích, không phụ thuộc mạng, không có yếu tố "đoán" của
-  // AI. Dùng lại đúng aggregateStrategyData() đã có (cùng nguồn số với
-  // phần AI bên dưới) làm nền TH1, cộng thêm 2 khoản chênh lệch từ
-  // computeInvoiceMismatchWhatIf() để ra TH2.
-  const summaryForWhatIf = aggregateStrategyData(sa.from, sa.to);
-  const whatIf = computeInvoiceMismatchWhatIf(sa.from, sa.to);
+
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="strategyBackBtn">← Quay Lại</button>
+    </section>
+    ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới phân tích được.</div>` : ''}
+    <section class="group">
+      <h3>🧭 Trợ Lý Chiến Lược</h3>
+      <div class="hint" style="margin-bottom:10px;">AI đọc số liệu vận hành thực tế trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="strategy_from" value="${sa.from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="strategy_to" value="${sa.to}">
+        </div>
+      </div>
+      <button class="btn btn-accent btn-block ${sa.loading?'strategy-run-line':''}" id="runStrategyBtn" style="margin-top:12px;" ${sa.loading?'disabled':''}>
+        ${sa.loading ? 'Đang phân tích...' : '🧭 Phân Tích Ngay'}
+        ${sa.loading ? HOWO_TRUCK_HTML : ''}
+      </button>
+      ${sa.loading ? `<div class="hint" id="strategyRetryHint" style="margin-top:8px;"></div>` : ''}
+      ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
+    </section>
+
+    ${sa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(sa.error)}</div></section>` : ''}
+
+    ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
+      <section class="group">
+        <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc số liệu vận hành trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
+      </section>
+    ` : '')}
+  `;
+
+  if(sa.loading){
+    activeStrategyTruckRun = startTruckRun(document.getElementById('runStrategyBtn'));
+  } else {
+    activeStrategyTruckRun = null;
+  }
+
+  document.getElementById('strategyBackBtn').addEventListener('click', ()=>{ state.strategyView='ai-hub'; renderAll(); restoreMainScroll(); });
+  document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
+  document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
+  document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
+}
+
+/// MỚI (Ông Chủ yêu cầu 2026-09-24 — "cho 2 nút phân nhánh: Đọc Kết Quả /
+/// Phân Tích Ngay (AI), Đọc Kết Quả tách tiếp 2 nhánh con: Đọc Kết Quả
+/// Thật / Giả Định Khi Tick Hoá Đơn"): trang gốc khi bấm "🧭 TRỢ LÝ CHIẾN
+/// LƯỢC" từ hub Trợ Lý — chỉ 2 nút lựa chọn nhánh, không tính toán gì ở
+/// đây. renderStrategy() (AI 4 chuyên gia) giữ NGUYÊN VẸN như cũ, không
+/// đổi 1 dòng nào — chỉ đổi đường dẫn vào (qua nhánh 2) và nút Quay Lại
+/// của nó (trỏ về đúng trang này thay vì thẳng về hub Trợ Lý).
+function renderStrategyBranchHub(){
+  scrollMainToTop();
+  state.strategyView = 'ai-hub';
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="strategyHubBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h3>🧭 Trợ Lý Chiến Lược</h3>
+      <div class="hint" style="margin-bottom:14px;">Chọn 1 trong 2 hướng bên dưới.</div>
+      <button class="btn btn-accent btn-block" id="goResultsReadBtn" style="padding:16px; margin-bottom:12px;">📊 Đọc Kết Quả</button>
+      <div class="hint" style="margin-top:0; margin-bottom:16px;">Số liệu tính THẲNG bằng công thức, không qua AI — luôn có ngay, không cần chờ, không có yếu tố "đoán".</div>
+      <button class="btn btn-ghost btn-block" id="goAiAnalysisBtn" style="padding:16px;">🤖 Phân Tích Ngay (AI 4 Chuyên Gia)</button>
+      <div class="hint" style="margin-top:8px;">AI đọc số liệu vận hành trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược theo góc nhìn 4 chuyên gia.</div>
+    </section>
+  `;
+  document.getElementById('strategyHubBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
+  document.getElementById('goResultsReadBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsReadHub(); });
+  document.getElementById('goAiAnalysisBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategy(); });
+}
+
+/// Nhánh con của "Đọc Kết Quả" — 2 lựa chọn: số THẬT hiện tại, hay số
+/// GIẢ ĐỊNH nếu tick đủ hoá đơn 2 chiều.
+function renderResultsReadHub(){
+  scrollMainToTop();
+  state.strategyView = 'results-hub';
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="resultsReadHubBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h3>📊 Đọc Kết Quả</h3>
+      <div class="hint" style="margin-bottom:14px;">Chọn 1 trong 2 cách xem — cả 2 đều tính trực tiếp bằng công thức, không qua AI.</div>
+      <button class="btn btn-accent btn-block" id="goResultsRealBtn" style="padding:16px; margin-bottom:12px;">📈 Đọc Kết Quả Thật</button>
+      <div class="hint" style="margin-top:0; margin-bottom:16px;">Đúng số hiện tại app đang ghi nhận, theo khoảng ngày tự chọn.</div>
+      <button class="btn btn-ghost btn-block" id="goResultsWhatIfBtn" style="padding:16px;">🔮 Giả Định Khi Tick Hoá Đơn</button>
+      <div class="hint" style="margin-top:8px;">Nếu tick đủ "Đã nhận hoá đơn MUA" + "Đã xuất hoá đơn BÁN" cho mọi ca thương mại trong khoảng ngày này thì lãi/lỗ thật sự sẽ là bao nhiêu — kèm khuyến nghị chạy tiếp hay tạm nghỉ.</div>
+    </section>
+  `;
+  document.getElementById('resultsReadHubBackBtn').addEventListener('click', ()=>{ saveMainScroll(); renderStrategyBranchHub(); });
+  document.getElementById('goResultsRealBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsReal(); });
+  document.getElementById('goResultsWhatIfBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsWhatIf(); });
+}
+
+/// "Đọc Kết Quả Thật" — số P&L hiện tại theo đúng khoảng ngày tự chọn,
+/// dùng lại NGUYÊN VẸN aggregateStrategyData() (cùng nguồn số app đang
+/// dùng cho AI) — không tính lại bằng công thức riêng.
+function renderResultsReal(){
+  scrollMainToTop();
+  state.strategyView = 'results-real';
+  const app = document.getElementById('app');
+  const sa = state.strategyAnalysis;
+  if(!sa.from || !sa.to){ const r = currentMonthRange(); sa.from = r.from; sa.to = r.to; }
+  const summary = aggregateStrategyData(sa.from, sa.to);
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="resultsRealBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h3>📈 Đọc Kết Quả Thật</h3>
+      <div class="hint" style="margin-bottom:10px;">Đúng số hiện tại app đang ghi nhận cho khoảng ngày đã chọn — không giả định gì.</div>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="rr_from" value="${sa.from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="rr_to" value="${sa.to}">
+        </div>
+      </div>
+      <div class="grid-table-wrap" style="margin-top:12px;">
+        <table class="grid-table">
+          <thead><tr><th>Chỉ số</th><th class="num">Giá trị</th></tr></thead>
+          <tbody>
+            <tr><td>Doanh thu</td><td class="num" style="color:var(--profit);">+${fmtVND(summary.totalRevenue)}</td></tr>
+            <tr><td>Chi phí vận hành</td><td class="num" style="color:var(--loss);">−${fmtVND(summary.totalCost)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Lợi Nhuận Gộp</td><td class="num" style="color:${summary.grossProfit>=0?'var(--profit)':'var(--loss)'}">${summary.grossProfit>=0?'+':''}${fmtVND(summary.grossProfit)}</td></tr>
+            <tr><td>Tổng số Km</td><td class="num">${summary.totalKm.toLocaleString('vi-VN')} km</td></tr>
+            <tr><td>Tổng số chuyến</td><td class="num">${summary.totalTrips}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ${summary.siteRanking.length>0 ? `
+      <h3 style="margin-top:18px;">🏗️ Theo Từng Công Trình</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Công trình</th><th class="num">Doanh thu</th><th class="num">Số chuyến</th></tr></thead>
+          <tbody>
+            ${summary.siteRanking.map(s=>`<tr><td>${escapeHtml(s.name)}</td><td class="num">${fmtVND(s.revenue)}</td><td class="num">${s.trips}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+      ${summary.driverStats.length>0 ? `
+      <h3 style="margin-top:18px;">🧑‍✈️ Theo Từng Tài Xế</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tài xế</th><th class="num">Số ca</th><th class="num">Km</th><th class="num">Dầu (lít/km)</th></tr></thead>
+          <tbody>
+            ${summary.driverStats.map(d=>`<tr><td>${escapeHtml(d.name)}</td><td class="num">${d.shifts}</td><td class="num">${d.totalKm.toLocaleString('vi-VN')}</td><td class="num">${d.fuelPerKm}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+    </section>
+  `;
+  document.getElementById('resultsRealBackBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsReadHub(); });
+  document.getElementById('rr_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; renderResultsReal(); });
+  document.getElementById('rr_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; renderResultsReal(); });
+}
+
+/// "Giả Định Khi Tick Hoá Đơn" — kịch bản TH1→TH2 + khuyến nghị chạy/nghỉ,
+/// tính TRỰC TIẾP bằng công thức (KHÔNG qua AI). Dùng lại NGUYÊN VẸN
+/// aggregateStrategyData()/computeInvoiceMismatchWhatIf() đã có.
+function renderResultsWhatIf(){
+  scrollMainToTop();
+  state.strategyView = 'results-whatif';
+  const app = document.getElementById('app');
+  const sa = state.strategyAnalysis;
+  if(!sa.from || !sa.to){ const r = currentMonthRange(); sa.from = r.from; sa.to = r.to; }
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
-  const th1Profit = summaryForWhatIf.grossProfit;
+  const summary = aggregateStrategyData(sa.from, sa.to);
+  const whatIf = computeInvoiceMismatchWhatIf(sa.from, sa.to);
+  const th1Profit = summary.grossProfit;
   const th2Profit = th1Profit + whatIf.extraVatCredit - whatIf.extraCompCost;
   const fixedCostIfIdle = state.shifts.filter(sh=>sh.date>=sa.from && sh.date<=sa.to)
     .reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.foodAllowance)||0),0);
-  const whatIfHtml = `
+  app.innerHTML = `
     <section class="group">
-      <h3>📊 Kịch Bản Thật (Giả Định Tick Đủ Hoá Đơn 2 Chiều)</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">Tính trực tiếp bằng công thức, KHÔNG qua AI — luôn có ngay, đúng theo đúng khoảng ngày Ông Chủ đang chọn ở trên. So sánh lãi hiện tại (TH1 — nhiều ca CHƯA tick đủ hoá đơn nên số đang bị lệch) với lãi thật nếu tick đủ (TH2).</div>
-      <div class="grid-table-wrap" style="margin-bottom:10px;">
+      <button class="btn btn-ghost btn-sm" id="resultsWhatIfBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h3>🔮 Giả Định Khi Tick Hoá Đơn</h3>
+      <div class="hint" style="margin-bottom:10px;">Tính trực tiếp bằng công thức, KHÔNG qua AI. So sánh lãi hiện tại (TH1 — nhiều ca CHƯA tick đủ hoá đơn nên số đang bị lệch) với lãi thật nếu tick đủ (TH2), theo đúng khoảng ngày tự chọn.</div>
+      <div class="date-range">
+        <div class="field">
+          <label>Từ ngày</label>
+          <input type="date" id="rw_from" value="${sa.from}">
+        </div>
+        <div class="field">
+          <label>Đến ngày</label>
+          <input type="date" id="rw_to" value="${sa.to}">
+        </div>
+      </div>
+      <div class="grid-table-wrap" style="margin-top:12px; margin-bottom:10px;">
         <table class="grid-table">
           <thead><tr><th>Trường hợp</th><th class="num">Lợi Nhuận Gộp</th></tr></thead>
           <tbody>
@@ -10628,54 +10810,9 @@ function renderStrategy(){
       </div>
     </section>
   `;
-
-  app.innerHTML = `
-    <section class="group">
-      <button class="btn btn-ghost btn-sm" id="strategyBackBtn">← Quay Lại</button>
-    </section>
-    ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới phân tích được.</div>` : ''}
-    <section class="group">
-      <h3>🧭 Trợ Lý Chiến Lược</h3>
-      <div class="hint" style="margin-bottom:10px;">AI đọc số liệu vận hành thực tế trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
-      <div class="date-range">
-        <div class="field">
-          <label>Từ ngày</label>
-          <input type="date" id="strategy_from" value="${sa.from}">
-        </div>
-        <div class="field">
-          <label>Đến ngày</label>
-          <input type="date" id="strategy_to" value="${sa.to}">
-        </div>
-      </div>
-      <button class="btn btn-accent btn-block ${sa.loading?'strategy-run-line':''}" id="runStrategyBtn" style="margin-top:12px;" ${sa.loading?'disabled':''}>
-        ${sa.loading ? 'Đang phân tích...' : '🧭 Phân Tích Ngay'}
-        ${sa.loading ? HOWO_TRUCK_HTML : ''}
-      </button>
-      ${sa.loading ? `<div class="hint" id="strategyRetryHint" style="margin-top:8px;"></div>` : ''}
-      ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
-    </section>
-
-    ${whatIfHtml}
-
-    ${sa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(sa.error)}</div></section>` : ''}
-
-    ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
-      <section class="group">
-        <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc số liệu vận hành trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
-      </section>
-    ` : '')}
-  `;
-
-  if(sa.loading){
-    activeStrategyTruckRun = startTruckRun(document.getElementById('runStrategyBtn'));
-  } else {
-    activeStrategyTruckRun = null;
-  }
-
-  document.getElementById('strategyBackBtn').addEventListener('click', ()=>{ state.strategyView='hub'; renderAll(); restoreMainScroll(); });
-  document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; renderStrategy(); });
-  document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; renderStrategy(); });
-  document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
+  document.getElementById('resultsWhatIfBackBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsReadHub(); });
+  document.getElementById('rw_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; renderResultsWhatIf(); });
+  document.getElementById('rw_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; renderResultsWhatIf(); });
 }
 
 /// Trang "🎁 Đề Xuất Thưởng Cuối Tháng" — cùng khuôn với Trợ Lý Chiến Lược
@@ -21633,6 +21770,10 @@ function renderAll(){
       if(state.strategyView==='appraisal') renderProjectAppraisal();
       else if(state.strategyView==='bonus') renderBonusAdvisor();
       else if(state.strategyView==='ai') renderStrategy();
+      else if(state.strategyView==='ai-hub') renderStrategyBranchHub();
+      else if(state.strategyView==='results-hub') renderResultsReadHub();
+      else if(state.strategyView==='results-real') renderResultsReal();
+      else if(state.strategyView==='results-whatif') renderResultsWhatIf();
       else if(state.strategyView==='hiring') renderHiringAdvisor();
       else renderStrategyHub();
     } else if(state.currentTab==='results'){
