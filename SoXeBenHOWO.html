@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-25 · #307';
+const APP_BUILD = '2026-09-25 · #308';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6318,7 +6318,7 @@ function computeInvoiceMismatchWhatIf(from, to){
           const delta = Math.min(theoreticalCredit, availableRoom);
           if(delta>0.5){
             extraVatCredit += delta;
-            vatDetails.push({ date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', supplierName: supplier?supplier.name:'(chưa gắn nhà cung cấp)', netBuy, invoicedPct, vatRatePercent: vatRate*100, theoreticalCredit, availableRoom, delta, capped: delta < theoreticalCredit-0.5 });
+            vatDetails.push({ shiftId: sh.id, date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', supplierName: supplier?supplier.name:'(chưa gắn nhà cung cấp)', netBuy, invoicedPct, vatRatePercent: vatRate*100, theoreticalCredit, availableRoom, delta, capped: delta < theoreticalCredit-0.5 });
           }
         }
       }
@@ -6335,7 +6335,7 @@ function computeInvoiceMismatchWhatIf(from, to){
           else {
             const cost = need*priceInfo.value;
             extraCompCost += cost;
-            compCostDetails.push({ date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', goodsType: g.goodsType, volume: need, priceInfo, cost });
+            compCostDetails.push({ shiftId: sh.id, date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', goodsType: g.goodsType, volume: need, priceInfo, cost });
           }
         });
       }
@@ -9983,9 +9983,10 @@ const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400'
 /// each wait so the caller can keep its loading UI (the truck animation)
 /// alive and, after enough attempts, let Ông Chủ know it's still working
 /// rather than silently stuck — without ever showing a dead-end error.
-async function callGeminiWithRetry(attemptFn, onRetry){
+async function callGeminiWithRetry(attemptFn, onRetry, shouldCancel){
   let attempt = 0;
   while(true){
+    if(shouldCancel && shouldCancel()){ const e = new Error('Đã huỷ.'); e.code='CANCELLED'; throw e; }
     attempt++;
     try {
       return await attemptFn();
@@ -9993,7 +9994,18 @@ async function callGeminiWithRetry(attemptFn, onRetry){
       if(GEMINI_NON_RETRYABLE_CODES.has(err.code)) throw err;
       const waitMs = Math.min(1500 * Math.pow(2, attempt-1), 20000);
       if(onRetry){ try{ onRetry(attempt, err, waitMs); }catch(_ignored){} }
-      await new Promise(resolve=>setTimeout(resolve, waitMs));
+      // MỚI (Ông Chủ báo "phân tích ngay phản hồi quá chậm" — thêm nút
+      // Huỷ ở nơi gọi): thay vì ngủ nguyên 1 khoảng backoff (tới 20s) rồi
+      // mới có cơ hội kiểm tra huỷ, chia nhỏ thành từng bước 300ms — bấm
+      // Huỷ có tác dụng gần như ngay lập tức, không phải đợi hết khoảng
+      // chờ hiện tại.
+      let waited = 0;
+      while(waited<waitMs){
+        if(shouldCancel && shouldCancel()){ const e = new Error('Đã huỷ.'); e.code='CANCELLED'; throw e; }
+        const step = Math.min(300, waitMs-waited);
+        await new Promise(resolve=>setTimeout(resolve, step));
+        waited += step;
+      }
     }
   }
 }
@@ -10133,7 +10145,7 @@ Chỉ đưa nhận xét dựa trên số liệu thực tế ở trên, không su
 
 /// Text-only Gemini call (no image) — same API, just omits the inline_data
 /// image part.
-async function callGeminiText(promptText, onRetry){
+async function callGeminiText(promptText, onRetry, shouldCancel){
   const apiKey = (state.settings.geminiApiKey || '').trim();
   if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
 
@@ -10176,7 +10188,7 @@ async function callGeminiText(promptText, onRetry){
     if(!textOut){ const e = new Error('Gemini không trả về nội dung.'); e.code='EMPTY'; throw e; }
     try { return JSON.parse(textOut); }
     catch(parseErr){ const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e; }
-  }, onRetry);
+  }, onRetry, shouldCancel);
 }
 
 /// Handle for whichever HOWO truck run is currently live in the DOM for
@@ -10288,7 +10300,7 @@ let activeStrategyTruckRun = null;
 
 async function runStrategyAnalysis(){
   const sa = state.strategyAnalysis;
-  sa.loading = true; sa.error = null;
+  sa.loading = true; sa.error = null; sa.cancelRequested = false;
   renderStrategy();
   try{
     const summary = aggregateStrategyData(sa.from, sa.to);
@@ -10314,11 +10326,15 @@ async function runStrategyAnalysis(){
         const hintEl = document.getElementById('strategyRetryHint');
         if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
       }
-    });
+    }, ()=>sa.cancelRequested);
     sa.result = result;
     sa.generatedAt = new Date().toISOString();
   }catch(e){
-    sa.error = e.message || 'Không phân tích được — thử lại.';
+    // MỚI (Ông Chủ báo "phân tích ngay phản hồi quá chậm" — thêm nút Huỷ):
+    // bấm Huỷ không phải "lỗi", không hiện khung đỏ báo lỗi — chỉ lặng lẽ
+    // dừng, trả về đúng màn hình ban đầu để Ông Chủ có thể đổi khoảng
+    // ngày hoặc quay lại dùng "Đọc Kết Quả" (nhanh hơn, không qua AI).
+    if(e.code!=='CANCELLED') sa.error = e.message || 'Không phân tích được — thử lại.';
   }
   sa.loading = false;
   if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
@@ -10626,6 +10642,7 @@ function renderStrategy(){
         ${sa.loading ? 'Đang phân tích...' : '🧭 Phân Tích Ngay'}
         ${sa.loading ? HOWO_TRUCK_HTML : ''}
       </button>
+      ${sa.loading ? `<button class="btn btn-ghost btn-block" id="cancelStrategyBtn" style="margin-top:8px;">✕ Huỷ</button>` : ''}
       ${sa.loading ? `<div class="hint" id="strategyRetryHint" style="margin-top:8px;"></div>` : ''}
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
@@ -10649,6 +10666,8 @@ function renderStrategy(){
   document.getElementById('strategy_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; sa.result=null; sa.error=null; });
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
+  const cancelStrategyBtn = document.getElementById('cancelStrategyBtn');
+  if(cancelStrategyBtn) cancelStrategyBtn.addEventListener('click', ()=>{ sa.cancelRequested = true; });
 }
 
 /// MỚI (Ông Chủ yêu cầu 2026-09-24 — "cho 2 nút phân nhánh: Đọc Kết Quả /
@@ -10671,7 +10690,7 @@ function renderStrategyBranchHub(){
       <div class="hint" style="margin-bottom:14px;">Chọn 1 trong 2 hướng bên dưới.</div>
       <button class="btn btn-accent btn-block" id="goResultsReadBtn" style="padding:16px; margin-bottom:12px;">📊 Đọc Kết Quả</button>
       <div class="hint" style="margin-top:0; margin-bottom:16px;">Số liệu tính THẲNG bằng công thức, không qua AI — luôn có ngay, không cần chờ, không có yếu tố "đoán".</div>
-      <button class="btn btn-ghost btn-block" id="goAiAnalysisBtn" style="padding:16px;">🤖 Phân Tích Ngay (AI 4 Chuyên Gia)</button>
+      <button class="btn btn-ghost btn-block" id="goAiAnalysisBtn" style="padding:16px;">🤖 Phân Tích Ngay</button>
       <div class="hint" style="margin-top:8px;">AI đọc số liệu vận hành trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược theo góc nhìn 4 chuyên gia.</div>
     </section>
   `;
@@ -10891,7 +10910,7 @@ function renderResultsWhatIf(){
   // bóc rõ TỪNG BƯỚC TÍNH ra đúng 2 con số +VAT/−Chi phí bù ở bảng trên,
   // không phải hiển thị lại P&L đã biết): liệt kê ĐỦ từng dòng đóng góp,
   // kèm công thức chữ, để tự Ông Chủ đối chiếu ra đúng bằng tay được.
-  const vatCalcHtml = whatIf.vatDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick MUA đủ hoặc không có giao dịch thương mại).</div>' : whatIf.vatDetails.map(d=>`
+  const vatCalcHtml = whatIf.vatDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick MUA đủ hoặc không có giao dịch thương mại).</div>' : whatIf.vatDetails.map((d,i)=>`
     <div class="card" style="margin-bottom:10px;">
       <div style="font-weight:700; font-size:13px; margin-bottom:6px;">${formatDateVN(d.date)} · ${shiftTypeLabel(d.shiftType)} · ${escapeHtml(d.customerName)} (mua từ ${escapeHtml(d.supplierName)})</div>
       <div class="hint" style="margin-top:0; margin-bottom:4px; line-height:1.6;">
@@ -10905,8 +10924,9 @@ function renderResultsWhatIf(){
       ` : ''}
       <div style="font-weight:700; color:var(--profit); font-size:13.5px;">= ${d.capped ? `Kẹp còn ${fmtVND(Math.round(d.availableRoom))}` : `${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}% × ${d.vatRatePercent}%`} = +${fmtVND(Math.round(d.delta))}</div>
       <div class="hint" style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);">📦 Đồng thời, giá trị hàng có hoá đơn thật ghi nhận vào Kho (${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}%) = <strong>${fmtVND(Math.round(d.netBuy*d.invoicedPct/100))}</strong> — không mất thêm đồng nào, để dành dùng cho lần bán tới đúng loại hàng đã múc (xem tại Linh Chí Thành → Tổng Tồn Kho Hoá Đơn).</div>
+      ${d.shiftId ? `<button class="link-btn vatDetailShiftBtn" data-shift-id="${escapeHtml(d.shiftId)}" style="margin-top:8px; font-size:12px; padding:2px;">🔍 Xem Ca Này (đối chiếu từng chuyến)</button>` : ''}
     </div>`).join('');
-  const compCalcHtml = whatIf.compCostDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick BÁN đủ hoặc không thiếu chứng từ).</div>' : whatIf.compCostDetails.map(d=>`
+  const compCalcHtml = whatIf.compCostDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick BÁN đủ hoặc không thiếu chứng từ).</div>' : whatIf.compCostDetails.map((d,i)=>`
     <div class="card" style="margin-bottom:10px;">
       <div style="font-weight:700; font-size:13px; margin-bottom:6px;">${formatDateVN(d.date)} · ${shiftTypeLabel(d.shiftType)} · ${escapeHtml(d.customerName)} — thiếu chứng từ ${escapeHtml(d.goodsType)}</div>
       <div class="hint" style="margin-top:0; margin-bottom:4px; line-height:1.6;">
@@ -10914,6 +10934,7 @@ function renderResultsWhatIf(){
         × Đơn giá dùng: <strong>${fmtVND(Math.round(d.priceInfo.value))}/khối</strong> (${d.priceInfo.source==='override'?'Ông Chủ tự ghi đè ở Cài Đặt':'giá NET lô hoá đơn bù thật gần nhất, ngày '+formatDateVN(d.priceInfo.lotDate)})
       </div>
       <div style="font-weight:700; color:var(--loss); font-size:13.5px;">= ${fmtQty(d.volume)} khối × ${fmtVND(Math.round(d.priceInfo.value))}đ/khối = −${fmtVND(Math.round(d.cost))}</div>
+      ${d.shiftId ? `<button class="link-btn compDetailShiftBtn" data-shift-id="${escapeHtml(d.shiftId)}" style="margin-top:8px; font-size:12px; padding:2px;">🔍 Xem Ca Này (đối chiếu từng chuyến)</button>` : ''}
     </div>`).join('');
 
   app.innerHTML = `
@@ -10994,6 +11015,9 @@ function renderResultsWhatIf(){
   }
   const goInvoiceLotBtn = document.getElementById('rw_goInvoiceLotBtn');
   if(goInvoiceLotBtn) goInvoiceLotBtn.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(null); });
+  document.querySelectorAll('.vatDetailShiftBtn, .compDetailShiftBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ openShift(btn.dataset.shiftId); });
+  });
 }
 
 /// Trang "🎁 Đề Xuất Thưởng Cuối Tháng" — cùng khuôn với Trợ Lý Chiến Lược
