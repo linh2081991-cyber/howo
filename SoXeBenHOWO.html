@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-25 · #305';
+const APP_BUILD = '2026-09-25 · #306';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6295,18 +6295,31 @@ function computeInvoiceMismatchWhatIf(from, to){
       const customer = s.customerId ? customerById(s.customerId) : null;
       const supplier = s.supplierId ? supplierById(s.supplierId) : null;
       if(!s.buyHasInvoice){
-        // MỚI (Ông Chủ yêu cầu 2026-09-25 — "show chi tiết cách tính để
-        // thuyết phục"): KHÔNG chỉ lấy hiệu số commercialVatPayable()
-        // trước/sau (hộp đen) — bóc rõ TỪNG THÀNH PHẦN đúng công thức
-        // thật (netBuy × %hoá đơn mỏ xuất × thuế suất VAT) để hiển thị
-        // minh bạch từng con số, không phải "tin em".
+        // SỬA 2026-09-25 (rà lại dưới góc nhìn CHUYÊN GIA THUẾ — phát hiện
+        // lỗi quan trọng ở bản trước): công thức thật commercialVatPayable()
+        // có 1 "trần" — luật thuế KHÔNG cho khấu trừ VƯỢT QUÁ đúng số VAT
+        // ĐẦU RA còn lại của CHÍNH công trình đó sau khi đã trừ hoá đơn bù
+        // (không hoàn thuế, không bù chéo sang công trình khác — đã ghi rõ
+        // trong công thức gốc). Bản trước lỡ hiện thẳng con số LÝ THUYẾT
+        // (netBuy × %hoá đơn × VAT) mà KHÔNG kiểm tra "còn room hay không"
+        // — có thể phóng đại quá số VAT thật được hưởng nếu công trình đó
+        // giá trị bán nhỏ. Sửa lại: kẹp đúng bằng "room" còn lại, TOÁN HỌC
+        // tương đương chính xác 100% với vatBefore−vatAfter của công thức
+        // gốc (đã chứng minh: delta = min(theoretical, room)) — vừa đúng
+        // tuyệt đối, vừa vẫn hiện đủ từng thành phần để minh bạch.
         const netBuy = commercialNetBuy(s);
         const invoicedPct = siteInvoicedBuyPercent(s);
         const vatRate = siteVatRateFraction(s);
-        const delta = netBuy * (invoicedPct/100) * vatRate;
-        if(delta>0.5){
-          extraVatCredit += delta;
-          vatDetails.push({ date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', supplierName: supplier?supplier.name:'(chưa gắn nhà cung cấp)', netBuy, invoicedPct, vatRatePercent: vatRate*100, delta });
+        const theoreticalCredit = netBuy * (invoicedPct/100) * vatRate;
+        if(theoreticalCredit>0.5){
+          const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vatRate : 0);
+          const inputVatFromSupplement = siteInvoiceSupplementVatCredit(s, {sh, idx});
+          const availableRoom = Math.max(0, outputVat - inputVatFromSupplement);
+          const delta = Math.min(theoreticalCredit, availableRoom);
+          if(delta>0.5){
+            extraVatCredit += delta;
+            vatDetails.push({ date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', supplierName: supplier?supplier.name:'(chưa gắn nhà cung cấp)', netBuy, invoicedPct, vatRatePercent: vatRate*100, theoreticalCredit, availableRoom, delta, capped: delta < theoreticalCredit-0.5 });
+          }
         }
       }
       if(!s.sellHasInvoice){
@@ -10701,13 +10714,35 @@ function renderResultsReal(){
   const sa = state.strategyAnalysis;
   if(!sa.from || !sa.to){ const r = currentMonthRange(); sa.from = r.from; sa.to = r.to; }
   const summary = aggregateStrategyData(sa.from, sa.to);
+  // MỚI (Ông Chủ báo "sơ sài quá, cần chuyên nghiệp như chuyên gia báo
+  // cáo tài chính/phân tích kinh tế"): trang cũ chỉ hiện lại ĐÚNG 3 dòng
+  // trong khi aggregateStrategyData() đã tính sẵn RẤT nhiều số liệu khác
+  // (đang gửi cho AI mà không hề hiện cho Ông Chủ thấy trực tiếp!) — giờ
+  // trình bày ĐỦ theo đúng 4 góc nhìn chuyên gia (khớp cấu trúc "hội đồng
+  // 4 chuyên gia" đã dùng cho AI): Kế Toán-Tài Chính, Điều Hành Logistics
+  // (công trình + tài xế), Pháp Lý (giấy tờ sắp hết hạn), và bổ trợ Bảo
+  // Dưỡng. KHÔNG tính thêm công thức mới — chỉ trình bày ĐẦY ĐỦ dữ liệu
+  // đã có sẵn, cộng vài chỉ số phái sinh đơn giản (biên lợi nhuận %,
+  // bình quân/ngày) tính thẳng từ số đã có.
+  const marginPct = summary.totalRevenue>0 ? (summary.grossProfit/summary.totalRevenue*100) : 0;
+  const revenuePerDay = summary.totalRevenue/summary.periodDays;
+  const revenuePerTrip = summary.totalTrips>0 ? summary.totalRevenue/summary.totalTrips : 0;
+  const revenuePerKm = summary.totalKm>0 ? summary.totalRevenue/summary.totalKm : 0;
+  const totalFixedMonthly = summary.financialSnapshot.roadFeeThisMonth + summary.financialSnapshot.otherFixedMonthly;
+  const sortedSites = [...summary.siteRanking].sort((a,b)=>b.revenue-a.revenue);
+  const sortedDrivers = [...summary.driverStats].sort((a,b)=>b.totalKm-a.totalKm);
+  const bestFuelDriver = summary.driverStats.filter(d=>d.totalKm>0).sort((a,b)=>a.fuelPerKm-b.fuelPerKm)[0];
+  const worstFuelDriver = summary.driverStats.filter(d=>d.totalKm>0).sort((a,b)=>b.fuelPerKm-a.fuelPerKm)[0];
+  const docWarnColor = days => days<=7 ? 'var(--loss)' : days<=15 ? 'var(--accent)' : 'var(--ink-soft)';
+  const dueSoonMaintenance = summary.maintenanceScheduleStatus.filter(m=>m.kmRemaining!==null && m.kmRemaining<=1000).sort((a,b)=>a.kmRemaining-b.kmRemaining);
+
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="resultsRealBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
       <h3>📈 Đọc Kết Quả Thật</h3>
-      <div class="hint" style="margin-bottom:10px;">Đúng số hiện tại app đang ghi nhận cho khoảng ngày đã chọn — không giả định gì.</div>
+      <div class="hint" style="margin-bottom:10px;">Đúng số hiện tại app đang ghi nhận cho khoảng ngày đã chọn — không giả định gì. Trình bày theo 4 góc nhìn: Tài Chính, Điều Hành, Pháp Lý, Bảo Dưỡng.</div>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -10718,35 +10753,103 @@ function renderResultsReal(){
           <input type="date" id="rr_to" value="${sa.to}">
         </div>
       </div>
-      <div class="grid-table-wrap" style="margin-top:12px;">
+    </section>
+
+    <section class="group">
+      <h3>💰 Tổng Quan Tài Chính (${summary.periodDays} ngày)</h3>
+      <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Chỉ số</th><th class="num">Giá trị</th></tr></thead>
           <tbody>
             <tr><td>Doanh thu</td><td class="num" style="color:var(--profit);">+${fmtVND(summary.totalRevenue)}</td></tr>
             <tr><td>Chi phí vận hành</td><td class="num" style="color:var(--loss);">−${fmtVND(summary.totalCost)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Lợi Nhuận Gộp</td><td class="num" style="color:${summary.grossProfit>=0?'var(--profit)':'var(--loss)'}">${summary.grossProfit>=0?'+':''}${fmtVND(summary.grossProfit)}</td></tr>
+            <tr><td>Biên lợi nhuận gộp</td><td class="num" style="font-weight:700; color:${marginPct>=0?'var(--profit)':'var(--loss)'};">${marginPct.toFixed(1)}%</td></tr>
+            <tr><td>Doanh thu bình quân/ngày</td><td class="num">${fmtVND(Math.round(revenuePerDay))}</td></tr>
+            <tr><td>Doanh thu bình quân/chuyến</td><td class="num">${fmtVND(Math.round(revenuePerTrip))}</td></tr>
+            <tr><td>Doanh thu bình quân/km</td><td class="num">${fmtVND(Math.round(revenuePerKm))}</td></tr>
             <tr><td>Tổng số Km</td><td class="num">${summary.totalKm.toLocaleString('vi-VN')} km</td></tr>
             <tr><td>Tổng số chuyến</td><td class="num">${summary.totalTrips}</td></tr>
           </tbody>
         </table>
       </div>
-      ${summary.siteRanking.length>0 ? `
-      <h3 style="margin-top:18px;">🏗️ Theo Từng Công Trình</h3>
+      <div class="hint" style="margin-top:8px;">Chi phí cố định tháng hiện tại (không phụ thuộc khoảng ngày đã chọn ở trên): luật đường ${fmtVND(summary.financialSnapshot.roadFeeThisMonth)} + khấu hao/lãi vay/bảo hiểm/đăng kiểm ${fmtVND(summary.financialSnapshot.otherFixedMonthly)} = <strong>${fmtVND(totalFixedMonthly)}</strong>/tháng — đây là mức "phải trả dù chạy hay nghỉ".</div>
+    </section>
+
+    ${sortedSites.length>0 ? `
+    <section class="group">
+      <h3>🏗️ Hiệu Suất Từng Công Trình (Góc Điều Hành Logistics)</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Chỉ liệt kê công trình còn hoạt động (đã tự loại công trình quá 5 ngày không chạy ca nào).</div>
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Công trình</th><th class="num">Doanh thu</th><th class="num">Số chuyến</th></tr></thead>
+          <thead><tr><th>Công trình</th><th class="num">Doanh thu</th><th class="num">Số chuyến</th><th class="num">Đơn giá/chuyến</th><th class="num">Ca gần nhất</th></tr></thead>
           <tbody>
-            ${summary.siteRanking.map(s=>`<tr><td>${escapeHtml(s.name)}</td><td class="num">${fmtVND(s.revenue)}</td><td class="num">${s.trips}</td></tr>`).join('')}
+            ${sortedSites.map(s=>`<tr>
+              <td>${escapeHtml(s.name)}</td>
+              <td class="num">${fmtVND(s.revenue)}</td>
+              <td class="num">${s.trips}</td>
+              <td class="num">${fmtVND(s.revenuePerTrip)}</td>
+              <td class="num" style="color:${s.daysSinceLastActivity===null?'var(--ink-soft)':s.daysSinceLastActivity>=3?'var(--accent)':'var(--ink)'};">${s.daysSinceLastActivity===null?'—':s.daysSinceLastActivity+' ngày trước'}</td>
+            </tr>`).join('')}
           </tbody>
         </table>
-      </div>` : ''}
-      ${summary.driverStats.length>0 ? `
-      <h3 style="margin-top:18px;">🧑‍✈️ Theo Từng Tài Xế</h3>
+      </div>
+    </section>` : ''}
+
+    ${sortedDrivers.length>0 ? `
+    <section class="group">
+      <h3>🧑‍✈️ Hiệu Suất Từng Tài Xế (Góc Điều Hành Logistics)</h3>
+      ${bestFuelDriver && worstFuelDriver && bestFuelDriver.name!==worstFuelDriver.name ? `<div class="hint" style="margin-top:0; margin-bottom:10px;">Tiết kiệm dầu nhất: <strong>${escapeHtml(bestFuelDriver.name)}</strong> (${bestFuelDriver.fuelPerKm} lít/km) — hao dầu nhất: <strong>${escapeHtml(worstFuelDriver.name)}</strong> (${worstFuelDriver.fuelPerKm} lít/km).</div>` : ''}
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Tài xế</th><th class="num">Số ca</th><th class="num">Km</th><th class="num">Dầu (lít/km)</th></tr></thead>
           <tbody>
-            ${summary.driverStats.map(d=>`<tr><td>${escapeHtml(d.name)}</td><td class="num">${d.shifts}</td><td class="num">${d.totalKm.toLocaleString('vi-VN')}</td><td class="num">${d.fuelPerKm}</td></tr>`).join('')}
+            ${sortedDrivers.map(d=>`<tr><td>${escapeHtml(d.name)}</td><td class="num">${d.shifts}</td><td class="num">${d.totalKm.toLocaleString('vi-VN')}</td><td class="num" style="color:${bestFuelDriver&&d.name===bestFuelDriver.name?'var(--profit)':worstFuelDriver&&d.name===worstFuelDriver.name&&sortedDrivers.length>1?'var(--loss)':'var(--ink)'};">${d.fuelPerKm}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </section>` : ''}
+
+    <section class="group">
+      <h3>⚖️ Rủi Ro Pháp Lý (Giấy Tờ Sắp Hết Hạn)</h3>
+      ${summary.upcomingDocumentExpirations.length===0 ? '<div class="hint">Không có giấy tờ nào sắp hết hạn trong 30 ngày tới.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Loại giấy tờ</th><th>Tài xế/Xe</th><th class="num">Còn lại</th></tr></thead>
+          <tbody>
+            ${summary.upcomingDocumentExpirations.map(d=>`<tr>
+              <td>${escapeHtml(d.type)}</td>
+              <td>${escapeHtml(d.driverName||'—')}</td>
+              <td class="num" style="font-weight:700; color:${docWarnColor(d.daysLeft)};">${d.daysLeft} ngày</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>🔧 Radar Bảo Dưỡng</h3>
+      ${dueSoonMaintenance.length===0 ? '<div class="hint">Không có hạng mục nào sắp tới hạn (dưới 1.000km) trong lịch bảo dưỡng định kỳ.</div>' : `
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Các hạng mục còn dưới 1.000km tới hạn:</div>
+      <div class="grid-table-wrap" style="margin-bottom:12px;">
+        <table class="grid-table">
+          <thead><tr><th>Hạng mục</th><th class="num">Còn lại</th><th>Dự kiến tới hạn</th></tr></thead>
+          <tbody>
+            ${dueSoonMaintenance.map(m=>`<tr>
+              <td>${escapeHtml(m.name)}</td>
+              <td class="num" style="font-weight:700; color:${m.kmRemaining<=200?'var(--loss)':'var(--accent)'};">${m.kmRemaining.toLocaleString('vi-VN')} km</td>
+              <td>${m.predictedDueDate?formatDateVN(m.predictedDueDate):'—'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      ${summary.relevantRecentRepairs.length>0 ? `
+      <div class="hint" style="margin-bottom:6px;">5 lần sửa chữa liên quan vận hành gần nhất:</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Hạng mục</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>
+            ${summary.relevantRecentRepairs.map(r=>`<tr><td>${formatDateVN(r.date)}</td><td>${escapeHtml(r.item)}</td><td class="num">${fmtVND(r.amount)}</td></tr>`).join('')}
           </tbody>
         </table>
       </div>` : ''}
@@ -10794,9 +10897,13 @@ function renderResultsWhatIf(){
       <div class="hint" style="margin-top:0; margin-bottom:4px; line-height:1.6;">
         Giá trị mua thuần (chưa VAT): <strong>${fmtVND(Math.round(d.netBuy))}</strong><br>
         × % hoá đơn mỏ xuất được: <strong>${d.invoicedPct}%</strong><br>
-        × Thuế suất VAT: <strong>${d.vatRatePercent}%</strong>
+        × Thuế suất VAT: <strong>${d.vatRatePercent}%</strong><br>
+        = Khấu trừ lý thuyết: <strong>${fmtVND(Math.round(d.theoreticalCredit))}</strong>
       </div>
-      <div style="font-weight:700; color:var(--profit); font-size:13.5px;">= ${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}% × ${d.vatRatePercent}% = +${fmtVND(Math.round(d.delta))}</div>
+      ${d.capped ? `
+      <div class="hint" style="margin-top:0; margin-bottom:4px; color:var(--loss); line-height:1.6;">⚠️ Luật thuế không cho khấu trừ vượt quá đúng số VAT đầu ra CÒN LẠI của chính công trình này (không hoàn thuế, không bù chéo sang công trình khác) — số VAT còn lại chỉ là <strong>${fmtVND(Math.round(d.availableRoom))}</strong>, nên bị kẹp về đúng mức này.</div>
+      ` : ''}
+      <div style="font-weight:700; color:var(--profit); font-size:13.5px;">= ${d.capped ? `Kẹp còn ${fmtVND(Math.round(d.availableRoom))}` : `${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}% × ${d.vatRatePercent}%`} = +${fmtVND(Math.round(d.delta))}</div>
     </div>`).join('');
   const compCalcHtml = whatIf.compCostDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick BÁN đủ hoặc không thiếu chứng từ).</div>' : whatIf.compCostDetails.map(d=>`
     <div class="card" style="margin-bottom:10px;">
