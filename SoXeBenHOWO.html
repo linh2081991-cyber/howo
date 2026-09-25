@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-25 · #306';
+const APP_BUILD = '2026-09-25 · #307';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10763,8 +10763,8 @@ function renderResultsReal(){
           <tbody>
             <tr><td>Doanh thu</td><td class="num" style="color:var(--profit);">+${fmtVND(summary.totalRevenue)}</td></tr>
             <tr><td>Chi phí vận hành</td><td class="num" style="color:var(--loss);">−${fmtVND(summary.totalCost)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= Lợi Nhuận Gộp</td><td class="num" style="color:${summary.grossProfit>=0?'var(--profit)':'var(--loss)'}">${summary.grossProfit>=0?'+':''}${fmtVND(summary.grossProfit)}</td></tr>
-            <tr><td>Biên lợi nhuận gộp</td><td class="num" style="font-weight:700; color:${marginPct>=0?'var(--profit)':'var(--loss)'};">${marginPct.toFixed(1)}%</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Lợi Nhuận Ròng (đã trừ đủ dầu, lương, chi phí phát sinh)</td><td class="num" style="color:${summary.grossProfit>=0?'var(--profit)':'var(--loss)'}">${summary.grossProfit>=0?'+':''}${fmtVND(summary.grossProfit)}</td></tr>
+            <tr><td>Biên lợi nhuận ròng</td><td class="num" style="font-weight:700; color:${marginPct>=0?'var(--profit)':'var(--loss)'};">${marginPct.toFixed(1)}%</td></tr>
             <tr><td>Doanh thu bình quân/ngày</td><td class="num">${fmtVND(Math.round(revenuePerDay))}</td></tr>
             <tr><td>Doanh thu bình quân/chuyến</td><td class="num">${fmtVND(Math.round(revenuePerTrip))}</td></tr>
             <tr><td>Doanh thu bình quân/km</td><td class="num">${fmtVND(Math.round(revenuePerKm))}</td></tr>
@@ -10904,6 +10904,7 @@ function renderResultsWhatIf(){
       <div class="hint" style="margin-top:0; margin-bottom:4px; color:var(--loss); line-height:1.6;">⚠️ Luật thuế không cho khấu trừ vượt quá đúng số VAT đầu ra CÒN LẠI của chính công trình này (không hoàn thuế, không bù chéo sang công trình khác) — số VAT còn lại chỉ là <strong>${fmtVND(Math.round(d.availableRoom))}</strong>, nên bị kẹp về đúng mức này.</div>
       ` : ''}
       <div style="font-weight:700; color:var(--profit); font-size:13.5px;">= ${d.capped ? `Kẹp còn ${fmtVND(Math.round(d.availableRoom))}` : `${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}% × ${d.vatRatePercent}%`} = +${fmtVND(Math.round(d.delta))}</div>
+      <div class="hint" style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);">📦 Đồng thời, giá trị hàng có hoá đơn thật ghi nhận vào Kho (${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}%) = <strong>${fmtVND(Math.round(d.netBuy*d.invoicedPct/100))}</strong> — không mất thêm đồng nào, để dành dùng cho lần bán tới đúng loại hàng đã múc (xem tại Linh Chí Thành → Tổng Tồn Kho Hoá Đơn).</div>
     </div>`).join('');
   const compCalcHtml = whatIf.compCostDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick BÁN đủ hoặc không thiếu chứng từ).</div>' : whatIf.compCostDetails.map(d=>`
     <div class="card" style="margin-bottom:10px;">
@@ -10945,15 +10946,16 @@ function renderResultsWhatIf(){
       `}
       <div class="grid-table-wrap" style="margin-top:12px; margin-bottom:10px;">
         <table class="grid-table">
-          <thead><tr><th>Trường hợp</th><th class="num">Lợi Nhuận Gộp</th></tr></thead>
+          <thead><tr><th>Trường hợp</th><th class="num">Lợi Nhuận Ròng</th></tr></thead>
           <tbody>
-            <tr><td>TH1 — Hiện tại (chưa tick đủ)</td><td class="num">${fmtVND(th1Profit)}</td></tr>
+            <tr style="font-weight:700;"><td>TH1 — Hiện tại (chưa tick đủ)</td><td class="num">${fmtVND(th1Profit)}</td></tr>
             <tr><td>+ VAT khấu trừ thêm nếu tick MUA</td><td class="num" style="color:var(--profit);">+${fmtVND(whatIf.extraVatCredit)}</td></tr>
             <tr><td>− Chi phí bù thêm nếu tick BÁN</td><td class="num" style="color:var(--loss);">−${fmtVND(whatIf.extraCompCost)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= TH2 — Lãi Thật (giả định tick đủ)</td><td class="num" style="color:${th2Profit>=0?'var(--profit)':'var(--loss)'}">${th2Profit>=0?'+':''}${fmtVND(th2Profit)}</td></tr>
           </tbody>
         </table>
       </div>
+      <div class="hint" style="margin-top:-4px; margin-bottom:10px;">Lưu ý: "TH1" ở đây là <strong>Lợi Nhuận RÒNG</strong> (đã trừ đủ dầu, lương, chi phí phát sinh) — KHÁC với dòng "LÃI GỘP MUA-BÁN" (chỉ mới trừ giá vốn hàng, chưa trừ dầu/lương) hiện ở trang Ca Làm Việc. So sánh nhầm 2 dòng này với nhau sẽ thấy số "không khớp", dù thực ra cả 2 nơi đều tính đúng, chỉ khác giai đoạn trừ chi phí.</div>
       <div class="card" style="border:1.5px solid ${th2Profit>=(-fixedCostIfIdle)?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🎯 Nên Chạy Tiếp Hay Tạm Nghỉ?</div>
         <div class="hint" style="margin-top:0; margin-bottom:8px;">Chi phí cố định KHÔNG ĐỔI dù chạy hay nghỉ trong khoảng ngày này (lương cứng + tiền ăn tài xế): <strong>${fmtVND(fixedCostIfIdle)}</strong> — đây là số LỖ chắc chắn nếu nghỉ hẳn, không thu lại được.</div>
