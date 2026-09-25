@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-24 · #303';
+const APP_BUILD = '2026-09-25 · #304';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10748,20 +10748,73 @@ function renderResultsWhatIf(){
   const app = document.getElementById('app');
   const sa = state.strategyAnalysis;
   if(!sa.from || !sa.to){ const r = currentMonthRange(); sa.from = r.from; sa.to = r.to; }
+  // MỚI (Ông Chủ yêu cầu 2026-09-25 — "cần chọn ĐÚNG 1 NGÀY cụ thể, kết
+  // quả phải bao quát MỌI chỉ số trong ca + dữ liệu kho hoá đơn ngày đó,
+  // rất quan trọng, phải làm kỹ"): thêm chế độ chọn — 'single' (1 ngày,
+  // Ông Chủ quan tâm nhất) hoặc 'range' (khoảng ngày, giữ như cũ). Khi
+  // 'single', from=to=đúng ngày đó.
+  if(!sa.whatIfMode) sa.whatIfMode = 'range';
+  if(!sa.singleDate) sa.singleDate = sa.to;
   const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{maximumFractionDigits:2});
-  const summary = aggregateStrategyData(sa.from, sa.to);
-  const whatIf = computeInvoiceMismatchWhatIf(sa.from, sa.to);
+  const from = sa.whatIfMode==='single' ? sa.singleDate : sa.from;
+  const to = sa.whatIfMode==='single' ? sa.singleDate : sa.to;
+  const summary = aggregateStrategyData(from, to);
+  const whatIf = computeInvoiceMismatchWhatIf(from, to);
   const th1Profit = summary.grossProfit;
   const th2Profit = th1Profit + whatIf.extraVatCredit - whatIf.extraCompCost;
-  const fixedCostIfIdle = state.shifts.filter(sh=>sh.date>=sa.from && sh.date<=sa.to)
-    .reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.foodAllowance)||0),0);
+  const inRangeShifts = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const fixedCostIfIdle = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.foodAllowance)||0),0);
+
+  // Chi Tiết Từng Ca — TÁI SỬ DỤNG NGUYÊN VẸN shiftFinancialSummaryHtml()
+  // (đúng khối "Tổng Kết Ca" đang dùng ở form sửa ca/xem lại ca, không
+  // viết công thức hiển thị mới) + liệt kê riêng từng chuyến bị lệch
+  // loại hàng (múc 1 loại, bán 1 loại khác) kèm trạng thái đã tick hoá
+  // đơn hay chưa — đúng yêu cầu "bao quát mọi chỉ số trong ca".
+  const tooManyShifts = inRangeShifts.length>8;
+  const shiftDetailHtml = inRangeShifts.length===0 ? '<div class="hint">Không có ca nào trong khoảng ngày này.</div>' : (tooManyShifts ? `<div class="hint">Có ${inRangeShifts.length} ca trong khoảng ngày này — chọn "📅 1 Ngày" ở trên để xem chi tiết đầy đủ từng ca (khoảng ngày dài chỉ hiện tổng, tránh trang quá dài).</div>` : inRangeShifts.map(sh=>{
+    const driver = driverById(sh.driverId);
+    const mismatchTrips = [];
+    (sh.siteLogs||[]).forEach(s=>{
+      if(s.siteType!=='commercial') return;
+      (s.commercialTrips||[]).forEach((t,tIdx)=>{
+        const buyType = (t.goodsType||'').trim();
+        const sellTypeRaw = (t.sellGoodsType||'').trim();
+        const sellEffective = sellTypeRaw || buyType;
+        if(buyType && sellEffective && normGoodsType(buyType)!==normGoodsType(sellEffective)){
+          mismatchTrips.push({ site:s, t, tIdx, buyType, sellEffective });
+        }
+      });
+    });
+    return `
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-weight:800; font-size:14px; margin-bottom:2px;">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)} · ${driver?escapeHtml(driver.name):'(chưa gán tài xế)'}</div>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">${shiftOdoDriven(sh)} km · ${fmtQty(shiftFuelConsumed(sh))} lít dầu</div>
+      ${shiftFinancialSummaryHtml(sh)}
+      ${mismatchTrips.length>0 ? `
+      <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
+        <div style="font-weight:700; font-size:12.5px; margin-bottom:6px;">📌 Chuyến lệch loại hàng (múc 1 loại, bán 1 loại khác):</div>
+        ${mismatchTrips.map(m=>`<div class="hint" style="margin-bottom:4px;">Chuyến ${m.tIdx+1}: múc <strong>${escapeHtml(m.buyType)}</strong> (${fmtQty(m.t.buyVolume)} tấn) → bán <strong>${escapeHtml(m.sellEffective)}</strong> (${fmtQty(m.t.sellVolume)} khối) — ${m.site.buyHasInvoice?'✅ đã tick MUA':'⬜ chưa tick MUA'} · ${m.site.sellHasInvoice?'✅ đã tick BÁN':'⬜ chưa tick BÁN'}</div>`).join('')}
+      </div>` : ''}
+    </div>`;
+  }).join(''));
+
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="resultsWhatIfBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
       <h3>🔮 Giả Định Khi Tick Hoá Đơn</h3>
-      <div class="hint" style="margin-bottom:10px;">Tính trực tiếp bằng công thức, KHÔNG qua AI. So sánh lãi hiện tại (TH1 — nhiều ca CHƯA tick đủ hoá đơn nên số đang bị lệch) với lãi thật nếu tick đủ (TH2), theo đúng khoảng ngày tự chọn.</div>
+      <div class="hint" style="margin-bottom:10px;">Tính trực tiếp bằng công thức, KHÔNG qua AI. So sánh lãi hiện tại (TH1 — nhiều ca CHƯA tick đủ hoá đơn nên số đang bị lệch) với lãi thật nếu tick đủ (TH2).</div>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button class="btn ${sa.whatIfMode==='single'?'btn-accent':'btn-ghost'}" id="wm_single" style="flex:1;">📅 1 Ngày</button>
+        <button class="btn ${sa.whatIfMode==='range'?'btn-accent':'btn-ghost'}" id="wm_range" style="flex:1;">📆 Khoảng Ngày</button>
+      </div>
+      ${sa.whatIfMode==='single' ? `
+      <div class="field">
+        <label>Chọn ngày</label>
+        <input type="date" id="rw_singleDate" value="${sa.singleDate}">
+      </div>
+      ` : `
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -10772,6 +10825,7 @@ function renderResultsWhatIf(){
           <input type="date" id="rw_to" value="${sa.to}">
         </div>
       </div>
+      `}
       <div class="grid-table-wrap" style="margin-top:12px; margin-bottom:10px;">
         <table class="grid-table">
           <thead><tr><th>Trường hợp</th><th class="num">Lợi Nhuận Gộp</th></tr></thead>
@@ -10796,7 +10850,9 @@ function renderResultsWhatIf(){
             </tr>`).join('')}
           </tbody>
         </table>
-      </div>` : ''}
+      </div>
+      <button class="btn btn-ghost btn-sm" id="rw_goInvoiceLotBtn" style="margin-bottom:10px;">📦 Xem Kho Hoá Đơn Bù</button>
+      ` : ''}
       <div class="card" style="border:1.5px solid ${th2Profit>=(-fixedCostIfIdle)?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🎯 Nên Chạy Tiếp Hay Tạm Nghỉ?</div>
         <div class="hint" style="margin-top:0; margin-bottom:8px;">Chi phí cố định KHÔNG ĐỔI dù chạy hay nghỉ trong khoảng ngày này (lương cứng + tiền ăn tài xế): <strong>${fmtVND(fixedCostIfIdle)}</strong> — đây là số LỖ chắc chắn nếu nghỉ hẳn, không thu lại được.</div>
@@ -10809,10 +10865,24 @@ function renderResultsWhatIf(){
         `}
       </div>
     </section>
+
+    <section class="group">
+      <h3>📋 Chi Tiết Từng Ca ${sa.whatIfMode==='single' ? `(${formatDateVN(from)})` : `(${inRangeShifts.length} ca)`}</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đầy đủ mọi chỉ số của từng ca (Km, dầu, doanh thu, chi phí, lãi) — đúng y hệt bảng "Tổng Kết Ca" ở form nhập ca, không tính khác.</div>
+      ${shiftDetailHtml}
+    </section>
   `;
   document.getElementById('resultsWhatIfBackBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsReadHub(); });
-  document.getElementById('rw_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; renderResultsWhatIf(); });
-  document.getElementById('rw_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; renderResultsWhatIf(); });
+  document.getElementById('wm_single').addEventListener('click', ()=>{ sa.whatIfMode='single'; if(!sa.singleDate) sa.singleDate=sa.to; renderResultsWhatIf(); });
+  document.getElementById('wm_range').addEventListener('click', ()=>{ sa.whatIfMode='range'; renderResultsWhatIf(); });
+  if(sa.whatIfMode==='single'){
+    document.getElementById('rw_singleDate').addEventListener('change', e=>{ sa.singleDate = e.target.value || sa.singleDate; renderResultsWhatIf(); });
+  } else {
+    document.getElementById('rw_from').addEventListener('change', e=>{ sa.from = e.target.value || sa.from; renderResultsWhatIf(); });
+    document.getElementById('rw_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; renderResultsWhatIf(); });
+  }
+  const goInvoiceLotBtn = document.getElementById('rw_goInvoiceLotBtn');
+  if(goInvoiceLotBtn) goInvoiceLotBtn.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(null); });
 }
 
 /// Trang "🎁 Đề Xuất Thưởng Cuối Tháng" — cùng khuôn với Trợ Lý Chiến Lược
