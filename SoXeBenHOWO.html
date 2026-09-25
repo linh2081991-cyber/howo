@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-25 · #304';
+const APP_BUILD = '2026-09-25 · #305';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6287,13 +6287,27 @@ function computeInvoiceMismatchWhatIf(from, to){
   const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
   let extraVatCredit = 0, extraCompCost = 0, unpricedVolume = 0;
   const missingByGoodsType = {};
+  const vatDetails = [];
+  const compCostDetails = [];
   inRange.forEach(sh=>{
     (sh.siteLogs||[]).forEach((s,idx)=>{
       if(s.siteType!=='commercial') return;
+      const customer = s.customerId ? customerById(s.customerId) : null;
+      const supplier = s.supplierId ? supplierById(s.supplierId) : null;
       if(!s.buyHasInvoice){
-        const vatBefore = commercialVatPayable(s);
-        const vatAfter = commercialVatPayable({...s, buyHasInvoice:true});
-        extraVatCredit += Math.max(0, vatBefore-vatAfter);
+        // MỚI (Ông Chủ yêu cầu 2026-09-25 — "show chi tiết cách tính để
+        // thuyết phục"): KHÔNG chỉ lấy hiệu số commercialVatPayable()
+        // trước/sau (hộp đen) — bóc rõ TỪNG THÀNH PHẦN đúng công thức
+        // thật (netBuy × %hoá đơn mỏ xuất × thuế suất VAT) để hiển thị
+        // minh bạch từng con số, không phải "tin em".
+        const netBuy = commercialNetBuy(s);
+        const invoicedPct = siteInvoicedBuyPercent(s);
+        const vatRate = siteVatRateFraction(s);
+        const delta = netBuy * (invoicedPct/100) * vatRate;
+        if(delta>0.5){
+          extraVatCredit += delta;
+          vatDetails.push({ date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', supplierName: supplier?supplier.name:'(chưa gắn nhà cung cấp)', netBuy, invoicedPct, vatRatePercent: vatRate*100, delta });
+        }
       }
       if(!s.sellHasInvoice){
         const sTicked = {...s, buyHasInvoice:true, sellHasInvoice:true};
@@ -6304,13 +6318,17 @@ function computeInvoiceMismatchWhatIf(from, to){
           const key = normGoodsType(g.goodsType);
           if(!missingByGoodsType[key]) missingByGoodsType[key] = { goodsType:g.goodsType, volume:0, priceInfo };
           missingByGoodsType[key].volume += need;
-          if(priceInfo.value===null) unpricedVolume += need;
-          else extraCompCost += need*priceInfo.value;
+          if(priceInfo.value===null){ unpricedVolume += need; }
+          else {
+            const cost = need*priceInfo.value;
+            extraCompCost += cost;
+            compCostDetails.push({ date: sh.date, shiftType: sh.shiftType, customerName: customer?customer.name:'(chưa gắn khách hàng)', goodsType: g.goodsType, volume: need, priceInfo, cost });
+          }
         });
       }
     });
   });
-  return { extraVatCredit, extraCompCost, missingByGoodsType: Object.values(missingByGoodsType), unpricedVolume };
+  return { extraVatCredit, extraCompCost, missingByGoodsType: Object.values(missingByGoodsType), unpricedVolume, vatDetails, compCostDetails };
 }
 function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
@@ -10765,38 +10783,30 @@ function renderResultsWhatIf(){
   const inRangeShifts = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
   const fixedCostIfIdle = inRangeShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.foodAllowance)||0),0);
 
-  // Chi Tiết Từng Ca — TÁI SỬ DỤNG NGUYÊN VẸN shiftFinancialSummaryHtml()
-  // (đúng khối "Tổng Kết Ca" đang dùng ở form sửa ca/xem lại ca, không
-  // viết công thức hiển thị mới) + liệt kê riêng từng chuyến bị lệch
-  // loại hàng (múc 1 loại, bán 1 loại khác) kèm trạng thái đã tick hoá
-  // đơn hay chưa — đúng yêu cầu "bao quát mọi chỉ số trong ca".
-  const tooManyShifts = inRangeShifts.length>8;
-  const shiftDetailHtml = inRangeShifts.length===0 ? '<div class="hint">Không có ca nào trong khoảng ngày này.</div>' : (tooManyShifts ? `<div class="hint">Có ${inRangeShifts.length} ca trong khoảng ngày này — chọn "📅 1 Ngày" ở trên để xem chi tiết đầy đủ từng ca (khoảng ngày dài chỉ hiện tổng, tránh trang quá dài).</div>` : inRangeShifts.map(sh=>{
-    const driver = driverById(sh.driverId);
-    const mismatchTrips = [];
-    (sh.siteLogs||[]).forEach(s=>{
-      if(s.siteType!=='commercial') return;
-      (s.commercialTrips||[]).forEach((t,tIdx)=>{
-        const buyType = (t.goodsType||'').trim();
-        const sellTypeRaw = (t.sellGoodsType||'').trim();
-        const sellEffective = sellTypeRaw || buyType;
-        if(buyType && sellEffective && normGoodsType(buyType)!==normGoodsType(sellEffective)){
-          mismatchTrips.push({ site:s, t, tIdx, buyType, sellEffective });
-        }
-      });
-    });
-    return `
-    <div class="card" style="margin-bottom:12px;">
-      <div style="font-weight:800; font-size:14px; margin-bottom:2px;">${formatDateVN(sh.date)} · ${shiftTypeLabel(sh.shiftType)} · ${driver?escapeHtml(driver.name):'(chưa gán tài xế)'}</div>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">${shiftOdoDriven(sh)} km · ${fmtQty(shiftFuelConsumed(sh))} lít dầu</div>
-      ${shiftFinancialSummaryHtml(sh)}
-      ${mismatchTrips.length>0 ? `
-      <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
-        <div style="font-weight:700; font-size:12.5px; margin-bottom:6px;">📌 Chuyến lệch loại hàng (múc 1 loại, bán 1 loại khác):</div>
-        ${mismatchTrips.map(m=>`<div class="hint" style="margin-bottom:4px;">Chuyến ${m.tIdx+1}: múc <strong>${escapeHtml(m.buyType)}</strong> (${fmtQty(m.t.buyVolume)} tấn) → bán <strong>${escapeHtml(m.sellEffective)}</strong> (${fmtQty(m.t.sellVolume)} khối) — ${m.site.buyHasInvoice?'✅ đã tick MUA':'⬜ chưa tick MUA'} · ${m.site.sellHasInvoice?'✅ đã tick BÁN':'⬜ chưa tick BÁN'}</div>`).join('')}
-      </div>` : ''}
-    </div>`;
-  }).join(''));
+  // MỚI (Ông Chủ báo — "Chi Tiết Từng Ca cũ chỉ trùng lặp đúng cái đã
+  // xem được ở Ca Làm Việc rồi, không thuyết phục" — CÁI THẬT SỰ CẦN là
+  // bóc rõ TỪNG BƯỚC TÍNH ra đúng 2 con số +VAT/−Chi phí bù ở bảng trên,
+  // không phải hiển thị lại P&L đã biết): liệt kê ĐỦ từng dòng đóng góp,
+  // kèm công thức chữ, để tự Ông Chủ đối chiếu ra đúng bằng tay được.
+  const vatCalcHtml = whatIf.vatDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick MUA đủ hoặc không có giao dịch thương mại).</div>' : whatIf.vatDetails.map(d=>`
+    <div class="card" style="margin-bottom:10px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:6px;">${formatDateVN(d.date)} · ${shiftTypeLabel(d.shiftType)} · ${escapeHtml(d.customerName)} (mua từ ${escapeHtml(d.supplierName)})</div>
+      <div class="hint" style="margin-top:0; margin-bottom:4px; line-height:1.6;">
+        Giá trị mua thuần (chưa VAT): <strong>${fmtVND(Math.round(d.netBuy))}</strong><br>
+        × % hoá đơn mỏ xuất được: <strong>${d.invoicedPct}%</strong><br>
+        × Thuế suất VAT: <strong>${d.vatRatePercent}%</strong>
+      </div>
+      <div style="font-weight:700; color:var(--profit); font-size:13.5px;">= ${fmtVND(Math.round(d.netBuy))} × ${d.invoicedPct}% × ${d.vatRatePercent}% = +${fmtVND(Math.round(d.delta))}</div>
+    </div>`).join('');
+  const compCalcHtml = whatIf.compCostDetails.length===0 ? '<div class="hint">Không có ca nào đóng góp khoản này (đã tick BÁN đủ hoặc không thiếu chứng từ).</div>' : whatIf.compCostDetails.map(d=>`
+    <div class="card" style="margin-bottom:10px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:6px;">${formatDateVN(d.date)} · ${shiftTypeLabel(d.shiftType)} · ${escapeHtml(d.customerName)} — thiếu chứng từ ${escapeHtml(d.goodsType)}</div>
+      <div class="hint" style="margin-top:0; margin-bottom:4px; line-height:1.6;">
+        Khối lượng thiếu: <strong>${fmtQty(d.volume)} khối</strong><br>
+        × Đơn giá dùng: <strong>${fmtVND(Math.round(d.priceInfo.value))}/khối</strong> (${d.priceInfo.source==='override'?'Ông Chủ tự ghi đè ở Cài Đặt':'giá NET lô hoá đơn bù thật gần nhất, ngày '+formatDateVN(d.priceInfo.lotDate)})
+      </div>
+      <div style="font-weight:700; color:var(--loss); font-size:13.5px;">= ${fmtQty(d.volume)} khối × ${fmtVND(Math.round(d.priceInfo.value))}đ/khối = −${fmtVND(Math.round(d.cost))}</div>
+    </div>`).join('');
 
   app.innerHTML = `
     <section class="group">
@@ -10837,22 +10847,6 @@ function renderResultsWhatIf(){
           </tbody>
         </table>
       </div>
-      ${whatIf.missingByGoodsType.length>0 ? `
-      <div class="hint" style="margin-bottom:10px;">Khối lượng thiếu chứng từ theo từng loại hàng (nguồn gốc khoản −${fmtVND(whatIf.extraCompCost)} ở trên):</div>
-      <div class="grid-table-wrap" style="margin-bottom:10px;">
-        <table class="grid-table">
-          <thead><tr><th>Loại hàng</th><th class="num">Khối lượng thiếu</th><th class="num">Đơn giá dùng</th></tr></thead>
-          <tbody>
-            ${whatIf.missingByGoodsType.map(m=>`<tr>
-              <td>${escapeHtml(m.goodsType)}</td>
-              <td class="num">${fmtQty(m.volume)} khối</td>
-              <td class="num" style="font-size:12px;">${m.priceInfo.value!==null ? `${fmtVND(Math.round(m.priceInfo.value))}/khối (${m.priceInfo.source==='override'?'tự ghi đè':'lô gần nhất '+formatDateVN(m.priceInfo.lotDate)})` : '<span style="color:var(--loss);">chưa có giá — vào Cài Đặt khai</span>'}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="rw_goInvoiceLotBtn" style="margin-bottom:10px;">📦 Xem Kho Hoá Đơn Bù</button>
-      ` : ''}
       <div class="card" style="border:1.5px solid ${th2Profit>=(-fixedCostIfIdle)?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🎯 Nên Chạy Tiếp Hay Tạm Nghỉ?</div>
         <div class="hint" style="margin-top:0; margin-bottom:8px;">Chi phí cố định KHÔNG ĐỔI dù chạy hay nghỉ trong khoảng ngày này (lương cứng + tiền ăn tài xế): <strong>${fmtVND(fixedCostIfIdle)}</strong> — đây là số LỖ chắc chắn nếu nghỉ hẳn, không thu lại được.</div>
@@ -10867,9 +10861,17 @@ function renderResultsWhatIf(){
     </section>
 
     <section class="group">
-      <h3>📋 Chi Tiết Từng Ca ${sa.whatIfMode==='single' ? `(${formatDateVN(from)})` : `(${inRangeShifts.length} ca)`}</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đầy đủ mọi chỉ số của từng ca (Km, dầu, doanh thu, chi phí, lãi) — đúng y hệt bảng "Tổng Kết Ca" ở form nhập ca, không tính khác.</div>
-      ${shiftDetailHtml}
+      <h3>📐 Chi Tiết Cách Tính — Khoản "+${fmtVND(whatIf.extraVatCredit)} VAT Khấu Trừ Thêm"</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đúng công thức đang chạy trong app: Giá trị mua thuần × % hoá đơn mỏ xuất × Thuế suất VAT — cộng dồn từng ca chưa tick "Đã nhận hoá đơn MUA" bên dưới.</div>
+      ${vatCalcHtml}
+    </section>
+
+    <section class="group">
+      <h3>📐 Chi Tiết Cách Tính — Khoản "−${fmtVND(whatIf.extraCompCost)} Chi Phí Bù Thêm"</h3>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Đúng công thức đang chạy trong app: Khối lượng thiếu chứng từ × Đơn giá NET của lô hoá đơn bù thật gần nhất (hoặc số Ông Chủ tự ghi đè) — cộng dồn từng ca chưa tick "Đã xuất hoá đơn BÁN" bên dưới.</div>
+      ${compCalcHtml}
+      ${whatIf.unpricedVolume>0 ? `<div class="hint" style="color:var(--loss);">Còn ${fmtQty(whatIf.unpricedVolume)} khối chưa tính được vì chưa có lô hoá đơn bù nào từng mua đúng loại hàng đó — vào Cài Đặt khai giá giả định nếu muốn tính đủ.</div>` : ''}
+      <button class="btn btn-ghost btn-sm" id="rw_goInvoiceLotBtn" style="margin-top:6px;">📦 Xem Kho Hoá Đơn Bù</button>
     </section>
   `;
   document.getElementById('resultsWhatIfBackBtn').addEventListener('click', ()=>{ saveMainScroll(); renderResultsReadHub(); });
