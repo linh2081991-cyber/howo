@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-27 · #314';
+const APP_BUILD = '2026-09-27 · #315';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3004,10 +3004,33 @@ function computeTotalInitialInvestment(){
   if(list.length>0) return list.reduce((s,e)=>s+(Number(e.amount)||0),0);
   return Number(state.equityProjectInfo.initialInvestment)||0;
 }
+// SỬA 2026-09-27 (Ông Chủ đối chiếu Sao Kê — "thực chất chỉ thêm 500tr,
+// không phải 660tr; chỉ sai đoạn cho vào rút ra cho vào để góp đủ vốn điều
+// lệ"): trước đây bỏ RIÊNG từng dòng "🔄 Tiền đảo" ở mỗi chiều — nếu tổng
+// rút đảo KHÁC tổng góp đảo (vd rút đảo 500tr nhưng chỉ góp đảo lại 340tr)
+// thì phần lệch (160tr rút ra CHƯA nộp lại) biến mất khỏi sổ. Sửa: tiền
+// đảo chỉ được triệt tiêu ĐÚNG phần khớp cặp 2 chiều; phần lệch tính là
+// rút thật (nếu rút đảo nhiều hơn) hoặc góp thật (nếu góp đảo nhiều hơn).
+// Nhờ vậy: Góp thật − Rút thật LUÔN = Tổng góp − Tổng rút (tiền thật ròng),
+// bất kể nhãn đảo/mới gắn thế nào. KHÔNG đụng dữ liệu đã lưu.
+function realOwnerEquityFlows(asOfDate){
+  const list = state.ownerEquityEntries.filter(e=>!asOfDate || e.date<=asOfDate);
+  const sumOf = (type, recycled)=>list.filter(e=>e.type===type && !!e.isRecycled===recycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const newIn = sumOf('contribution', false), newOut = sumOf('withdrawal', false);
+  const recIn = sumOf('contribution', true), recOut = sumOf('withdrawal', true);
+  const imbalance = recOut - recIn; // >0: rút đảo chưa nộp lại; <0: góp đảo vượt phần đã rút
+  return {
+    contributedExtra: newIn + Math.max(0, -imbalance),
+    withdrawn: newOut + Math.max(0, imbalance),
+    recycledIn: recIn, recycledOut: recOut,
+    recycledUnmatchedOut: Math.max(0, imbalance), recycledUnmatchedIn: Math.max(0, -imbalance)
+  };
+}
 function computeOwnerEquity(){
   const initialInvestment = computeTotalInitialInvestment();
-  const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const realFlows = realOwnerEquityFlows();
+  const contributedExtra = realFlows.contributedExtra;
+  const withdrawn = realFlows.withdrawn;
   // SỬA 2026-09-14 (Ông Chủ xác nhận theo đúng phản biện — "mua hàng chưa
   // bán không được coi là mất tiền, chỉ là đổi tiền mặt thành hàng tồn
   // kho"): ĐỔI từ computeCumulativeCompanyProfit() (Dòng Tiền Ròng — trừ
@@ -3037,7 +3060,8 @@ function computeOwnerEquity(){
   const remainingLoanBalance = companyWideEquityLoanAdjustment();
   return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, remainingLoanBalance,
     equity: contributed - withdrawn + cumulativeProfit - remainingLoanBalance,
-    contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled };
+    contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled,
+    recycledUnmatchedOut: realFlows.recycledUnmatchedOut, recycledUnmatchedIn: realFlows.recycledUnmatchedIn };
 }
 /// Dựng dãy [{month, equity, cumulativeProfit}] từ THÁNG BẮT ĐẦU DỰ ÁN
 /// tới THÁNG HIỆN TẠI — mỗi điểm là Vốn Chủ Sở Hữu "chốt" tại đúng ngày
@@ -3058,8 +3082,9 @@ function computeMonthlyEquityTimeline(){
     const dim = daysInMonth(`${ym}-01`);
     const monthEnd = `${ym}-${String(dim).padStart(2,'0')}`;
     const snapshotDate = monthEnd < today ? monthEnd : today;
-    const contributedExtra = state.ownerEquityEntries.filter(e=>e.type==='contribution' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
-    const withdrawn = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && !e.isRecycled && e.date<=snapshotDate).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const realFlowsAtDate = realOwnerEquityFlows(snapshotDate); // SỬA 2026-09-27 — đồng bộ computeOwnerEquity()
+    const contributedExtra = realFlowsAtDate.contributedExtra;
+    const withdrawn = realFlowsAtDate.withdrawn;
     // SỬA 2026-09-14 (đồng bộ với computeOwnerEquity() vừa đổi sang Lợi
     // Nhuận Thực Tế — đúng như chú thích gốc phía trên yêu cầu "khớp đúng
     // với số Vốn Chủ Sở Hữu hiện tại"): đổi cùng nguồn, không còn dùng
@@ -17408,7 +17433,7 @@ function openROICalculationDetail(){
   const accrualTimeline = computeMonthlyAccrualProfitTimeline();
   const recentRate3 = computeRecentMonthlyRate(accrualTimeline, 3);
   const recentRate6 = computeRecentMonthlyRate(accrualTimeline, 6);
-  const totalCapital = eq.initialInvestment + eq.contributedExtra;
+  const totalCapital = eq.initialInvestment + eq.contributedExtra - eq.withdrawn; // SỬA 2026-09-27: vốn bỏ vào RÒNG (góp thật − rút thật)
   // SỬA 2026-09-14 (Ông Chủ phản biện — "2,6% là lãi thật sau khi đầu tư
   // hơn 2 tỷ, phải tính lại"): chuyên gia phản biện lại — khấu hao KHÔNG
   // phải tiền mặt rời túi (tiền mua xe đã tính 1 LẦN ở mẫu số "Tổng vốn
@@ -17486,7 +17511,7 @@ function openROICalculationDetail(){
             <tr><td>Tiền Lãi Ròng (Lợi Nhuận Thực Tế, đã trừ khấu hao — chuẩn kế toán)</td><td class="num" style="color:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'}">${accrualProfit.netProfit>=0?'+':''}${fmtVND(accrualProfit.netProfit)}</td></tr>
             <tr><td>+ Khấu Hao Xe Đã Thu (quỹ để dành thay xe — xem "Chi Tiết Thu Hồi Khấu Hao")</td><td class="num" style="color:var(--profit);">+${fmtVND(depreciationInAccrual)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Tổng tiền mặt thật đã thu hồi</td><td class="num" style="color:${netCashProfit>=0?'var(--profit)':'var(--loss)'}">${netCashProfit>=0?'+':''}${fmtVND(netCashProfit)}</td></tr>
-            <tr><td>÷ Tổng vốn đã bỏ vào (mua xe ${fmtVND(eq.initialInvestment)} + góp thêm ${fmtVND(eq.contributedExtra)})</td><td class="num">${fmtVND(totalCapital)}</td></tr>
+            <tr><td>÷ Tổng vốn đã bỏ vào (mua xe ${fmtVND(eq.initialInvestment)} + góp thêm ${fmtVND(eq.contributedExtra)} − rút ra ${fmtVND(eq.withdrawn)})</td><td class="num">${fmtVND(totalCapital)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Đã thu hồi được</td><td class="num">${recoveredPercent.toFixed(1)}%</td></tr>
           </tbody>
         </table>
@@ -18542,7 +18567,7 @@ function renderCompanyDashboardPage(preserveScroll){
   // trừ khấu hao, CHỈ trừ LÃI vay, không trừ gốc) — đây mới là số ĐÚNG
   // trả lời "bỏ vốn ra tao lãi/lỗ thật bao nhiêu".
   const accrualProfit = computeCumulativeAccrualProfit();
-  const totalCapitalForROI = eq.initialInvestment + eq.contributedExtra;
+  const totalCapitalForROI = eq.initialInvestment + eq.contributedExtra - eq.withdrawn; // SỬA 2026-09-27: vốn bỏ vào RÒNG
   // SỬA 2026-09-14 LẦN 2 (Ông Chủ báo — "Khấu Hao Xe Đã Thu" hiện 0đ dù
   // thực tế đã có, "Tiền Lãi Ròng" lại gộp hết vào, không tách bạch rõ"):
   // BẮT ĐƯỢC LỖI THIẾT KẾ — 2 nhánh trước đó KHÔNG PHẢI 2 phần cộng lại
@@ -18841,7 +18866,7 @@ function renderCompanyDashboardPage(preserveScroll){
             <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
             <tbody>
               <tr><td>+ Đã góp thêm vào vận hành (tiền thật, không tính tiền đảo) <button class="link-btn" id="cbLedgerBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.contributedExtra)}</td></tr>
-              <tr><td>− Đã rút ra (tiền thật, không tính tiền đảo)</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.withdrawn)}</td></tr>
+              <tr><td>− Đã rút ra thật (gồm tiền đảo rút ra chưa nộp lại)</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.withdrawn)}</td></tr>
               <tr><td>+ Lãi ròng trước khi trừ lãi vay (đã trừ khấu hao) <button class="link-btn" id="cbProfitBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${cb.profitBeforeInterest>=0?'var(--profit)':'var(--loss)'};">${cb.profitBeforeInterest>=0?'+':'−'}${fmtVND(Math.abs(cb.profitBeforeInterest))}</td></tr>
               <tr><td>+ Cộng lại khấu hao (chi phí trên sổ, tiền không rời công ty) <button class="link-btn" id="cbDepBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.depreciationSoFar)}</td></tr>
               <tr><td>− Lãi vay đã trả — 🏦 TCB</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.interestBank)}</td></tr>
@@ -18986,6 +19011,7 @@ function renderCompanyDashboardPage(preserveScroll){
             </tbody>
           </table>
         </div>
+        ${eq.recycledUnmatchedOut>0.5 ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Tiền đảo rút ra ${fmtVND(eq.withdrawnRaw-(eq.withdrawn-eq.recycledUnmatchedOut))} nhưng chỉ nộp lại ${fmtVND(eq.contributedRecycled)} — phần ${fmtVND(eq.recycledUnmatchedOut)} chưa nộp lại được tính là rút thật.</div>` : ''}${eq.recycledUnmatchedIn>0.5 ? `<div class="hint" style="margin-top:6px;">ℹ️ Tiền đảo nộp vào nhiều hơn phần đã rút ra ${fmtVND(eq.recycledUnmatchedIn)} — phần này được tính là góp thật.</div>` : ''}
         <div class="hint" style="margin-top:8px;">Muốn xem ĐÚNG từng khoản (kèm nhãn tiền đảo/Vốn Điều Lệ/nguồn/trước-sau mốc chốt) — bấm "📋 Chi Tiết — Toàn Bộ Sao Kê Nộp Vào/Rút Ra" bên dưới, đây là nơi DUY NHẤT hiện đủ mọi chi tiết của từng khoản, các bảng khác chỉ là tổng đã lọc theo 1 góc nhìn.</div>
       </div>
       ` : ''}
@@ -20686,6 +20712,7 @@ function renderEquityDetailPage(){
           </tbody>
         </table>
       </div>
+      ${eq.recycledUnmatchedOut>0.5 ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Tiền đảo rút ra ${fmtVND(eq.withdrawnRaw-(eq.withdrawn-eq.recycledUnmatchedOut))} nhưng chỉ nộp lại ${fmtVND(eq.contributedRecycled)} — phần ${fmtVND(eq.recycledUnmatchedOut)} chưa nộp lại được tính là rút thật.</div>` : ''}${eq.recycledUnmatchedIn>0.5 ? `<div class="hint" style="margin-top:6px;">ℹ️ Tiền đảo nộp vào nhiều hơn phần đã rút ra ${fmtVND(eq.recycledUnmatchedIn)} — phần này được tính là góp thật.</div>` : ''}
     </section>
 
     <section class="group">
