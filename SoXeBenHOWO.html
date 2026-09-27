@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-26 · #310';
+const APP_BUILD = '2026-09-26 · #311';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -13703,8 +13703,12 @@ function computeBankBalanceReconciliation(){
   // như 1 khoản chi ra (KHÁC internalTransfers ở trên — đó là đổi túi
   // NỘI BỘ, còn đây là tiền ra khỏi 2 túi vận hành hẳn). Chiều ngược lại
   // (fromReserve) là lúc rút quỹ về dùng lại, cộng trả lại đúng vậy.
-  const reserveOut = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='toReserve').reduce((s,t)=>s+(Number(t.amount)||0),0);
-  const reserveIn = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='fromReserve').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  // SỬA 2026-09-26 LẦN 2 (Ông Chủ yêu cầu — "chọn nguồn TCB hoặc tiền
+  // mặt khi chuyển vào quỹ"): CHỈ tính vào đây đúng những lần Ông Chủ
+  // chọn nguồn/đích là Ngân Hàng (method!=='cash') — bản ghi cũ trước khi
+  // có field này mặc định coi là 'bank', khớp đúng hành vi ban đầu.
+  const reserveOut = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='toReserve' && (t.method||'bank')!=='cash').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const reserveIn = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='fromReserve' && (t.method||'bank')!=='cash').reduce((s,t)=>s+(Number(t.amount)||0),0);
   // SỬA 2026-09-14 (audit "Kế Toán Nội Bộ" — Ông Chủ phát hiện qua redesign
   // Khớp Số Dư → Kế Toán Nội Bộ): 2 khoản CHƯA TỪNG cộng vào công thức
   // này dù là tiền thật ra khỏi công ty — (1) driverAdvances: tiền ứng
@@ -13807,8 +13811,12 @@ function computeCashBalanceReconciliation(){
   const invoiceLotCash = invoiceLotCashOutOnly - invoiceLotCashInOnly;
   const vatPaymentCash = (state.vatPayments||[]).filter(p=>p.date>=from && p.date<=today && p.method==='cash')
     .reduce((s,p)=>s+(Number(p.amount)||0), 0);
+  // MỚI (2026-09-26) — sinh đôi với reserveOut/reserveIn bên Ngân Hàng,
+  // nhưng cho lần Ông Chủ chọn nguồn/đích là Tiền Mặt.
+  const reserveOutCash = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='toReserve' && t.method==='cash').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const reserveInCash = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='fromReserve' && t.method==='cash').reduce((s,t)=>s+(Number(t.amount)||0),0);
   const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank - driverAdvanceCash - bonusCash
-    - repairCash - roadFeeCash - houseRentCash - utilitiesCash - tollFeeCash - fixedMonthlyCash - invoiceLotCash - vatPaymentCash;
+    - repairCash - roadFeeCash - houseRentCash - utilitiesCash - tollFeeCash - fixedMonthlyCash - invoiceLotCash - vatPaymentCash - reserveOutCash + reserveInCash;
   // SỬA 2026-09-14 LẦN 3 (sinh đôi với lỗi vừa sửa ở computeBankBalanceReconciliation()
   // phía trên — cùng nguyên nhân, cùng cách sửa): dùng đúng `>= from`
   // thay vì `>= latest.date`, tránh tính trùng khoản góp/rút vốn ghi đúng
@@ -13821,7 +13829,7 @@ function computeCashBalanceReconciliation(){
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash,
-    repairCash, roadFeeCash, houseRentCash, utilitiesCash, tollFeeCash, fixedMonthlyCash, invoiceLotCash, vatPaymentCash };
+    repairCash, roadFeeCash, houseRentCash, utilitiesCash, tollFeeCash, fixedMonthlyCash, invoiceLotCash, vatPaymentCash, reserveOutCash, reserveInCash };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
 /// những khoản Góp Vào được đánh dấu "isCharterCapital:true" — KHÔNG phải
@@ -17634,15 +17642,27 @@ function openInternalTransferModal(){
 /// mỗi lần — app không tự ép đúng 20tr/tháng, không tự bịa số.
 function openDepreciationReserveTransferModal(){
   let amountVal = 0;
+  const vehicleOptions = state.vehicles.map(v=>`<option value="${v.id}">🚛 ${escapeHtml(v.name||v.plate||'')}</option>`).join('');
   openModal(`
-    <h3>🏦 Ghi Nhận Chuyển Tiền — Quỹ Khấu Hao</h3>
-    <div class="hint" style="margin-top:0;">Ghi đúng số tiền THẬT đã chuyển giữa TCB Bank và tài khoản cá nhân giữ riêng — không cần đúng 20tr/tháng, chuyển bao nhiêu ghi đúng bấy nhiêu.</div>
+    <h3>🫙 Ghi Nhận Chuyển Tiền — Quỹ Khấu Hao</h3>
+    <div class="hint" style="margin-top:0;">Ghi đúng số tiền THẬT đã chuyển giữa công ty và tài khoản cá nhân giữ riêng — không cần đúng 20tr/tháng, chuyển bao nhiêu ghi đúng bấy nhiêu.</div>
     <div class="field">
       <label>Chiều chuyển</label>
       <div class="seg" id="drt_direction">
-        <button data-val="toReserve" class="active">🏦→🏦 Chuyển VÀO Quỹ Khấu Hao</button>
-        <button data-val="fromReserve">🏦→🏦 Rút TỪ Quỹ Khấu Hao về</button>
+        <button data-val="toReserve" class="active">→🫙 Chuyển VÀO Quỹ Khấu Hao</button>
+        <button data-val="fromReserve">🫙→ Rút TỪ Quỹ Khấu Hao về</button>
       </div>
+    </div>
+    <div class="field">
+      <label id="drt_methodLabel">Nguồn tiền (rút từ đâu)</label>
+      <div class="seg" id="drt_method">
+        <button data-val="bank" class="active">🏦 TCB Bank</button>
+        <button data-val="cash">💵 Tiền Mặt</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Của xe nào (để xem lịch sử riêng từng xe)</label>
+      <select id="drt_vehicle">${vehicleOptions}</select>
     </div>
     <div class="field">
       <label>Ngày</label>
@@ -17659,19 +17679,32 @@ function openDepreciationReserveTransferModal(){
     <button class="btn btn-accent btn-block" id="drt_saveBtn" style="margin-top:14px;">Lưu</button>
   `);
   let direction = 'toReserve';
+  let method = 'bank';
   document.querySelectorAll('#drt_direction button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       direction = btn.dataset.val;
       document.querySelectorAll('#drt_direction button').forEach(b=>b.classList.toggle('active', b===btn));
+      const lbl = document.getElementById('drt_methodLabel');
+      if(lbl) lbl.textContent = direction==='toReserve' ? 'Nguồn tiền (rút từ đâu)' : 'Trả về đâu';
+    });
+  });
+  document.querySelectorAll('#drt_method button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      method = btn.dataset.val;
+      document.querySelectorAll('#drt_method button').forEach(b=>b.classList.toggle('active', b===btn));
     });
   });
   attachMoneyInput(document.getElementById('drt_amount'), 0, v=>amountVal=v);
+  const activeVid = activeVehicleIdForEditing();
+  const vehicleSelect = document.getElementById('drt_vehicle');
+  if(vehicleSelect && activeVid) vehicleSelect.value = activeVid;
   document.getElementById('drt_saveBtn').addEventListener('click', async ()=>{
     const date = document.getElementById('drt_date').value;
     const notes = document.getElementById('drt_notes').value.trim();
+    const vehicleId = document.getElementById('drt_vehicle').value;
     if(!date){ showToast('Chọn ngày trước đã.'); return; }
     if(!(amountVal>0)){ showToast('Nhập số tiền trước đã.'); return; }
-    state.depreciationReserveTransfers.push({ id: uid('drtxfer'), date, direction, amount: amountVal, note: notes });
+    state.depreciationReserveTransfers.push({ id: uid('drtxfer'), date, direction, amount: amountVal, note: notes, method, vehicleId });
     const ok = await saveDepreciationReserveTransfers();
     if(!ok) return;
     showToast('Đã ghi nhận chuyển tiền.');
@@ -18536,36 +18569,33 @@ function renderCompanyDashboardPage(preserveScroll){
           <div style="width:2px; height:14px; background:var(--border);"></div>
           <div style="width:2px; height:14px; background:var(--border);"></div>
         </div>
-        <div style="display:flex; gap:14px; justify-content:center;">
-          <div style="flex:1; max-width:150px; text-align:center;">
-            <button id="ktnbGoBankBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
-              <div style="font-size:26px; line-height:1;">🏦</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">TCB Bank</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <div style="flex:1; max-width:120px; text-align:center;">
+            <button id="ktnbGoBankBtn" style="width:100%; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+              <div style="font-size:24px; line-height:1;">🏦</div>
+              <div style="font-weight:800; margin-top:6px; font-size:11.5px;">TCB Bank</div>
+              <div style="font-weight:900; margin-top:2px; font-size:12.5px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
             </button>
-            <button id="ktnbDetailBankBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
           </div>
-          <div style="flex:1; max-width:150px; text-align:center;">
-            <button id="ktnbGoCashBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
-              <div style="font-size:26px; line-height:1;">💵</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Tiền Mặt</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
+          <div style="flex:1; max-width:120px; text-align:center;">
+            <button id="ktnbGoCashBtn" style="width:100%; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+              <div style="font-size:24px; line-height:1;">💵</div>
+              <div style="font-weight:800; margin-top:6px; font-size:11.5px;">Tiền Mặt</div>
+              <div style="font-weight:900; margin-top:2px; font-size:12.5px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
             </button>
-            <button id="ktnbDetailCashBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
           </div>
-        </div>
-        <!-- MỚI (2026-09-26, Ông Chủ yêu cầu — "1 tài khoản ngân hàng cá
-        nhân nắm giữ riêng khoản khấu hao, tách bạch khỏi tiền lãi"): thẻ
-        THỨ 3, tách hẳn hàng riêng bên dưới TCB Bank/Tiền Mặt — cùng kiểu
-        dáng, chỉ khác không có nút "Chi tiết" sâu (chưa cần trang riêng,
-        số dư đã đủ rõ ràng). -->
-        <div style="display:flex; justify-content:center; margin-top:14px;">
-          <div style="flex:1; max-width:150px; text-align:center;">
-            <div style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--accent); background:var(--accent-soft);">
-              <div style="font-size:26px; line-height:1;">🏦</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Quỹ Khấu Hao (TK Cá Nhân)</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</div>
-            </div>
+          <!-- MỚI (2026-09-26, Ông Chủ yêu cầu — "1 tài khoản ngân hàng cá
+          nhân nắm giữ riêng khoản khấu hao, kích thước bằng ô TCB/Tiền
+          Mặt, bấm vào hiện lịch sử chi tiết từng xe"): thẻ THỨ 3, CÙNG
+          HÀNG, CÙNG KÍCH THƯỚC 2 ô kia — bấm mở thẳng lịch sử theo xe. Bỏ
+          2 nút "Chi tiết" rời của TCB/Tiền Mặt phía trên vì bấm thẳng vào
+          ô đã mở đúng trang đó rồi, giữ lại là thừa. -->
+          <div style="flex:1; max-width:120px; text-align:center;">
+            <button id="ktnbGoDepReserveBtn" style="width:100%; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
+              <div style="font-size:24px; line-height:1;">🫙</div>
+              <div style="font-weight:800; margin-top:6px; font-size:11.5px;">Chứa Tiền Khấu Hao Xe</div>
+              <div style="font-weight:900; margin-top:2px; font-size:12.5px; color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</div>
+            </button>
           </div>
         </div>
         <div class="formula-divider" style="margin:16px 0 12px;"></div>
@@ -18574,11 +18604,8 @@ function renderCompanyDashboardPage(preserveScroll){
           <button class="btn btn-accent" id="addInternalTransferBtn" style="flex:1;">🔄➕ Ghi Nhận</button>
           <button class="btn btn-ghost" id="internalTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
         </div>
-        <div style="font-weight:800; font-size:13px; margin-top:16px; margin-bottom:8px; text-align:center;">🏦 Chuyển Tiền — Quỹ Khấu Hao</div>
-        <div style="display:flex; gap:10px;">
-          <button class="btn btn-accent" id="addDepReserveTransferBtn" style="flex:1;">🏦➕ Ghi Nhận</button>
-          <button class="btn btn-ghost" id="depReserveTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
-        </div>
+        <div style="font-weight:800; font-size:13px; margin-top:16px; margin-bottom:8px; text-align:center;">🫙 Chuyển Tiền — Chứa Tiền Khấu Hao Xe</div>
+        <button class="btn btn-accent btn-block" id="addDepReserveTransferBtn">🫙➕ Ghi Nhận</button>
       </div>
     </section>
 
@@ -18647,7 +18674,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue+mineInvoiceInventoryValue)}</td></tr>
-              <tr><td>🏦 Quỹ Khấu Hao (TK Cá Nhân)</td><td class="num" style="color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</td></tr>
+              <tr><td>🫙 Chứa Tiền Khấu Hao Xe</td><td class="num" style="color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</td></tr>
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
             </tbody>
           </table>
@@ -18991,12 +19018,10 @@ function renderCompanyDashboardPage(preserveScroll){
   if(ktnbFullLedgerBtn) ktnbFullLedgerBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
   const ktnbGoBankBtn = document.getElementById('ktnbGoBankBtn');
   if(ktnbGoBankBtn) ktnbGoBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('bank'); });
-  const ktnbDetailBankBtn = document.getElementById('ktnbDetailBankBtn');
-  if(ktnbDetailBankBtn) ktnbDetailBankBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('bank'); });
   const ktnbGoCashBtn = document.getElementById('ktnbGoCashBtn');
   if(ktnbGoCashBtn) ktnbGoCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('cash'); });
-  const ktnbDetailCashBtn = document.getElementById('ktnbDetailCashBtn');
-  if(ktnbDetailCashBtn) ktnbDetailCashBtn.addEventListener('click', ()=>{ saveMainScroll(); renderBankReconDetailPage('cash'); });
+  const ktnbGoDepReserveBtn = document.getElementById('ktnbGoDepReserveBtn');
+  if(ktnbGoDepReserveBtn) ktnbGoDepReserveBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationReserveHistoryPage(); });
   document.getElementById('cashFlowBreakdownDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCashFlowBreakdownDetailPage(); });
   const invoiceInventoryDetailBtn = document.getElementById('invoiceInventoryDetailBtn');
   if(invoiceInventoryDetailBtn) invoiceInventoryDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderInvoiceInventoryDetailPage(); });
@@ -19047,8 +19072,6 @@ function renderCompanyDashboardPage(preserveScroll){
   document.getElementById('internalTransferHistoryBtn').addEventListener('click', ()=>{ saveMainScroll(); renderInternalTransferHistoryPage(); });
   const addDepReserveTransferBtn = document.getElementById('addDepReserveTransferBtn');
   if(addDepReserveTransferBtn) addDepReserveTransferBtn.addEventListener('click', openDepreciationReserveTransferModal);
-  const depReserveTransferHistoryBtn = document.getElementById('depReserveTransferHistoryBtn');
-  if(depReserveTransferHistoryBtn) depReserveTransferHistoryBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationReserveHistoryPage(); });
   renderRoadFeeMonthTable();
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
@@ -19456,27 +19479,48 @@ function renderDepreciationReserveHistoryPage(){
   scrollMainToTop();
   const app = document.getElementById('app');
   const sorted = [...state.depreciationReserveTransfers].sort((a,b)=>b.date.localeCompare(a.date));
+  // MỚI (2026-09-26, Ông Chủ yêu cầu — "hiện toàn bộ lịch sử chi tiết
+  // tiền đã thu từng con xe"): nhóm theo ĐÚNG xe đã gán lúc ghi nhận —
+  // mỗi xe 1 khối riêng, có dòng tổng riêng, rồi mới tới danh sách từng
+  // lần bên trong xe đó. Bản ghi cũ (trước khi có field vehicleId) không
+  // gán xe nào → gom vào nhóm "Chưa gán xe cụ thể", không mất dữ liệu.
+  const byVehicle = {};
+  sorted.forEach(t=>{
+    const key = t.vehicleId || '_none';
+    if(!byVehicle[key]) byVehicle[key] = [];
+    byVehicle[key].push(t);
+  });
+  const vehicleGroupsHtml = Object.entries(byVehicle).map(([vid, list])=>{
+    const v = vid==='_none' ? null : state.vehicles.find(x=>x.id===vid);
+    const label = v ? `🚛 ${escapeHtml(v.name||v.plate||'')}` : '❓ Chưa gán xe cụ thể';
+    const subtotal = list.reduce((s,t)=>s+(t.direction==='toReserve'?Number(t.amount)||0:-(Number(t.amount)||0)),0);
+    return `
+    <div class="card" style="margin-bottom:12px; padding:0; overflow:hidden;">
+      <div style="padding:12px 14px; background:var(--accent-soft); display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:800; font-size:13.5px;">${label}</span>
+        <span style="font-weight:900; color:${subtotal>=0?'var(--profit)':'var(--loss)'};">${fmtVND(subtotal)}</span>
+      </div>
+      ${list.map(t=>`
+        <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+          <div>
+            <div style="font-weight:700;">${t.direction==='toReserve'?'→🫙 Chuyển VÀO Quỹ':'🫙→ Rút TỪ Quỹ về'} (${(t.method||'bank')==='cash'?'💵 Tiền Mặt':'🏦 TCB Bank'}) — ${formatDateVN(t.date)}</div>
+            ${t.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(t.note)}</div>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-weight:800; white-space:nowrap; color:${t.direction==='toReserve'?'var(--profit)':'var(--loss)'};">${t.direction==='toReserve'?'+':'−'}${fmtVND(t.amount)}</span>
+            <button class="link-btn" data-del-dr-transfer="${t.id}" style="color:var(--loss); padding:0;">Xoá</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }).join('');
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="depReserveHistoryBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
-      <h2 style="margin-bottom:2px;">🏦 Chi Tiết Lịch Sử Quỹ Khấu Hao</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">${sorted.length} lần chuyển, mới nhất lên đầu. Số dư hiện tại: <strong>${fmtVND(depreciationReserveBalance())}</strong>.</div>
-      ${sorted.length===0 ? '<div class="hint">Chưa có lần chuyển tiền nào vào/ra Quỹ Khấu Hao.</div>' : `
-      <div class="card" style="padding:0; overflow:hidden;">
-        ${sorted.map(t=>`
-          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
-            <div>
-              <div style="font-weight:700;">${t.direction==='toReserve'?'🏦→🏦 Chuyển VÀO Quỹ':'🏦→🏦 Rút TỪ Quỹ về'} — ${formatDateVN(t.date)}</div>
-              ${t.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(t.note)}</div>` : ''}
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-weight:800; white-space:nowrap; color:${t.direction==='toReserve'?'var(--profit)':'var(--loss)'};">${t.direction==='toReserve'?'+':'−'}${fmtVND(t.amount)}</span>
-              <button class="link-btn" data-del-dr-transfer="${t.id}" style="color:var(--loss); padding:0;">Xoá</button>
-            </div>
-          </div>`).join('')}
-      </div>`}
+      <h2 style="margin-bottom:2px;">🫙 Chi Tiết Lịch Sử — Chứa Tiền Khấu Hao Xe</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${sorted.length} lần chuyển, nhóm theo từng xe, mới nhất lên đầu trong mỗi nhóm. Số dư hiện tại (mọi xe cộng lại): <strong>${fmtVND(depreciationReserveBalance())}</strong>.</div>
+      ${sorted.length===0 ? '<div class="hint">Chưa có lần chuyển tiền nào vào/ra Quỹ Khấu Hao.</div>' : vehicleGroupsHtml}
     </section>
   `;
   document.getElementById('depReserveHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
