@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-26 · #311';
+const APP_BUILD = '2026-09-27 · #312';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2675,6 +2675,42 @@ function companyWideEquityLoanAdjustment(){
     });
   });
   return sum;
+}
+// MỚI 2026-09-27 (Ông Chủ yêu cầu — "Cầu Nối Dòng Tiền: lãi ròng hơn 126tr
+// mà tiền thiếu hụt ở đâu?"): hàm CHỈ ĐỌC, không sửa bất kỳ công thức tài
+// chính nào — chỉ ghép lại các số ĐÃ CÓ SẴN để đối chiếu:
+//   Vốn vận hành LẼ RA PHẢI CÓ = Góp thêm (thật) − Rút ra (thật)
+//     + Lãi ròng kế toán (computeCumulativeAccrualProfit, đã trừ khấu hao)
+//     + Khấu hao luỹ kế (chi phí trên sổ, tiền KHÔNG rời công ty)
+//     − Gốc vay đã trả thật (MỌI khoản vay — trả gốc là tiền ra thật nhưng
+//       KHÔNG phải chi phí, nên lãi ròng không trừ)
+//   Chênh lệch = Vốn vận hành THỰC TẾ − Vốn vận hành LẼ RA PHẢI CÓ.
+// "Vốn Đầu Tư Ban Đầu" (tiền mua xe) KHÔNG vào cầu nối: nó vừa là vốn bỏ
+// vào, vừa nằm ngay trong chiếc xe — tự triệt tiêu, không đi qua vốn vận
+// hành. workingCapitalTotal + depreciationSoFar nhận ĐÚNG số đang hiện ở
+// bảng Tổng Giá Trị Ròng (truyền vào, không tính lại) — không thể lệch.
+function computeCashBridge(eq, workingCapitalTotal, depreciationSoFar){
+  let principalPaidAll = 0, hasCompanyLoan = false;
+  const loanRows = [];
+  Object.entries(state.allVehiclesSettings).forEach(([vid,s])=>{
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    loans.forEach(loan=>{
+      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+      const paid = computeFullLoanSchedule(loan).reduce((s2,row)=>{
+        const ym = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}`;
+        return paidSet.has(ym) ? s2 + (Number(row.monthlyPrincipal)||0) : s2;
+      }, 0);
+      if((loan.ownerType||'personal')==='company') hasCompanyLoan = true;
+      principalPaidAll += paid;
+      loanRows.push({ name: loan.name || 'Khoản vay', ownerType: loan.ownerType||'personal', principal: Number(loan.principal)||0, paid });
+    });
+  });
+  const accrualProfit = Number(eq.cumulativeProfit)||0;
+  const expectedWC = (Number(eq.contributedExtra)||0) - (Number(eq.withdrawn)||0) + accrualProfit + (Number(depreciationSoFar)||0) - principalPaidAll;
+  const residual = workingCapitalTotal - expectedWC;
+  return { contributedExtra: Number(eq.contributedExtra)||0, withdrawn: Number(eq.withdrawn)||0,
+    accrualProfit, depreciationSoFar: Number(depreciationSoFar)||0, principalPaidAll, loanRows, hasCompanyLoan,
+    expectedWC, actualWC: workingCapitalTotal, residual };
 }
 // SỬA 2026-09-14 (Ông Chủ yêu cầu bảng "Tổng Giá Trị Ròng" đầy đủ cho Kế
 // Toán Nội Bộ): Hàng Tồn Kho = Tổng tiền THẬT đã mua lô hoá đơn bù (NET,
@@ -18657,6 +18693,7 @@ function renderCompanyDashboardPage(preserveScroll){
           + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + mineInvoiceInventoryValue + depreciationReserveBalance();
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
+        const cb = computeCashBridge(eq, workingCapitalTotal, depreciationSoFar);
         return `
         <!-- MỚI (Ông Chủ yêu cầu 2026-09-20 — "gói vào 1 bảng tổng nền
         trắng để hiểu các dữ liệu liên quan tới nhau, không rời rạc"):
@@ -18697,6 +18734,41 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG TOÀN CÔNG TY</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- MỚI 2026-09-27 (Ông Chủ yêu cầu — "Cầu Nối Dòng Tiền"): CHỈ ĐỌC,
+        ghép các số ĐÃ CÓ SẴN (xem computeCashBridge) — không đổi bất kỳ
+        công thức nào ở trên. Dòng cuối về 0 = mọi đồng đều đã ghi nhận. -->
+        <div class="card" style="margin-top:14px;">
+          <div style="font-weight:800; font-size:15px; margin-bottom:2px;">🌉 Cầu Nối Dòng Tiền</div>
+          <div class="hint" style="margin-top:0; margin-bottom:8px;">Đối chiếu lãi trên sổ sách với tiền thật đang có. Dòng chênh lệch về 0 nghĩa là mọi đồng của Ông Chủ đều đã được ghi nhận.</div>
+          <table class="grid-table">
+            <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+            <tbody>
+              <tr><td>+ Đã góp thêm vào vận hành (tiền thật, không tính tiền đảo) <button class="link-btn" id="cbLedgerBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.contributedExtra)}</td></tr>
+              <tr><td>− Đã rút ra (tiền thật, không tính tiền đảo)</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.withdrawn)}</td></tr>
+              <tr><td>+ Lãi ròng kế toán (đã trừ khấu hao) <button class="link-btn" id="cbProfitBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${cb.accrualProfit>=0?'var(--profit)':'var(--loss)'};">${cb.accrualProfit>=0?'+':'−'}${fmtVND(Math.abs(cb.accrualProfit))}</td></tr>
+              <tr><td>+ Cộng lại khấu hao (chi phí trên sổ, tiền không rời công ty) <button class="link-btn" id="cbDepBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.depreciationSoFar)}</td></tr>
+              <tr><td>− Gốc vay đã trả bằng tiền công ty (tiền ra thật, không phải chi phí) <button class="link-btn" id="cbLoanBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(cb.principalPaidAll)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= VỐN VẬN HÀNH LẼ RA PHẢI CÓ</td><td class="num">${cb.expectedWC>=0?'+':'−'}${fmtVND(Math.abs(cb.expectedWC))}</td></tr>
+              <tr><td>Vốn vận hành thực tế (bảng trên)</td><td class="num">${cb.actualWC>=0?'+':'−'}${fmtVND(Math.abs(cb.actualWC))}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= CHÊNH LỆCH CHƯA GIẢI THÍCH</td><td class="num" style="color:${Math.abs(cb.residual)<1000?'var(--profit)':'var(--loss)'};">${Math.abs(cb.residual)<1000?'0đ ✅':(cb.residual>0?'+':'−')+fmtVND(Math.abs(cb.residual))}</td></tr>
+            </tbody>
+          </table>
+          ${Math.abs(cb.residual)<1000 ? `
+          <div class="hint" style="margin-top:8px; color:var(--profit);">✅ Khớp: tiền thật đang có đúng bằng số sổ sách tính ra. Không có đồng nào thất thoát.</div>` : cb.residual<0 ? `
+          <div class="hint" style="margin-top:8px; padding:10px; border-radius:10px; background:var(--loss-soft, #f6e3e1); color:var(--loss);">⚠️ Tiền thật đang THIẾU ${fmtVND(Math.abs(cb.residual))} so với sổ sách. Ông Chủ kiểm tra lần lượt:<br>
+          • Chi phí đã trả thật nhưng chưa nhập vào app (khi đó lãi ròng đang bị ghi cao hơn thực tế).<br>
+          • Tiền ứng / tạm ứng lương tài xế chưa quyết toán.<br>
+          • VAT đầu vào đã trả, đang chờ khấu trừ (là tài sản thuế, không phải mất).<br>
+          • Tiền rút dùng cá nhân nhưng chưa ghi "Rút vốn" (bấm 🔍 dòng Góp thêm để xem sao kê).<br>
+          • Tiền chi cho xe (trả trước, đăng ký, phụ kiện) từ tài khoản công ty nhưng đã tính vào Vốn Đầu Tư Ban Đầu.</div>` : `
+          <div class="hint" style="margin-top:8px; padding:10px; border-radius:10px; background:var(--accent-soft); color:var(--ink);">ℹ️ Tiền thật đang DƯ ${fmtVND(cb.residual)} so với sổ sách. Ông Chủ kiểm tra lần lượt:<br>
+          • Tiền đưa vào tài khoản công ty (ví dụ tiền giải ngân khoản vay) nhưng chưa ghi "Góp thêm".<br>
+          • Khoản công ty đang nợ chưa trả: lương tài xế chưa thanh toán, VAT phải nộp chưa nộp.<br>
+          • Doanh thu đã thu tiền nhưng chưa nhập ca.</div>`}
+          ${cb.hasCompanyLoan ? `<div class="hint" style="margin-top:6px;">Có khoản vay đứng tên công ty: nếu tiền giải ngân chảy vào tài khoản công ty (không trả thẳng cho bên bán xe), phần đó sẽ hiện ở dòng chênh lệch.</div>` : ''}
+          <div class="hint" style="margin-top:6px;">Tiền mua xe (Vốn Đầu Tư Ban Đầu) không đi qua cầu nối vì đang nằm ngay trong chiếc xe.</div>
         </div>
         `;
       })()}
@@ -19031,6 +19103,15 @@ function renderCompanyDashboardPage(preserveScroll){
   if(charterCapitalEditBtn) charterCapitalEditBtn.addEventListener('click', openCharterCapitalEditor);
   const equityDetailBtn = document.getElementById('equityDetailBtn');
   if(equityDetailBtn) equityDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderEquityDetailPage(); });
+  // MỚI 2026-09-27 — nút 🔍 của Cầu Nối Dòng Tiền: mở đúng các trang chi tiết ĐÃ CÓ SẴN.
+  const cbLedgerBtn = document.getElementById('cbLedgerBtn');
+  if(cbLedgerBtn) cbLedgerBtn.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyCashFlowLedgerPage(); });
+  const cbProfitBtn = document.getElementById('cbProfitBtn');
+  if(cbProfitBtn) cbProfitBtn.addEventListener('click', openROICalculationDetail);
+  const cbDepBtn = document.getElementById('cbDepBtn');
+  if(cbDepBtn) cbDepBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
+  const cbLoanBtn = document.getElementById('cbLoanBtn');
+  if(cbLoanBtn) cbLoanBtn.addEventListener('click', ()=>{ saveMainScroll(); renderEquityDetailPage(); });
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
   const addInvestEntryBtn = document.getElementById('addInvestEntryBtn');
