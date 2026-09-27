@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-27 · #313';
+const APP_BUILD = '2026-09-27 · #314';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2680,6 +2680,17 @@ function companyWideEquityLoanAdjustment(){
   });
   return sum;
 }
+// MỚI 2026-09-27 LẦN 3 (Ông Chủ — "lãi vay các kỳ đã thanh toán cũng như
+// sau này thực sự là 1 chi phí, kiểm tra lại toàn bộ app"): lãi vay CỦA
+// KỲ HIỆN TẠI tính LIVE ngay lúc gọi, cho đúng xe `s` — thay cho việc đọc
+// snapshot s.monthlyLoanInterest (chỉ được làm mới khi mở đúng xe đó).
+// Dùng cho các phép DỰ BÁO theo tháng (Trợ Lý, Hoà Vốn Cả Tháng, Thẩm
+// Định, Tư Vấn Thuê Tài Xế) — y hệt công thức recomputeBankLoanMonthlyPayment().
+function liveMonthlyLoanInterest(s){
+  if(!s) return 0;
+  const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+  return Math.round(loans.reduce((sum,loan)=>sum+(Number(computeBankLoanAmortization(loan, new Date()).monthlyInterestCurrent)||0), 0));
+}
 // MỚI 2026-09-27 (Ông Chủ yêu cầu — "Cầu Nối Dòng Tiền: lãi ròng hơn 126tr
 // mà tiền thiếu hụt ở đâu?"): hàm CHỈ ĐỌC, không sửa bất kỳ công thức tài
 // chính nào — chỉ ghép lại các số ĐÃ CÓ SẴN để đối chiếu:
@@ -2726,10 +2737,14 @@ function computeCashBridge(eq, workingCapitalTotal, depreciationSoFar){
   const interestInProfit = (profitFrom && profitFrom<=profitTo) ? companyWideAccrualFixedMonthlyBreakdown(profitFrom, profitTo).loanInterest : 0;
   const interestOutsideProfit = interestPaidAll - interestInProfit;
   const accrualProfit = Number(eq.cumulativeProfit)||0;
-  const expectedWC = (Number(eq.contributedExtra)||0) - (Number(eq.withdrawn)||0) + accrualProfit + (Number(depreciationSoFar)||0) - principalPaidAll - interestOutsideProfit;
+  // Trình bày lãi vay thành DÒNG CHI RIÊNG (Ông Chủ yêu cầu): cộng trả lại
+  // phần lãi đã nằm trong Lãi Ròng, rồi trừ ĐỦ toàn bộ lãi đã trả thật theo
+  // nguồn — kết quả Y HỆT công thức cũ (chỉ đổi cách trình bày).
+  const profitBeforeInterest = accrualProfit + interestInProfit;
+  const expectedWC = (Number(eq.contributedExtra)||0) - (Number(eq.withdrawn)||0) + profitBeforeInterest + (Number(depreciationSoFar)||0) - interestPaidAll - principalPaidAll;
   const residual = workingCapitalTotal - expectedWC;
   return { contributedExtra: Number(eq.contributedExtra)||0, withdrawn: Number(eq.withdrawn)||0,
-    accrualProfit, depreciationSoFar: Number(depreciationSoFar)||0,
+    accrualProfit, profitBeforeInterest, depreciationSoFar: Number(depreciationSoFar)||0,
     principalBank, principalCash, principalPaidAll, interestBank, interestCash, interestPaidAll, interestInProfit, interestOutsideProfit,
     hasCompanyLoan, expectedWC, actualWC: workingCapitalTotal, residual };
 }
@@ -10230,7 +10245,7 @@ function aggregateStrategyData(from, to){
   const todayYM = todayLocalDateStr();
   const financialSnapshot = {
     roadFeeThisMonth: Math.round(roadFeeForRange(todayYM, todayYM)),
-    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
+    otherFixedMonthly: Math.round((Number(state.settings.monthlyVehicleDepreciation)||0) + liveMonthlyLoanInterest(state.settings) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0))
   };
 
   return {
@@ -10555,7 +10570,7 @@ function computeHiringAdvisorMetrics(draft){
   const currentMonthlyTollFee = tollFeeForRange(curMonthRangeForRoadFee.from, curMonthRangeForRoadFee.to);
   // 2026-08-16: monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ Lãi)
   // — khớp đúng quy tắc otherFixedMonthly ở computePeriodSummary (~7850).
-  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + (Number(state.settings.monthlyLoanInterest)||0) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(state.settings.monthlyVehicleDepreciation)||0) + liveMonthlyLoanInterest(state.settings) + (Number(state.settings.monthlyInsurance)||0) + (Number(state.settings.monthlyRegistrationFee)||0);
   const currentFixedCost = currentMonthlySalary + currentMonthlyHouseRent + currentMonthlyUtilities + currentMonthlyTollFee + currentMonthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   // ----- Kịch bản HIỆN TẠI (1 lái) — quy đổi nhịp độ thực tế trong khoảng
@@ -11528,7 +11543,7 @@ function computeAppraisalMetrics(p){
   // 2026-08-16: đổi monthlyLoanPayment (Gốc+Lãi) → monthlyLoanInterest (chỉ
   // LÃI) — khớp đúng quy tắc otherFixedMonthly ở computePeriodSummary
   // (~7850): Gốc vay là trả bớt nợ, không phải chi phí làm giảm lợi nhuận.
-  const fixedLoanMonthly = Number(state.settings.monthlyLoanInterest)||0; // lấy tự động từ Công Cụ Tính Gốc+Lãi ở Cài Đặt — chi phí cố định áp dụng cho toàn bộ app, không gõ tay riêng theo từng công trình nữa
+  const fixedLoanMonthly = liveMonthlyLoanInterest(state.settings); // lấy tự động từ Công Cụ Tính Gốc+Lãi ở Cài Đặt — chi phí cố định áp dụng cho toàn bộ app, không gõ tay riêng theo từng công trình nữa
   const fixedInsuranceMonthly = Number(p.fixedInsuranceMonthly)||0;
   const fixedRegistrationMonthly = Number(p.fixedRegistrationMonthly)||0;
   const fixedOtherMonthly = Number(p.fixedOtherMonthly)||0;
@@ -11646,7 +11661,7 @@ function computeCommercialAppraisalMetrics(p){
   const fixedBaseSalaryMonthly = Number(p.fixedBaseSalaryMonthly)||0;
   const fixedHousingMonthly = Number(p.fixedHousingMonthly)||0;
   const fixedDepreciationMonthly = Number(p.fixedDepreciationMonthly)||0;
-  const fixedLoanMonthly = Number(state.settings.monthlyLoanInterest)||0;
+  const fixedLoanMonthly = liveMonthlyLoanInterest(state.settings);
   const fixedInsuranceMonthly = Number(p.fixedInsuranceMonthly)||0;
   const fixedRegistrationMonthly = Number(p.fixedRegistrationMonthly)||0;
   const fixedOtherMonthly = Number(p.fixedOtherMonthly)||0;
@@ -13067,7 +13082,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const curMonthRange = currentMonthRange();
   const monthlyRoadFee = roadFeeForRange(curMonthRange.from, curMonthRange.to);
   const monthlyHousing = houseRentForRange(curMonthRange.from, curMonthRange.to) + utilitiesForRange(curMonthRange.from, curMonthRange.to);
-  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + (Number(s.monthlyLoanInterest)||0) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
+  const otherFixedMonthly = (Number(s.monthlyVehicleDepreciation)||0) + liveMonthlyLoanInterest(s) + (Number(s.monthlyInsurance)||0) + (Number(s.monthlyRegistrationFee)||0);
   const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   const toDate = today;
@@ -15270,7 +15285,7 @@ function renderResults(){
   const opCostDetailBtn = document.getElementById('operatingCostDetailBtn');
   if(opCostDetailBtn) opCostDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderOperatingCostBreakdownModal(gTotal, repairTotal, roadFee, houseRent, utilities, tollFee); });
   document.getElementById('exportResultsBtn').addEventListener('click', ()=>{
-    exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent, utilities, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows});
+    exportResultsXLSX({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent, utilities, otherFixedMonthly, finalNetProfit, dailyBreakdown, siteRanking, rows, fixedBreakdown: fixedCostBreakdownForDisplay});
   });
   document.getElementById('exportKTThueBtn').addEventListener('click', ()=>{
     exportKTThueBundle(from, to);
@@ -18827,13 +18842,13 @@ function renderCompanyDashboardPage(preserveScroll){
             <tbody>
               <tr><td>+ Đã góp thêm vào vận hành (tiền thật, không tính tiền đảo) <button class="link-btn" id="cbLedgerBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.contributedExtra)}</td></tr>
               <tr><td>− Đã rút ra (tiền thật, không tính tiền đảo)</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.withdrawn)}</td></tr>
-              <tr><td>+ Lãi ròng kế toán (đã trừ khấu hao và lãi vay) <button class="link-btn" id="cbProfitBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${cb.accrualProfit>=0?'var(--profit)':'var(--loss)'};">${cb.accrualProfit>=0?'+':'−'}${fmtVND(Math.abs(cb.accrualProfit))}</td></tr>
-              <tr><td colspan="2" class="hint" style="margin:0; padding-left:18px;">↳ trong đó đã trừ lãi vay: ${fmtVND(cb.interestInProfit)}</td></tr>
+              <tr><td>+ Lãi ròng trước khi trừ lãi vay (đã trừ khấu hao) <button class="link-btn" id="cbProfitBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${cb.profitBeforeInterest>=0?'var(--profit)':'var(--loss)'};">${cb.profitBeforeInterest>=0?'+':'−'}${fmtVND(Math.abs(cb.profitBeforeInterest))}</td></tr>
               <tr><td>+ Cộng lại khấu hao (chi phí trên sổ, tiền không rời công ty) <button class="link-btn" id="cbDepBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.depreciationSoFar)}</td></tr>
+              <tr><td>− Lãi vay đã trả — 🏦 TCB</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.interestBank)}</td></tr>
+              <tr><td>− Lãi vay đã trả — 💵 Tiền mặt</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.interestCash)}</td></tr>
               <tr><td>− Gốc vay đã trả — 🏦 TCB <button class="link-btn" id="cbLoanBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(cb.principalBank)}</td></tr>
               <tr><td>− Gốc vay đã trả — 💵 Tiền mặt</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.principalCash)}</td></tr>
-              <tr><td>− Lãi vay đã trả nhưng chưa trừ trong lãi ròng (kỳ trả trước ngày ca đầu tiên của xe, hoặc trả trước hạn)</td><td class="num" style="color:${cb.interestOutsideProfit>0?'var(--loss)':'var(--ink-soft)'};">${cb.interestOutsideProfit>=0?'−':'+'}${fmtVND(Math.abs(cb.interestOutsideProfit))}</td></tr>
-              <tr><td colspan="2" class="hint" style="margin:0; padding-left:18px;">Tổng lãi vay đã trả thật: ${fmtVND(cb.interestPaidAll)} (🏦 TCB ${fmtVND(cb.interestBank)} · 💵 Tiền mặt ${fmtVND(cb.interestCash)})</td></tr>
+              ${Math.abs(cb.interestOutsideProfit)>=1 ? `<tr><td colspan="2" class="hint" style="margin:0; padding-left:18px;">↳ Trong số lãi vay đã trả có ${fmtVND(Math.abs(cb.interestOutsideProfit))} thuộc kỳ trước ngày ca đầu tiên của xe hoặc trả trước hạn — phần này chưa vào Lãi Ròng tab Kết Quả.</td></tr>` : ''}
               <tr class="grid-total-row"><td style="text-align:left;">= VỐN VẬN HÀNH LẼ RA PHẢI CÓ</td><td class="num">${cb.expectedWC>=0?'+':'−'}${fmtVND(Math.abs(cb.expectedWC))}</td></tr>
               <tr><td>Vốn vận hành thực tế (bảng trên)</td><td class="num">${cb.actualWC>=0?'+':'−'}${fmtVND(Math.abs(cb.actualWC))}</td></tr>
               <tr class="grid-total-row"><td style="text-align:left;">= CHÊNH LỆCH CHƯA GIẢI THÍCH</td><td class="num" style="color:${Math.abs(cb.residual)<1000?'var(--profit)':'var(--loss)'};">${Math.abs(cb.residual)<1000?'0đ ✅':(cb.residual>0?'+':'−')+fmtVND(Math.abs(cb.residual))}</td></tr>
@@ -21172,7 +21187,7 @@ function buildDriverPayrollRows(from, to){
 /// Builds the "Kết Quả Kinh Doanh" sheet: final net profit, financial
 /// health overview (Day/Night/Total), daily breakdown, site ranking —
 /// matching the Kết Quả tab exactly for the given [from, to] period.
-function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent=0, utilities=0, otherFixedMonthly=0, finalNetProfit, dailyBreakdown, siteRanking, rows: overviewRows}){
+function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee, houseRent=0, utilities=0, otherFixedMonthly=0, finalNetProfit, dailyBreakdown, siteRanking, rows: overviewRows, fixedBreakdown=null}){
   const out = [];
   out.push([`Kết Quả Kinh Doanh: ${formatDateVN(from)} - ${formatDateVN(to)}`]);
   out.push([]);
@@ -21187,10 +21202,15 @@ function buildResultsRows({from, to, gDay, gNight, gTotal, repairTotal, roadFee,
   // khiến cộng tay các dòng hiển thị không khớp số cuối): thêm houseRent/
   // utilities vào đúng dòng này, y hệt cách repairTotal/roadFee đã có.
   out.push(['Lợi nhuận gộp vận hành (đã gồm sửa chữa/khấu hao, luật đường, tiền nhà/điện nước)', Math.round(gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities)]);
-  out.push(['− Khấu hao xe dự kiến/tháng', Math.round(state.settings.monthlyVehicleDepreciation||0)]);
-  out.push(['− Lãi vay ngân hàng/tháng (chỉ phần lãi, không gồm gốc)', Math.round(state.settings.monthlyLoanInterest||0)]);
-  out.push(['− Bảo hiểm xe/tháng', Math.round(state.settings.monthlyInsurance||0)]);
-  out.push(['− Đăng kiểm/Đăng ký/Phù hiệu vận tải/tháng', Math.round(state.settings.monthlyRegistrationFee||0)]);
+  // SỬA 2026-09-27 (Ông Chủ — "lãi vay đã thanh toán thực sự là chi phí"):
+  // file Excel xuất ra trước đây ghi lãi vay = mức ước tính kỳ HIỆN TẠI của
+  // 1 xe, KHÔNG phải lãi THẬT đã trả trong kỳ đang xem như trên màn Kết Quả.
+  // Giờ dùng ĐÚNG bộ số màn hình đang hiện (fixedCostBreakdownForDisplay).
+  const fb = fixedBreakdown || { depreciation: state.settings.monthlyVehicleDepreciation||0, loanInterest: liveMonthlyLoanInterest(state.settings), insurance: state.settings.monthlyInsurance||0, registration: state.settings.monthlyRegistrationFee||0 };
+  out.push(['− Khấu hao xe', Math.round(Number(fb.depreciation)||0)]);
+  out.push(['− Lãi vay ngân hàng đã trả trong kỳ (chỉ phần lãi, không gồm gốc)', Math.round(Number(fb.loanInterest)||0)]);
+  out.push(['− Bảo hiểm xe', Math.round(Number(fb.insurance)||0)]);
+  out.push(['− Đăng kiểm/Đăng ký/Phù hiệu vận tải', Math.round(Number(fb.registration)||0)]);
   out.push(['LỢI NHUẬN THỰC TẾ', Math.round(finalNetProfit)]);
   out.push([`Thuế TNDN dự kiến (${Number(state.settings.citRatePercent)||0}%, ước tính tham khảo)`, Math.round(Math.max(0,finalNetProfit)*(Number(state.settings.citRatePercent)||0)/100)]);
   out.push([]);
