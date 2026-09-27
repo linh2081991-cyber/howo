@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-25 · #309';
+const APP_BUILD = '2026-09-26 · #310';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -992,6 +992,17 @@ let state = {
   vatPayments: [], // {id, date, amount, notes} — CHUNG CÔNG TY, tiền VAT đã nộp thật cho nhà nước
   cashBalanceCheckpoints: [], // {id, date, balance, note} — mốc chốt TIỀN MẶT ĐANG CẦM, sinh đôi với bankBalanceCheckpoints
   internalTransfers: [], // {id, date, direction:'bankToCash'|'cashToBank', amount, note} — chuyển tiền NỘI BỘ giữa 2 túi (ngân hàng/tiền mặt) của CÙNG 1 công ty, KHÔNG phải chi tiêu — không đổi Tổng Giá Trị Hiện Có
+  // MỚI (2026-09-26, Ông Chủ yêu cầu — "để 1 tài khoản ngân hàng cá nhân
+  // nắm giữ riêng khoản tiền khấu hao, tách bạch khỏi tiền lãi, để không
+  // nhầm lẫn"): quỹ THỨ 3, tách hẳn khỏi TCB Bank/Tiền Mặt — tiền THẬT đã
+  // rời khỏi 2 túi vận hành, chuyển sang 1 tài khoản riêng giữ hộ, đúng
+  // bằng số Ông Chủ tự ghi mỗi lần chuyển (KHÔNG tự ép đúng 20tr/tháng —
+  // Ông Chủ có thể chuyển nhiều/ít/không đều, app chỉ ghi nhận đúng số
+  // thật). direction:'toReserve' = rút từ TCB Bank sang quỹ; 'fromReserve'
+  // = rút NGƯỢC LẠI từ quỹ về TCB Bank (VD lúc thật sự mua xe mới, cần rút
+  // quỹ ra dùng). Vẫn là tiền của công ty/Ông Chủ — cộng vào đúng dòng
+  // riêng ở Tổng Giá Trị Ròng, không đổi Tổng Giá Trị Hiện Có.
+  depreciationReserveTransfers: [], // {id, date, direction:'toReserve'|'fromReserve', amount, note}
   // "Dự Án Đầu Tư Xe" (2026-08-15) — Vốn Đầu Tư Ban Đầu (giá xe + chi phí
   // liên quan mua xe, Ông Chủ tự điền tay) TÁCH RIÊNG hẳn khỏi Sổ Vốn Chủ
   // Sở Hữu ở trên (đó là các lần góp/rút LẺ TẺ về sau) — và Ngày Bắt Đầu
@@ -1675,7 +1686,7 @@ function withTimeout(promise, ms=15000){
 
 async function loadAll(){
   try {
-    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, initialInvestmentEntriesSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap] = await Promise.all([
+    const [dSnap, sSnap, rSnap, stSnap, pSnap, docSnap, maintSnap, contractSnap, appraisalSnap, bonusSnap, roadFeeSnap, housingUtilSnap, tollFeeSnap, supplierSnap, customerSnap, supplierPaymentSnap, invoiceLotSnap, mineInvoiceSnap, driverAdvanceSnap, driverExpenseReportSnap, vehicleSnap, companySettingsSnap, ownerEquitySnap, equityProjectInfoSnap, initialInvestmentEntriesSnap, bankBalanceCheckpointsSnap, vatPaymentSnap, cashBalanceCheckpointsSnap, internalTransfersSnap, depreciationReserveTransfersSnap] = await Promise.all([
       sharedDataRef('drivers').get(),
       sharedDataRef('shifts').get(),
       sharedDataRef('repairs').get(),
@@ -1728,7 +1739,12 @@ async function loadAll(){
       // BỘ giữa 2 túi ngân hàng/tiền mặt CỦA CÙNG CÔNG TY — không phải
       // chi tiêu, chỉ đổi hình thái, nên phải trừ 1 bên + cộng bên kia
       // ĐỒNG THỜI để Tổng Giá Trị Hiện Có không bị đổi sai.
-      sharedDataRef('internalTransfers').get()
+      sharedDataRef('internalTransfers').get(),
+      // MỚI (2026-09-26) — sổ CHUYỂN TIỀN vào/ra Quỹ Khấu Hao (tài khoản
+      // ngân hàng CÁ NHÂN Ông Chủ giữ riêng) — tách hẳn khỏi internalTransfers
+      // ở trên (đó là chuyển NỘI BỘ giữa 2 túi vận hành CỦA công ty; đây là
+      // chuyển RA NGOÀI 2 túi đó, sang 1 nơi giữ riêng).
+      sharedDataRef('depreciationReserveTransfers').get()
     ]);
     const dData = dSnap.exists ? dSnap.data() : null;
     const sData = sSnap.exists ? sSnap.data() : null;
@@ -1770,6 +1786,8 @@ async function loadAll(){
     state.cashBalanceCheckpoints = cashBalanceCheckpointsData && Array.isArray(cashBalanceCheckpointsData.list) ? cashBalanceCheckpointsData.list : [];
     const internalTransfersData = internalTransfersSnap.exists ? internalTransfersSnap.data() : null;
     state.internalTransfers = internalTransfersData && Array.isArray(internalTransfersData.list) ? internalTransfersData.list : [];
+    const depreciationReserveTransfersData = depreciationReserveTransfersSnap.exists ? depreciationReserveTransfersSnap.data() : null;
+    state.depreciationReserveTransfers = depreciationReserveTransfersData && Array.isArray(depreciationReserveTransfersData.list) ? depreciationReserveTransfersData.list : [];
     if(equityProjectInfoSnap.exists){
       const epi = equityProjectInfoSnap.data();
       state.equityProjectInfo = { initialInvestment: Number(epi.initialInvestment)||0, startDate: epi.startDate||null,
@@ -2143,6 +2161,10 @@ async function saveCashBalanceCheckpoints(){
 async function saveInternalTransfers(){
   try { await withTimeout(sharedDataRef('internalTransfers').set({ list: state.internalTransfers })); return true; }
   catch(e){ showToast('Lỗi lưu sổ chuyển tiền nội bộ: ' + (e?.message || e)); return false; }
+}
+async function saveDepreciationReserveTransfers(){
+  try { await withTimeout(sharedDataRef('depreciationReserveTransfers').set({ list: state.depreciationReserveTransfers })); return true; }
+  catch(e){ showToast('Lỗi lưu sổ Quỹ Khấu Hao: ' + (e?.message || e)); return false; }
 }
 async function saveShifts(){
   try {
@@ -6342,6 +6364,14 @@ function computeInvoiceMismatchWhatIf(from, to){
     });
   });
   return { extraVatCredit, extraCompCost, missingByGoodsType: Object.values(missingByGoodsType), unpricedVolume, vatDetails, compCostDetails };
+}
+/// MỚI (2026-09-26) — số dư hiện tại của Quỹ Khấu Hao (TK cá nhân giữ
+/// riêng), cộng dồn TOÀN BỘ lịch sử (không giới hạn theo kỳ, khác hẳn
+/// computeBankBalanceReconciliation() ở trên chỉ tính TỪ mốc chốt) — vì
+/// đây không có "mốc chốt" nào cả, chỉ đơn giản là tổng đã chuyển vào trừ
+/// tổng đã rút ra, từ ngày đầu tiên Ông Chủ bắt đầu dùng quỹ này.
+function depreciationReserveBalance(){
+  return (state.depreciationReserveTransfers||[]).reduce((sum,t)=>sum + (t.direction==='toReserve' ? (Number(t.amount)||0) : -(Number(t.amount)||0)), 0);
 }
 function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
@@ -13668,6 +13698,13 @@ function computeBankBalanceReconciliation(){
   // không đổi (đúng bản chất "vẫn là tiền công ty, chỉ đổi hình thái").
   const transferOutToCash = (state.internalTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='bankToCash').reduce((s,t)=>s+(Number(t.amount)||0),0);
   const transferInFromCash = (state.internalTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='cashToBank').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  // MỚI (2026-09-26) — chuyển tiền RA khỏi TCB Bank sang Quỹ Khấu Hao (TK
+  // cá nhân giữ riêng): tiền THẬT rời tài khoản công ty, phải trừ đúng
+  // như 1 khoản chi ra (KHÁC internalTransfers ở trên — đó là đổi túi
+  // NỘI BỘ, còn đây là tiền ra khỏi 2 túi vận hành hẳn). Chiều ngược lại
+  // (fromReserve) là lúc rút quỹ về dùng lại, cộng trả lại đúng vậy.
+  const reserveOut = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='toReserve').reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const reserveIn = (state.depreciationReserveTransfers||[]).filter(t=>t.date>=from && t.date<=today && t.direction==='fromReserve').reduce((s,t)=>s+(Number(t.amount)||0),0);
   // SỬA 2026-09-14 (audit "Kế Toán Nội Bộ" — Ông Chủ phát hiện qua redesign
   // Khớp Số Dư → Kế Toán Nội Bộ): 2 khoản CHƯA TỪNG cộng vào công thức
   // này dù là tiền thật ra khỏi công ty — (1) driverAdvances: tiền ứng
@@ -13681,7 +13718,7 @@ function computeBankBalanceReconciliation(){
   const driverAdvanceBank = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method!=='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const bonusBank = state.monthlyBonuses.filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method!=='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash - driverAdvanceBank - bonusBank;
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash - driverAdvanceBank - bonusBank - reserveOut + reserveIn;
   // SỬA 2026-09-14 LẦN 3 (Ông Chủ báo — khai mốc chốt ĐÚNG HÔM NAY,
   // 352.090.794đ, nhưng app tính ra 264.424.794đ, lệch đúng 87.666.000đ):
   // BẮT ĐƯỢC LỖI TÍNH TRÙNG NGÀY THẬT SỰ NGHIÊM TRỌNG — 2 dòng
@@ -13712,7 +13749,7 @@ function computeBankBalanceReconciliation(){
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
-    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash, driverAdvanceBank, bonusBank };
+    operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash, driverAdvanceBank, bonusBank, reserveOut, reserveIn };
 }
 /// SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài thật
 /// sự còn 123tr"): SINH ĐÔI với computeBankBalanceReconciliation() ở
@@ -17589,6 +17626,61 @@ function openInternalTransferModal(){
     restoreMainScroll();
   });
 }
+/// MỚI (2026-09-26, Ông Chủ yêu cầu — "để 1 tài khoản ngân hàng cá nhân
+/// nắm giữ riêng khoản tiền khấu hao, tách bạch khỏi tiền lãi"): modal
+/// ghi nhận chuyển tiền vào/ra Quỹ Khấu Hao — mô phỏng ĐÚNG kiểu
+/// openInternalTransferModal() ở trên, chỉ khác đối tượng (quỹ riêng
+/// thay vì đổi túi nội bộ). Ông Chủ tự ghi đúng số tiền THẬT đã chuyển
+/// mỗi lần — app không tự ép đúng 20tr/tháng, không tự bịa số.
+function openDepreciationReserveTransferModal(){
+  let amountVal = 0;
+  openModal(`
+    <h3>🏦 Ghi Nhận Chuyển Tiền — Quỹ Khấu Hao</h3>
+    <div class="hint" style="margin-top:0;">Ghi đúng số tiền THẬT đã chuyển giữa TCB Bank và tài khoản cá nhân giữ riêng — không cần đúng 20tr/tháng, chuyển bao nhiêu ghi đúng bấy nhiêu.</div>
+    <div class="field">
+      <label>Chiều chuyển</label>
+      <div class="seg" id="drt_direction">
+        <button data-val="toReserve" class="active">🏦→🏦 Chuyển VÀO Quỹ Khấu Hao</button>
+        <button data-val="fromReserve">🏦→🏦 Rút TỪ Quỹ Khấu Hao về</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Ngày</label>
+      <input type="date" id="drt_date" value="${todayLocalDateStr()}">
+    </div>
+    <div class="field">
+      <label>Số tiền</label>
+      <input type="text" inputmode="decimal" id="drt_amount">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>Ghi chú</label>
+      <input type="text" id="drt_notes" placeholder="VD: Trích khấu hao tháng 9">
+    </div>
+    <button class="btn btn-accent btn-block" id="drt_saveBtn" style="margin-top:14px;">Lưu</button>
+  `);
+  let direction = 'toReserve';
+  document.querySelectorAll('#drt_direction button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      direction = btn.dataset.val;
+      document.querySelectorAll('#drt_direction button').forEach(b=>b.classList.toggle('active', b===btn));
+    });
+  });
+  attachMoneyInput(document.getElementById('drt_amount'), 0, v=>amountVal=v);
+  document.getElementById('drt_saveBtn').addEventListener('click', async ()=>{
+    const date = document.getElementById('drt_date').value;
+    const notes = document.getElementById('drt_notes').value.trim();
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(!(amountVal>0)){ showToast('Nhập số tiền trước đã.'); return; }
+    state.depreciationReserveTransfers.push({ id: uid('drtxfer'), date, direction, amount: amountVal, note: notes });
+    const ok = await saveDepreciationReserveTransfers();
+    if(!ok) return;
+    showToast('Đã ghi nhận chuyển tiền.');
+    closeModal();
+    saveMainScroll();
+    renderCompanyDashboardPage(true);
+    restoreMainScroll();
+  });
+}
 function openFixedCostsEditor(){
   let depVal = Number(state.settings.monthlyVehicleDepreciation)||0;
   let insVal = Number(state.settings.monthlyInsurance)||0;
@@ -18462,11 +18554,30 @@ function renderCompanyDashboardPage(preserveScroll){
             <button id="ktnbDetailCashBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
           </div>
         </div>
+        <!-- MỚI (2026-09-26, Ông Chủ yêu cầu — "1 tài khoản ngân hàng cá
+        nhân nắm giữ riêng khoản khấu hao, tách bạch khỏi tiền lãi"): thẻ
+        THỨ 3, tách hẳn hàng riêng bên dưới TCB Bank/Tiền Mặt — cùng kiểu
+        dáng, chỉ khác không có nút "Chi tiết" sâu (chưa cần trang riêng,
+        số dư đã đủ rõ ràng). -->
+        <div style="display:flex; justify-content:center; margin-top:14px;">
+          <div style="flex:1; max-width:150px; text-align:center;">
+            <div style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--accent); background:var(--accent-soft);">
+              <div style="font-size:26px; line-height:1;">🏦</div>
+              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Quỹ Khấu Hao (TK Cá Nhân)</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</div>
+            </div>
+          </div>
+        </div>
         <div class="formula-divider" style="margin:16px 0 12px;"></div>
         <div style="font-weight:800; font-size:13px; margin-bottom:8px; text-align:center;">🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)</div>
         <div style="display:flex; gap:10px;">
           <button class="btn btn-accent" id="addInternalTransferBtn" style="flex:1;">🔄➕ Ghi Nhận</button>
           <button class="btn btn-ghost" id="internalTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
+        </div>
+        <div style="font-weight:800; font-size:13px; margin-top:16px; margin-bottom:8px; text-align:center;">🏦 Chuyển Tiền — Quỹ Khấu Hao</div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn btn-accent" id="addDepReserveTransferBtn" style="flex:1;">🏦➕ Ghi Nhận</button>
+          <button class="btn btn-ghost" id="depReserveTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
         </div>
       </div>
     </section>
@@ -18516,7 +18627,7 @@ function renderCompanyDashboardPage(preserveScroll){
         // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
         // trước.
         const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
-          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + mineInvoiceInventoryValue;
+          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + mineInvoiceInventoryValue + depreciationReserveBalance();
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
         return `
@@ -18536,6 +18647,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue+mineInvoiceInventoryValue)}</td></tr>
+              <tr><td>🏦 Quỹ Khấu Hao (TK Cá Nhân)</td><td class="num" style="color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</td></tr>
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
             </tbody>
           </table>
@@ -18933,6 +19045,10 @@ function renderCompanyDashboardPage(preserveScroll){
   document.getElementById('equityHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderEquityHistoryDetailPage(); });
   document.getElementById('addInternalTransferBtn').addEventListener('click', openInternalTransferModal);
   document.getElementById('internalTransferHistoryBtn').addEventListener('click', ()=>{ saveMainScroll(); renderInternalTransferHistoryPage(); });
+  const addDepReserveTransferBtn = document.getElementById('addDepReserveTransferBtn');
+  if(addDepReserveTransferBtn) addDepReserveTransferBtn.addEventListener('click', openDepreciationReserveTransferModal);
+  const depReserveTransferHistoryBtn = document.getElementById('depReserveTransferHistoryBtn');
+  if(depReserveTransferHistoryBtn) depReserveTransferHistoryBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationReserveHistoryPage(); });
   renderRoadFeeMonthTable();
   renderHousingUtilMonthTable();
   renderTollFeeMonthTable();
@@ -19330,6 +19446,46 @@ function renderInternalTransferHistoryPage(){
       if(!(await saveInternalTransfers())) return;
       showToast('Đã xoá.');
       renderInternalTransferHistoryPage();
+    });
+  });
+}
+/// MỚI (2026-09-26) — sinh đôi với renderInternalTransferHistoryPage() ở
+/// trên, nhưng cho Quỹ Khấu Hao (TK cá nhân giữ riêng) thay vì đổi túi
+/// nội bộ ngân hàng/tiền mặt.
+function renderDepreciationReserveHistoryPage(){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const sorted = [...state.depreciationReserveTransfers].sort((a,b)=>b.date.localeCompare(a.date));
+  app.innerHTML = `
+    <section class="group">
+      <button class="btn btn-ghost btn-sm" id="depReserveHistoryBackBtn">← Quay Lại</button>
+    </section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🏦 Chi Tiết Lịch Sử Quỹ Khấu Hao</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:12px;">${sorted.length} lần chuyển, mới nhất lên đầu. Số dư hiện tại: <strong>${fmtVND(depreciationReserveBalance())}</strong>.</div>
+      ${sorted.length===0 ? '<div class="hint">Chưa có lần chuyển tiền nào vào/ra Quỹ Khấu Hao.</div>' : `
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${sorted.map(t=>`
+          <div class="driver-row" style="padding:12px 14px; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-weight:700;">${t.direction==='toReserve'?'🏦→🏦 Chuyển VÀO Quỹ':'🏦→🏦 Rút TỪ Quỹ về'} — ${formatDateVN(t.date)}</div>
+              ${t.note ? `<div class="hint" style="margin-top:2px;">${escapeHtml(t.note)}</div>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-weight:800; white-space:nowrap; color:${t.direction==='toReserve'?'var(--profit)':'var(--loss)'};">${t.direction==='toReserve'?'+':'−'}${fmtVND(t.amount)}</span>
+              <button class="link-btn" data-del-dr-transfer="${t.id}" style="color:var(--loss); padding:0;">Xoá</button>
+            </div>
+          </div>`).join('')}
+      </div>`}
+    </section>
+  `;
+  document.getElementById('depReserveHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  document.querySelectorAll('[data-del-dr-transfer]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      state.depreciationReserveTransfers = state.depreciationReserveTransfers.filter(t=>t.id!==btn.dataset.delDrTransfer);
+      if(!(await saveDepreciationReserveTransfers())) return;
+      showToast('Đã xoá.');
+      renderDepreciationReserveHistoryPage();
     });
   });
 }
