@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-28 · #320';
+const APP_BUILD = '2026-09-28 · #321';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2819,6 +2819,247 @@ function openVehicleProfileEditor(){
     saveMainScroll();
     if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
     restoreMainScroll();
+  });
+}
+// ===== MỚI 2026-09-28 (#321 — Ông Chủ duyệt) =====
+/// Mục 1 — Công tác phí: chỉ cộng tài xế ĐANG GIỮ tiền (số dương). Tài xế chi
+/// vượt (số âm) tách riêng thành "công ty còn nợ tài xế" — không bù trừ lẫn nhau.
+function driverAdvanceRows(){
+  return (state.drivers||[]).map(d=>{
+    const advanced = (state.driverAdvances||[]).filter(a=>a.driverId===d.id && a.date<=todayLocalDateStr()).reduce((s,a)=>s+(Number(a.amount)||0),0);
+    const incidental = shiftsCompanyWideSafe().filter(sh=>sh.driverId===d.id && sh.date<=todayLocalDateStr()).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
+    const manual = (state.driverExpenseReports||[]).filter(r=>r.driverId===d.id && r.date<=todayLocalDateStr()).reduce((s,r)=>s+(Number(r.amount)||0),0);
+    return { driver: d, advanced, incidental, manual, balance: driverAdvanceBalance(d.id) };
+  }).filter(r=>r.advanced||r.incidental||r.manual);
+}
+function companyWideDriverAdvanceHeldPositive(){ return driverAdvanceRows().reduce((s,r)=>s+Math.max(0,r.balance),0); }
+function companyWideDriverAdvanceOwed(){ return driverAdvanceRows().reduce((s,r)=>s+Math.max(0,-r.balance),0); }
+function openDriverAdvanceBreakdownModal(){
+  const rows = driverAdvanceRows();
+  openModal(`
+    <h3 style="margin-top:0;">👷 Công Tác Phí — Từng Tài Xế (tính đến hôm nay)</h3>
+    <div class="grid-table-wrap"><table class="grid-table">
+      <thead><tr><th>Tài xế</th><th class="num">Đã ứng</th><th class="num">Phát sinh trên ca</th><th class="num">Báo chi tay</th><th class="num">Còn giữ</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.driver.name||'')}${r.driver.isActive===false?' <span class="hint">(đã nghỉ)</span>':''}</td><td class="num">${fmtVND(r.advanced)}</td><td class="num">−${fmtVND(r.incidental)}</td><td class="num">−${fmtVND(r.manual)}</td><td class="num" style="font-weight:800; color:${r.balance>=0?'var(--profit)':'var(--loss)'};">${r.balance<0?'−':''}${fmtVND(Math.abs(r.balance))}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Chưa có dữ liệu.</td></tr>'}
+        <tr class="grid-total-row"><td colspan="4" style="text-align:left;">= Tài xế đang giữ (cộng các số dương)</td><td class="num">${fmtVND(companyWideDriverAdvanceHeldPositive())}</td></tr>
+        <tr class="grid-total-row"><td colspan="4" style="text-align:left;">= Công ty còn nợ tài xế (cộng các số âm)</td><td class="num" style="color:var(--loss);">${fmtVND(companyWideDriverAdvanceOwed())}</td></tr>
+      </tbody></table></div>
+    <div class="hint">Số âm = tài xế có chi phí phát sinh ghi trên ca nhiều hơn số đã được ứng. Nếu thực tế Ông Chủ đã tự trả các khoản đó, Ông Chủ ghi thêm 1 lần "Ghi Ứng Thêm" cho tài xế đó để về 0.</div>
+    <button class="btn btn-ghost btn-block" id="dabClose" style="margin-top:10px;">Đóng</button>`);
+  document.getElementById('dabClose').addEventListener('click', closeModal);
+}
+/// Mục 2 — Lương còn nợ theo TỪNG THÁNG (cùng nguồn số với Chi Tiết Vận Hành / phiếu lương).
+function driverWagePayableByMonth(driverId){
+  const today = todayLocalDateStr();
+  const shifts = shiftsCompanyWideSafe().filter(sh=>sh.driverId===driverId && sh.date<=today);
+  const bonuses = allMonthlyBonusesCompanyWide().filter(b=>b.driverId===driverId);
+  const repairs = allRepairsCompanyWide().filter(r=>r.responsibleDriverId===driverId && r.date<=today && (r.responsibility==='driver_full' || r.responsibility==='custom'));
+  const settlements = (state.salaryPayments||[]).filter(p=>p.driverId===driverId && p.date<=today);
+  const months = new Set();
+  shifts.forEach(sh=>months.add(sh.date.slice(0,7)));
+  bonuses.forEach(b=>months.add(b.yearMonth)); repairs.forEach(r=>months.add(r.date.slice(0,7))); settlements.forEach(p=>months.add(p.date.slice(0,7)));
+  return [...months].filter(ym=>ym<=today.slice(0,7)).sort().map(ym=>{
+    const from = `${ym}-01`, dim = daysInMonth(from), end = `${ym}-${String(dim).padStart(2,'0')}`, to = end<today?end:today;
+    const mShifts = shifts.filter(sh=>sh.date.slice(0,7)===ym);
+    const baseFood = mShifts.reduce((s,sh)=>s+(Number(sh.baseSalaryAllocation)||0)+(Number(sh.foodAllowance)||0),0);
+    const trip = driverTripWageStatsInRange(driverId, from, to, shiftsCompanyWideSafe()).tripWage || 0;
+    const bonus = bonuses.filter(b=>b.yearMonth===ym).reduce((s,b)=>s+(Number(b.amount)||0),0);
+    const bonusPaid = bonuses.filter(b=>bonusEffectiveDate(b).slice(0,7)===ym && bonusEffectiveDate(b)<=today).reduce((s,b)=>s+(Number(b.amount)||0),0);
+    const repair = repairs.filter(r=>r.date.slice(0,7)===ym).reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
+    const advance = mShifts.reduce((s,sh)=>s+(Number(sh.advanceAmount)||0),0);
+    const settled = settlements.filter(p=>p.date.slice(0,7)===ym).reduce((s,p)=>s+(Number(p.amount)||0),0);
+    const net = baseFood + trip + bonus - repair - advance - bonusPaid - settled;
+    return { ym, baseFood, trip, bonus, repair, advance, bonusPaid, settled, net };
+  });
+}
+function openWagePayableBreakdownModal(){
+  const drivers = (state.drivers||[]).map(d=>({ d, rows: driverWagePayableByMonth(d.id) })).filter(x=>x.rows.length);
+  openModal(`
+    <h3 style="margin-top:0;">👷 Lương Còn Nợ Tài Xế — Từng Người, Từng Tháng</h3>
+    <div class="hint" style="margin-top:0;">Cùng nguồn số với "Xem Chi Tiết Vận Hành" và phiếu lương. Tháng nào đã trả đủ ngoài app: bấm "💵 Thanh Toán Lương" trên thẻ tài xế, ghi đúng ngày đã trả (trước mốc chốt thì số dư TCB/Tiền Mặt không đổi).</div>
+    ${drivers.map(({d,rows})=>{ const tot = rows.reduce((s,r)=>s+r.net,0); return `
+      <div style="font-weight:800; margin:12px 0 6px;">${escapeHtml(d.name||'')} — còn nợ <span style="color:${tot>0.5?'var(--loss)':'var(--profit)'};">${tot<0?'−':''}${fmtVND(Math.abs(tot))}</span></div>
+      <div class="grid-table-wrap"><table class="grid-table">
+        <thead><tr><th>Tháng</th><th class="num">Cứng + ăn</th><th class="num">Chuyến</th><th class="num">Thưởng</th><th class="num">Trừ hỏng</th><th class="num">Đã ứng</th><th class="num">Đã trả thưởng</th><th class="num">Thanh toán</th><th class="num">Còn nợ</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td style="white-space:nowrap;">${monthLabelVN(r.ym)}</td><td class="num">${fmtVND(r.baseFood)}</td><td class="num">${fmtVND(r.trip)}</td><td class="num">${fmtVND(r.bonus)}</td><td class="num">−${fmtVND(r.repair)}</td><td class="num">−${fmtVND(r.advance)}</td><td class="num">−${fmtVND(r.bonusPaid)}</td><td class="num">−${fmtVND(r.settled)}</td><td class="num" style="font-weight:800;">${r.net<0?'−':''}${fmtVND(Math.abs(r.net))}</td></tr>`).join('')}</tbody>
+      </table></div>`; }).join('') || '<div class="hint">Chưa có dữ liệu lương.</div>'}
+    <div class="summary-row" style="margin-top:10px;"><span><strong>TỔNG LƯƠNG CÒN NỢ</strong></span><span class="val"><strong>${fmtVND(companyWideWagePayable())}</strong></span></div>
+    <button class="btn btn-ghost btn-block" id="wpbClose" style="margin-top:10px;">Đóng</button>`);
+  document.getElementById('wpbClose').addEventListener('click', closeModal);
+}
+/// Mục 4 — Hoá đơn mỏ chưa dùng: tiền hàng đã nằm trong giá vốn + đã trả mỏ, nên
+/// KHÔNG cộng tiền vào Vốn Vận Hành; chỉ theo dõi KHỐI LƯỢNG + khoản tiết kiệm tham khảo
+/// (không phải mua hoá đơn bù cho phần đó).
+function mineInvoiceRemainingByGoods(){
+  const goodsTypes = [...new Set((state.mineInvoices||[]).map(inv=>normGoodsType(inv.goodsType)).filter(Boolean))];
+  return goodsTypes.map(gt=>{
+    buildMineInvoiceMatchLedger(gt);
+    const buckets = (_mineInvoiceMatchCache[gt] && _mineInvoiceMatchCache[gt].buckets) || [];
+    const volKhoi = buckets.reduce((s,b)=>s+Math.max(0, Number(b.remainingVolume)||0),0);
+    const lots = invoiceLotSupplyOnly(gt);
+    const lotVol = lots.reduce((s,l)=>s+l.totalVolume,0);
+    const lotNetPerVol = lotVol>0 ? lots.reduce((s,l)=>s+(l._netCostPerVol - l._vatPerVol)*l.totalVolume,0)/lotVol : 0;
+    return { goodsType: gt, volKhoi, savingEstimate: Math.max(0, volKhoi*lotNetPerVol), bookValue: 0 };
+  }).filter(x=>x.volKhoi>0);
+}
+/// Lưu cài đặt của 1 xe bất kỳ (xe đang mở dùng saveSettings; xe khác chỉ ghi ĐÚNG các trường đổi, merge).
+async function saveVehicleSettingsPatch(vid, patch){
+  if(vid===activeVehicleIdForEditing()){
+    Object.assign(state.settings, patch);
+    return await saveSettings();
+  }
+  try {
+    await withTimeout(vehicleDataRef(vid, 'settings').set(patch, { merge: true }));
+    state.allVehiclesSettings[vid] = Object.assign(state.allVehiclesSettings[vid]||defaultSettingsShape(), patch);
+    return true;
+  } catch(e){ showToast('Lỗi lưu hồ sơ xe: ' + (e?.message || e)); return false; }
+}
+/// Mục 5 — Trang riêng 🚛 QUẢN LÝ XE (thay cửa sổ phụ "Hồ Sơ Xe").
+function renderVehicleManagementPage(selectedVid){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const vehicles = state.vehicles||[];
+  const vid = selectedVid || activeVehicleIdForEditing() || (vehicles[0]&&vehicles[0].id);
+  const v = vehicles.find(x=>x.id===vid);
+  const s = settingsOfVehicle(vid) || {};
+  const r = rentalOf(s), sale = s.sale || {};
+  const base = vid ? vehicleDepreciableBase(vid) : 0;
+  const entries = (state.initialInvestmentEntries||[]).filter(e=>e.vehicleId===vid).sort((a,b)=>a.date.localeCompare(b.date));
+  const unassigned = (state.initialInvestmentEntries||[]).filter(e=>!e.vehicleId || !state.allVehiclesSettings[e.vehicleId]);
+  const loans = Array.isArray(s.bankLoans) ? s.bankLoans : [];
+  const saleRes = vid ? vehicleSaleResult(vid) : null;
+  const entryRow = e=>{ const p = investEntryParts(e); return `<tr>
+      <td style="white-space:nowrap;">${formatDateVN(e.date)}</td>
+      <td>${escapeHtml(e.note||'')}<div class="hint" style="margin:2px 0 0;">Giá chưa VAT ${fmtVND(p.pre)} · VAT ${fmtVND(p.vat)} · Chi phí kèm ${fmtVND(p.extra)}</div><div class="hint" style="margin:2px 0 0;">${INVEST_FUNDING_LABELS[investFundingOf(e)]||''}</div></td>
+      <td class="num">${fmtVND(p.total)}</td>
+      <td><button class="link-btn" data-edit-invest="${e.id}" style="padding:0;">Sửa</button></td></tr>`; };
+  app.innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="vmBackBtn">← Quay Lại</button></section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🚛 Quản Lý Xe</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Chọn xe để xem và sửa toàn bộ thông tin liên quan: sở hữu, tiền đầu tư, khấu hao, hợp đồng thuê, bán xe, khoản vay.</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        ${vehicles.map(x=>`<button class="btn ${x.id===vid?'btn-accent':'btn-ghost'} btn-sm" data-vm-pick="${x.id}" style="width:auto;">🚛 ${escapeHtml(x.name||x.plate||'')}</button>`).join('')}
+      </div>
+      ${!v ? '<div class="hint">Chưa có xe nào.</div>' : `
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; margin-bottom:8px;">1️⃣ Thông tin xe</div>
+        <div class="two-col">
+          <div class="field"><label>Biển số</label><input type="text" id="vm_plate" value="${escapeHtml(v.plate||'')}"></div>
+          <div class="field"><label>Tên gọi</label><input type="text" id="vm_name" value="${escapeHtml(v.name||'')}"></div>
+        </div>
+        <div class="field" style="margin-bottom:0;"><label>Xe đứng tên ai?</label>
+          <select id="vm_owner">
+            <option value="personal" ${vehicleOwnershipOf(s)==='personal'?'selected':''}>👤 Cá nhân Ông Chủ (cho công ty thuê)</option>
+            <option value="company" ${vehicleOwnershipOf(s)==='company'?'selected':''}>🏢 Công ty</option>
+          </select></div>
+        <div class="hint">Ngày chạy ca đầu tiên: <strong>${vehicleOperatingStartDate(vid) ? formatDateVN(vehicleOperatingStartDate(vid)) : 'chưa có ca'}</strong></div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; margin-bottom:8px;">2️⃣ Tiền đầu tư mua xe</div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Nội dung</th><th class="num">Tổng</th><th></th></tr></thead>
+          <tbody>${entries.map(entryRow).join('') || '<tr><td colspan="4" class="hint">Chưa có lần đầu tư nào gán cho xe này.</td></tr>'}
+            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">= Giá trị xe đem khấu hao ${vehicleOwnershipOf(s)==='company'?'(không gồm VAT)':'(gồm VAT)'}</td><td class="num">${fmtVND(base)}</td><td></td></tr>
+          </tbody></table></div>
+        <button class="btn btn-ghost btn-block" id="vm_addInvest" style="margin-top:8px;">➕ Thêm lần đầu tư cho xe này</button>
+        ${unassigned.length ? `<div class="hint" style="margin-top:8px;">⚠️ Có ${unassigned.length} lần đầu tư CHƯA gán xe:</div>
+          <div class="grid-table-wrap"><table class="grid-table"><tbody>${unassigned.map(entryRow).join('')}</tbody></table></div>
+          <div class="hint">Bấm "Sửa" → chọn đúng xe để app tính giá trị riêng từng xe.</div>` : ''}
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; margin-bottom:8px;">3️⃣ Khấu hao</div>
+        <div class="two-col">
+          <div class="field"><label>Khấu hao trong bao nhiêu tháng</label><input type="number" inputmode="numeric" id="vm_depMonths" value="${Number(s.depreciationMonths)||''}" placeholder="VD: 60"></div>
+          <div class="field"><label>Giá trị còn lại khi hết khấu hao</label><input type="text" inputmode="decimal" id="vm_residual"></div>
+        </div>
+        <div class="hint" id="vm_depSuggest" style="margin-top:0;"></div>
+        <div class="field" style="margin-bottom:0;"><label>Khấu hao / tháng đang dùng</label><input type="text" inputmode="decimal" id="vm_dep"></div>
+        <button class="btn btn-ghost btn-sm" id="vm_applyDep" style="margin-top:8px;">↓ Điền mức gợi ý vào ô trên</button>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;" id="vm_rentalCard">
+        <div style="font-weight:800; margin-bottom:8px;">4️⃣ Hợp đồng cho công ty thuê xe (Ông Chủ điền tay)</div>
+        <div class="field"><label>Ngày bắt đầu hợp đồng</label><input type="date" id="vm_rentStart" value="${r.startDate||''}"></div>
+        <div class="two-col">
+          <div class="field"><label>Tiền thuê / tháng</label><input type="text" inputmode="decimal" id="vm_rent" placeholder="Để trống nếu chưa có"></div>
+          <div class="field"><label>Thuế trên tiền thuê / tháng</label><input type="text" inputmode="decimal" id="vm_rentTax" placeholder="Để trống nếu chưa có"></div>
+        </div>
+        <div class="field" style="margin-bottom:0;"><label>Thuế trên tiền thuê trả bằng nguồn nào</label>
+          <select id="vm_rentTaxMethod"><option value="bank" ${r.taxMethod!=='cash'?'selected':''}>🏦 TCB</option><option value="cash" ${r.taxMethod==='cash'?'selected':''}>💵 Tiền mặt</option></select></div>
+        <div class="hint">Tiền thuê KHÔNG trừ vào Lợi Nhuận thật (chỉ dùng ở bảng thuế TNDN). Thuế trên tiền thuê là chi phí thật. Nếu công ty chuyển tiền thuê thật sang tài khoản cá nhân, ghi ở Góp/Rút → Rút vốn.</div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; margin-bottom:8px;">5️⃣ Bán xe (chỉ điền khi đã bán)</div>
+        <div class="two-col">
+          <div class="field"><label>Ngày bán</label><input type="date" id="vm_saleDate" value="${sale.date||''}"></div>
+          <div class="field"><label>Giá bán</label><input type="text" inputmode="decimal" id="vm_salePrice"></div>
+        </div>
+        <div class="field" style="margin-bottom:0;"><label>Tiền bán nhận về đâu</label>
+          <select id="vm_saleMethod"><option value="bank" ${sale.method!=='cash'?'selected':''}>🏦 TCB</option><option value="cash" ${sale.method==='cash'?'selected':''}>💵 Tiền mặt</option></select></div>
+        ${saleRes ? `<div class="hint">Giá trị còn lại tại ngày bán ${fmtVND(saleRes.bookValue)} → ${saleRes.gain>=0?'lãi':'lỗ'} ${fmtVND(Math.abs(saleRes.gain))}.</div>` : ''}
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; margin-bottom:8px;">6️⃣ Khoản vay gắn với xe (sửa ở mục Khoản Vay)</div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Khoản vay</th><th>Đứng tên</th><th class="num">Gốc vay</th></tr></thead>
+          <tbody>${loans.map(l=>`<tr><td>${escapeHtml(l.name||'Khoản vay')}</td><td>${(l.ownerType||'personal')==='company'?'🏢 Công ty':'👤 Cá nhân'}</td><td class="num">${fmtVND(l.principal)}</td></tr>`).join('') || '<tr><td colspan="3" class="hint">Chưa có khoản vay.</td></tr>'}</tbody>
+        </table></div>
+      </div>
+
+      <button class="btn btn-accent btn-block" id="vm_save">💾 Lưu Thông Tin Xe</button>`}
+    </section>`;
+  document.getElementById('vmBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  document.querySelectorAll('[data-vm-pick]').forEach(b=>b.addEventListener('click', ()=>renderVehicleManagementPage(b.dataset.vmPick)));
+  if(!v) return;
+  let residualVal = Number(s.depreciationResidual)||0, depVal = Number(s.monthlyVehicleDepreciation)||0;
+  let rentVal = Number(r.monthly)||0, rentTaxVal = Number(r.taxMonthly)||0, salePriceVal = Number(sale.price)||0;
+  attachMoneyInput(document.getElementById('vm_rent'), rentVal, x=>rentVal=x);
+  attachMoneyInput(document.getElementById('vm_rentTax'), rentTaxVal, x=>rentTaxVal=x);
+  attachMoneyInput(document.getElementById('vm_salePrice'), salePriceVal, x=>salePriceVal=x);
+  attachMoneyInput(document.getElementById('vm_dep'), depVal, x=>depVal=x);
+  const suggest = ()=>{
+    const m = Number(document.getElementById('vm_depMonths').value)||0;
+    const val = m>0 ? Math.max(0, Math.round((base - residualVal)/m)) : 0;
+    document.getElementById('vm_depSuggest').innerHTML = m>0 ? `Gợi ý: (${fmtVND(base)} − ${fmtVND(residualVal)}) ÷ ${m} tháng = <strong>${fmtVND(val)}</strong>/tháng` : 'Nhập số tháng để app gợi ý mức khấu hao/tháng.';
+    return val;
+  };
+  attachMoneyInput(document.getElementById('vm_residual'), residualVal, x=>{ residualVal=x; suggest(); });
+  document.getElementById('vm_depMonths').addEventListener('input', suggest); suggest();
+  document.getElementById('vm_applyDep').addEventListener('click', ()=>{
+    const val = suggest();
+    if(!(val>0)){ showToast('Ông Chủ nhập số tháng khấu hao và gán lần đầu tư cho xe này trước.'); return; }
+    depVal = val; const el = document.getElementById('vm_dep'); el.value = val.toLocaleString('vi-VN');
+    showToast(`Đã điền ${fmtVND(val)}/tháng — bấm Lưu để áp dụng.`);
+  });
+  const toggleRental = ()=>{ document.getElementById('vm_rentalCard').style.display = document.getElementById('vm_owner').value==='personal' ? '' : 'none'; };
+  document.getElementById('vm_owner').addEventListener('change', toggleRental); toggleRental();
+  document.getElementById('vm_addInvest').addEventListener('click', ()=>openInvestmentEntryEditor(null, { vehicleId: vid, onBack: ()=>renderVehicleManagementPage(vid) }));
+  document.querySelectorAll('[data-edit-invest]').forEach(b=>b.addEventListener('click', ()=>openInvestmentEntryEditor(b.dataset.editInvest, { onBack: ()=>renderVehicleManagementPage(vid) })));
+  document.getElementById('vm_save').addEventListener('click', async ()=>{
+    const plate = (document.getElementById('vm_plate').value||'').trim();
+    if(!plate){ showToast('Nhập biển số xe trước đã.'); return; }
+    const name = (document.getElementById('vm_name').value||'').trim() || plate;
+    if(plate!==v.plate || name!==v.name){
+      const oldPlate = v.plate, oldName = v.name; v.plate = plate; v.name = name;
+      if(!(await saveVehicles())){ v.plate = oldPlate; v.name = oldName; showToast('Lưu thông tin xe thất bại — thử lại.'); return; }
+    }
+    const sd = document.getElementById('vm_saleDate').value;
+    const patch = {
+      ownershipType: document.getElementById('vm_owner').value,
+      depreciationMonths: Number(document.getElementById('vm_depMonths').value)||0,
+      depreciationResidual: residualVal||0,
+      monthlyVehicleDepreciation: depVal||0,
+      rental: { startDate: document.getElementById('vm_rentStart').value || '', monthly: rentVal||0, taxMonthly: rentTaxVal||0, taxMethod: document.getElementById('vm_rentTaxMethod').value },
+      sale: sd ? { date: sd, price: salePriceVal||0, method: document.getElementById('vm_saleMethod').value } : null
+    };
+    if(!(await saveVehicleSettingsPatch(vid, patch))) return;
+    showToast('Đã lưu thông tin xe.');
+    renderVehicleManagementPage(vid);
   });
 }
 function allShiftsCompanyWide(){
@@ -19062,15 +19303,22 @@ function renderPerVehicleDataNotice(){
 // sách từng lần mua xe, tự cộng dồn, không phải cộng tay khi thêm xe
 // mới): modal thêm/sửa 1 lần đầu tư — mẫu y hệt openMonthlyAmountEditor()
 // đã dùng ở nơi khác cho nhất quán.
-function openInvestmentEntryEditor(id){
+function openInvestmentEntryEditor(id, opts){
   const existing = id ? (state.initialInvestmentEntries||[]).find(e=>e.id===id) : null;
-  const draft = existing ? {...existing} : { id: uid('invest'), date: todayLocalDateStr(), amount: 0, note: '' };
+  opts = opts || {};
+  // #321 — trang RIÊNG (không còn cửa sổ phụ); quay lại đúng nơi đã mở.
+  const goBack = opts.onBack || (()=>{ if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll(); restoreMainScroll(); });
+  if(!opts.onBack) saveMainScroll();
+  const draft = existing ? {...existing} : { id: uid('invest'), date: todayLocalDateStr(), amount: 0, note: '', vehicleId: opts.vehicleId || null };
   let amountVal = draft.amount;
   // #320 — tách giá chưa VAT / VAT / chi phí kèm + xe nào + nguồn tiền.
   const parts0 = investEntryParts(draft);
   let preVal = parts0.pre, vatVal = parts0.vat, extraVal = parts0.extra;
-  openModal(`
-    <h3>🚛 ${existing?'Sửa':'Thêm'} Lần Đầu Tư Xe</h3>
+  scrollMainToTop();
+  document.getElementById('app').innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="ie_backBtn">← Quay Lại</button></section>
+    <section class="group"><div class="card">
+    <h3 style="margin-top:0;">🚛 ${existing?'Sửa':'Thêm'} Lần Đầu Tư Xe</h3>
     <div class="field">
       <label>Ngày mua/đầu tư</label>
       <input type="date" id="ie_date" value="${draft.date}">
@@ -19103,19 +19351,18 @@ function openInvestmentEntryEditor(id){
       <button class="btn btn-ghost" id="ie_cancelBtn">Huỷ</button>
       <button class="btn btn-accent btn-block" id="ie_saveBtn">Lưu</button>
     </div>
-  `);
+    </div></section>
+  `;
+  document.getElementById('ie_backBtn').addEventListener('click', goBack);
   const refreshTotal = ()=>{ amountVal = (preVal||0)+(vatVal||0)+(extraVal||0); document.getElementById('ie_total').innerHTML = `Tổng tiền đã trả: <strong>${fmtVND(amountVal)}</strong>. Xe công ty: VAT thành "VAT chờ khấu trừ", không tính vào giá trị khấu hao. Xe cá nhân: VAT tính vào giá xe. Trả bằng TCB/Tiền mặt công ty: tự trừ vào số dư và không tính là vốn góp mới.`; };
   attachMoneyInput(document.getElementById('ie_pre'), preVal, v=>{ preVal=v; refreshTotal(); });
   attachMoneyInput(document.getElementById('ie_vat'), vatVal, v=>{ vatVal=v; refreshTotal(); });
   attachMoneyInput(document.getElementById('ie_extra'), extraVal, v=>{ extraVal=v; refreshTotal(); });
   refreshTotal();
-  document.getElementById('ie_cancelBtn').addEventListener('click', closeModal);
+  document.getElementById('ie_cancelBtn').addEventListener('click', goBack);
   const afterWrite = async (msg)=>{
-    closeModal();
     showToast(msg);
-    saveMainScroll();
-    if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll();
-    restoreMainScroll();
+    goBack();
   };
   document.getElementById('ie_saveBtn').addEventListener('click', async ()=>{
     const date = document.getElementById('ie_date').value;
@@ -19301,7 +19548,6 @@ function renderCompanyDashboardPage(preserveScroll){
             <div style="font-weight:800; margin-top:6px; font-size:12px;">Khấu Hao Xe Đã Thu</div>
             <div style="font-weight:900; margin-top:2px; font-size:13.5px; color:var(--profit);">${fmtVND(depreciationRecovered)}</div>
           </button>
-          <button id="depHubDetailBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
         </div>
         <div style="flex:1; max-width:150px; text-align:center;">
           <button id="netProfitHubBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
@@ -19309,7 +19555,6 @@ function renderCompanyDashboardPage(preserveScroll){
             <div style="font-weight:800; margin-top:6px; font-size:12px;">Tiền Lãi Ròng</div>
             <div style="font-weight:900; margin-top:2px; font-size:13.5px; color:${accrualProfit.netProfit>=0?'var(--profit)':'var(--loss)'};">${accrualProfit.netProfit>=0?'+':''}${fmtVND(accrualProfit.netProfit)}</div>
           </button>
-          <button id="netProfitHubDetailBtn" class="link-btn" style="margin-top:6px; font-size:12px; padding:2px; width:100%; text-align:center;">📋 Chi tiết</button>
         </div>
       </div>
       <div class="formula-divider" style="margin:12px 0;"></div>
@@ -19488,7 +19733,9 @@ function renderCompanyDashboardPage(preserveScroll){
         //  • Mục 6: − lương còn nợ tài xế (nợ thật của công ty).
         const loanSplit = loanBalancesSplit();
         const remainingLoanBalance = loanSplit.companyRemaining;
-        const driverAdvanceHeld = companyWideDriverAdvanceHeld();
+        // #321 — chỉ cộng tài xế đang giữ; chi vượt tách riêng (không bù trừ lẫn nhau).
+        const driverAdvanceHeld = companyWideDriverAdvanceHeldPositive();
+        const driverAdvanceOwed = companyWideDriverAdvanceOwed();
         const wagePayable = companyWideWagePayable();
         const truckVatRemaining = truckVatCreditSchedule().remaining; // #320 — VAT mua xe công ty chờ khấu trừ
         // MỚI (Ông Chủ yêu cầu 2026-09-20 — "tách rõ phần tiền góp vào vận
@@ -19502,8 +19749,9 @@ function renderCompanyDashboardPage(preserveScroll){
         // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
         // trước.
         const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
-          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + mineInvoiceInventoryValue + depreciationReserveBalance()
-          + driverAdvanceHeld - wagePayable + truckVatRemaining;
+          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + depreciationReserveBalance()
+          + driverAdvanceHeld - driverAdvanceOwed - wagePayable + truckVatRemaining; // #321 — hoá đơn mỏ KHÔNG cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
+        const mineRemaining = mineInvoiceRemainingByGoods(); // #321
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
         const cb = computeCashBridge(eq, workingCapitalTotal, depreciationSoFar);
@@ -19523,10 +19771,12 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
               <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
-              <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue+mineInvoiceInventoryValue)}</td></tr>
+              <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue)}</td></tr>
+              ${mineRemaining.length ? `<tr><td colspan="2" class="hint" style="margin:0; padding-left:18px;">↳ Hoá đơn thật từ mỏ chưa dùng (tính 0đ — tiền hàng đã nằm trong giá vốn và đã trả mỏ): ${mineRemaining.map(m=>`${escapeHtml(m.goodsType)} ${m.volKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối`).join(' · ')} — giúp tiết kiệm khoảng ${fmtVND(mineRemaining.reduce((a,m)=>a+m.savingEstimate,0))} tiền mua hoá đơn bù (tham khảo)</td></tr>` : ''}
               <tr><td>🫙 Chứa Tiền Khấu Hao Xe</td><td class="num" style="color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</td></tr>
-              <tr><td>👷 ${driverAdvanceHeld<0?'Công ty đang nợ tài xế (chi vượt tạm ứng)':'Tiền tạm ứng tài xế đang giữ'}</td><td class="num" style="color:${driverAdvanceHeld<0?'var(--loss)':'var(--profit)'};">${driverAdvanceHeld<0?'−':'+'}${fmtVND(Math.abs(driverAdvanceHeld))}</td></tr>
-              <tr><td>👷 ${wagePayable<0?'Tài xế đang nợ lại công ty (trả lương vượt)':'Lương còn nợ tài xế'}</td><td class="num" style="color:${wagePayable>0?'var(--loss)':'var(--profit)'};">${wagePayable>0?'−':'+'}${fmtVND(Math.abs(wagePayable))}</td></tr>
+              <tr><td>👷 Công tác phí tài xế đang giữ <button class="link-btn" id="wcAdvanceBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(driverAdvanceHeld)}</td></tr>
+              ${driverAdvanceOwed>0.5 ? `<tr><td>👷 Công ty còn nợ tài xế (chi vượt công tác phí) <button class="link-btn" id="wcAdvanceBreakdownBtn2" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(driverAdvanceOwed)}</td></tr>` : ''}
+              <tr><td>👷 ${wagePayable<0?'Tài xế đang nợ lại công ty (trả lương vượt)':'Lương còn nợ tài xế'} <button class="link-btn" id="wcWageBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${wagePayable>0?'var(--loss)':'var(--profit)'};">${wagePayable>0?'−':'+'}${fmtVND(Math.abs(wagePayable))}</td></tr>
               ${truckVatRemaining>0.5 ? `<tr><td>🧾 VAT mua xe công ty chờ khấu trừ</td><td class="num" style="color:var(--profit);">+${fmtVND(truckVatRemaining)}</td></tr>` : ''}
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
             </tbody>
@@ -19562,8 +19812,7 @@ function renderCompanyDashboardPage(preserveScroll){
           <table class="grid-table">
             <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
             <tbody>
-              <tr><td>+ Đã góp thêm vào vận hành (tiền thật, không tính tiền đảo) <button class="link-btn" id="cbLedgerBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.contributedExtra)}</td></tr>
-              <tr><td>− Đã rút ra thật (gồm tiền đảo rút ra chưa nộp lại)</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.withdrawn)}</td></tr>
+              <tr><td>+ Vốn Ông Chủ góp thêm thật (ròng = tổng góp − tổng rút) <button class="link-btn" id="cbLedgerBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${(cb.contributedExtra-cb.withdrawn)>=0?'var(--profit)':'var(--loss)'};">${(cb.contributedExtra-cb.withdrawn)>=0?'+':'−'}${fmtVND(Math.abs(cb.contributedExtra-cb.withdrawn))}</td></tr>
               <tr><td>+ Lãi ròng trước khi trừ lãi vay (đã trừ khấu hao) <button class="link-btn" id="cbProfitBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${cb.profitBeforeInterest>=0?'var(--profit)':'var(--loss)'};">${cb.profitBeforeInterest>=0?'+':'−'}${fmtVND(Math.abs(cb.profitBeforeInterest))}</td></tr>
               <tr><td>+ Cộng lại khấu hao (chi phí trên sổ, tiền không rời công ty) <button class="link-btn" id="cbDepBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(cb.depreciationSoFar)}</td></tr>
               <tr><td>− Lãi vay đã trả — 🏦 TCB</td><td class="num" style="color:var(--loss);">−${fmtVND(cb.interestBank)}</td></tr>
@@ -19685,8 +19934,7 @@ function renderCompanyDashboardPage(preserveScroll){
           <thead><tr><th style="color:var(--ink); font-weight:800;">Khoản mục</th><th class="num" style="color:var(--ink); font-weight:800;">Số tiền</th></tr></thead>
           <tbody>
             <tr><td>Vốn đầu tư ban đầu (mua xe)</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
-            <tr><td>+ Đã góp thêm sau này (tiền thật)</td><td class="num" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</td></tr>
-            <tr><td>− Đã rút ra (tiền thật)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</td></tr>
+            <tr><td>+ Vốn Ông Chủ góp thêm thật (ròng = tổng góp − tổng rút)</td><td class="num" style="color:${(eq.contributedExtra-eq.withdrawn)>=0?'var(--profit)':'var(--loss)'};">${(eq.contributedExtra-eq.withdrawn)>=0?'+':'−'}${fmtVND(Math.abs(eq.contributedExtra-eq.withdrawn))}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">+ Lợi nhuận luỹ kế</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</td></tr>
           </tbody>
         </table>
@@ -19881,7 +20129,7 @@ function renderCompanyDashboardPage(preserveScroll){
         <button class="btn btn-ghost" id="editFixedCostsBtn" style="flex:1;">✏️ Sửa</button>
         <button class="btn btn-ghost" id="depreciationDetailBtn" style="flex:1;">📊 Chi Tiết Thu Hồi Khấu Hao</button>
       </div>
-      <button class="btn btn-ghost btn-block" id="vehicleProfileBtn" style="margin-top:10px;">🚛 Hồ Sơ Xe (sở hữu · khấu hao · thuê · bán)</button>
+      <button class="btn btn-ghost btn-block" id="vehicleProfileBtn" style="margin-top:10px;">🚛 Quản Lý Xe (sở hữu · đầu tư · khấu hao · thuê · bán)</button>
       `}
     </section>
 
@@ -20030,8 +20278,11 @@ function renderCompanyDashboardPage(preserveScroll){
   if(netProfitHubDetailBtn) netProfitHubDetailBtn.addEventListener('click', openROICalculationDetail);
   const editFixedCostsBtn = document.getElementById('editFixedCostsBtn');
   if(editFixedCostsBtn) editFixedCostsBtn.addEventListener('click', openFixedCostsEditor);
-  const vehicleProfileBtn = document.getElementById('vehicleProfileBtn'); // #320
-  if(vehicleProfileBtn) vehicleProfileBtn.addEventListener('click', openVehicleProfileEditor);
+  const vehicleProfileBtn = document.getElementById('vehicleProfileBtn'); // #321 — trang riêng Quản Lý Xe
+  if(vehicleProfileBtn) vehicleProfileBtn.addEventListener('click', ()=>{ saveMainScroll(); renderVehicleManagementPage(); });
+  ['wcAdvanceBreakdownBtn','wcAdvanceBreakdownBtn2'].forEach(id=>{ const b = document.getElementById(id); if(b) b.addEventListener('click', openDriverAdvanceBreakdownModal); });
+  const wcWageBreakdownBtn = document.getElementById('wcWageBreakdownBtn');
+  if(wcWageBreakdownBtn) wcWageBreakdownBtn.addEventListener('click', openWagePayableBreakdownModal);
   const depreciationDetailBtn = document.getElementById('depreciationDetailBtn');
   if(depreciationDetailBtn) depreciationDetailBtn.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationDetailPage(); });
   renderDocumentList();
@@ -21354,7 +21605,8 @@ function renderInvoiceInventoryDetailPage(){
   const app = document.getElementById('app');
   const lotValue = companyWideInvoiceLotInventoryValue();
   const mineValue = companyWideMineInvoiceInventoryValue();
-  const total = lotValue + mineValue;
+  const total = lotValue; // #321 — hoá đơn mỏ không cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
+  const mineRemainingPage = mineInvoiceRemainingByGoods();
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="invoiceInventoryDetailBackBtn">← Quay Lại</button>
@@ -21392,10 +21644,10 @@ function renderInvoiceInventoryDetailPage(){
             <button id="invInvGoMineBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg); cursor:pointer;">
               <div style="font-size:26px; line-height:1;">📄</div>
               <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Thật Từ Mỏ Chưa Dùng</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">+${fmtVND(mineValue)}</div>
+              <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">${mineRemainingPage.length ? mineRemainingPage.map(m=>`${escapeHtml(m.goodsType)}: ${m.volKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối`).join('<br>') : '0 khối'}<div style="font-size:11px; font-weight:700; color:var(--ink-soft); margin-top:2px;">Tính tiền: 0đ</div></div>
             </button>
             <button id="invInvGoMineBtn2" class="link-btn" style="margin-top:6px; font-size:11.5px; padding:2px; width:100%; text-align:center;">📋 Xem Sổ Hoá Đơn Thật →</button>
-            <div class="hint" style="margin-top:2px; font-size:11px;">Mỏ tự xuất theo hàng đã múc, không tốn thêm.</div>
+            <div class="hint" style="margin-top:2px; font-size:11px;">Mỏ tự xuất theo hàng đã múc — tiền hàng đã nằm trong giá vốn và đã trả mỏ, nên không cộng thêm tiền (tránh tính 2 lần). Giá trị thật: dùng để xuất bán mà không phải mua hoá đơn bù — tiết kiệm khoảng ${fmtVND(mineRemainingPage.reduce((a,m)=>a+m.savingEstimate,0))} (tham khảo).</div>
           </div>
         </div>
       </div>
@@ -21453,8 +21705,7 @@ function renderEquityDetailPage(){
           <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
           <tbody>
             <tr><td>Vốn Đầu Tư Ban Đầu</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
-            <tr><td>+ Đã Góp Thêm (tiền thật)</td><td class="num" style="color:var(--profit);">+${fmtVND(eq.contributedExtra)}</td></tr>
-            <tr><td>− Đã Rút Ra (tiền thật)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.withdrawn)}</td></tr>
+            <tr><td>+ Vốn Ông Chủ góp thêm thật (ròng = tổng góp − tổng rút)</td><td class="num" style="color:${(eq.contributedExtra-eq.withdrawn)>=0?'var(--profit)':'var(--loss)'};">${(eq.contributedExtra-eq.withdrawn)>=0?'+':'−'}${fmtVND(Math.abs(eq.contributedExtra-eq.withdrawn))}</td></tr>
             <tr><td>+ Lợi Nhuận Thực Tế (luỹ kế)</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'};">${eq.cumulativeProfit>=0?'+':'−'}${fmtVND(Math.abs(eq.cumulativeProfit))}</td></tr>
             <tr><td>− Điều Chỉnh Vay Ngân Hàng</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.remainingLoanBalance)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= VỐN CHỦ SỞ HỮU HIỆN TẠI</td><td class="num" style="color:${eq.equity>=0?'var(--profit)':'var(--loss)'}">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</td></tr>
