@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-27 · #315';
+const APP_BUILD = '2026-09-27 · #316';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -943,6 +943,7 @@ let state = {
   // xem/sửa). Xem allShiftsCompanyWide()/refreshAllVehiclesDataCache().
   allVehiclesShifts: {},
   allVehiclesRepairs: {},
+  allVehiclesMonthlyBonuses: {}, // MỚI 2026-09-27 — tip/thưởng tháng của mọi xe
   allVehiclesRoadFee: {},
   allVehiclesSettings: {},
   drivers: [],
@@ -1313,13 +1314,13 @@ function computeMissingPickupDateWarnings(){
   // danh sách ca.
   try {
     const out = [];
-    for(const sh of state.shifts){
+    for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
       for(const s of (sh.siteLogs||[])){
         if(s.siteType!=='commercial') continue;
         (s.commercialTrips||[]).forEach(t=>{
           if(t.pickupDriverId && t.pickupDriverId!==sh.driverId && !t.pickupDate){
             const pd = driverById(t.pickupDriverId);
-            out.push({ shiftId: sh.id, date: sh.date, siteName: s.siteName||'(chưa đặt tên)', pickupDriverName: pd?pd.name:'(chưa rõ)' });
+            out.push({ shiftId: sh.id, vehicleId: sh._vehicleId, date: sh.date, siteName: (s.siteName||'(chưa đặt tên)') + (state.vehicles.length>1 && sh._vehicleId ? ` — 🚛 ${vehicleNameById(sh._vehicleId)}` : ''), pickupDriverName: pd?pd.name:'(chưa rõ)' });
           }
         });
       }
@@ -1336,14 +1337,14 @@ function computeMissingPickupDateWarnings(){
 // không quên. Quên hóa đơn MUA = mất quyền khấu trừ VAT đầu vào = mất tiền thật.
 function computeInvoiceWarnings(){
   const out = [];
-  for(const sh of state.shifts){
+  for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
       const missing = [];
       if(!s.buyHasInvoice) missing.push('hóa đơn MUA');
       if(!s.sellHasInvoice) missing.push('hóa đơn BÁN');
       if(missing.length>0){
-        out.push({ date: sh.date, siteName: s.siteName||'(chưa đặt tên)', missing: missing.join(' + ') });
+        out.push({ date: sh.date, siteName: (s.siteName||'(chưa đặt tên)') + (state.vehicles.length>1 && sh._vehicleId ? ` — 🚛 ${vehicleNameById(sh._vehicleId)}` : ''), missing: missing.join(' + ') });
       }
     }
   }
@@ -1401,12 +1402,17 @@ function openMissingPickupDateDetail(){
             <span class="rating-badge warn">${escapeHtml(v.pickupDriverName)} lấy hàng</span>
           </div>
           <div class="hint" style="margin-top:2px;">Ca đổ hộ ngày ${formatDateVN(v.date)}</div>
-          <button class="btn btn-ghost btn-sm" data-shift-id="${escapeHtml(v.shiftId)}" style="margin-top:8px;">Bổ Sung Ngay →</button>
+          <button class="btn btn-ghost btn-sm" data-shift-id="${escapeHtml(v.shiftId)}" data-vehicle-id="${escapeHtml(v.vehicleId||'')}" style="margin-top:8px;">Bổ Sung Ngay →</button>
         </div>`).join('')}
     </section>`;
   document.getElementById('pickupDateDetailBackBtn').addEventListener('click', ()=>{ renderAll(); restoreMainScroll(); });
   app.querySelectorAll('button[data-shift-id]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ openShift(btn.dataset.shiftId); });
+    btn.addEventListener('click', async ()=>{
+      // SỬA 2026-09-27 — ca thuộc xe khác: chuyển sang đúng xe đó rồi mới mở ca.
+      const vid = btn.dataset.vehicleId;
+      if(vid && vid!==activeVehicleIdForEditing()) await switchVehicle(vid);
+      openShift(btn.dataset.shiftId);
+    });
   });
 }
 // Cảnh báo đến hạn đóng lãi ngân hàng — hiện từ ngày 17 (3 ngày trước hạn,
@@ -2021,6 +2027,7 @@ async function loadVehicleWorkingSet(vehicleId){
       state.allVehiclesRepairs[vehicleId] = state.repairs;
       state.allVehiclesRoadFee[vehicleId] = state.roadFeeByMonth;
       state.allVehiclesSettings[vehicleId] = state.settings;
+      state.allVehiclesMonthlyBonuses[vehicleId] = state.monthlyBonuses;
     }
   } catch(e) {
     showToast('Lỗi tải dữ liệu xe: ' + (e?.message || e));
@@ -2244,12 +2251,15 @@ async function bulkTickInvoiceAcrossAllVehicles({ from, to, partyField, partyId,
 /// đồng bộ, y hệt forceRefreshInvoiceLedgerData(), cho nhất quán.
 async function refreshAllVehiclesShiftsCache(){
   const entries = await Promise.all(state.vehicles.map(async v=>{
-    const [sSnap, rSnap, roadFeeSnap, stSnap] = await Promise.all([
+    const [sSnap, rSnap, roadFeeSnap, stSnap, bonusSnap] = await Promise.all([
       vehicleDataRef(v.id, 'shifts').get(),
       vehicleDataRef(v.id, 'repairs').get(),
       vehicleDataRef(v.id, 'roadFeeByMonth').get(),
-      vehicleDataRef(v.id, 'settings').get()
+      vehicleDataRef(v.id, 'settings').get(),
+      vehicleDataRef(v.id, 'monthlyBonuses').get()
     ]);
+    // MỚI 2026-09-27 — nạp luôn tip/thưởng tháng của từng xe (số dư TCB/Tiền Mặt cần đủ mọi xe).
+    state.allVehiclesMonthlyBonuses[v.id] = bonusSnap.exists && Array.isArray(bonusSnap.data().list) ? bonusSnap.data().list : [];
     const shiftsList = sSnap.exists && Array.isArray(sSnap.data().list) ? sSnap.data().list : [];
     const repairsList = rSnap.exists && Array.isArray(rSnap.data().list) ? rSnap.data().list : [];
     const roadFeeList = roadFeeSnap.exists && Array.isArray(roadFeeSnap.data().list) ? roadFeeSnap.data().list : [];
@@ -2308,6 +2318,64 @@ async function forceRefreshInvoiceLedgerData(){
   } catch(e){
     showToast('LẤY DỮ LIỆU THẤT BẠI — kiểm tra mạng rồi thử lại: '+(e.message||''));
   }
+}
+// MỚI 2026-09-27 (Ông Chủ — "rà thật sâu khi thêm xe mới, xử lý triệt để"):
+// Tài xế, tiền ứng, tiền khách trả là dữ liệu DÙNG CHUNG cả công ty, nên
+// lương/tạm ứng/công nợ/cảnh báo phải đọc ca của MỌI xe. Gộp ca mọi xe,
+// riêng xe đang mở luôn lấy đúng state.shifts (bản mới nhất trên màn
+// hình) — không phụ thuộc cache đã nạp đủ hay chưa.
+function companyShiftsWithVehicle(){
+  const act = activeVehicleIdForEditing();
+  const out = [];
+  Object.entries(state.allVehiclesShifts||{}).forEach(([vid,list])=>{
+    if(vid===act) return;
+    (list||[]).forEach(sh=>out.push({ sh, vid }));
+  });
+  if(act || Object.keys(state.allVehiclesShifts||{}).length===0) (state.shifts||[]).forEach(sh=>out.push({ sh, vid: act||null }));
+  return out;
+}
+/// Bản sao nhẹ (có _vehicleId) — chỉ để ĐỌC, không sửa ca gốc.
+function shiftsCompanyWideSafe(){
+  return companyShiftsWithVehicle().map(({sh,vid})=>Object.assign({}, sh, { _vehicleId: vid }));
+}
+function vehicleIdOfShiftId(shiftId){
+  const hit = companyShiftsWithVehicle().find(x=>x.sh.id===shiftId);
+  return hit ? hit.vid : activeVehicleIdForEditing();
+}
+/// Chính sách chi phí (costPolicies) của ĐÚNG xe chứa ca đó.
+function costPoliciesForVehicle(vid){
+  const act = activeVehicleIdForEditing();
+  const vs = (vid && vid!==act) ? state.allVehiclesSettings[vid] : null;
+  return (vs && vs.costPolicies) || state.settings.costPolicies || {};
+}
+/// Lưu lại ca của đúng các xe vừa bị tính lại (xe đang mở dùng saveShifts()).
+async function saveShiftsForVehicleList(vids, alwaysActive){
+  const act = activeVehicleIdForEditing();
+  const set = new Set((vids||[]).filter(v=>v!==undefined));
+  if(alwaysActive) set.add(act||null);
+  let ok = true;
+  for(const vid of set){
+    const r = (vid===act || vid===null) ? await saveShifts() : await saveShiftsForVehicleId(vid, state.allVehiclesShifts[vid]||[]);
+    ok = r && ok;
+  }
+  return ok;
+}
+/// Tip/thưởng tháng của MỌI xe (mỗi xe lưu riêng 1 danh sách).
+function allMonthlyBonusesCompanyWide(){
+  const act = activeVehicleIdForEditing();
+  const out = [];
+  Object.entries(state.allVehiclesMonthlyBonuses||{}).forEach(([vid,list])=>{
+    if(vid===act) return;
+    (list||[]).forEach(b=>out.push(Object.assign({}, b, { _vehicleId: vid })));
+  });
+  if(act || Object.keys(state.allVehiclesMonthlyBonuses||{}).length===0) (state.monthlyBonuses||[]).forEach(b=>out.push(Object.assign({}, b, { _vehicleId: act||null })));
+  return out;
+}
+/// Nhãn "— 🚛 Tên xe" cho các màn DỰ BÁO theo 1 xe (chỉ hiện khi có ≥2 xe).
+function activeVehicleTagHtml(){
+  if(!Array.isArray(state.vehicles) || state.vehicles.length<2) return '';
+  const vid = activeVehicleIdForEditing();
+  return vid ? ` <span style="font-size:12px; font-weight:700; color:var(--ink-soft);">— 🚛 ${escapeHtml(vehicleNameById(vid))}</span>` : '';
 }
 function allShiftsCompanyWide(){
   const combined = [];
@@ -3589,7 +3657,12 @@ async function saveSiteAppraisals(){
   catch(e){ showToast('Lỗi lưu dữ liệu thẩm định công trình: ' + (e?.message || e)); return false; }
 }
 async function saveMonthlyBonuses(){
-  try { await vehicleDataRef(activeVehicleIdForEditing(), 'monthlyBonuses').set({ list: state.monthlyBonuses }); return true; }
+  try {
+    await vehicleDataRef(activeVehicleIdForEditing(), 'monthlyBonuses').set({ list: state.monthlyBonuses });
+    const vid = activeVehicleIdForEditing();
+    if(vid) state.allVehiclesMonthlyBonuses[vid] = state.monthlyBonuses;
+    return true;
+  }
   catch(e){ showToast('Lỗi lưu tiền tip/thưởng cuối tháng: ' + (e?.message || e)); return false; }
 }
 /// Lưu Cài Đặt — TÁCH LÀM 2: 4 field dùng chung (giá dầu/VAT/CIT/API key)
@@ -3749,11 +3822,28 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
 // file the person saves elsewhere (Zalo Cloud, Email to self, Google Drive),
 // and can load back on any phone via "Phục Hồi Từ File Sao Lưu".
 
-function exportBackupFile(){
+// SỬA 2026-09-27 (Ông Chủ — "rà thật sâu khi thêm xe mới"): bản cũ (v4)
+// chỉ lưu ca + cài đặt của XE ĐANG MỞ và thiếu hẳn các mục mới (góp/rút
+// vốn, lô hoá đơn, khách hàng, nhà cung cấp, mốc chốt TCB/Tiền Mặt, quỹ
+// khấu hao, VAT...). Bản v5 đọc NGUYÊN VẸN mọi tài liệu trong kho dữ liệu
+// của công ty (mọi xe, mọi mục — kể cả mục sau này thêm mới) rồi lưu ra
+// 1 file. Vẫn giữ các trường v4 ở ngoài cùng để bản app cũ còn đọc được.
+async function exportBackupFile(){
+  showToast('Đang gom toàn bộ dữ liệu công ty để sao lưu...');
+  let allDocs = null;
+  try {
+    const snap = await withTimeout(db.collection('shared').doc(SHARED_SPACE_ID).collection('appdata').get());
+    allDocs = {};
+    snap.forEach(doc=>{ allDocs[doc.id] = doc.data(); });
+  } catch(e) {
+    showToast('SAO LƯU THẤT BẠI — không đọc được dữ liệu từ máy chủ (kiểm tra mạng rồi thử lại): ' + (e?.message || e));
+    return;
+  }
   const backup = {
     appName: 'SoXeBenHOWO',
-    backupVersion: 4,
+    backupVersion: 5,
     exportedAt: new Date().toISOString(),
+    allDocs,
     drivers: state.drivers,
     shifts: state.shifts,
     repairs: state.repairs,
@@ -3776,7 +3866,7 @@ function exportBackupFile(){
   a.href=url; a.download=`SaoLuu_SoXeBenHOWO_${todayLocalDateStr()}.json`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast('Đã tạo file sao lưu. Nhớ gửi file này qua Zalo/Email cho chính mình để cất giữ.');
+  showToast(`Đã sao lưu ĐỦ ${Object.keys(allDocs).length} mục dữ liệu của mọi xe. Nhớ gửi file này qua Zalo/Email cho chính mình để cất giữ.`);
 }
 
 function triggerRestoreFilePicker(){
@@ -3789,6 +3879,25 @@ async function handleRestoreFile(file){
   try{
     const text = await file.text();
     const backup = JSON.parse(text);
+    // MỚI 2026-09-27 — file v5: phục hồi NGUYÊN VẸN mọi tài liệu của mọi xe.
+    if(backup && backup.backupVersion>=5 && backup.allDocs && typeof backup.allDocs==='object'){
+      const names = Object.keys(backup.allDocs);
+      const msg5 = `File sao lưu ĐẦY ĐỦ (mọi xe) gồm ${names.length} mục dữ liệu, xuất lúc ${new Date(backup.exportedAt).toLocaleString('vi-VN')}.\n\nPhục hồi sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại của công ty bằng dữ liệu trong file. Ông Chủ chắc chắn muốn phục hồi?`;
+      if(!confirm(msg5)) return;
+      const col = db.collection('shared').doc(SHARED_SPACE_ID).collection('appdata');
+      const results = await Promise.all(names.map(async name=>{
+        try { await withTimeout(col.doc(name).set(backup.allDocs[name])); return true; }
+        catch(e){ return false; }
+      }));
+      const failed = results.filter(r=>!r).length;
+      if(failed===0){
+        showToast('Đã phục hồi ĐỦ dữ liệu mọi xe. App sẽ tự tải lại.');
+        setTimeout(()=>location.reload(), 1200);
+      } else {
+        showToast(`PHỤC HỒI THẤT BẠI ${failed}/${names.length} mục (kiểm tra mạng) — Ông Chủ bấm Khôi Phục lại lần nữa để chắc chắn đủ.`);
+      }
+      return;
+    }
     if(!backup || !Array.isArray(backup.drivers) || !Array.isArray(backup.shifts)){
       showToast('File này không đúng định dạng sao lưu.');
       return;
@@ -5394,10 +5503,18 @@ function dailyBaseSalary(driver){
 function shiftPositionInfo(sh){
   const ym = (sh.date||'').slice(0,7);
   const standard = Number(state.settings.standardWorkDaysPerMonth)||28;
-  const earnsBaseSalary = s => !!(state.settings.costPolicies[s.status]||{}).baseSalary;
-  if(!earnsBaseSalary(sh)) return { ordinal:0, priorIntensitySum:0 };
-  const pool = state.shifts
-    .filter(s=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym && earnsBaseSalary(s))
+  // SỬA 2026-09-27 (Ông Chủ — "xử lý triệt để khi thêm xe mới"): 1 tài xế
+  // có 1 mức lương tháng — thứ tự ca trong tháng phải đếm trên MỌI xe tài
+  // xế đó chạy (trước đây chỉ đếm ca của xe đang mở → chạy 2 xe trong
+  // tháng thì mỗi xe tự đếm lại từ 1, lương cứng bị chia sai). Chính sách
+  // chi phí lấy theo ĐÚNG xe chứa từng ca. Tài xế chỉ chạy 1 xe: kết quả
+  // Y HỆT cũ.
+  const shVid = sh._vehicleId!==undefined ? sh._vehicleId : vehicleIdOfShiftId(sh.id);
+  const earnsBaseSalary = (s, vid) => !!(costPoliciesForVehicle(vid)[s.status]||{}).baseSalary;
+  if(!earnsBaseSalary(sh, shVid)) return { ordinal:0, priorIntensitySum:0 };
+  const pool = companyShiftsWithVehicle()
+    .filter(({sh:s, vid})=>s.id!==sh.id && s.driverId===sh.driverId && (s.date||'').slice(0,7)===ym && earnsBaseSalary(s, vid))
+    .map(x=>x.sh)
     .concat([sh]);
   pool.sort((a,b)=> a.date!==b.date ? (a.date<b.date?-1:1) : String(a.id).localeCompare(String(b.id)));
   const ordinal = pool.findIndex(s=>s.id===sh.id) + 1;
@@ -6588,7 +6705,7 @@ function siteWageTotal(s){
 /// định × số chuyến" đã có sẵn).
 function driverTripWageStatsInRange(driverId, from, to, shiftsList){
   let tripCount = 0, tripWage = 0;
-  (shiftsList || state.shifts).forEach(sh=>{
+  (shiftsList || shiftsCompanyWideSafe()).forEach(sh=>{
     if(sh.date<from || sh.date>to || sh.status!=='active') return;
     (sh.siteLogs||[]).forEach(s=>{
       if(s.siteType!=='commercial'){
@@ -6656,7 +6773,7 @@ function shiftOdoDriven(sh){ return Math.max(0, (Number(sh.odoEnd)||0) - (Number
 /// số cho ra tổng giống hệt nhau (phép chia phân phối đúng qua phép cộng)
 /// nên không lệch 1 đồng nào so với tổng công ty.
 function driverPersonalRevenueCostStatsInRange(driverId, from, to, shiftsList){
-  const list = shiftsList || state.shifts;
+  const list = shiftsList || shiftsCompanyWideSafe();
   // SỬA 2026-08-25: bọc try-catch cùng lý do với shiftCrossDriverInfo và
   // computeMissingPickupDateWarnings — nếu có tình huống dữ liệu lạ gây
   // lỗi, TỰ ĐỘNG lùi về đúng công thức cũ (theo ca, không chia lại) thay
@@ -6873,7 +6990,7 @@ function driverBonusRecord(driverId, yearMonth){
 /// payroll Excel export, so the two always agree.
 function driverMonthlyBonusTotalInRange(driverId, from, to){
   const months = new Set(monthsInRange(from, to));
-  return state.monthlyBonuses
+  return allMonthlyBonusesCompanyWide() // SỬA 2026-09-27 — thưởng của tài xế ở MỌI xe
     .filter(b=>b.driverId===driverId && months.has(b.yearMonth))
     .reduce((s,b)=>s+(Number(b.amount)||0),0);
 }
@@ -6938,7 +7055,7 @@ function suggestDriverIdForNewShift(dateStr, shiftType, excludeId){
 /// ý khi gõ tên mới.
 function allSiteNames(){
   const lastSeen = {}; // tên công trình -> ngày gần nhất xuất hiện
-  for(const sh of state.shifts){
+  for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
     for(const s of (sh.siteLogs||[])){
       // CHỈ công trình chở cước — công trình thương mại có s.siteName do
       // syncSiteNameFromTrips() TỰ GỘP nhiều Điểm Múc-Điểm Đổ khác nhau
@@ -6975,7 +7092,7 @@ function allSiteNames(){
 /// nhất như allSiteNames() để đồng nhất trải nghiệm gõ.
 function allTripLocationsForSupplier(supplierId){
   const lastSeen = {}; // điểm múc-đổ -> ngày gần nhất xuất hiện (đúng nhà cung cấp)
-  for(const sh of state.shifts){
+  for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
     for(const s of (sh.siteLogs||[])){
       if(s.siteType!=='commercial') continue;
       if(supplierId && s.supplierId!==supplierId) continue; // khác nhà cung cấp → bỏ qua
@@ -7211,7 +7328,7 @@ function shiftCrossDriverInfo(sh){
       if((s.commercialTrips||[]).some(t=>t.pickupDriverId && t.pickupDriverId!==sh.driverId)) isDeliveringForOthers = true;
     });
     let isPickingUpForOthers = false;
-    (state.shifts||[]).forEach(other=>{
+    shiftsCompanyWideSafe().forEach(other=>{ // SỬA 2026-09-27 — mọi xe
       if(other.id===sh.id || other.driverId===sh.driverId) return;
       (other.siteLogs||[]).forEach(s=>{
         if(s.siteType!=='commercial') return;
@@ -7777,13 +7894,19 @@ function reapplyCostPolicyToDraft(){
 function recalcDriverShiftAllocations(driverId){
   const driver = driverById(driverId);
   if(!driver) return;
-  state.shifts.forEach(sh=>{
+  // SỬA 2026-09-27: tính lại ca của tài xế ở MỌI xe (không riêng xe đang
+  // mở), trả về danh sách xe có ca thực sự đổi số để lưu lại đúng xe đó.
+  const changed = new Set();
+  companyShiftsWithVehicle().forEach(({sh, vid})=>{
     if(sh.driverId!==driverId) return;
-    const policy = state.settings.costPolicies[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
+    const policy = costPoliciesForVehicle(vid)[sh.status] || {baseSalary:false,food:false,housing:false,operations:true};
     const intensity = Number(sh.intensity)||1; // giữ đúng hệ số ca rưỡi đã snapshot của từng ca khi tính lại
-    sh.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(sh, driver, intensity) : 0;
+    const before = `${sh.baseSalaryAllocation}|${sh.foodAllowance}`;
+    sh.baseSalaryAllocation = policy.baseSalary ? baseSalaryForShift(Object.assign({}, sh, { _vehicleId: vid }), driver, intensity) : 0;
     sh.foodAllowance = policy.food ? driver.dailyFoodAllowance : 0;
+    if(before!==`${sh.baseSalaryAllocation}|${sh.foodAllowance}`) changed.add(vid);
   });
+  return [...changed];
 }
 
 /// Recomputes Odo Start / Fuel Start inheritance from the chronologically
@@ -9137,8 +9260,9 @@ function renderDrivers(){
     // recalcDriverShiftAllocations() đã có sẵn, y hệt cách màn Sửa Tài Xế
     // đang làm khi đổi lương 1 người.
     try {
-      state.drivers.forEach(d=>recalcDriverShiftAllocations(d.id));
-      const ok = await saveShifts();
+      const changedVids = new Set();
+      state.drivers.forEach(d=>(recalcDriverShiftAllocations(d.id)||[]).forEach(v=>changedVids.add(v)));
+      const ok = await saveShiftsForVehicleList([...changedVids], true);
       if(!ok) showToast('Đã lưu Công Chuẩn nhưng LƯU LẠI CA CŨ THẤT BẠI (xem lý do lỗi ở thông báo trước đó) — vào từng ca lưu lại, nếu không lương cứng cũ sẽ chưa cập nhật.');
     } catch(e) {
       showToast('Đã lưu Công Chuẩn nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
@@ -9266,8 +9390,8 @@ function openEditDriver(id){
     // 3 số vừa lưu ở trên, nên chạy lại vẫn an toàn/idempotent kể cả khi
     // Ông Chủ chỉ sửa CCCD/bằng lái mà không đổi số tiền nào.
     try {
-      recalcDriverShiftAllocations(d.id);
-      const ok = await saveShifts();
+      const changedVids = recalcDriverShiftAllocations(d.id) || [];
+      const ok = await saveShiftsForVehicleList(changedVids, true);
       if(!ok) showToast('Đã lưu tài xế nhưng LƯU LẠI CA CŨ THẤT BẠI (xem lý do lỗi ở thông báo trước đó) — vào từng ca lưu lại nếu cần.');
     } catch(e) {
       showToast('Đã lưu tài xế nhưng có lỗi khi cập nhật lại ca cũ — thử Lưu lại lần nữa.');
@@ -9390,7 +9514,7 @@ function driverAdvancesInMonth(driverId, yearMonth){
 /// tranh chấp với tài xế theo đúng khoảng ngày tự chọn, không bó buộc
 /// theo tháng).
 function driverIncidentalShiftsInRange(driverId, from, to){
-  return state.shifts
+  return shiftsCompanyWideSafe() // SỬA 2026-09-27 — mọi xe
     .filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to && (Number(sh.incidentalCost)||0)>0)
     .sort((a,b)=>b.date.localeCompare(a.date));
 }
@@ -9426,7 +9550,7 @@ function driverAdvanceBalance(driverId, asOfDate){
   const advanced = state.driverAdvances
     .filter(a=>a.driverId===driverId && a.date<=asOfDate)
     .reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const incidental = state.shifts
+  const incidental = shiftsCompanyWideSafe() // SỬA 2026-09-27 — phát sinh ở MỌI xe
     .filter(sh=>sh.driverId===driverId && sh.date<=asOfDate && (Number(sh.incidentalCost)||0)>0)
     .reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
   const manual = state.driverExpenseReports
@@ -9738,7 +9862,7 @@ function openDriverTripDetailModal(driverId, from, to){
   const sameMonth = (from||'').slice(0,7) === (to||'').slice(0,7);
   const monthInputVal = sameMonth ? from.slice(0,7) : todayLocalDateStr().slice(0,7);
 
-  const shiftsForDriver = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
+  const shiftsForDriver = shiftsCompanyWideSafe().filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
   const rows = buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver)
     .filter(r=>(r.tripCount||0)>0)
     .sort((a,b)=>(a._sortKey||0)-(b._sortKey||0));
@@ -9788,7 +9912,7 @@ function openDriverDetail(driverId){
   if(!state.driverDetailRange) state.driverDetailRange = currentMonthRange();
   const { from, to } = state.driverDetailRange;
 
-  const inRange = state.shifts.filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to);
+  const inRange = shiftsCompanyWideSafe().filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to); // SỬA 2026-09-27 — mọi xe
   const activeShifts = inRange.filter(sh=>sh.status==='active');
   const activeDates = new Set(activeShifts.map(sh=>sh.date));
   // SỬA 2026-08-23 (Ông Chủ hỏi vì sao Số Ca Hoạt Động ≠ Số Ngày Có Ca Hoạt
@@ -9805,7 +9929,7 @@ function openDriverDetail(driverId){
   // không đổi hành vi cũ) — GỘP TẤT CẢ ca của XE NÀY trong kỳ (không chỉ
   // ca của driverId, vì có thể chuyến của driverId nằm trong ca của tài
   // xế khác — trường hợp lấy hàng hôm nay, hôm sau người khác đổ hộ).
-  const driverStats = driverTripWageStatsInRange(driverId, from, to, state.shifts);
+  const driverStats = driverTripWageStatsInRange(driverId, from, to, shiftsCompanyWideSafe());
   const totalTrips = driverStats.tripCount;
   // SỬA 2026-08-23 (Ông Chủ: "tính tất cả cho tao, tất cả các con số
   // trong app phải đồng nhất" — sau khi phát hiện Lợi Nhuận Ròng ở đây bị
@@ -9823,7 +9947,7 @@ function openDriverDetail(driverId){
   // ở trên, không đụng shiftTotalRevenue/shiftNetProfit gốc). Thẻ ca,
   // "Kết Quả Kinh Doanh", file KT Thuế... vẫn dùng đúng công thức cũ,
   // không đổi.
-  const personalStats = driverPersonalRevenueCostStatsInRange(driverId, from, to, state.shifts);
+  const personalStats = driverPersonalRevenueCostStatsInRange(driverId, from, to, shiftsCompanyWideSafe());
   const totalRevenue = personalStats.revenue;
   const totalNetProfit = personalStats.netProfit;
 
@@ -9863,7 +9987,7 @@ function openDriverDetail(driverId){
   const advanceRecords = inRange.filter(sh=>(sh.advanceAmount||0)>0).sort((a,b)=>b.date.localeCompare(a.date));
   const repairRecords = state.repairs.filter(r=>r.responsibleDriverId===driverId && r.date>=from && r.date<=to &&
     (r.responsibility==='driver_full' || r.responsibility==='custom')).sort((a,b)=>b.date.localeCompare(a.date));
-  const bonusRecordsInRange = state.monthlyBonuses.filter(b=>b.driverId===driverId && monthsSpanned.includes(b.yearMonth)).sort((a,b)=>b.yearMonth.localeCompare(a.yearMonth));
+  const bonusRecordsInRange = allMonthlyBonusesCompanyWide().filter(b=>b.driverId===driverId && monthsSpanned.includes(b.yearMonth)).sort((a,b)=>b.yearMonth.localeCompare(a.yearMonth));
   const now = new Date();
   const defaultYearMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
@@ -9998,11 +10122,11 @@ function openDriverDetail(driverId){
         <div style="margin-top:14px;">
           <div class="hint" style="margin-bottom:6px;">Bấm vào 1 dòng để sửa lại tháng đó.</div>
           ${bonusRecordsInRange.map(b=>`
-            <div class="bonusRow" data-id="${b.id}" data-month="${b.yearMonth}" data-amount="${b.amount}" data-method="${b.method==='cash'?'cash':'bank'}" data-paiddate="${bonusEffectiveDate(b)}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px; cursor:pointer;">
-              <span>Tháng ${escapeHtml(b.yearMonth)} <span style="font-size:11px;">${b.method==='cash'?'💵':'🏦'}</span></span>
+            <div class="${b._vehicleId && b._vehicleId!==activeVehicleIdForEditing() ? 'bonusRowOther' : 'bonusRow'}" data-id="${b.id}" data-month="${b.yearMonth}" data-amount="${b.amount}" data-method="${b.method==='cash'?'cash':'bank'}" data-paiddate="${bonusEffectiveDate(b)}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px; cursor:pointer;">
+              <span>Tháng ${escapeHtml(b.yearMonth)} <span style="font-size:11px;">${b.method==='cash'?'💵':'🏦'}</span>${b._vehicleId && b._vehicleId!==activeVehicleIdForEditing() ? ` <span style="font-size:11px; color:var(--ink-soft);">🚛 ${escapeHtml(vehicleNameById(b._vehicleId))} — mở xe đó để sửa</span>` : ''}</span>
               <span style="display:flex; align-items:center; gap:12px;">
                 <span style="font-weight:700; color:var(--profit);">${fmtVND(b.amount)}</span>
-                <button class="link-btn deleteBonusBtn" data-id="${b.id}" style="color:var(--loss);">Xoá</button>
+                ${b._vehicleId && b._vehicleId!==activeVehicleIdForEditing() ? '' : `<button class="link-btn deleteBonusBtn" data-id="${b.id}" style="color:var(--loss);">Xoá</button>`}
               </span>
             </div>
           `).join('')}
@@ -10822,7 +10946,7 @@ function renderStrategy(){
     </section>
     ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới phân tích được.</div>` : ''}
     <section class="group">
-      <h3>🧭 Trợ Lý Chiến Lược</h3>
+      <h3>🧭 Trợ Lý Chiến Lược${activeVehicleTagHtml()}</h3>
       <div class="hint" style="margin-bottom:10px;">AI đọc số liệu vận hành thực tế trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
       <div class="date-range">
         <div class="field">
@@ -10882,7 +11006,7 @@ function renderStrategyBranchHub(){
       <button class="btn btn-ghost btn-sm" id="strategyHubBackBtn">← Quay Lại</button>
     </section>
     <section class="group">
-      <h3>🧭 Trợ Lý Chiến Lược</h3>
+      <h3>🧭 Trợ Lý Chiến Lược${activeVehicleTagHtml()}</h3>
       <div class="hint" style="margin-bottom:14px;">Chọn 1 trong 2 hướng bên dưới.</div>
       <button class="btn btn-accent btn-block" id="goResultsReadBtn" style="padding:16px; margin-bottom:12px;">📊 Đọc Kết Quả</button>
       <div class="hint" style="margin-top:0; margin-bottom:16px;">Số liệu tính THẲNG bằng công thức, không qua AI — luôn có ngay, không cần chờ, không có yếu tố "đoán".</div>
@@ -13491,7 +13615,7 @@ function computeDailyBreakdown(inRangeShifts){
 // công trình đã "ngủ" bao lâu. Quá 5 ngày không nhập gì coi như đã kết thúc.
 function lastActivityDateForSite(siteName){
   let latest = null;
-  for(const sh of state.shifts){
+  for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
     for(const s of (sh.siteLogs||[])){
       const name = (s.siteName||'(chưa đặt tên)').trim() || '(chưa đặt tên)';
       if(name!==siteName) continue;
@@ -13539,7 +13663,7 @@ function computeSiteDetail(siteName, from, to){
   // collected, owed) is always ALL-TIME — debt is a running balance, not a
   // period concept, and mixing the two produced inconsistent "owed"
   // numbers between this view and the Đối Tác & Công Nợ overview.
-  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const inRange = shiftsCompanyWideSafe().filter(sh=>sh.date>=from && sh.date<=to); // SỬA 2026-09-27 — mọi xe
   const tripsByDriver = {};
   const dailyActivity = [];
   for(const sh of inRange){
@@ -13846,7 +13970,7 @@ function computeBankBalanceReconciliation(){
   // — không sửa/xoá bất kỳ dòng công thức nào phía trên (đúng nguyên tắc
   // đóng băng công thức đã xác minh).
   const driverAdvanceBank = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method!=='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const bonusBank = state.monthlyBonuses.filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method!=='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
+  const bonusBank = allMonthlyBonusesCompanyWide().filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method!=='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
   const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash - driverAdvanceBank - bonusBank - reserveOut + reserveIn;
   // SỬA 2026-09-14 LẦN 3 (Ông Chủ báo — khai mốc chốt ĐÚNG HÔM NAY,
@@ -13915,7 +14039,7 @@ function computeCashBalanceReconciliation(){
   // lại) — mỗi lần Ông Chủ đưa tiền mặt trực tiếp cho tài xế (ứng riêng
   // hoặc tip/thưởng) thì tiền mặt đang cầm giảm đúng bằng số đó.
   const driverAdvanceCash = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method==='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const bonusCash = state.monthlyBonuses.filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method==='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
+  const bonusCash = allMonthlyBonusesCompanyWide().filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method==='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
   // SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
   // TCB, mày liên kết chuẩn để có số chuẩn xác"): thêm ĐỦ chiều tiền mặt
   // sinh đôi với mọi khoản đã có bên Ngân Hàng — sửa chữa, luật đường,
@@ -14426,7 +14550,7 @@ function computePeriodSummary(from, to){
 }
 function computeAllSiteBilledEvents(){
   const map = {};
-  for(const sh of state.shifts){
+  for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
     for(const s of (sh.siteLogs||[])){
       // Thương mại giờ theo dõi công nợ riêng qua đúng Khách Hàng/Nhà Cung
       // Cấp (renderCustomerSupplierDebtOverview) — KHÔNG gộp vào bảng Đối
@@ -15115,7 +15239,7 @@ function renderResults(){
     </section>
 
     <section class="group">
-      <h3>🎯 Dự Đoán Hoà Vốn Cả Tháng ${monthLabelVN(todayLocalDateStr().slice(0,7))}</h3>
+      <h3>🎯 Dự Đoán Hoà Vốn Cả Tháng ${monthLabelVN(todayLocalDateStr().slice(0,7))}${activeVehicleTagHtml()}</h3>
 
 
       <div class="seg" id="marginWindowToggle">
@@ -18725,16 +18849,16 @@ function renderCompanyDashboardPage(preserveScroll){
           <div style="width:2px; height:14px; background:var(--border);"></div>
           <div style="width:2px; height:14px; background:var(--border);"></div>
         </div>
-        <div style="display:flex; gap:10px; justify-content:center;">
-          <div style="flex:1; max-width:120px; text-align:center;">
-            <button id="ktnbGoBankBtn" style="width:100%; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+        <div style="display:flex; gap:10px; justify-content:center; align-items:stretch;">
+          <div style="flex:1; max-width:120px; text-align:center; display:flex;">
+            <button id="ktnbGoBankBtn" style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
               <div style="font-size:24px; line-height:1;">🏦</div>
               <div style="font-weight:800; margin-top:6px; font-size:11.5px;">TCB Bank</div>
               <div style="font-weight:900; margin-top:2px; font-size:12.5px; color:${bankRecon ? (bankRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${bankRecon?fmtVND(bankRecon.computedBalance):'Chưa khai'}</div>
             </button>
           </div>
-          <div style="flex:1; max-width:120px; text-align:center;">
-            <button id="ktnbGoCashBtn" style="width:100%; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
+          <div style="flex:1; max-width:120px; text-align:center; display:flex;">
+            <button id="ktnbGoCashBtn" style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg,#fff); cursor:pointer;">
               <div style="font-size:24px; line-height:1;">💵</div>
               <div style="font-weight:800; margin-top:6px; font-size:11.5px;">Tiền Mặt</div>
               <div style="font-weight:900; margin-top:2px; font-size:12.5px; color:${cashRecon ? (cashRecon.computedBalance>=0?'var(--profit)':'var(--loss)') : 'var(--ink-soft)'};">${cashRecon?fmtVND(cashRecon.computedBalance):'Chưa khai'}</div>
@@ -18746,8 +18870,8 @@ function renderCompanyDashboardPage(preserveScroll){
           HÀNG, CÙNG KÍCH THƯỚC 2 ô kia — bấm mở thẳng lịch sử theo xe. Bỏ
           2 nút "Chi tiết" rời của TCB/Tiền Mặt phía trên vì bấm thẳng vào
           ô đã mở đúng trang đó rồi, giữ lại là thừa. -->
-          <div style="flex:1; max-width:120px; text-align:center;">
-            <button id="ktnbGoDepReserveBtn" style="width:100%; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
+          <div style="flex:1; max-width:120px; text-align:center; display:flex;">
+            <button id="ktnbGoDepReserveBtn" style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:12px 6px; border-radius:14px; border:1.5px solid var(--accent); background:var(--accent-soft); cursor:pointer;">
               <div style="font-size:24px; line-height:1;">🫙</div>
               <div style="font-weight:800; margin-top:6px; font-size:11.5px;">Chứa Tiền Khấu Hao Xe</div>
               <div style="font-weight:900; margin-top:2px; font-size:12.5px; color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</div>
@@ -18761,7 +18885,9 @@ function renderCompanyDashboardPage(preserveScroll){
           <button class="btn btn-ghost" id="internalTransferHistoryBtn" style="flex:1;">📋 Chi Tiết</button>
         </div>
         <div style="font-weight:800; font-size:13px; margin-top:16px; margin-bottom:8px; text-align:center;">🫙 Chuyển Tiền — Chứa Tiền Khấu Hao Xe</div>
-        <button class="btn btn-accent btn-block" id="addDepReserveTransferBtn">🫙➕ Ghi Nhận</button>
+        <div style="display:flex; justify-content:center;">
+          <button class="btn btn-accent" id="addDepReserveTransferBtn" style="flex:0 1 calc(50% - 5px);">🫙➕ Ghi Nhận</button>
+        </div>
       </div>
     </section>
 
@@ -19369,10 +19495,10 @@ function computeCompanyCashFlowLedger(){
     entries.push({ date:a.date, category:'Ứng riêng cho tài xế', amount:Number(a.amount)||0, sign:-1,
       desc: (driver?driver.name:'') + (a.note?' — '+a.note:''), id:a.id, method: a.method||'bank' });
   });
-  state.monthlyBonuses.forEach(b=>{
+  allMonthlyBonusesCompanyWide().forEach(b=>{
     const driver = driverById(b.driverId);
     entries.push({ date:bonusEffectiveDate(b), category:'Tip/Thưởng tháng', amount:Number(b.amount)||0, sign:-1,
-      desc: `${driver?driver.name:''} — tháng ${b.yearMonth}`, id:b.id, method: b.method||'bank' });
+      desc: `${driver?driver.name:''} — tháng ${b.yearMonth}${state.vehicles.length>1 && b._vehicleId ? ` — 🚛 ${vehicleNameById(b._vehicleId)}` : ''}`, id:b.id, method: b.method||'bank' });
   });
   entries.sort((a,b)=> b.date===a.date ? 0 : (b.date>a.date?1:-1));
   return entries;
@@ -20031,7 +20157,7 @@ function renderBankReconDetailPage(mode){
     .filter(a=>a.date>bankRecon.checkpoint.date && a.date<=todayLocalDateStr() && a.method!=='cash')
     .map(a=>{ const driver = driverById(a.driverId); return { date:a.date, name: driver?driver.name:'', note:a.note||'', cost:Number(a.amount)||0 }; })
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
-  const bankBonusItems = bankRecon ? state.monthlyBonuses
+  const bankBonusItems = bankRecon ? allMonthlyBonusesCompanyWide()
     .filter(b=>{ const d=bonusEffectiveDate(b); return d>bankRecon.checkpoint.date && d<=todayLocalDateStr() && b.method!=='cash'; })
     .map(b=>{ const driver = driverById(b.driverId); return { date:bonusEffectiveDate(b), name: driver?driver.name:'', yearMonth:b.yearMonth, cost:Number(b.amount)||0 }; })
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
@@ -20039,7 +20165,7 @@ function renderBankReconDetailPage(mode){
     .filter(a=>a.date>cashRecon.checkpoint.date && a.date<=todayLocalDateStr() && a.method==='cash')
     .map(a=>{ const driver = driverById(a.driverId); return { date:a.date, name: driver?driver.name:'', note:a.note||'', cost:Number(a.amount)||0 }; })
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
-  const cashBonusItems = cashRecon ? state.monthlyBonuses
+  const cashBonusItems = cashRecon ? allMonthlyBonusesCompanyWide()
     .filter(b=>{ const d=bonusEffectiveDate(b); return d>cashRecon.checkpoint.date && d<=todayLocalDateStr() && b.method==='cash'; })
     .map(b=>{ const driver = driverById(b.driverId); return { date:bonusEffectiveDate(b), name: driver?driver.name:'', yearMonth:b.yearMonth, cost:Number(b.amount)||0 }; })
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
@@ -21173,7 +21299,7 @@ function buildDriverPayrollRows(from, to){
   // Doanh" (xem buildBusinessResultRows), không lặp lại ở đây nữa.
   const header = ['Tài Xế','Số Ca Tính Lương','Số Ca Nghỉ Phép','Số Ca Khác (Không Lương)','Lương Cứng','Tổng Lương Chuyến','Tổng Tiền Ăn','Tiền Tip/Thưởng Cuối Tháng','Ứng Lương/Đền Bù','Trừ Do Hỏng Hóc','LƯƠNG THỰC NHẬN'];
   const rows = [header];
-  const inRange = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const inRange = shiftsCompanyWideSafe().filter(sh=>sh.date>=from && sh.date<=to); // SỬA 2026-09-27 — bảng lương gồm MỌI xe
   const byDriver = {};
   for(const sh of inRange){
     const driver = driverById(sh.driverId);
@@ -21535,7 +21661,7 @@ function buildDriverPayslipTripRows(driverId, from, to, shiftsForDriver){
   // Một site log có thể có NHIỀU chuyến lấy hộ vào NHIỀU ngày múc khác
   // nhau — nên phải nhóm riêng theo từng ngày múc, không gộp chung 1 cục
   // như trước.
-  (state.shifts||[]).forEach(sh=>{
+  shiftsCompanyWideSafe().forEach(sh=>{ // SỬA 2026-09-27 — chuyến ở MỌI xe
     if(sh.date<from || sh.date>to || sh.status!=='active') return;
     if(sh.driverId===driverId) return;
     (sh.siteLogs||[]).forEach(s=>{
@@ -21646,7 +21772,7 @@ function buildDriverPayslipSheetRows(driverId, driverName, shiftsForDriver, from
   // chỉ shiftsForDriver), để khớp tuyệt đối với sheet tổng hợp "Lương Tài
   // Xế" (buildDriverPayrollRows, đã sửa cùng ngày). Nếu driverId=null
   // (chưa gán tài xế) không thể tra cứu theo id, giữ nguyên công thức cũ.
-  const tripWage = driverId ? driverTripWageStatsInRange(driverId, from, to, state.shifts).tripWage
+  const tripWage = driverId ? driverTripWageStatsInRange(driverId, from, to, shiftsCompanyWideSafe()).tripWage
     : shiftsForDriver.reduce((s,sh)=>s+shiftTotalTripWage(sh),0);
   const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
@@ -21976,7 +22102,7 @@ function ktBuildSupplierDetail(wb, from, to){
       });
     });
     let missingVol = 0;
-    for(const sh of state.shifts){
+    for(const sh of shiftsCompanyWideSafe()){ // SỬA 2026-09-27 — mọi xe
       if(sh.date<from || sh.date>to) continue;
       for(const s of (sh.siteLogs||[])) if(s.siteType==='commercial' && s.supplierId===sup.id) missingVol += siteMissingDocumentedVolume(s);
     }
@@ -22112,7 +22238,7 @@ async function exportDriverPayslipXLSX(driverId){
   const range = state.driverDetailRange || currentMonthRange();
   const from = range.from, to = range.to;
   const driverName = driver.name || '(chưa đặt tên)';
-  const shiftsForDriver = state.shifts
+  const shiftsForDriver = shiftsCompanyWideSafe() // SỬA 2026-09-27 — mọi xe
     .filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to)
     .sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
 
@@ -22120,7 +22246,7 @@ async function exportDriverPayslipXLSX(driverId){
   const baseSalary = shiftsForDriver.reduce((s,sh)=>s+(sh.baseSalaryAllocation||0),0);
   // SỬA 2026-08-20: đồng bộ đúng driverTripWageStatsInRange, khớp tuyệt
   // đối với Chi Tiết Tài Xế + Bảng Lương + Phiếu Lương trong file KT Thuế.
-  const tripWage = driverTripWageStatsInRange(driverId, from, to, state.shifts).tripWage;
+  const tripWage = driverTripWageStatsInRange(driverId, from, to, shiftsCompanyWideSafe()).tripWage;
   const food = shiftsForDriver.reduce((s,sh)=>s+(sh.foodAllowance||0),0);
   const advance = shiftsForDriver.reduce((s,sh)=>s+(sh.advanceAmount||0),0);
   const repairDeduction = driverResponsibleRepairTotalInRange(driverId, from, to);
@@ -22320,7 +22446,7 @@ function downloadWorkbook(from, to, resultsData, filenamePrefix){
   // LƯƠNG THỰC NHẬN ở đây LUÔN khớp đúng với dòng tương ứng ở sheet "Luong
   // Tai Xe" (cùng dùng chung công thức, không tính lại kiểu khác).
   const usedSheetNames = new Set(['Nhat Ky Van Hanh','Luong Tai Xe','Ket Qua Kinh Doanh','Sua Chua Khau Hao']);
-  const inRangeForPayslips = state.shifts.filter(sh=>sh.date>=from && sh.date<=to);
+  const inRangeForPayslips = shiftsCompanyWideSafe().filter(sh=>sh.date>=from && sh.date<=to); // SỬA 2026-09-27 — mọi xe
   const byDriverForPayslips = {};
   for(const sh of inRangeForPayslips){
     const driver = driverById(sh.driverId);
