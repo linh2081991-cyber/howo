@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-27 · #316';
+const APP_BUILD = '2026-09-28 · #317';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9230,8 +9230,8 @@ function renderDrivers(){
             <div class="driver-cv-item"><span class="k">Số CCCD</span><span class="v">${escapeHtml(d.cccdNumber||'—')}</span></div>
             <div class="driver-cv-item"><span class="k">Bằng lái</span><span class="v">${escapeHtml(d.licenseInfo||'—')}</span></div>
             <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tình trạng sức khoẻ</span><span class="v">${escapeHtml(d.healthStatus||'—')}</span></div>
-            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--loss)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
-            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ (tính đến hôm nay)</span><span class="v" style="color:${driverAdvanceBalance(d.id)>=0?'inherit':'var(--loss)'}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Trừ do hỏng hóc quy trách nhiệm (toàn thời gian)</span><span class="v" style="color:${driverResponsibleRepairTotal(d.id)>0?'var(--profit)':'inherit'}">${fmtVND(driverResponsibleRepairTotal(d.id))}</span></div>
+            <div class="driver-cv-item" style="grid-column:1 / -1;"><span class="k">Tạm ứng chi phí đang giữ (tính đến hôm nay)</span><span class="v" style="color:${driverAdvanceBalance(d.id)>0?'var(--profit)':(driverAdvanceBalance(d.id)<0?'var(--loss)':'inherit')}">${driverAdvanceBalance(d.id)>=0?'':'−'}${fmtVND(Math.abs(driverAdvanceBalance(d.id)))}</span></div>
           </div>
           <div class="hint" style="margin-top:8px;">Lương cứng phân bổ mỗi ca: ${fmtVND(dailyBaseSalary(d))} (chia ${state.settings.standardWorkDaysPerMonth} ngày công chuẩn)</div>
           <button class="btn btn-ghost btn-block viewDriverDetailBtn" data-id="${d.id}" style="margin-top:10px;">📊 Xem Chi Tiết Vận Hành →</button>
