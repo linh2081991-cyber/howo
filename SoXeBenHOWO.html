@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-28 · #322';
+const APP_BUILD = '2026-09-28 · #323';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -878,7 +878,7 @@ function defaultCostPolicies(){
 /// ngân hàng, bảo hiểm, đăng kiểm, lương cứng...), theo đúng yêu cầu Ông
 /// Chủ 2026-08-14: "thêm xe nào thêm tiền xe đó... tiền ngân hàng, khấu
 /// hao... chưa nhập thì không thể lấy số bên xe 29E69112".
-const SHARED_SETTINGS_FIELDS = ['geminiApiKey','currentFuelUnitPrice','vatRatePercent','citRatePercent','lotPriceOverrides'];
+const SHARED_SETTINGS_FIELDS = ['geminiApiKey','currentFuelUnitPrice','vatRatePercent','citRatePercent','lotPriceOverrides','invoiceRefPriceByGoods','invoiceStockAlertDays']; // #323
 function defaultSettingsShape(){
   return { standardWorkDaysPerMonth: 28, costPolicies: defaultCostPolicies(),
               monthlyFixedRoadFee: 25000000, geminiApiKey: '',
@@ -2330,6 +2330,220 @@ async function forceRefreshInvoiceLedgerData(){
 // lương/tạm ứng/công nợ/cảnh báo phải đọc ca của MỌI xe. Gộp ca mọi xe,
 // riêng xe đang mở luôn lấy đúng state.shifts (bản mới nhất trên màn
 // hình) — không phụ thuộc cache đã nạp đủ hay chưa.
+function allShiftsCompanyWide(){
+  const combined = [];
+  Object.entries(state.allVehiclesShifts).forEach(([vid,list])=>{
+    // Nhân bản NHẸ (không đụng object gốc) — gắn thêm _vehicleId để nơi
+    // nào cần hiện rõ "xe nào" (Kho Hoá Đơn Bù) có sẵn thông tin, không
+    // phải tra ngược qua state.vehicles nhiều lần.
+    list.forEach(sh=>combined.push(Object.assign({}, sh, { _vehicleId: vid })));
+  });
+  return combined;
+}
+/// #323 — Số liệu kho theo từng loại (đọc thẳng động cơ kho), dùng cho trang Kho Hoá Đơn.
+function computeInvoiceWarehouseByGoods(){
+  const today = todayLocalDateStr();
+  const d30 = (()=>{ const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10); })();
+  return withLedgerReportMode(()=>invoiceWarehouseGoodsTypes().map(gt=>{
+    const combined = combinedStockOverview(gt, ALL_TIME_FROM, ALL_TIME_TO);
+    const L = buildInvoiceLotLedger(gt);
+    const labelSrc = (state.invoiceLots||[]).find(l=>normGoodsType(l.goodsType)===gt) || (state.mineInvoices||[]).find(i=>normGoodsType(i.goodsType)===gt);
+    let label = labelSrc ? (labelSrc.goodsType||'').trim() : '';
+    if(!label){ for(const g of L.groups){ const t=(g.s.commercialTrips||[]).find(t=>normGoodsType(t.sellGoodsType||t.goodsType)===gt||normGoodsType(t.goodsType)===gt); if(t){ label=(normGoodsType(t.goodsType)===gt?t.goodsType:t.sellGoodsType)||gt; break; } } }
+    const lotRem = L.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume),0);
+    const lotMoney = L.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*(l._netCostPerVol-l._vatPerVol),0);
+    const poolRem = L.pool.reduce((a,p)=>a+Math.max(0,p.remaining),0);
+    const poolMoney = L.pool.reduce((a,p)=>a+Math.max(0,p.remaining)*p.unit,0);
+    let pendingReserved=0, pendingSold=0, awaitingMine=0, shortfall=0, expectedNeedPending=0, recentNeed=0;
+    const pendingList = [];
+    L.groups.forEach(g=>{
+      const r = L.bySiteLog[g.key] || {};
+      const expOwn = Math.min(g.sellVolume, g.hasBucket ? g.reserved : g.theoretical);
+      if(!g.both){
+        if(g.hasBucket) pendingReserved += g.reserved;
+        pendingSold += g.sellVolume;
+        expectedNeedPending += Math.max(0, g.sellVolume - expOwn);
+        if(g.sellVolume>0.0001 || g.reserved>0.0001) pendingList.push(g);
+      } else {
+        awaitingMine += r.ownExpected||0;
+        shortfall += r.shortfall||0;
+      }
+      if(g.date>=d30 && g.date<=today) recentNeed += Math.max(0, g.sellVolume - expOwn);
+    });
+    const explained = pendingReserved + poolRem + lotRem - pendingSold - awaitingMine - shortfall;
+    const available = poolRem + lotRem - expectedNeedPending - shortfall;
+    const dailyNeed = recentNeed/30;
+    const staleLeftover = L.pool.filter(p=>p.remaining>0.0001 && p.date && p.date < (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })());
+    return { gt, label: label||gt, L, combined, lotRem, lotMoney, poolRem, poolMoney, pendingReserved, pendingSold, awaitingMine, shortfall,
+      residual: combined.combinedRemaining - explained, expectedNeedPending, available, dailyNeed,
+      daysCover: dailyNeed>0 ? available/dailyNeed : null, pendingList, staleLeftover, unit: L.unit };
+  }).filter(r=>r.combined.mineVolKhoi||r.combined.lotVolKhoi||r.combined.soldVolKhoi));
+}
+function mineInvoiceRemainingByGoods(){ return computeInvoiceWarehouseByGoods().filter(r=>r.poolRem>0.0001).map(r=>({ goodsType:r.label, volKhoi:r.poolRem, savingEstimate:r.poolMoney, bookValue:r.poolMoney })); }
+function fmtKhoi(v){ return (Number(v)||0).toLocaleString('vi-VN',{maximumFractionDigits:2}); }
+function invoiceGroupStatus(g){
+  if(g.both) return '✅ Đủ 2 đầu';
+  if(g.sellTicked) return '⏳ Đã xuất HĐ bán · chờ HĐ mỏ';
+  if(g.buyTicked) return '⏳ Đã nhận HĐ mỏ · chờ xuất HĐ bán';
+  return '⬜ Chưa tick';
+}
+function tripTypeLabel(g){
+  const t = (g.s.commercialTrips||[]);
+  const swap = t.some(x=>normGoodsType(x.sellGoodsType||x.goodsType)!==normGoodsType(x.goodsType));
+  if(!swap) return '';
+  const buys = [...new Set(t.map(x=>(x.goodsType||'').trim()))].join('/'), sells = [...new Set(t.map(x=>((x.sellGoodsType||x.goodsType)||'').trim()))].join('/');
+  return ` <span style="color:var(--accent); font-weight:700;">↔ Mua ${escapeHtml(buys)} · Bán ${escapeHtml(sells)}</span>`;
+}
+function buildStockCardRows(w){
+  const gt = w.gt, L = w.L, rows = [];
+  (state.mineInvoices||[]).filter(inv=>normGoodsType(inv.goodsType)===gt).forEach(inv=>{
+    rows.push({ date: inv.invoiceDate || inv.deliveryTo || '', order:0, doc:`📄 Nhập HĐ mỏ${inv.invoiceNumber?' số '+escapeHtml(inv.invoiceNumber):''} (${inv.deliveryFrom?formatDateVN(inv.deliveryFrom):''}→${inv.deliveryTo?formatDateVN(inv.deliveryTo):''})`, qIn: mineInvoiceVolumeKhoi(inv), qOut:0, money:0 });
+  });
+  L.pool.filter(p=>p.kind==='over' && p.unit>0).forEach(p=>rows.push({ date:p.date, order:1, doc:'📄 Ghi giá trị HĐ mỏ dư (mỏ xuất dư so với phần giữ chỗ)', qIn:0, qOut:0, money:p.volume*p.unit }));
+  L.lots.forEach(l=>{ const lot = invoiceLotById(l.id); rows.push({ date:l.date, order:0, doc:`📦 Nhập lô thương mại${lot&&lot.note?' — '+escapeHtml(lot.note):''}`, qIn:l.totalVolume, qOut:0, money:l.totalVolume*(l._netCostPerVol-l._vatPerVol) }); });
+  L.groups.forEach(g=>{
+    const r = L.bySiteLog[g.key] || { allocations:[] };
+    const usage = r.allocations.filter(a=>a.kind==='mine'||a.kind==='lot').reduce((a,x)=>a+(x.kind==='lot'?x.cost-x.vat:x.cost),0);
+    const swapCredit = -r.allocations.filter(a=>a.kind==='credit-swap').reduce((a,x)=>a+x.cost,0);
+    if(g.sellVolume<=0.0001 && swapCredit<=0.0001) return;
+    const src = r.allocations.filter(a=>a.kind==='mine'||a.kind==='lot').map(a=>`${a.kind==='mine'?'HĐ mỏ dư':'Lô'} ${formatDateVN(a.purchaseDate)}: ${fmtKhoi(a.volume)}`).join('; ');
+    rows.push({ date:g.date, order:2, group:g, doc:`🚛 ${formatDateVN(g.date)} · ${escapeHtml(g.s.siteName||'')}${tripTypeLabel(g)}<div class="hint" style="margin:2px 0 0;">${invoiceGroupStatus(g)}${g.both?` · HĐ mỏ của chuyến ${fmtKhoi(r.own||0)}${r.ownExpected?' (dự kiến)':''}${src?' · '+src:''}${r.shortfall>0.0001?` · <span style="color:var(--loss);">thiếu ${fmtKhoi(r.shortfall)}</span>`:''}${swapCredit>0?` · HĐ mỏ dư do đổi loại +${fmtKhoi(swapCredit/(w.unit||1))}`:''}`:''}</div>`, qIn:0, qOut:g.sellVolume, money: swapCredit - usage });
+  });
+  rows.sort((a,b)=>(a.date||'').localeCompare(b.date||'') || a.order-b.order);
+  let q=0, m=0;
+  rows.forEach(r=>{ q += r.qIn - r.qOut; m += r.money; r.balQ = q; r.balM = m; });
+  return rows;
+}
+function renderInvoiceInventoryDetailPage(selectedGt){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const all = computeInvoiceWarehouseByGoods();
+  const w = all.find(x=>x.gt===selectedGt) || all[0];
+  const lotValue = companyWideInvoiceLotInventoryValue();
+  const alertDays = Number(state.settings.invoiceStockAlertDays)||7;
+  const totalMoneyByTypes = all.reduce((a,x)=>a+x.lotMoney+x.poolMoney,0);
+  const card = w ? buildStockCardRows(w) : [];
+  const mineRows = w ? (state.mineInvoices||[]).filter(inv=>normGoodsType(inv.goodsType)===w.gt).map(inv=>{
+    const holders = w.L.groups.filter(g=>g.bucketInvId===inv.id);
+    const reserved = holders.reduce((a,g)=>a+g.reserved,0);
+    const ownUsed = holders.filter(g=>g.both).reduce((a,g)=>a+Math.min(g.reserved,g.sellVolume),0);
+    const pending = holders.filter(g=>!g.both).reduce((a,g)=>a+g.reserved,0);
+    const poolEntries = w.L.pool.filter(p=>p.invId===inv.id);
+    const leftover = poolEntries.reduce((a,p)=>a+p.volume,0), leftoverUsed = poolEntries.reduce((a,p)=>a+(p.volume-p.remaining),0);
+    return { inv, total: mineInvoiceVolumeKhoi(inv), reserved, ownUsed, pending, leftover, leftoverUsed, remain: pending + leftover - leftoverUsed };
+  }) : [];
+  const lotRows = w ? w.L.lots.map(l=>({ l, lot: invoiceLotById(l.id) })) : [];
+  app.innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="invoiceInventoryDetailBackBtn">← Quay Lại</button></section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🗄️ Kho Hoá Đơn</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Công thức gốc từng loại: <strong>HĐ mỏ + HĐ thương mại = Khối bán ra</strong>. Tiền chỉ đổi khi chuyến đủ 2 đầu tick.</div>
+      <div class="card" style="margin-bottom:12px;">
+        <div class="summary-row"><span><strong>TỔNG TIỀN KHO HOÁ ĐƠN</strong></span><span class="val" style="font-weight:900; color:var(--profit);">${fmtVND(lotValue)}</span></div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Loại</th><th class="num">Lô thương mại còn</th><th class="num">HĐ mỏ dư còn</th><th class="num">Tiền</th></tr></thead>
+          <tbody>${all.map(x=>`<tr><td><strong>${escapeHtml(x.label)}</strong></td><td class="num">${fmtKhoi(x.lotRem)} khối<div class="hint" style="margin:0;">${fmtVND(x.lotMoney)}</div></td><td class="num">${fmtKhoi(x.poolRem)} khối<div class="hint" style="margin:0;">${fmtVND(x.poolMoney)}</div></td><td class="num"><strong>${fmtVND(x.lotMoney+x.poolMoney)}</strong></td></tr>`).join('')}</tbody>
+        </table></div>
+        ${Math.abs(totalMoneyByTypes-lotValue)>1000?`<div class="hint" style="color:var(--loss);">⚠️ Lệch ${fmtVND(Math.abs(totalMoneyByTypes-lotValue))} giữa tổng các loại và số trong Vốn Vận Hành — báo lại để kiểm tra.</div>`:''}
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        ${all.map(x=>`<button class="btn ${w&&x.gt===w.gt?'btn-accent':'btn-ghost'} btn-sm" data-inv-gt="${escapeHtml(x.gt)}" style="width:auto;">${escapeHtml(x.label)}</button>`).join('')}
+      </div>
+      ${!w ? '<div class="hint">Chưa có dữ liệu kho hoá đơn.</div>' : `
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; font-size:15px; margin-bottom:8px;">🎛️ Bảng điều hành — ${escapeHtml(w.label)}</div>
+        <div class="grid-table-wrap"><table class="grid-table"><tbody>
+          <tr><td>Tồn Kho Tổng Hợp <span class="hint">(${fmtKhoi(w.combined.mineVolKhoi)} HĐ mỏ + ${fmtKhoi(w.combined.lotVolKhoi)} lô − ${fmtKhoi(w.combined.soldVolKhoi)} đã bán)</span></td><td class="num"><strong>${fmtKhoi(w.combined.combinedRemaining)} khối</strong></td></tr>
+          <tr><td>Lô thương mại còn</td><td class="num">${fmtKhoi(w.lotRem)} khối</td></tr>
+          <tr><td>HĐ mỏ dư còn (dùng được cho chuyến khác)</td><td class="num">${fmtKhoi(w.poolRem)} khối</td></tr>
+          <tr><td>− Dự kiến cần rút cho các chuyến chưa đủ 2 đầu</td><td class="num">−${fmtKhoi(w.expectedNeedPending)} khối</td></tr>
+          ${w.shortfall>0.0001?`<tr><td style="color:var(--loss);">− Đã bán có HĐ nhưng kho KHÔNG đủ HĐ che</td><td class="num" style="color:var(--loss);">−${fmtKhoi(w.shortfall)} khối</td></tr>`:''}
+          <tr class="grid-total-row"><td style="text-align:left;">= CÒN DÙNG ĐƯỢC THẬT</td><td class="num" style="color:${w.available<0?'var(--loss)':'var(--profit)'};">${fmtKhoi(w.available)} khối</td></tr>
+          <tr><td>Nhu cầu bình quân (30 ngày gần nhất)</td><td class="num">${fmtKhoi(w.dailyNeed)} khối/ngày</td></tr>
+          <tr><td>Đủ dùng khoảng</td><td class="num" style="font-weight:800; color:${w.daysCover!==null && w.daysCover<alertDays?'var(--loss)':'var(--profit)'};">${w.daysCover===null?'—':(w.daysCover<0?'0':Math.floor(w.daysCover))+' ngày'}</td></tr>
+        </tbody></table></div>
+        ${w.daysCover!==null && w.daysCover<alertDays ? `<div class="hint" style="color:var(--loss); font-weight:700;">🔴 Dưới ngưỡng ${alertDays} ngày — nên mua thêm hoá đơn thương mại ${escapeHtml(w.label)}.</div>` : ''}
+        ${w.staleLeftover.length ? `<div class="hint" style="color:var(--loss);">⚠️ Có ${fmtKhoi(w.staleLeftover.reduce((a,p)=>a+p.remaining,0))} khối HĐ mỏ dư nằm kho quá 60 ngày.</div>` : ''}
+        <div class="two-col" style="margin-top:8px;">
+          <div class="field" style="margin-bottom:0;"><label>Ngưỡng cảnh báo (ngày)</label><input type="number" inputmode="numeric" id="inv_alertDays" value="${alertDays}"></div>
+          <div class="field" style="margin-bottom:0;"><label>Giá tham chiếu HĐ ${escapeHtml(w.label)} /khối</label><input type="text" inputmode="decimal" id="inv_refPrice" placeholder="Tự tính theo lô: ${fmtVND(w.unit)}"></div>
+        </div>
+        <div class="hint">Giá tham chiếu dùng để ghi giá trị HĐ mỏ dư. Để trống = tự tính theo giá bình quân lô thương mại cùng loại (sau VAT được trừ).</div>
+        <button class="btn btn-ghost btn-sm" id="inv_saveCfg" style="margin-top:6px;">💾 Lưu ngưỡng & giá tham chiếu</button>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; font-size:15px; margin-bottom:6px;">🧮 Đối chiếu — ${escapeHtml(w.label)}</div>
+        <div class="grid-table-wrap"><table class="grid-table"><tbody>
+          <tr><td>HĐ mỏ đang giữ chỗ cho chuyến chưa đủ 2 đầu</td><td class="num">+${fmtKhoi(w.pendingReserved)}</td></tr>
+          <tr><td>HĐ mỏ dư còn</td><td class="num">+${fmtKhoi(w.poolRem)}</td></tr>
+          <tr><td>Lô thương mại còn</td><td class="num">+${fmtKhoi(w.lotRem)}</td></tr>
+          <tr><td>Đã bán nhưng chuyến chưa đủ 2 đầu</td><td class="num">−${fmtKhoi(w.pendingSold)}</td></tr>
+          ${w.awaitingMine>0.0001?`<tr><td>Đủ 2 đầu nhưng chưa nhập HĐ mỏ khớp ngày (đang tính theo % dự kiến)</td><td class="num">−${fmtKhoi(w.awaitingMine)}</td></tr>`:''}
+          ${w.shortfall>0.0001?`<tr><td>Đủ 2 đầu nhưng kho không đủ HĐ</td><td class="num">−${fmtKhoi(w.shortfall)}</td></tr>`:''}
+          <tr class="grid-total-row"><td style="text-align:left;">= Tồn Kho Tổng Hợp</td><td class="num">${fmtKhoi(w.combined.combinedRemaining)}</td></tr>
+        </tbody></table></div>
+        <div class="hint" style="color:${Math.abs(w.residual)<0.01?'var(--profit)':'var(--loss)'};">${Math.abs(w.residual)<0.01?'✅ Khớp tuyệt đối với Tồn Kho Tổng Hợp.':`⚠️ Còn lệch ${fmtKhoi(w.residual)} khối — thường do HĐ mỏ chưa nhập khoảng ngày, hoặc chuyến chưa cấu hình tỷ trọng.`}</div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; font-size:15px; margin-bottom:6px;">⏳ Chuyến chưa đủ 2 đầu (${w.pendingList.length})</div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Công trình · Xe</th><th class="num">Khối bán</th><th>Trạng thái</th></tr></thead>
+          <tbody>${w.pendingList.map(g=>`<tr data-open-shift="${g.sh.id}" data-open-vid="${g.vehicleId||''}" style="cursor:pointer;"><td style="white-space:nowrap;">${formatDateVN(g.date)}</td><td>${escapeHtml(g.s.siteName||'')}${g.vehicleId&&state.vehicles.length>1?' · 🚛 '+escapeHtml(vehicleNameById(g.vehicleId)):''}${tripTypeLabel(g)}</td><td class="num">${fmtKhoi(g.sellVolume)}</td><td style="white-space:nowrap;">${invoiceGroupStatus(g)} →</td></tr>`).join('') || '<tr><td colspan="4" class="hint">Không có — mọi chuyến đã đủ 2 đầu.</td></tr>'}</tbody>
+        </table></div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;" id="invMineTable">
+        <div style="font-weight:800; font-size:15px; margin-bottom:6px;">📄 Sổ Hoá Đơn Mỏ — ${escapeHtml(w.label)}</div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Hoá đơn · khoảng ngày</th><th class="num">Khối</th><th class="num">Đã dùng cho chính chuyến</th><th class="num">Giữ chỗ chờ 2 đầu</th><th class="num">Dư</th><th class="num">Dư đã dùng</th><th class="num">Còn</th></tr></thead>
+          <tbody>${mineRows.map(m=>`<tr><td>${m.inv.invoiceNumber?'Số '+escapeHtml(m.inv.invoiceNumber)+'<br>':''}${m.inv.deliveryFrom?formatDateVN(m.inv.deliveryFrom):''} → ${m.inv.deliveryTo?formatDateVN(m.inv.deliveryTo):''}</td><td class="num">${fmtKhoi(m.total)}</td><td class="num">${fmtKhoi(m.ownUsed)}</td><td class="num">${fmtKhoi(m.pending)}</td><td class="num">${fmtKhoi(m.leftover)}</td><td class="num">${fmtKhoi(m.leftoverUsed)}</td><td class="num"><strong>${fmtKhoi(m.remain)}</strong></td></tr>`).join('') || '<tr><td colspan="7" class="hint">Chưa có hoá đơn mỏ.</td></tr>'}</tbody>
+        </table></div>
+        <button class="btn btn-ghost btn-block" id="invGoMineMgr" style="margin-top:8px;">📄 Thêm / Sửa Hoá Đơn Mỏ</button>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;" id="invLotTable">
+        <div style="font-weight:800; font-size:15px; margin-bottom:6px;">📦 Sổ Lô Hoá Đơn Thương Mại — ${escapeHtml(w.label)}</div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Ngày mua</th><th class="num">Khối mua</th><th class="num">Đã rút</th><th class="num">Còn</th><th class="num">Giá thật/khối</th><th class="num">Tiền còn</th></tr></thead>
+          <tbody>${lotRows.map(({l,lot})=>`<tr><td>${formatDateVN(l.date)}${lot&&lot.note?'<div class="hint" style="margin:0;">'+escapeHtml(lot.note)+'</div>':''}</td><td class="num">${fmtKhoi(l.totalVolume)}</td><td class="num">${fmtKhoi(l.totalVolume-Math.max(0,l.remainingVolume))}</td><td class="num"><strong>${fmtKhoi(Math.max(0,l.remainingVolume))}</strong></td><td class="num">${fmtVND(l._netCostPerVol-l._vatPerVol)}</td><td class="num">${fmtVND(Math.max(0,l.remainingVolume)*(l._netCostPerVol-l._vatPerVol))}</td></tr>`).join('') || '<tr><td colspan="6" class="hint">Chưa có lô.</td></tr>'}</tbody>
+        </table></div>
+        <button class="btn btn-ghost btn-block" id="invGoLotMgr" style="margin-top:8px;">📦 Thêm / Sửa Lô Thương Mại</button>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-weight:800; font-size:15px; margin-bottom:6px;">📒 Thẻ Kho — ${escapeHtml(w.label)}</div>
+        <div class="grid-table-wrap"><table class="grid-table">
+          <thead><tr><th>Ngày</th><th>Chứng từ</th><th class="num">Nhập</th><th class="num">Xuất</th><th class="num">Tồn khối</th><th class="num">Tiền +/−</th><th class="num">Tồn tiền</th></tr></thead>
+          <tbody>${card.map(r=>`<tr${r.group?` data-open-shift="${r.group.sh.id}" data-open-vid="${r.group.vehicleId||''}" style="cursor:pointer;"`:''}><td style="white-space:nowrap;">${formatDateVN(r.date)}</td><td>${r.doc}</td><td class="num">${r.qIn?fmtKhoi(r.qIn):''}</td><td class="num">${r.qOut?fmtKhoi(r.qOut):''}</td><td class="num"><strong>${fmtKhoi(r.balQ)}</strong></td><td class="num" style="color:${r.money>=0?'var(--profit)':'var(--loss)'};">${Math.abs(r.money)>0.5?(r.money>=0?'+':'−')+fmtVND(Math.abs(r.money)):''}</td><td class="num">${fmtVND(r.balM)}</td></tr>`).join('') || '<tr><td colspan="7" class="hint">Chưa có phát sinh.</td></tr>'}</tbody>
+        </table></div>
+        <div class="hint">Tồn khối cuối thẻ = Tồn Kho Tổng Hợp; tồn tiền cuối thẻ = tiền kho của loại này.</div>
+      </div>`}
+    </section>`;
+  document.getElementById('invoiceInventoryDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  document.querySelectorAll('[data-inv-gt]').forEach(b=>b.addEventListener('click', ()=>renderInvoiceInventoryDetailPage(b.dataset.invGt)));
+  document.querySelectorAll('[data-open-shift]').forEach(tr=>tr.addEventListener('click', async ()=>{
+    const vid = tr.dataset.openVid || vehicleIdOfShiftId(tr.dataset.openShift);
+    if(vid && vid!==activeVehicleIdForEditing()) await switchVehicle(vid);
+    openShift(tr.dataset.openShift);
+  }));
+  if(!w) return;
+  const goLot = ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(null); };
+  const goMine = ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null); };
+  document.getElementById('invGoMineMgr').addEventListener('click', goMine);
+  document.getElementById('invGoLotMgr').addEventListener('click', goLot);
+  let refVal = Number((state.settings.invoiceRefPriceByGoods||{})[w.gt])||0;
+  attachMoneyInput(document.getElementById('inv_refPrice'), refVal, v=>refVal=v);
+  document.getElementById('inv_saveCfg').addEventListener('click', async ()=>{
+    state.settings.invoiceStockAlertDays = Number(document.getElementById('inv_alertDays').value)||7;
+    state.settings.invoiceRefPriceByGoods = Object.assign({}, state.settings.invoiceRefPriceByGoods||{}, { [w.gt]: refVal||0 });
+    if(!(await saveSettings())) return;
+    showToast('Đã lưu.');
+    renderInvoiceInventoryDetailPage(w.gt);
+  });
+}
+
 function companyShiftsWithVehicle(){
   const act = activeVehicleIdForEditing();
   const out = [];
@@ -2890,11 +3104,6 @@ function openWagePayableBreakdownModal(){
 /// Mục 4 — Hoá đơn mỏ chưa dùng: tiền hàng đã nằm trong giá vốn + đã trả mỏ, nên
 /// KHÔNG cộng tiền vào Vốn Vận Hành; chỉ theo dõi KHỐI LƯỢNG + khoản tiết kiệm tham khảo
 /// (không phải mua hoá đơn bù cho phần đó).
-function mineInvoiceRemainingByGoods(){
-  // #322 — lấy từ bảng kho theo loại đá (đã trừ cả phần hoá đơn mỏ bị rút ở ca chưa tick MUA).
-  return computeInvoiceWarehouseByGoods().filter(r=>r.mineRem>0.0001)
-    .map(r=>({ goodsType: r.label, volKhoi: r.mineRem, savingEstimate: r.mineSaving, bookValue: 0 }));
-}
 /// Lưu cài đặt của 1 xe bất kỳ (xe đang mở dùng saveSettings; xe khác chỉ ghi ĐÚNG các trường đổi, merge).
 async function saveVehicleSettingsPatch(vid, patch){
   if(vid===activeVehicleIdForEditing()){
@@ -3058,46 +3267,6 @@ function renderVehicleManagementPage(selectedVid){
 // ===== MỚI 2026-09-28 (#322 — Ông Chủ duyệt: Tổng Tồn Kho Hoá Đơn theo từng loại đá,
 // khớp tuyệt đối Tồn Kho Tổng Hợp, realtime toàn thời gian). CHỈ ĐỌC các sổ rút kho
 // sẵn có (buildInvoiceLotLedger / buildMineInvoiceMatchLedger / combinedStockOverview).
-function computeInvoiceWarehouseByGoods(){
-  const labelOf = {};
-  const addLabel = raw=>{ const n=(raw||'').trim(); if(!n) return; const g = normGoodsType(n); if(g && !labelOf[g]) labelOf[g] = n; };
-  (state.invoiceLots||[]).forEach(l=>addLabel(l.goodsType));
-  (state.mineInvoices||[]).forEach(inv=>addLabel(inv.goodsType));
-  shiftsCompanyWideSafe().forEach(sh=>(sh.siteLogs||[]).forEach(s=>(s.commercialTrips||[]).forEach(t=>{ addLabel(t.goodsType); addLabel(t.sellGoodsType); })));
-  return withLedgerReportMode(()=>Object.keys(labelOf).sort().map(gt=>{
-    const combined = combinedStockOverview(gt, ALL_TIME_FROM, ALL_TIME_TO);
-    const lotLedger = buildInvoiceLotLedger(gt);
-    const lots = invoiceLotSupplyOnly(gt);
-    let lotRem = 0, lotMoney = 0;
-    lots.forEach(l=>{
-      const b = lotLedger.byLot[l.id]; const rem = b ? b.remaining : l.totalVolume;
-      lotRem += rem; lotMoney += rem * (l._netCostPerVol - l._vatPerVol);
-    });
-    buildMineInvoiceMatchLedger(gt);
-    const buckets = (_mineInvoiceMatchCache[gt] && _mineInvoiceMatchCache[gt].buckets) || [];
-    let mineRem = 0;
-    buckets.forEach(bk=>{
-      const usedInPool = (lotLedger.byLot[bk.inv.id] && lotLedger.byLot[bk.inv.id].used) || 0; // rút ở ca chưa tick MUA
-      mineRem += Math.max(0, (Number(bk.remainingVolume)||0) - usedInPool);
-    });
-    const lotVolAll = lots.reduce((s,l)=>s+l.totalVolume,0);
-    const lotNetPerVol = lotVolAll>0 ? lots.reduce((s,l)=>s+(l._netCostPerVol - l._vatPerVol)*l.totalVolume,0)/lotVolAll : 0;
-    return { gt, label: labelOf[gt], mineIn: combined.mineVolKhoi, lotIn: combined.lotVolKhoi, sold: combined.soldVolKhoi,
-      combined: combined.combinedRemaining, mineRem, lotRem, unmatched: combined.combinedRemaining - mineRem - lotRem,
-      lotMoney, mineSaving: Math.max(0, mineRem*lotNetPerVol) };
-  }).filter(r=>r.mineIn||r.lotIn||r.sold));
-}
-function fmtKhoi(v){ return (Number(v)||0).toLocaleString('vi-VN',{maximumFractionDigits:2}); }
-function allShiftsCompanyWide(){
-  const combined = [];
-  Object.entries(state.allVehiclesShifts).forEach(([vid,list])=>{
-    // Nhân bản NHẸ (không đụng object gốc) — gắn thêm _vehicleId để nơi
-    // nào cần hiện rõ "xe nào" (Kho Hoá Đơn Bù) có sẵn thông tin, không
-    // phải tra ngược qua state.vehicles nhiều lần.
-    list.forEach(sh=>combined.push(Object.assign({}, sh, { _vehicleId: vid })));
-  });
-  return combined;
-}
 function vehicleNameById(vid){
   const v = state.vehicles.find(x=>x.id===vid);
   return v ? (v.name||v.plate) : '(xe không rõ)';
@@ -3564,15 +3733,21 @@ function computeCashBridge(eq, workingCapitalTotal, depreciationSoFar){
 // được khấu trừ vì hàng chưa dùng) — khớp đúng chuẩn NET-OF-VAT với bên
 // Lợi Nhuận Thực Tế.
 function companyWideInvoiceLotInventoryValue(){
-  const totalPurchasedNet = state.invoiceLots.reduce((s,l)=>s+Math.max(0,(Number(l.totalInvoiceValue)||0)-(Number(l.cashReturned)||0)),0);
-  const totalConsumed = allShiftsCompanyWide().reduce((s,sh)=>s+shiftInvoiceSupplementCost(sh),0);
-  const totalVatAllLots = state.invoiceLots.reduce((s,l)=>{
-    const vatRate = Number(l.vatRatePercent)||0;
-    return s + (Number(l.totalInvoiceValue)||0) * vatRate/(100+vatRate);
+  // #323 — tiền kho hoá đơn = lô thương mại còn (giá thật sau VAT được trừ) + HĐ mỏ dư còn (giá thay thế).
+  return invoiceWarehouseGoodsTypes().reduce((sum,gt)=>{
+    const L = withLedgerReportMode(()=>buildInvoiceLotLedger(gt));
+    const lotVal = L.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*(l._netCostPerVol - l._vatPerVol),0);
+    const poolVal = L.pool.reduce((a,p)=>a+Math.max(0,p.remaining)*p.unit,0);
+    return sum + lotVal + poolVal;
   }, 0);
-  const totalVatRecovered = allShiftsCompanyWide().reduce((s,sh)=>s+shiftInvoiceSupplementVatCredit(sh),0);
-  const remainingVatInInventory = Math.max(0, totalVatAllLots - totalVatRecovered);
-  return Math.max(0, totalPurchasedNet - totalConsumed - remainingVatInInventory);
+}
+function invoiceWarehouseGoodsTypes(){
+  const set = new Set();
+  (state.invoiceLots||[]).forEach(l=>{ const g=normGoodsType(l.goodsType); if(g) set.add(g); });
+  (state.mineInvoices||[]).forEach(inv=>{ const g=normGoodsType(inv.goodsType); if(g) set.add(g); });
+  shiftsCompanyWideSafe().forEach(sh=>(sh.siteLogs||[]).forEach(s=>(s.commercialTrips||[]).forEach(t=>{
+    const a=normGoodsType(t.goodsType), b=normGoodsType(t.sellGoodsType||t.goodsType); if(a) set.add(a); if(b) set.add(b); })));
+  return [...set].sort();
 }
 // SỬA 2026-09-14 (Ông Chủ yêu cầu tách "Tiền Lãi Ròng" ra khỏi "Khấu Hao
 // Xe Đã Thu" — chuyên gia phản biện: khấu hao không phải tiền mặt rời
@@ -6089,7 +6264,7 @@ function renderWarehouseDrawHistoryPage(goodsType, from, to){
       <div class="card" style="padding:0; overflow:hidden;">
         ${rows.map(r=>{
           const sourceLines = r.allocations.length>0
-            ? r.allocations.map(a=>`↳ ${formatDateVN(a.purchaseDate)}: ${fmtQty(a.volume)} khối`).join('<br>')
+            ? r.allocations.map(a=>a.kind==='credit-swap'||a.kind==='credit-over' ? `↳ Ghi giá trị HĐ mỏ dư: ${fmtVND(-a.cost)}` : `↳ ${a.kind==='mine'?'HĐ mỏ dư':'Lô'} ${formatDateVN(a.purchaseDate)}: ${fmtQty(a.volume)} khối`).join('<br>')
             : (r.realNeeded<=0.001 ? '<span class="hint">Không cần bù (đủ chứng từ hoặc chưa xuất HĐ bán — vẫn lý thuyết)</span>' : '');
           const shortLine = r.shortfall>0.001 ? `<br><span style="color:var(--loss); font-weight:700;">⚠️ Kho không đủ, còn thiếu ${fmtQty(r.shortfall)} khối</span>` : '';
           const stateNote = !r.sellTicked ? '<span class="hint">(chưa tick BÁN — lý thuyết, kho chưa rút)</span>'
@@ -6476,7 +6651,7 @@ function buildMineInvoiceMatchLedger(goodsType){
     if(s.siteType!=='commercial') return '0';
     let buy=0;
     (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt) buy+=Number(t.buyVolume)||0; });
-    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+(s.supplierId||'')+':'+(s.densityRatio??'');
+    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+(s.supplierId||'')+':'+(s.invoicedBuyPercent??'')+':'+(s.densityRatio??'');
   }).join('|')).join(',');
   const cacheKey = (_ledgerReportMode?'R':'L')+'|'+gt+'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
     +'|'+JSON.stringify((state.suppliers||[]).map(sp=>[sp.id, sp.invoicedBuyPercent, sp.densityRatio]))
@@ -6497,7 +6672,9 @@ function buildMineInvoiceMatchLedger(goodsType){
       // CHỈ nhu cầu bên "đã tick MUA" mới dùng cơ chế khớp hoá đơn thật —
       // bên chưa tick vẫn theo cơ chế cũ (buildInvoiceLotLedger, rút cả 2
       // nguồn), không đụng ở đây, tránh 1 đồng vốn hoá đơn thật bị tính 2 lần.
-      if(s.siteType!=='commercial' || !buyIsDeductible(s)) return;
+      // #323 — GIỮ CHỖ cho MỌI chuyến trong khoảng ngày của hoá đơn mỏ (không phụ thuộc tick);
+      // tiền chỉ đổi khi chuyến đủ 2 đầu (xem buildInvoiceLotLedger).
+      if(s.siteType!=='commercial') return;
       siteRawGoodsTypeGroups(s).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt || g.buyVolume<=0) return;
         const { density, invoicedPct } = siteInvoicedConfig(s);
@@ -6521,15 +6698,17 @@ function buildMineInvoiceMatchLedger(goodsType){
   demand.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
 
   const documentedBySiteLog = {};
+  const bucketOfKey = {}; // #323
   demand.forEach(d=>{
     const bucket = buckets.find(b=>d.date>=b.from && d.date<=b.to && b.remainingVolume>0.0001);
     if(!bucket){ documentedBySiteLog[d.key] = null; return; } // không có hoá đơn thật khớp ngày này -> để null (fallback % lý thuyết)
     const take = Math.min(bucket.remainingVolume, d.entitlementKhoi);
     bucket.remainingVolume -= take;
     documentedBySiteLog[d.key] = take;
+    bucketOfKey[d.key] = bucket.inv.id; // #323
   });
 
-  _mineInvoiceMatchCache[gt] = { key: cacheKey, data: documentedBySiteLog, buckets };
+  _mineInvoiceMatchCache[gt] = { key: cacheKey, data: documentedBySiteLog, buckets, bucketOfKey };
   return documentedBySiteLog;
 }
 /// MỚI (Ông Chủ yêu cầu 2026-09-23 — thêm dòng "Chứng Từ Thật Từ Mỏ Chưa
@@ -6584,7 +6763,13 @@ function siteMissingDocumentedVolume(s){
 /// phần mua thường ở commercialVatPayable) — không đụng, tách biệt hoàn
 /// toàn khỏi việc rút/nạp kho.
 function siteGroupRealMissingVolume(s, g){
-  if(!s.sellHasInvoice) return 0; // chưa xuất hoá đơn BÁN thật — vẫn là lý thuyết, kho chưa suy chuyển
+  // #323 — chỉ khi ĐỦ 2 ĐẦU mới là nhu cầu thật; số lấy thẳng từ động cơ kho.
+  if(!siteBothEndsTicked(s)) return 0;
+  const ctx = findSiteLogContext(s);
+  if(ctx){
+    const r = buildInvoiceLotLedger(g.goodsType).bySiteLog[siteLogGroupKey(ctx.sh, ctx.idx, g.goodsType)];
+    if(r && r.need!==undefined) return r.need;
+  }
   return buyIsDeductible(s) ? g.missingVolume : g.sellVolume;
 }
 /// ==== KHO HOÁ ĐƠN BÙ (mua theo lô lớn, rút dần cho từng ca thiếu chứng
@@ -6812,90 +6997,129 @@ function withLedgerReportMode(fn){
   _ledgerReportMode = true;
   try { return fn(); } finally { _ledgerReportMode = prev; }
 }
+/// ===== #323 — ĐỘNG CƠ KHO HOÁ ĐƠN (Ông Chủ duyệt 2026-09-28) =====
+/// Công thức gốc cho TỪNG LOẠI HÀNG: Hoá đơn mỏ + Hoá đơn thương mại = Khối bán ra.
+/// • Hoá đơn mỏ đi theo LOẠI MUA; hoá đơn xuất cho khách đi theo LOẠI BÁN.
+/// • Mỗi hoá đơn mỏ (khoảng ngày) GIỮ CHỖ đúng % mỏ xuất (VD 70%) cho MỌI chuyến mua
+///   cùng loại nằm trong khoảng ngày đó (buildMineInvoiceMatchLedger).
+/// • Chỉ khi chuyến ĐỦ 2 ĐẦU (đã xuất HĐ bán + đầu mua đã nhận HĐ mỏ) mới rút kho & tính tiền:
+///     1) phần giữ chỗ của chính chuyến (chỉ che cho bán CÙNG loại),
+///     2) hoá đơn mỏ DƯ cùng loại (cũ trước, chỉ loại đã có trước ngày chuyến),
+///     3) lô thương mại cùng loại (FIFO).
+/// • Hoá đơn mỏ dư là TÀI SẢN, ghi theo GIÁ THAY THẾ (giá lô cùng loại sau VAT được trừ,
+///   hoặc giá Ông Chủ tự nhập): mỏ xuất dư → ghi giảm chi phí cho các chuyến của hoá đơn đó;
+///   chuyến MUA A BÁN B → phần giữ chỗ A không dùng được thành HĐ mỏ dư A, ghi giảm chi phí
+///   CHÍNH chuyến đó (Cách 2). Dùng HĐ mỏ dư cho chuyến khác → ghi chi phí đúng giá đã ghi.
+function siteBuyEndOk(s){ return buyIsDeductible(s) || siteInvoicedConfig(s).invoicedPct<=0; }
+function siteBothEndsTicked(s){ return !!s.sellHasInvoice && siteBuyEndOk(s); }
+function invoiceRefUnitValue(goodsType){
+  const gt = normGoodsType(goodsType);
+  const manual = Number(((state.settings.invoiceRefPriceByGoods)||{})[gt]);
+  if(manual>0) return manual;
+  const lots = invoiceLotSupplyOnly(gt);
+  const vol = lots.reduce((s,l)=>s+l.totalVolume,0);
+  return vol>0 ? Math.max(0, lots.reduce((s,l)=>s+(l._netCostPerVol - l._vatPerVol)*l.totalVolume,0)/vol) : 0;
+}
 function buildInvoiceLotLedger(goodsType){
   const gt = normGoodsType(goodsType);
-  if(!gt) return { bySiteLog:{}, byLot:{} };
+  const empty = { bySiteLog:{}, byLot:{}, pool:[], groups:[], unit:0, lots:[] };
+  if(!gt) return empty;
   const allSh = _ledgerReportMode ? allShiftsCompanyWide() : allShiftsForLedgerCompanyWide();
-  const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.siteLogs||[]).map(s=>{
+  const shiftSig = allSh.map(sh=>sh.id+':'+sh.date+':'+(sh.shiftType||'')+':'+(sh.siteLogs||[]).map(s=>{
     if(s.siteType!=='commercial') return '0';
-    let buy=0, sell=0;
-    (s.commercialTrips||[]).forEach(t=>{ if(normGoodsType(t.goodsType)===gt){ buy+=Number(t.buyVolume)||0; sell+=Number(t.sellVolume)||0; } });
-    // SỬA 2026-08-23 (Ông Chủ báo: "Chi Phí & VAT Hưởng Theo Ca" lúc hiện
-    // lúc không) — chữ ký này TRƯỚC ĐÂY thiếu supplierId/invoicedBuyPercent/
-    // densityRatio của CHÍNH ca, nên sửa % hoá đơn mỏ xuất hoặc tỷ trọng
-    // quy đổi ngay trên ca (khác nguồn với sửa ở Nhà Cung Cấp, xem thêm ở
-    // cacheKey bên dưới) KHÔNG làm app biết đường tính lại — vẫn trả về
-    // kết quả CŨ cho tới khi có 1 thay đổi KHÁC vô tình làm chữ ký đổi.
-    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+buy+':'+sell+':'+(s.supplierId||'')+':'+(s.invoicedBuyPercent??'')+':'+(s.densityRatio??'');
+    return '1'+(s.sellHasInvoice?'1':'0')+(buyIsDeductible(s)?'1':'0')+':'+(s.supplierId||'')+':'+(s.invoicedBuyPercent??'')+':'+(s.densityRatio??'')+':'
+      +(s.commercialTrips||[]).map(t=>normGoodsType(t.goodsType)+'/'+normGoodsType(t.sellGoodsType||t.goodsType)+'/'+(Number(t.buyVolume)||0)+'/'+(Number(t.sellVolume)||0)).join(';');
   }).join('|')).join(',');
-  // SỬA 2026-08-23: thêm cấu hình Nhà Cung Cấp (% hoá đơn mỏ xuất + tỷ
-  // trọng quy đổi) vào cacheKey — đây là nguồn ĐƯỢC ƯU TIÊN trước site log
-  // (xem siteGoodsTypeGroups) nên sửa ở đây (rất hay gặp: khai bổ sung %
-  // sau khi đã có sẵn ca) phải làm cache biết đường tính lại NGAY, không
-  // chờ tính cờ có thay đổi khác.
-  const cacheKey = (_ledgerReportMode?'R':'L')+'|'+gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
+  const cacheKey = 'E323|'+(_ledgerReportMode?'R':'L')+'|'+gt+'|'+JSON.stringify(state.invoiceLots.filter(l=>normGoodsType(l.goodsType)===gt))
     +'|'+JSON.stringify(state.mineInvoices.filter(inv=>normGoodsType(inv.goodsType)===gt))
     +'|'+JSON.stringify((state.suppliers||[]).map(sp=>[sp.id, sp.invoicedBuyPercent, sp.densityRatio]))
-    +'|'+shiftSig;
+    +'|'+JSON.stringify((state.settings.invoiceRefPriceByGoods||{})[gt]||0)+'|'+shiftSig;
   if(_invoiceLedgerCache[gt] && _invoiceLedgerCache[gt].key===cacheKey) return _invoiceLedgerCache[gt].data;
 
-  const demand = [];
+  // 1) Giữ chỗ hoá đơn mỏ (mọi chuyến trong khoảng ngày, không phụ thuộc tick)
+  buildMineInvoiceMatchLedger(gt);
+  const mc = _mineInvoiceMatchCache[gt] || {};
+  const reservedByKey = mc.data || {}, bucketOfKey = mc.bucketOfKey || {}, buckets = mc.buckets || [];
+  const unit = invoiceRefUnitValue(gt);
+
+  // 2) Nhóm theo từng chuyến (site log) của loại này
+  const groups = [];
   allSh.forEach(sh=>{
     (sh.siteLogs||[]).forEach((s,idx)=>{
       if(s.siteType!=='commercial') return;
-      siteGoodsTypeGroups(s, {sh, idx}).forEach(g=>{
+      siteRawGoodsTypeGroups(s).forEach(g=>{
         if(normGoodsType(g.goodsType)!==gt) return;
-        const real = siteGroupRealMissingVolume(s, g);
-        if(real<=0) return; // chưa tick BÁN → vẫn là lý thuyết, không tạo nhu cầu rút kho
-        demand.push({ key: siteLogGroupKey(sh, idx, g.goodsType), date: sh.date, shiftType: sh.shiftType,
-          volume: real, usesCombinedPool: !buyIsDeductible(s) });
+        const { invoicedPct, density } = siteInvoicedConfig(s);
+        const key = siteLogGroupKey(sh, idx, g.goodsType);
+        const hasBucket = reservedByKey[key]!==undefined && reservedByKey[key]!==null;
+        const reserved = hasBucket ? Number(reservedByKey[key])||0 : 0;
+        const theoretical = density>0 ? (g.buyVolume*invoicedPct/100)/density : 0;
+        groups.push({ key, sh, idx, s, date: sh.date, shiftType: sh.shiftType, vehicleId: sh._vehicleId,
+          buyVolume: g.buyVolume, sellVolume: g.sellVolume, density, invoicedPct,
+          hasBucket, reserved, bucketInvId: hasBucket ? bucketOfKey[key] : null, theoretical,
+          both: siteBothEndsTicked(s), sellTicked: !!s.sellHasInvoice, buyTicked: siteBuyEndOk(s) });
       });
     });
   });
-  demand.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
-
-  const lotsSupply = invoiceLotSupplyOnly(gt);
-  const mineInvSupply = mineInvoiceSupplyOnly(gt);
-  let lotsPtr = 0, mineInvPtr = 0;
-
+  groups.sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType));
   const bySiteLog = {};
-  demand.forEach(d=>{
-    let need = d.volume;
-    const allocations = [];
-    if(!d.usesCombinedPool){
-      // Đã tick MUA — CHỈ rút Lô Mua Bù, tuyệt đối không đụng Hoá Đơn Thật.
-      while(need>0.0001 && lotsPtr<lotsSupply.length){
-        const lot = lotsSupply[lotsPtr];
-        if(lot.remainingVolume<=0.0001){ lotsPtr++; continue; }
-        const take = Math.min(need, lot.remainingVolume);
-        allocations.push({ lotId: lot.id, purchaseDate: lot.date, volume: take,
-          cost: take*lot._netCostPerVol, vat: take*lot._vatPerVol });
-        lot.remainingVolume -= take; need -= take;
-        if(lot.remainingVolume<=0.0001) lotsPtr++;
-      }
-    } else {
-      // Chưa tick MUA (hãn hữu) — rút CẢ 2 nguồn, ưu tiên ngày sớm hơn.
-      while(need>0.0001 && (lotsPtr<lotsSupply.length || mineInvPtr<mineInvSupply.length)){
-        while(lotsPtr<lotsSupply.length && lotsSupply[lotsPtr].remainingVolume<=0.0001) lotsPtr++;
-        while(mineInvPtr<mineInvSupply.length && mineInvSupply[mineInvPtr].remainingVolume<=0.0001) mineInvPtr++;
-        const lotAvail = lotsPtr<lotsSupply.length, invAvail = mineInvPtr<mineInvSupply.length;
-        if(!lotAvail && !invAvail) break;
-        const useLot = lotAvail && (!invAvail || (lotsSupply[lotsPtr].date||'') <= (mineInvSupply[mineInvPtr].date||''));
-        const src = useLot ? lotsSupply[lotsPtr] : mineInvSupply[mineInvPtr];
-        const take = Math.min(need, src.remainingVolume);
-        allocations.push({ lotId: src.id, purchaseDate: src.date, volume: take,
-          cost: take*src._netCostPerVol, vat: take*src._vatPerVol });
-        src.remainingVolume -= take; need -= take;
-        if(src.remainingVolume<=0.0001){ if(useLot) lotsPtr++; else mineInvPtr++; }
-      }
+  const rec = key => (bySiteLog[key] = bySiteLog[key] || { allocations:[], shortfall:0, need:0, own:0 });
+
+  // 3) Kho hoá đơn mỏ DƯ (có giá trị)
+  const pool = [];
+  buckets.forEach(b=>{
+    const rem = Number(b.remainingVolume)||0;
+    if(rem<=0.0001) return;
+    const holders = groups.filter(g=>g.bucketInvId===b.inv.id && g.reserved>0);
+    const totalRes = holders.reduce((s,g)=>s+g.reserved,0);
+    const u = totalRes>0 ? unit : 0; // không có chuyến nào của hoá đơn này → không ghi giá trị (tránh lãi ảo)
+    pool.push({ id:'over:'+b.inv.id, kind:'over', invId:b.inv.id, date:b.to, volume:rem, remaining:rem, unit:u });
+    if(u>0) holders.forEach(g=>{ rec(g.key).allocations.push({ lotId:b.inv.id, kind:'credit-over', purchaseDate:b.to, volume:0, cost:-(rem*u*g.reserved/totalRes), vat:0 }); });
+  });
+  groups.forEach(g=>{
+    if(!g.both || !g.hasBucket) return;
+    const own = Math.min(g.reserved, g.sellVolume);
+    const release = g.reserved - own;
+    if(release>0.0001){
+      pool.push({ id:'swap:'+g.key, kind:'swap', invId:g.bucketInvId, date:g.date, volume:release, remaining:release, unit, fromKey:g.key });
+      if(unit>0) rec(g.key).allocations.push({ lotId:g.bucketInvId, kind:'credit-swap', purchaseDate:g.date, volume:0, cost:-(release*unit), vat:0 });
     }
-    bySiteLog[d.key] = { allocations, shortfall: Math.max(0, need) };
+  });
+  pool.sort((a,b)=>(a.date||'').localeCompare(b.date||'') || a.id.localeCompare(b.id));
+
+  // 4) Xuất kho cho chuyến ĐỦ 2 ĐẦU: giữ chỗ riêng → HĐ mỏ dư → lô thương mại
+  const lots = invoiceLotSupplyOnly(gt);
+  let lotsPtr = 0;
+  groups.forEach(g=>{
+    if(!g.both || g.sellVolume<=0.0001) return;
+    if(g.density<=0 && g.invoicedPct<100) return; // chưa cấu hình tỷ trọng — không quy đổi được
+    const ownBase = g.hasBucket ? g.reserved : g.theoretical; // chưa nhập HĐ mỏ khớp ngày → dự kiến theo %
+    const own = Math.min(ownBase, g.sellVolume);
+    let need = g.sellVolume - own;
+    const r = rec(g.key);
+    r.own = own; r.ownExpected = g.hasBucket ? 0 : own; r.need = need;
+    for(const p of pool){
+      if(need<=0.0001) break;
+      if(p.remaining<=0.0001 || (p.date||'')>g.date) continue;
+      const take = Math.min(need, p.remaining);
+      r.allocations.push({ lotId:p.invId, kind:'mine', poolId:p.id, purchaseDate:p.date, volume:take, cost:take*p.unit, vat:0 });
+      p.remaining -= take; need -= take;
+    }
+    while(need>0.0001 && lotsPtr<lots.length){
+      const lot = lots[lotsPtr];
+      if(lot.remainingVolume<=0.0001){ lotsPtr++; continue; }
+      const take = Math.min(need, lot.remainingVolume);
+      r.allocations.push({ lotId:lot.id, kind:'lot', purchaseDate:lot.date, volume:take, cost:take*lot._netCostPerVol, vat:take*lot._vatPerVol });
+      lot.remainingVolume -= take; need -= take;
+      if(lot.remainingVolume<=0.0001) lotsPtr++;
+    }
+    r.shortfall = Math.max(0, need);
   });
 
   const byLot = {};
-  [...lotsSupply, ...mineInvSupply].forEach(l=>{ byLot[l.id] = { total: l.totalVolume, remaining: Math.max(0,l.remainingVolume), used: l.totalVolume-Math.max(0,l.remainingVolume) }; });
-
-  const data = { bySiteLog, byLot };
+  lots.forEach(l=>{ byLot[l.id] = { total:l.totalVolume, remaining:Math.max(0,l.remainingVolume), used:l.totalVolume-Math.max(0,l.remainingVolume), kind:'lot' }; });
+  pool.forEach(p=>{ byLot[p.id] = { total:p.volume, remaining:Math.max(0,p.remaining), used:p.volume-Math.max(0,p.remaining), kind:p.kind, invId:p.invId, unit:p.unit }; });
+  const data = { bySiteLog, byLot, pool, groups, unit, lots, buckets };
   _invoiceLedgerCache[gt] = { key: cacheKey, data };
   return data;
 }
@@ -6920,16 +7144,11 @@ function buildInvoiceLotLedger(goodsType){
 // Nơi nào KHÔNG truyền (mọi lời gọi cũ trong app) vẫn rơi về ĐÚNG hành vi
 // cũ (findSiteLogContext) — không đổi 1 dòng hành vi nào đã có.
 function siteInvoiceGroupBreakdown(s, goodsType, shCtx){
-  const groups = siteGoodsTypeGroups(s, shCtx);
-  const g = groups.find(x=>normGoodsType(x.goodsType)===normGoodsType(goodsType));
-  if(!g) return { allocations:[], shortfallVolume:0 };
-  const real = siteGroupRealMissingVolume(s, g);
-  if(real<=0) return { allocations:[], shortfallVolume:0 };
+  // #323 — lấy nguyên bản ghi của động cơ kho (gồm cả dòng ghi giá trị HĐ mỏ dư, có thể âm).
   const ctx = shCtx || findSiteLogContext(s);
-  if(!ctx || !normGoodsType(goodsType)) return { allocations:[], shortfallVolume: real };
-  const ledger = buildInvoiceLotLedger(goodsType);
-  const rec = ledger.bySiteLog[siteLogGroupKey(ctx.sh, ctx.idx, goodsType)];
-  return rec ? { allocations: rec.allocations, shortfallVolume: rec.shortfall } : { allocations:[], shortfallVolume: real };
+  if(!ctx || !normGoodsType(goodsType)) return { allocations:[], shortfallVolume:0 };
+  const r = buildInvoiceLotLedger(goodsType).bySiteLog[siteLogGroupKey(ctx.sh, ctx.idx, goodsType)];
+  return r ? { allocations: r.allocations, shortfallVolume: r.shortfall } : { allocations:[], shortfallVolume:0 };
 }
 
 /// Chi tiết rút kho GỘP CẢ CÔNG TRÌNH — cộng dồn qua mọi nhóm loại hàng
@@ -6937,8 +7156,9 @@ function siteInvoiceGroupBreakdown(s, goodsType, shCtx){
 /// site log này, mỗi dòng allocation có gắn kèm đúng loại hàng để hiển thị
 /// modal không lẫn lộn giữa các loại.
 function siteInvoiceLotBreakdown(s, shCtx){
-  const groups = siteGoodsTypeGroups(s, shCtx).filter(g=>siteGroupRealMissingVolume(s,g)>0);
-  const perGroup = groups.map(g=>({ goodsType: g.goodsType, ...siteInvoiceGroupBreakdown(s, g.goodsType, shCtx) }));
+  const groups = siteGoodsTypeGroups(s, shCtx);
+  const perGroup = groups.map(g=>({ goodsType: g.goodsType, ...siteInvoiceGroupBreakdown(s, g.goodsType, shCtx) }))
+    .filter(pg=>pg.allocations.length>0 || pg.shortfallVolume>0.0001); // #323
   const allocations = perGroup.flatMap(pg=>pg.allocations.map(a=>({ ...a, goodsType: pg.goodsType })));
   const shortfallVolume = perGroup.reduce((sum,pg)=>sum+pg.shortfallVolume, 0);
   return { allocations, shortfallVolume, byGroup: perGroup };
@@ -6982,7 +7202,7 @@ function computeInvoiceLotVatCreditByShift(from, to){
   for(const sh of shifts){
     const vatCredit = shiftInvoiceSupplementVatCredit(sh);
     const cost = shiftInvoiceSupplementCost(sh);
-    if(vatCredit <= 0.5 && cost <= 0.5) continue; // bỏ ca hoàn toàn không đụng tới kho, tránh bảng dài vô ích
+    if(vatCredit <= 0.5 && Math.abs(cost) <= 0.5) continue; // #323 — giữ cả ca chỉ có dòng ghi giá trị HĐ mỏ dư (chi phí âm) // bỏ ca hoàn toàn không đụng tới kho, tránh bảng dài vô ích
     const driver = driverById(sh.driverId);
     rows.push({ date: sh.date, shiftType: sh.shiftType, driverName: driver ? driver.name : (sh.driverNameSnapshot||'—'), vatCredit, cost });
     totalVatCredit += vatCredit;
@@ -9512,8 +9732,12 @@ KL có chứng từ = ${usedRealMatch
   : documentedVol!==null ? `(${fmtQty(g.buyVolume)} × ${rInv.val}%) ÷ ${rDen.val} = ${fmtQty(documentedVol)} khối — CHƯA có hoá đơn thật nào khớp đúng ngày ca này, tạm dùng % lý thuyết cấu hình sẵn` : 'không quy đổi được (thiếu % hoá đơn hoặc hệ số quy đổi)'}
 KL thiếu = MAX(0, ${fmtQty(g.sellVolume)} − ${documentedVol!==null?fmtQty(documentedVol):'—'}) = ${fmtQty(g.missingVolume)} khối</div>`;
       }).join('')}
-      ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Rút Kho Hoá Đơn Bù (FIFO — nguồn nào có trước dùng trước, gộp cả lô mua bù + hoá đơn thật từ mỏ)</b>
+      ${lotInfo.allocations.length>0 ? `<div class="st-formula"><b>Kho Hoá Đơn cho chuyến này (chỉ tính khi đủ 2 đầu: HĐ mỏ của chuyến → HĐ mỏ dư → lô thương mại FIFO)</b>
 ${lotInfo.allocations.map(a=>{
+  // #323 — dòng ghi giá trị HĐ mỏ dư (âm = giảm chi phí) và dòng dùng HĐ mỏ dư.
+  if(a.kind==='credit-swap') return `↳ Chuyến đổi loại: phần HĐ mỏ ${escapeHtml(a.goodsType||'')} không dùng được nhập kho HĐ mỏ dư → ghi giảm chi phí ${fmtVND(-a.cost)}`;
+  if(a.kind==='credit-over') return `↳ HĐ mỏ xuất dư (${a.purchaseDate?formatDateVN(a.purchaseDate):''}) nhập kho → phần ghi giảm chi phí của chuyến này ${fmtVND(-a.cost)}`;
+  if(a.kind==='mine') return `↳ Dùng HĐ mỏ dư ${a.purchaseDate?formatDateVN(a.purchaseDate):''} (${escapeHtml(a.goodsType||'')}) — ${fmtQty(a.volume)} khối × ${fmtVND(a.volume>0?a.cost/a.volume:0)}/khối (giá thay thế) = ${fmtVND(a.cost)}`;
   const src = warehouseSourceById(a.lotId);
   if(src && src.kind==='mineinv'){
     // Nguồn = Sổ Hoá Đơn Thật Từ Mỏ (2026-08-22) — đơn vị gốc là TẤN, quy
@@ -19777,7 +20001,6 @@ function renderCompanyDashboardPage(preserveScroll){
         const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
           + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + depreciationReserveBalance()
           + driverAdvanceHeld - driverAdvanceOwed - wagePayable + truckVatRemaining; // #321 — hoá đơn mỏ KHÔNG cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
-        const warehouseRows = computeInvoiceWarehouseByGoods(); // #322
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
         const cb = computeCashBridge(eq, workingCapitalTotal, depreciationSoFar);
@@ -19798,7 +20021,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'Ông Chủ đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ Ông Chủ'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue)}</td></tr>
-              ${warehouseRows.length ? `<tr><td colspan="2" class="hint" style="margin:0; padding-left:18px;">↳ Tồn kho theo loại (realtime): ${warehouseRows.map(w=>`<strong>${escapeHtml(w.label)}</strong> ${fmtKhoi(w.combined)} khối = lô bù ${fmtKhoi(w.lotRem)} + hoá đơn mỏ ${fmtKhoi(w.mineRem)}${Math.abs(w.unmatched)>0.005?` + chưa rút kho ${fmtKhoi(w.unmatched)}`:''}`).join(' · ')}. Tiền chỉ tính phần lô bù; hoá đơn mỏ tính 0đ (tiền hàng đã nằm trong giá vốn và đã trả mỏ).</td></tr>` : ''}
+              
               <tr><td>🫙 Chứa Tiền Khấu Hao Xe</td><td class="num" style="color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</td></tr>
               <tr><td>👷 Công tác phí tài xế đang giữ <button class="link-btn" id="wcAdvanceBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(driverAdvanceHeld)}</td></tr>
               ${driverAdvanceOwed>0.5 ? `<tr><td>👷 Công ty còn nợ tài xế (chi vượt công tác phí) <button class="link-btn" id="wcAdvanceBreakdownBtn2" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(driverAdvanceOwed)}</td></tr>` : ''}
@@ -21626,79 +21849,6 @@ function renderBankReconDetailPage(mode){
 /// thời điểm. Bố cục cây phân nhánh giữ ĐÚNG kiểu đã dùng cho "Kế Toán
 /// Nội Bộ" (gốc ở trên, 2 nhánh dưới nối bằng đường kẻ) để đồng bộ giao
 /// diện toàn app.
-function renderInvoiceInventoryDetailPage(){
-  scrollMainToTop();
-  const app = document.getElementById('app');
-  const lotValue = companyWideInvoiceLotInventoryValue();
-  const mineValue = companyWideMineInvoiceInventoryValue();
-  const total = lotValue; // #321 — hoá đơn mỏ không cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
-  const mineRemainingPage = mineInvoiceRemainingByGoods();
-  app.innerHTML = `
-    <section class="group">
-      <button class="btn btn-ghost btn-sm" id="invoiceInventoryDetailBackBtn">← Quay Lại</button>
-    </section>
-    <section class="group">
-      <h2 style="margin-bottom:2px;">🗄️ Tổng Tồn Kho Hoá Đơn</h2>
-      <div class="hint" style="margin-top:0; margin-bottom:12px;">Toàn bộ chứng từ đã có sẵn nhưng CHƯA dùng tới lần bán nào — tính real-time, luôn khớp đúng số đang chạy ở "📦 Kho Hoá Đơn Bù → Tồn Kho Tổng Hợp".</div>
-      <div class="card">
-        <div style="text-align:center;">
-          <div style="display:inline-block; padding:12px 22px; border-radius:16px; border:2px solid var(--accent); background:var(--accent-soft);">
-            <div style="font-size:26px; line-height:1;">🗄️</div>
-            <div style="font-weight:900; margin-top:6px; color:var(--accent); font-size:14px; letter-spacing:0.3px;">TỔNG TỒN KHO HOÁ ĐƠN</div>
-            <div style="font-weight:900; margin-top:4px; font-size:18px; color:var(--profit);">+${fmtVND(total)}</div>
-          </div>
-        </div>
-        <div style="text-align:center; margin-top:2px;">
-          <div style="display:inline-block; width:2px; height:16px; background:var(--border);"></div>
-        </div>
-        <div style="max-width:230px; height:2px; background:var(--border); margin:0 auto;"></div>
-        <div style="display:flex; justify-content:space-between; max-width:230px; margin:0 auto;">
-          <div style="width:2px; height:14px; background:var(--border);"></div>
-          <div style="width:2px; height:14px; background:var(--border);"></div>
-        </div>
-        <div style="display:flex; gap:14px; justify-content:center;">
-          <div style="flex:1; max-width:170px; text-align:center;">
-            <button id="invInvGoLotBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg); cursor:pointer;">
-              <div style="font-size:26px; line-height:1;">📦</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Bù Chưa Dùng</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">+${fmtVND(lotValue)}</div>
-            </button>
-            <button id="invInvGoLotBtn2" class="link-btn" style="margin-top:6px; font-size:11.5px; padding:2px; width:100%; text-align:center;">📋 Xem Kho Hoá Đơn Bù →</button>
-            <div class="hint" style="margin-top:2px; font-size:11px;">Mua thêm từ bên thứ 3 để bù thiếu.</div>
-          </div>
-          <div style="flex:1; max-width:170px; text-align:center;">
-            <button id="invInvGoMineBtn" style="width:100%; text-align:center; padding:14px 8px; border-radius:14px; border:1.5px solid var(--border); background:var(--bg); cursor:pointer;">
-              <div style="font-size:26px; line-height:1;">📄</div>
-              <div style="font-weight:800; margin-top:6px; font-size:12.5px;">Hoá Đơn Thật Từ Mỏ Chưa Dùng</div>
-              <div style="font-weight:900; margin-top:2px; font-size:14px; color:var(--profit);">${mineRemainingPage.length ? mineRemainingPage.map(m=>`${escapeHtml(m.goodsType)}: ${m.volKhoi.toLocaleString('vi-VN',{maximumFractionDigits:2})} khối`).join('<br>') : '0 khối'}<div style="font-size:11px; font-weight:700; color:var(--ink-soft); margin-top:2px;">Tính tiền: 0đ</div></div>
-            </button>
-            <button id="invInvGoMineBtn2" class="link-btn" style="margin-top:6px; font-size:11.5px; padding:2px; width:100%; text-align:center;">📋 Xem Sổ Hoá Đơn Thật →</button>
-            <div class="hint" style="margin-top:2px; font-size:11px;">Mỏ tự xuất theo hàng đã múc — tiền hàng đã nằm trong giá vốn và đã trả mỏ, nên không cộng thêm tiền (tránh tính 2 lần). Giá trị thật: dùng để xuất bán mà không phải mua hoá đơn bù — tiết kiệm khoảng ${fmtVND(mineRemainingPage.reduce((a,m)=>a+m.savingEstimate,0))} (tham khảo).</div>
-          </div>
-        </div>
-      </div>
-      ${(()=>{ const rows = computeInvoiceWarehouseByGoods(); const moneySum = rows.reduce((x,r)=>x+r.lotMoney,0); const diff = moneySum - lotValue; return `
-      <div class="card" style="margin-top:14px;">
-        <div style="font-weight:800; font-size:15px; margin-bottom:2px;">📊 Tồn Kho Theo Từng Loại Đá (realtime, toàn thời gian)</div>
-        <div class="hint" style="margin-top:0; margin-bottom:8px;">Cột đầu khớp đúng "Tồn Kho Tổng Hợp" ở Kho Hoá Đơn Bù. Đơn vị: khối.</div>
-        <div class="grid-table-wrap"><table class="grid-table">
-          <thead><tr><th>Loại</th><th class="num">Tồn kho tổng hợp</th><th class="num">Hoá đơn mỏ còn</th><th class="num">Lô bù còn</th><th class="num">Chưa rút kho</th><th class="num">Tiền lô bù còn</th></tr></thead>
-          <tbody>${rows.map(r=>`<tr><td><strong>${escapeHtml(r.label)}</strong><div class="hint" style="margin:2px 0 0;">${fmtKhoi(r.mineIn)} + ${fmtKhoi(r.lotIn)} − ${fmtKhoi(r.sold)}</div></td><td class="num"><strong>${fmtKhoi(r.combined)}</strong></td><td class="num">${fmtKhoi(r.mineRem)}</td><td class="num">${fmtKhoi(r.lotRem)}</td><td class="num" style="color:${Math.abs(r.unmatched)>0.005?'var(--loss)':'inherit'};">${fmtKhoi(r.unmatched)}</td><td class="num">${fmtVND(r.lotMoney)}</td></tr>`).join('') || '<tr><td colspan="6" class="hint">Chưa có dữ liệu.</td></tr>'}
-            <tr class="grid-total-row"><td colspan="5" style="text-align:left;">= Tổng tiền lô bù còn (tính theo từng lô)</td><td class="num">${fmtVND(moneySum)}</td></tr>
-          </tbody></table></div>
-        <div class="hint" style="margin-top:8px; color:${Math.abs(diff)<1000?'var(--profit)':'var(--loss)'};">${Math.abs(diff)<1000 ? '✅ Khớp với số "Tổng Tồn Kho Hoá Đơn" trong Vốn Vận Hành.' : `⚠️ Lệch ${fmtVND(Math.abs(diff))} so với số trong Vốn Vận Hành (${fmtVND(lotValue)}) — báo lại để kiểm tra.`}</div>
-        <div class="hint" style="margin-top:4px;">• <strong>Hoá đơn mỏ còn</strong>: phần hoá đơn mỏ chưa khớp cho ca nào (đã trừ cả phần rút ở ca chưa tick MUA) — tính 0đ vì tiền hàng đã nằm trong giá vốn và đã trả mỏ.<br>• <strong>Lô bù còn</strong>: theo sổ rút kho FIFO từng lô; tiền = khối còn × giá thật/khối của lô (đã trừ VAT được khấu trừ).<br>• <strong>Chưa rút kho</strong>: khối đã bán nhưng ca đó chưa tick "đã xuất hoá đơn bán" nên chưa rút kho — tick xong sẽ tự về 0.</div>
-      </div>`; })()}
-    </section>
-  `;
-  document.getElementById('invoiceInventoryDetailBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
-  const goLot = ()=>{ saveMainScroll(); renderInvoiceLotManagerModal(null); };
-  const goMine = ()=>{ saveMainScroll(); renderMineInvoiceManagerModal(null); };
-  document.getElementById('invInvGoLotBtn').addEventListener('click', goLot);
-  document.getElementById('invInvGoLotBtn2').addEventListener('click', goLot);
-  document.getElementById('invInvGoMineBtn').addEventListener('click', goMine);
-  document.getElementById('invInvGoMineBtn2').addEventListener('click', goMine);
-}
 /// Chi Tiết Vốn Điều Lệ — liệt kê CHỈ những khoản Góp Vào được đánh dấu
 /// "Vốn điều lệ", theo thứ tự thời gian, kèm số dư luỹ kế tại từng dòng —
 /// để Ông Chủ tự đối chiếu đúng đã góp bao nhiêu, còn thiếu bao nhiêu so
