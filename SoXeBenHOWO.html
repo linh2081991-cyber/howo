@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-29 · #326';
+const APP_BUILD = '2026-09-29 · #327';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1684,11 +1684,28 @@ function sharedDataRef(name){
 /// lệnh ghi phải có kết quả (thành công HOẶC lỗi rõ ràng) trong tối đa 15
 /// giây — quá hạn thì coi như thất bại, để saveXxx() bắt được và báo rõ
 /// "LƯU THẤT BẠI" thay vì treo mãi không phản hồi.
+// SỬA 2026-09-29 (#327 — Ông Chủ báo "nút không phản hồi"): mọi lần đọc/ghi máy chủ
+// giờ hiện ngay 1 nhãn "⏳ Đang lưu…" nếu chờ quá 0,4 giây, để Ông Chủ biết app ĐANG
+// xử lý (mạng chậm) chứ không phải nút hỏng. Hết chờ tự ẩn.
+let _syncPending = 0, _syncPillTimer = null;
+function _syncPill(show){
+  let el = document.getElementById('syncPill');
+  if(!el){
+    el = document.createElement('div'); el.id = 'syncPill';
+    el.style.cssText = 'position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); left:50%; transform:translateX(-50%); z-index:400; background:var(--ink); color:#fff; padding:6px 14px; border-radius:20px; font-size:12.5px; font-weight:700; display:none; box-shadow:0 2px 10px rgba(0,0,0,.25);';
+    el.textContent = '⏳ Đang lưu / đồng bộ với máy chủ…';
+    document.body.appendChild(el);
+  }
+  el.style.display = show ? 'block' : 'none';
+}
 function withTimeout(promise, ms=15000){
+  _syncPending++;
+  if(!_syncPillTimer) _syncPillTimer = setTimeout(()=>{ if(_syncPending>0) _syncPill(true); }, 400);
+  const done = ()=>{ _syncPending = Math.max(0,_syncPending-1); if(_syncPending===0){ clearTimeout(_syncPillTimer); _syncPillTimer=null; _syncPill(false); } };
   return Promise.race([
     promise,
     new Promise((_,reject)=>setTimeout(()=>reject(new Error('Timeout: mạng quá chậm hoặc mất kết nối sau '+(ms/1000)+'s')), ms))
-  ]);
+  ]).then(v=>{ done(); return v; }, e=>{ done(); throw e; });
 }
 
 async function loadAll(){
@@ -2861,12 +2878,13 @@ async function saveSalaryPayments(){
 }
 /// Nút "💵 Thanh Toán Lương" — ghi lần trả lương cuối kỳ (trừ TCB/Tiền Mặt
 /// và trừ nợ lương; KHÔNG phải chi phí mới).
-function openSalaryPaymentModal(driverId){
+function openSalaryPaymentModal(driverId, flash){
   const d = driverById(driverId); if(!d) return;
   const w = driverWagePayable(driverId);
   const list = (state.salaryPayments||[]).filter(p=>p.driverId===driverId).sort((a,b)=>b.date.localeCompare(a.date));
   openModal(`
     <h3 style="margin-top:0;">💵 Thanh Toán Lương — ${escapeHtml(d.name)}</h3>
+    <div id="salp_status" style="display:${flash?'block':'none'}; padding:10px; border-radius:10px; font-weight:700; margin-bottom:10px; background:var(--profit-soft, #e3f3e8); color:var(--profit);">${flash?escapeHtml(flash):''}</div>
     <div class="grid-table-wrap">
       <table class="grid-table">
         <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
@@ -2884,31 +2902,45 @@ function openSalaryPaymentModal(driverId){
       </table>
     </div>
     ${w.payable<-0.5 ? `<div class="hint" style="color:var(--loss);">⚠️ Số âm: công ty đã trả nhiều hơn lương tài xế làm được (tài xế đang nợ lại công ty).</div>` : ''}
-    <div class="field" style="margin-top:12px;"><label>Ngày trả</label><input type="date" id="sp_date" value="${todayLocalDateStr()}"></div>
-    <div class="field"><label>Số tiền trả</label><input type="text" inputmode="decimal" id="sp_amount" placeholder="0"></div>
+    <div class="field" style="margin-top:12px;"><label>Ngày trả</label><input type="date" id="salp_date" value="${todayLocalDateStr()}"></div>
+    <div class="field"><label>Số tiền trả</label><input type="text" inputmode="decimal" id="salp_amount" placeholder="0"></div>
     <div class="field"><label>Trả bằng nguồn nào</label>
-      <select id="sp_method"><option value="bank">🏦 TCB Bank</option><option value="cash">💵 Tiền mặt</option><option value="offbook">📌 Đã trả ngoài sổ (không trừ TCB/Tiền Mặt — số dư đã phản ánh sẵn)</option></select></div>
-    <div class="field"><label>Ghi chú</label><input type="text" id="sp_note" placeholder="Ví dụ: Thanh toán lương tháng 9"></div>
-    <button class="btn btn-accent btn-block" id="sp_saveBtn">💾 Ghi Nhận Thanh Toán</button>
+      <select id="salp_method"><option value="bank">🏦 TCB Bank</option><option value="cash">💵 Tiền mặt</option><option value="offbook">📌 Đã trả ngoài sổ (không trừ TCB/Tiền Mặt — số dư đã phản ánh sẵn)</option></select></div>
+    <div class="field"><label>Ghi chú</label><input type="text" id="salp_note" placeholder="Ví dụ: Thanh toán lương tháng 9"></div>
+    <button class="btn btn-accent btn-block" id="salp_saveBtn">💾 Ghi Nhận Thanh Toán</button>
     ${list.length ? `
     <div style="font-weight:800; font-size:13px; margin:14px 0 6px;">📜 Các lần đã thanh toán</div>
     <div class="grid-table-wrap"><table class="grid-table">
       <thead><tr><th>Ngày</th><th>Nguồn</th><th class="num">Số tiền</th><th></th></tr></thead>
       <tbody>${list.map(p=>`<tr><td style="white-space:nowrap;">${formatDateVN(p.date)}${p.note?`<div class="hint" style="margin:2px 0 0;">${escapeHtml(p.note)}</div>`:''}</td><td style="white-space:nowrap;">${SALARY_METHOD_LABELS[p.method||'bank']||''}</td><td class="num">${fmtVND(p.amount)}</td><td><button class="link-btn" data-del-sp="${p.id}" style="color:var(--loss); padding:0;">Xoá</button></td></tr>`).join('')}</tbody>
     </table></div>` : ''}
-    <button class="btn btn-ghost btn-block" id="sp_closeBtn" style="margin-top:10px;">Đóng</button>
+    <button class="btn btn-ghost btn-block" id="salp_closeBtn" style="margin-top:10px;">Đóng</button>
   `);
   let amount = 0;
-  attachMoneyInput(document.getElementById('sp_amount'), 0, v=>{ amount = v; });
-  document.getElementById('sp_closeBtn').addEventListener('click', ()=>{ closeModal(); renderAll(); });
-  document.getElementById('sp_saveBtn').addEventListener('click', async ()=>{
-    const date = document.getElementById('sp_date').value || todayLocalDateStr();
-    if(!(amount>0)){ showToast('Ông Chủ nhập số tiền trả trước.'); return; }
+  attachMoneyInput(document.getElementById('salp_amount'), 0, v=>{ amount = v; });
+  document.getElementById('salp_closeBtn').addEventListener('click', ()=>{ closeModal(); renderAll(); });
+  // #327 — nút có trạng thái rõ ràng: "⏳ Đang lưu…" → báo ✅/❌ ngay trong khung, không phụ thuộc toast.
+  const saveBtn = document.getElementById('salp_saveBtn');
+  const statusEl = document.getElementById('salp_status');
+  const setStatus = (html, ok)=>{ if(statusEl){ statusEl.innerHTML = html; statusEl.style.display = html ? 'block' : 'none'; statusEl.style.background = ok ? 'var(--profit-soft, #e3f3e8)' : 'var(--loss-soft, #f6e3e1)'; statusEl.style.color = ok ? 'var(--profit)' : 'var(--loss)'; } };
+  saveBtn.addEventListener('click', async ()=>{
+    if(saveBtn.disabled) return;
+    const date = document.getElementById('salp_date').value || todayLocalDateStr();
+    if(!(amount>0)){ setStatus('⚠️ Ông Chủ nhập số tiền trả trước.', false); document.getElementById('salp_amount').focus(); return; }
+    const method = document.getElementById('salp_method').value;
+    const entry = { id: uid('salpay'), driverId, date, amount, method, note: document.getElementById('salp_note').value.trim() };
+    saveBtn.disabled = true; const oldLabel = saveBtn.textContent; saveBtn.textContent = '⏳ Đang lưu…';
     state.salaryPayments = state.salaryPayments || [];
-    state.salaryPayments.push({ id: uid('salpay'), driverId, date, amount, method: document.getElementById('sp_method').value, note: document.getElementById('sp_note').value.trim() });
-    if(!(await saveSalaryPayments())) return;
-    showToast('Đã ghi nhận thanh toán lương.');
-    openSalaryPaymentModal(driverId);
+    state.salaryPayments.push(entry);
+    const ok = await saveSalaryPayments();
+    if(!ok){
+      state.salaryPayments = state.salaryPayments.filter(p=>p!==entry);
+      saveBtn.disabled = false; saveBtn.textContent = oldLabel;
+      setStatus('❌ LƯU THẤT BẠI — kiểm tra mạng rồi bấm lại. Chưa có gì được ghi.', false);
+      return;
+    }
+    if(document.getElementById('slBackBtn')) renderSalaryLedgerPage(driverId); // đang ở Sổ Lương → cập nhật ngay phía sau
+    openSalaryPaymentModal(driverId, `✅ Đã ghi nhận ${fmtVND(amount)} ngày ${formatDateVN(date)} · ${SALARY_METHOD_LABELS[method]||''}`);
   });
   document.querySelectorAll('[data-del-sp]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
@@ -8243,8 +8275,11 @@ let toastTimer=null;
 function showToast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg; t.classList.add('show');
+  // #327 — thông báo LỖI hiện đỏ và lâu hơn (6 giây) để Ông Chủ kịp đọc.
+  const isErr = /lỗi|thất bại|timeout/i.test(String(msg||''));
+  t.style.background = isErr ? 'var(--loss)' : '';
   clearTimeout(toastTimer);
-  toastTimer=setTimeout(()=>t.classList.remove('show'), 2200);
+  toastTimer=setTimeout(()=>t.classList.remove('show'), isErr ? 6000 : 2200);
 }
 
 /// MỚI 2026-09-21 (Sáng/Tối) — 'auto' (mặc định) = xoá lựa chọn tay, để
