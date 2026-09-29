@@ -757,7 +757,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-29 · #325';
+const APP_BUILD = '2026-09-29 · #326';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1434,9 +1434,9 @@ function computeLoanDueWarnings(){
     if(!amort.hasBasis || amort.isPaidOff) return;
     const curYM = todayLocalDateStr().slice(0,7);
     if(loan.lastPaidMonth===curYM) return; // đã bấm "Đã Trả Tiền Ngân Hàng" cho đúng tháng này rồi
-    const dueDay = Math.min(28, Math.max(1, Math.round(Number(loan.dueDayOfMonth)||20)));
+    const dueDay = Math.min(31, Math.max(1, Math.round(Number(loan.dueDayOfMonth)||20))); // #326 — nhận 1–31, tháng ngắn lấy ngày cuối tháng
     const today = new Date(todayLocalDateStr()+'T00:00:00');
-    const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
+    const dueDate = new Date(today.getFullYear(), today.getMonth(), Math.min(dueDay, new Date(today.getFullYear(), today.getMonth()+1, 0).getDate()));
     const daysLeft = Math.round((dueDate-today)/86400000);
     if(daysLeft>3) return; // chưa tới mốc cảnh báo (ngày 17 nếu hạn là 20)
     const dueDateStr = `${dueDate.getFullYear()}-${String(dueDate.getMonth()+1).padStart(2,'0')}-${String(dueDate.getDate()).padStart(2,'0')}`;
@@ -18256,9 +18256,16 @@ let showGeminiKeyInput = false;
 // tháng theo đúng Ngày Đến Hạn.
 function loanDueDatesSequence(disbursementDateStr, dueDayOfMonth, count){
   const d0 = new Date(disbursementDateStr+'T00:00:00');
-  const dueDay = Math.min(28, Math.max(1, Math.round(Number(dueDayOfMonth)||20)));
+  // SỬA 2026-09-29 (#326): trước đây ép ngày đến hạn tối đa 28 (Ông Chủ nhập 30
+  // thì app lặng lẽ dùng 28). Giờ nhận đúng 1–31; tháng nào ngắn hơn thì lấy
+  // NGÀY CUỐI của tháng đó (VD hạn 30 → tháng 2 là 28/29) — đúng cách ngân hàng làm.
+  const dueDay = Math.min(31, Math.max(1, Math.round(Number(dueDayOfMonth)||20)));
   const dates = [];
-  for(let i=0;i<count;i++) dates.push(new Date(d0.getFullYear(), d0.getMonth()+1+i, dueDay));
+  for(let i=0;i<count;i++){
+    const y = d0.getFullYear(), m = d0.getMonth()+1+i;
+    const lastDay = new Date(y, m+1, 0).getDate();
+    dates.push(new Date(y, m, Math.min(dueDay, lastDay)));
+  }
   return dates;
 }
 function daysBetweenDates(a,b){ return Math.round((b-a)/86400000); }
@@ -18458,8 +18465,8 @@ function openLoanEditor(loanId){
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ngày đến hạn đóng lãi hàng tháng</label>
-          <input type="number" inputmode="numeric" min="1" max="28" id="loan_dueDay" value="${draft.dueDayOfMonth||20}">
-          <div class="hint">Mặc định 20 — đúng ngày ngân hàng đang áp dụng. App sẽ cảnh báo trước 3 ngày (từ ngày 17) ở tab Ca Làm Việc.</div>
+          <input type="number" inputmode="numeric" min="1" max="31" id="loan_dueDay" value="${draft.dueDayOfMonth||20}">
+          <div class="hint">Nhập đúng ngày ngân hàng thu (1–31; tháng nào ngắn hơn thì tính ngày cuối tháng). App sẽ cảnh báo trước 3 ngày ở tab Ca Làm Việc.</div>
         </div>
       </div>
       <div class="card" style="margin-top:8px;">
@@ -18522,19 +18529,27 @@ function openLoanEditor(loanId){
         // dư nợ còn lại = dư nợ sau kỳ 1.
         const interestPaidSoFar = schedule.filter(row=>row.periodIndex < paidCount).reduce((sum,row)=>sum+row.interest, 0);
         const interestTotalLife = schedule.reduce((sum,row)=>sum+row.interest, 0);
+        // SỬA 2026-09-29 (#326 — Ông Chủ báo lỗi khi thêm khoản vay mới): giải ngân
+        // xong nhưng CHƯA tới kỳ trả đầu tiên thì computeBankLoanAmortization() không
+        // có "kỳ này" (không có dueDate) → trước đây màn xem trước bị lỗi. Giờ hiện
+        // đúng KỲ TRẢ ĐẦU TIÊN lấy từ lịch trả nợ (chỉ để hiển thị, không đổi công thức).
+        const firstRow = schedule[0] || null;
+        const cur = r.dueDate
+          ? { label:'Kỳ này', dueDate:r.dueDate, days:r.daysInPeriod, principal:r.monthlyPrincipal, interest:r.monthlyInterestCurrent, total:r.totalPaymentCurrent, grace:r.inGracePeriod, rate:r.annualRatePercent }
+          : (firstRow ? { label:'Kỳ trả đầu tiên (chưa tới hạn)', dueDate:firstRow.dueDate, days:firstRow.daysInPeriod, principal:firstRow.monthlyPrincipal, interest:firstRow.interest, total:firstRow.total, grace:firstRow.inGracePeriod, rate:firstRow.annualRatePercent } : null);
         const remainingByPaid = (paidCount>0 && schedule[paidCount-1]) ? schedule[paidCount-1].remainingBalanceAfter : r.remainingBalance;
         wrap.innerHTML = `
-          <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${fmtDec(r.annualRatePercent, 2)}%/năm</span></div>
+          <div class="summary-row"><span>Mức lãi đang áp dụng</span><span class="val">${fmtDec(cur ? cur.rate : r.annualRatePercent, 2)}%/năm</span></div>
           <div class="summary-row"><span>Số kỳ đã trả ngân hàng</span><span class="val">${paidCount} / ${r.termMonths} kỳ</span></div>
           <div class="summary-row"><span>Dư nợ còn lại (sau ${paidCount} kỳ đã trả)</span><span class="val">${fmtVND(remainingByPaid)}</span></div>
-          ${r.isPaidOff ? `
-          <div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>
+          ${(r.isPaidOff || !cur) ? `
+          ${r.isPaidOff ? `<div class="summary-row total"><span>✅ Đã trả hết nợ vay</span><span class="val">0đ</span></div>` : `<div class="hint" style="margin:0;">Chưa lập được lịch trả nợ — kiểm tra lại Số tiền vay, Thời hạn, Ngày giải ngân và Lộ Trình Lãi Suất.</div>`}
           ` : `
-          <div class="summary-row"><span>Kỳ này (${r.daysInPeriod} ngày, hạn ${formatDateVN(`${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}-${String(r.dueDate.getDate()).padStart(2,'0')}`)})${r.inGracePeriod?' <span style="color:var(--accent); font-weight:800;">— Đang Ân Hạn</span>':''}</span><span class="val"></span></div>
-          <div class="summary-row"><span>Gốc phải trả kỳ này${r.inGracePeriod?' (ân hạn, chưa trả gốc)':''}</span><span class="val">${fmtVND(r.monthlyPrincipal)}</span></div>
-          <div class="summary-row"><span>Lãi phải trả kỳ này (dư nợ đầu kỳ × lãi suất × số ngày/365)</span><span class="val">${fmtVND(r.monthlyInterestCurrent)}</span></div>
+          <div class="summary-row"><span>${cur.label} (${cur.days} ngày, hạn ${formatDateVN(`${cur.dueDate.getFullYear()}-${String(cur.dueDate.getMonth()+1).padStart(2,'0')}-${String(cur.dueDate.getDate()).padStart(2,'0')}`)})${cur.grace?' <span style="color:var(--accent); font-weight:800;">— Đang Ân Hạn</span>':''}</span><span class="val"></span></div>
+          <div class="summary-row"><span>Gốc phải trả kỳ này${cur.grace?' (ân hạn, chưa trả gốc)':''}</span><span class="val">${fmtVND(cur.principal)}</span></div>
+          <div class="summary-row"><span>Lãi phải trả kỳ này (dư nợ đầu kỳ × lãi suất × số ngày/365)</span><span class="val">${fmtVND(cur.interest)}</span></div>
           <div class="formula-divider" style="margin:8px 0;"></div>
-          <div class="summary-row total"><span>TỔNG GỐC + LÃI PHẢI TRẢ KỲ NÀY</span><span class="val" style="font-weight:800;">${fmtVND(r.totalPaymentCurrent)}</span></div>
+          <div class="summary-row total"><span>TỔNG GỐC + LÃI PHẢI TRẢ KỲ NÀY</span><span class="val" style="font-weight:800;">${fmtVND(cur.total)}</span></div>
           <div class="hint" style="margin-top:6px;">Số này cộng vào TỔNG "Gốc + lãi vay ngân hàng/tháng" của MỌI khoản vay — dùng cho toàn bộ app, tự đổi đúng theo từng kỳ thực tế (số ngày khác nhau mỗi tháng), Ông Chủ không cần vào đây sửa tay hàng tháng.</div>
           `}
           <div class="formula-divider" style="margin:10px 0;"></div>
