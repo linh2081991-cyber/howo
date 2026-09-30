@@ -651,13 +651,21 @@
   .grid-clickable-row{ cursor:pointer; }
   .grid-clickable-row:active{ background:var(--accent-soft); }
 
+  /* SỬA 2026-09-30 (#328 — Ông Chủ yêu cầu "mọi trang tạm hiển thị thành 1 trang rõ ràng
+     sạch đẹp"): mọi khung phụ (bottom sheet) giờ mở thành TRANG TOÀN MÀN HÌNH, có thanh
+     "← Quay Lại" cố định ở trên. Nội dung và nút bấm bên trong giữ nguyên. */
   .modal-backdrop{
-    position:fixed; inset:0; z-index:200; background:rgba(0,0,0,.45);
-    display:flex; align-items:flex-end; justify-content:center;
+    position:fixed; inset:0; z-index:200; background:var(--bg);
+    display:flex; align-items:stretch; justify-content:center;
   }
   .modal-sheet{
-    background:var(--bg); width:100%; max-width:520px; max-height:88vh; overflow-y:auto;
-    border-radius:18px 18px 0 0; padding:18px 18px calc(28px + env(safe-area-inset-bottom)) 18px; box-shadow:0 -6px 24px rgba(0,0,0,.2);
+    background:var(--bg); width:100%; max-width:760px; height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch;
+    border-radius:0; padding:0 16px calc(28px + env(safe-area-inset-bottom)) 16px; box-shadow:none;
+  }
+  .modal-page-bar{
+    position:sticky; top:0; z-index:5; background:var(--bg); margin:0 -16px 12px -16px;
+    padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px 16px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:10px;
   }
   .modal-sheet h3{ margin-top:0; }
   .modal-close-row{ display:flex; justify-content:flex-end; margin-bottom:6px; }
@@ -757,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-29 · #327';
+const APP_BUILD = '2026-09-30 · #329';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1168,10 +1176,9 @@ function scrollMainToTop(){
 function openModal(innerHtml){
   const root = document.getElementById('modalRoot');
   if(!root) return;
-  root.innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal-sheet">${innerHtml}</div></div>`;
-  document.getElementById('modalBackdrop').addEventListener('click', e=>{
-    if(e.target.id==='modalBackdrop') closeModal();
-  });
+  root.innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal-sheet"><div class="modal-page-bar"><button class="btn btn-ghost btn-sm" id="modalPageBackBtn" style="width:auto;">← Quay Lại</button></div>${innerHtml}</div></div>`;
+  // #328 — trang toàn màn hình: không đóng khi chạm vùng trống (tránh mất dữ liệu đang nhập); đóng bằng "← Quay Lại".
+  document.getElementById('modalPageBackBtn').addEventListener('click', closeModal);
   const closeBtn = document.getElementById('modalCloseBtn');
   if(closeBtn) closeBtn.addEventListener('click', closeModal);
 }
@@ -2176,6 +2183,50 @@ async function saveEquityProjectInfo(){
 // SỬA 2026-09-14 (Ông Chủ yêu cầu — "Vốn đầu tư ban đầu" tách thành danh
 // sách từng lần mua xe, không còn 1 ô duy nhất): lưu CHUNG CÔNG TY, y hệt
 // ownerEquityEntries — không thuộc riêng xe nào.
+// SỬA 2026-09-30 (#328 — Ông Chủ báo "thêm xe mới thì xe cũ bị ẩn mất"): NGUYÊN NHÂN —
+// xe đầu tiên (1 số cũ lưu ở equityProjectInfo.initialInvestment) chỉ hiện như 1 "dòng ảo"
+// khi danh sách Vốn Đầu Tư còn TRỐNG. Thêm lần đầu tư đầu tiên vào danh sách là dòng ảo
+// biến mất → tổng vốn đầu tư, giá trị xe, Vốn Chủ, hiệu quả đầu tư đều mất đúng số xe cũ.
+// Sửa gốc: đưa xe đầu tiên thành 1 DÒNG THẬT trong danh sách (đánh dấu legacyMigrated, gắn
+// đúng xe đầu tiên, nguồn "Ông Chủ bỏ riêng"), rồi lưu. Không xoá/sửa số cũ; không tạo
+// trùng nếu danh sách đã có đúng số tiền đó.
+// SỬA 2026-09-30 (#329 — "Mục 2 tiền đầu tư mua xe chưa hiện số, xử lý tận gốc"): MỌI nơi
+// đọc danh sách Vốn Đầu Tư giờ đi qua 1 cửa duy nhất investmentEntriesAll() — luôn gồm xe
+// đầu tiên (số cũ) nếu nó chưa nằm trong danh sách, kể cả khi việc tự đưa vào danh sách
+// (#328) chưa lưu được lên máy chủ (mất mạng/chưa cập nhật). Không bao giờ còn cảnh "thêm
+// xe mới thì xe cũ biến mất".
+function legacyInvestmentVirtualEntry(){
+  const legacy = Math.round(Number(state.equityProjectInfo && state.equityProjectInfo.initialInvestment)||0);
+  const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+  if(legacy<=0 || list.some(e=>e.legacyMigrated) || list.some(e=>Math.round(Number(e.amount)||0)===legacy)) return null;
+  const primary = (state.vehicles||[]).find(v=>v.isPrimary) || (state.vehicles||[])[0];
+  return { id:'invest_legacy_first', date: state.equityProjectInfo.startDate || todayLocalDateStr(), amount: legacy,
+    note: primary ? (primary.plate || primary.name || 'Xe đầu tiên') : 'Xe đầu tiên', vehicleId: primary ? primary.id : null,
+    fundingSource:'owner', legacyMigrated:true };
+}
+function investmentEntriesAll(){
+  const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+  const v = legacyInvestmentVirtualEntry();
+  return v ? [v, ...list] : list;
+}
+async function ensureLegacyInvestmentInList(){
+  const legacy = Math.round(Number(state.equityProjectInfo && state.equityProjectInfo.initialInvestment)||0);
+  const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+  if(legacy<=0) return false;
+  if(list.some(e=>e.legacyMigrated)) return false;
+  if(list.some(e=>Math.round(Number(e.amount)||0)===legacy)) return false;
+  const primary = (state.vehicles||[]).find(v=>v.isPrimary) || (state.vehicles||[])[0];
+  const shiftsAll = (typeof shiftsCompanyWideSafe==='function') ? shiftsCompanyWideSafe() : [];
+  const earliest = shiftsAll.length ? shiftsAll.map(x=>x.date).sort()[0] : null;
+  const entry = { id: 'invest_legacy_first', date: state.equityProjectInfo.startDate || earliest || todayLocalDateStr(), amount: legacy,
+    note: primary ? (primary.plate || primary.name || 'Xe đầu tiên') : 'Xe đầu tiên', vehicleId: primary ? primary.id : null,
+    fundingSource: 'owner', legacyMigrated: true };
+  state.initialInvestmentEntries = [entry, ...list];
+  const ok = await saveInitialInvestmentEntries();
+  if(!ok){ state.initialInvestmentEntries = list; return false; }
+  showToast(`Đã đưa xe đầu tiên (${fmtVND(legacy)}) vào danh sách Vốn Đầu Tư — không mất số cũ.`);
+  return true;
+}
 async function saveInitialInvestmentEntries(){
   try { await withTimeout(sharedDataRef('initialInvestmentEntries').set({ list: state.initialInvestmentEntries })); return true; }
   catch(e){ showToast('Lỗi lưu danh sách vốn đầu tư ban đầu: ' + (e?.message || e)); return false; }
@@ -2984,11 +3035,11 @@ function investDepreciableBase(e){
 /// Vốn Ông Chủ THẬT SỰ bỏ vào qua mua xe (tiền riêng / vay cá nhân). Phần trả bằng tiền
 /// công ty hoặc vay công ty KHÔNG phải vốn góp mới (tránh tính 2 lần).
 function ownerFundedInvestment(){
-  const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+  const list = investmentEntriesAll();
   if(list.length===0) return Number(state.equityProjectInfo.initialInvestment)||0;
   return list.filter(e=>investFundingOf(e)==='owner').reduce((s,e)=>s+investEntryParts(e).total,0);
 }
-function vehicleInvestEntries(vid){ return (state.initialInvestmentEntries||[]).filter(e=>e.vehicleId===vid); }
+function vehicleInvestEntries(vid){ return investmentEntriesAll().filter(e=>e.vehicleId===vid); }
 function vehicleDepreciableBase(vid){ return vehicleInvestEntries(vid).reduce((s,e)=>s+investDepreciableBase(e),0); }
 /// Giá trị còn lại của đội xe: xe đã gán lần đầu tư → giá trị riêng − khấu hao riêng;
 /// xe đã bán → 0; phần chưa gán xe → gộp y hệt cách tính cũ.
@@ -3001,7 +3052,7 @@ function fleetNetBookValue(){
     if(vehicleSaleDateOf(s)) return;
     total += Math.max(0, vehicleDepreciableBase(vid) - dep);
   });
-  const list = state.initialInvestmentEntries||[];
+  const list = investmentEntriesAll();
   const unassignedBase = list.length===0 ? (Number(state.equityProjectInfo.initialInvestment)||0)
     : list.filter(e=>!e.vehicleId || !state.allVehiclesSettings[e.vehicleId]).reduce((s,e)=>s+investDepreciableBase(e),0);
   total += Math.max(0, unassignedBase - unassignedDep);
@@ -3013,7 +3064,7 @@ function vehicleSaleResult(vid){
   const sd = vehicleSaleDateOf(s);
   if(!sd) return null;
   let base = vehicleDepreciableBase(vid);
-  if(base===0 && Object.keys(state.allVehiclesSettings).length===1) base = (state.initialInvestmentEntries||[]).reduce((a,e)=>a+investDepreciableBase(e),0);
+  if(base===0 && Object.keys(state.allVehiclesSettings).length===1) base = investmentEntriesAll().reduce((a,e)=>a+investDepreciableBase(e),0);
   const bookValue = Math.max(0, base - depreciationAccruedForVehicle(vid, sd));
   const price = Number(s.sale.price)||0;
   return { date: sd, price, method: s.sale.method||'bank', bookValue, gain: price - bookValue, baseKnown: base>0 };
@@ -3074,7 +3125,7 @@ function taxAdjustmentForRange(from, to, vid){
 /// VAT mua xe CÔNG TY: tài sản chờ khấu trừ, trừ dần theo tháng vào VAT phải nộp (thương mại) của toàn công ty.
 function truckVatCreditSchedule(){
   const credits = {};
-  (state.initialInvestmentEntries||[]).forEach(e=>{
+  investmentEntriesAll().forEach(e=>{
     if(!e.vehicleId) return;
     const s = settingsOfVehicle(e.vehicleId);
     const vat = investEntryParts(e).vat;
@@ -3105,7 +3156,7 @@ function truckVatUsedInRange(from, to){
 }
 /// Tiền công ty trả mua xe (TCB / tiền mặt) — trừ vào số dư như 1 khoản chi thật.
 function companyFundedInvestmentInRange(from, to, method){
-  return (state.initialInvestmentEntries||[]).filter(e=>e.date>=from && e.date<=to &&
+  return investmentEntriesAll().filter(e=>e.date>=from && e.date<=to &&
     ((method==='bank' && investFundingOf(e)==='companyBank') || (method==='cash' && investFundingOf(e)==='companyCash') || (!method && (investFundingOf(e)==='companyBank' || investFundingOf(e)==='companyCash'))))
     .reduce((s,e)=>s+investEntryParts(e).total,0);
 }
@@ -3301,8 +3352,8 @@ function renderVehicleManagementPage(selectedVid){
   const s = settingsOfVehicle(vid) || {};
   const r = rentalOf(s), sale = s.sale || {};
   const base = vid ? vehicleDepreciableBase(vid) : 0;
-  const entries = (state.initialInvestmentEntries||[]).filter(e=>e.vehicleId===vid).sort((a,b)=>a.date.localeCompare(b.date));
-  const unassigned = (state.initialInvestmentEntries||[]).filter(e=>!e.vehicleId || !state.allVehiclesSettings[e.vehicleId]);
+  const entries = investmentEntriesAll().filter(e=>e.vehicleId===vid).sort((a,b)=>a.date.localeCompare(b.date));
+  const unassigned = investmentEntriesAll().filter(e=>!e.vehicleId || !state.allVehiclesSettings[e.vehicleId]);
   const loans = Array.isArray(s.bankLoans) ? s.bankLoans : [];
   const saleRes = vid ? vehicleSaleResult(vid) : null;
   const entryRow = e=>{ const p = investEntryParts(e); return `<tr>
@@ -3880,7 +3931,7 @@ function computeCashBridge(eq, workingCapitalTotal, depreciationSoFar){
     loans2.forEach(l=>{ if(loanDisbursedToCompanyAccount(l) && l.disbursementDate && l.disbursementDate<=todayStr) companyLoanToAccount += Number(l.principal)||0; });
   });
   const soldBookValue = Object.keys(state.allVehiclesSettings).reduce((a,vid)=>{ const r = vehicleSaleResult(vid); return (r && r.date<=todayStr) ? a + r.bookValue : a; }, 0);
-  const vatNonCashFunded = (state.initialInvestmentEntries||[]).filter(e=>e.vehicleId && vehicleOwnershipOf(settingsOfVehicle(e.vehicleId))==='company' && (investFundingOf(e)==='owner' || investFundingOf(e)==='companyLoan'))
+  const vatNonCashFunded = investmentEntriesAll().filter(e=>e.vehicleId && vehicleOwnershipOf(settingsOfVehicle(e.vehicleId))==='company' && (investFundingOf(e)==='owner' || investFundingOf(e)==='companyLoan'))
     .reduce((a,e)=>a+investEntryParts(e).vat,0);
   const expectedWC = (Number(eq.contributedExtra)||0) - (Number(eq.withdrawn)||0) + profitBeforeInterest + (Number(depreciationSoFar)||0) - interestPaidAll - principalPaidAll
     - companyFundedInvest + companyLoanToAccount + soldBookValue + vatNonCashFunded;
@@ -4158,7 +4209,7 @@ function computeCumulativeCompanyProfit(toOverride){
 // tự coi flat cũ là "Xe 1" duy nhất — không mất dữ liệu, không cần thao
 // tác gì thêm.
 function computeTotalInitialInvestment(){
-  const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+  const list = investmentEntriesAll();
   if(list.length>0) return list.reduce((s,e)=>s+(Number(e.amount)||0),0);
   return Number(state.equityProjectInfo.initialInvestment)||0;
 }
@@ -4801,6 +4852,7 @@ async function startApp(){
   document.getElementById('dataLoadingScreen').style.display = 'flex';
   document.getElementById('loadingScreenText').textContent = 'Đang tải dữ liệu...';
   await loadAll();
+  try { await ensureLegacyInvestmentInList(); } catch(e){ console.warn('legacy invest migrate', e); } // #328
   document.getElementById('dataLoadingScreen').style.display = 'none';
   document.getElementById('shell').style.display = 'block';
   renderAll();
@@ -19770,7 +19822,7 @@ function renderPerVehicleDataNotice(){
 // mới): modal thêm/sửa 1 lần đầu tư — mẫu y hệt openMonthlyAmountEditor()
 // đã dùng ở nơi khác cho nhất quán.
 function openInvestmentEntryEditor(id, opts){
-  const existing = id ? (state.initialInvestmentEntries||[]).find(e=>e.id===id) : null;
+  const existing = id ? investmentEntriesAll().find(e=>e.id===id) : null;
   opts = opts || {};
   // #321 — trang RIÊNG (không còn cửa sổ phụ); quay lại đúng nơi đã mở.
   const goBack = opts.onBack || (()=>{ if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll(); restoreMainScroll(); });
@@ -19840,6 +19892,7 @@ function openInvestmentEntryEditor(id, opts){
     draft.vehicleId = document.getElementById('ie_vehicle').value || null;
     draft.fundingSource = document.getElementById('ie_funding').value;
     draft.note = document.getElementById('ie_note').value.trim();
+    try { await ensureLegacyInvestmentInList(); } catch(e){} // #328 — giữ xe cũ trước khi thêm dòng mới
     if(!Array.isArray(state.initialInvestmentEntries)) state.initialInvestmentEntries = [];
     const idx = state.initialInvestmentEntries.findIndex(e=>e.id===draft.id);
     if(idx>=0) state.initialInvestmentEntries[idx]=draft; else state.initialInvestmentEntries.push(draft);
@@ -19861,6 +19914,8 @@ function openInvestmentEntryEditor(id, opts){
     if(!confirm('Xoá lần đầu tư này?')) return;
     state.initialInvestmentEntries = (state.initialInvestmentEntries||[]).filter(e=>e.id!==draft.id);
     if(!(await saveInitialInvestmentEntries())) return;
+    // #329 — xoá đúng dòng xe đầu tiên (số cũ) thì xoá luôn số cũ, để nó không tự hiện lại.
+    if(draft.legacyMigrated && Number(state.equityProjectInfo.initialInvestment)>0){ state.equityProjectInfo.initialInvestment = 0; await saveEquityProjectInfo(); }
     afterWrite('Đã xoá.');
   });
 }
@@ -20437,7 +20492,7 @@ function renderCompanyDashboardPage(preserveScroll){
       <div class="card">
         <div style="font-weight:800; font-size:13px; margin-bottom:8px;">🚛 Vốn Đầu Tư Ban Đầu — Lộ Trình Từng Xe</div>
         ${(()=>{
-          const list = [...(state.initialInvestmentEntries||[])];
+          const list = [...investmentEntriesAll()];
           // Tương thích ngược: chưa từng thêm dòng nào (app cũ) — hiện
           // tạm 1 dòng ảo từ field flat cũ để Ông Chủ thấy đúng lộ trình
           // ngay cả khi chưa bấm "+ Thêm" lần nào, không đánh mất số cũ.
@@ -20799,7 +20854,7 @@ function computeCompanyCashFlowLedger(){
     const r = vehicleSaleResult(vid);
     if(r) entries.push({ date:r.date, category:'Bán xe', amount:r.price, sign:1, desc:`Bán xe 🚛 ${vehicleNameById(vid)}`, id:`sale_${vid}`, method:r.method });
   });
-  (state.initialInvestmentEntries||[]).forEach(e=>{
+  investmentEntriesAll().forEach(e=>{
     const f = investFundingOf(e);
     if(f==='companyBank' || f==='companyCash') entries.push({ date:e.date, category:'Mua xe (tiền công ty)', amount:investEntryParts(e).total, sign:-1,
       desc:`${e.vehicleId?'🚛 '+vehicleNameById(e.vehicleId):'Mua xe'}${e.note?' — '+e.note:''}`, id:e.id, method: f==='companyCash'?'cash':'bank' });
@@ -21164,7 +21219,7 @@ function renderDepreciationReserveHistoryPage(){
     const label = vid==='_none' ? '❓ Chưa gán xe cụ thể' : `🚛 ${escapeHtml(v ? (v.name||v.plate||'') : vid)}`;
     // #320 — giá trị xe đem khấu hao (từ các lần đầu tư đã gán cho xe này)
     let base = vid==='_none' ? 0 : vehicleDepreciableBase(vid);
-    if(base===0 && vid!=='_none' && Object.keys(state.allVehiclesSettings).length===1) base = (state.initialInvestmentEntries||[]).reduce((a,e)=>a+investDepreciableBase(e),0);
+    if(base===0 && vid!=='_none' && Object.keys(state.allVehiclesSettings).length===1) base = investmentEntriesAll().reduce((a,e)=>a+investDepreciableBase(e),0);
     return { vid, label, list, inBank, inCash, outBank, outCash, balance, monthlyRate, accrued, startDate, gap: accrued - balance, base };
   }).filter(x=>x.list.length>0 || x.monthlyRate>0 || x.accrued>0);
   const tot = summaries.reduce((a,x)=>{ ['inBank','inCash','outBank','outCash','balance','monthlyRate','accrued','gap','base'].forEach(k=>a[k]+=x[k]); return a; },
@@ -22079,7 +22134,7 @@ function renderBankReconDetailPage(mode){
 function renderEquityDetailPage(){
   scrollMainToTop();
   const eq = computeOwnerEquity();
-  const investEntries = [...(state.initialInvestmentEntries||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  const investEntries = [...investmentEntriesAll()].sort((a,b)=>a.date.localeCompare(b.date));
   const loanRows = [];
   state.vehicles.forEach(v=>{
     const s = state.allVehiclesSettings[v.id] || {};
