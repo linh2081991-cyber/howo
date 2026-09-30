@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-30 · #329';
+const APP_BUILD = '2026-09-30 · #330';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -7780,6 +7780,11 @@ function computeInvoiceMismatchWhatIf(from, to){
 /// computeBankBalanceReconciliation() ở trên chỉ tính TỪ mốc chốt) — vì
 /// đây không có "mốc chốt" nào cả, chỉ đơn giản là tổng đã chuyển vào trừ
 /// tổng đã rút ra, từ ngày đầu tiên Ông Chủ bắt đầu dùng quỹ này.
+// MỚI 2026-09-30 (#330) — số dư quỹ khấu hao của TỪNG xe (vid=null → phần chưa gán xe).
+function depreciationReserveBalanceForVehicle(vid){
+  return (state.depreciationReserveTransfers||[]).filter(t=>(t.vehicleId||null)===(vid||null))
+    .reduce((sum,t)=>sum + (t.direction==='toReserve' ? (Number(t.amount)||0) : -(Number(t.amount)||0)), 0);
+}
 function depreciationReserveBalance(){
   return (state.depreciationReserveTransfers||[]).reduce((sum,t)=>sum + (t.direction==='toReserve' ? (Number(t.amount)||0) : -(Number(t.amount)||0)), 0);
 }
@@ -20293,14 +20298,39 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ Ông Chủ (đã ứng dư)':'Ông Chủ đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue)}</td></tr>
               
-              <tr><td>🫙 Chứa Tiền Khấu Hao Xe</td><td class="num" style="color:${depreciationReserveBalance()>=0?'var(--profit)':'var(--loss)'};">${fmtVND(depreciationReserveBalance())}</td></tr>
               <tr><td>👷 Công tác phí tài xế đang giữ <button class="link-btn" id="wcAdvanceBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(driverAdvanceHeld)}</td></tr>
               ${driverAdvanceOwed>0.5 ? `<tr><td>👷 Công ty còn nợ tài xế (chi vượt công tác phí) <button class="link-btn" id="wcAdvanceBreakdownBtn2" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(driverAdvanceOwed)}</td></tr>` : ''}
               <tr><td>👷 ${wagePayable<0?'Tài xế đang nợ lại công ty (trả lương vượt)':'Lương còn nợ tài xế'} <button class="link-btn" id="wcWageBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${wagePayable>0?'var(--loss)':'var(--profit)'};">${wagePayable>0?'−':'+'}${fmtVND(Math.abs(wagePayable))}</td></tr>
               ${truckVatRemaining>0.5 ? `<tr><td>🧾 VAT mua xe công ty chờ khấu trừ</td><td class="num" style="color:var(--profit);">+${fmtVND(truckVatRemaining)}</td></tr>` : ''}
-              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG TIỀN VẬN HÀNH</td><td class="num" style="color:${(workingCapitalTotal-depreciationReserveBalance())>=0?'var(--profit)':'var(--loss)'}">${fmtVND(workingCapitalTotal-depreciationReserveBalance())}</td></tr>
             </tbody>
           </table>
+
+          <!-- #330 — Quỹ khấu hao TÁCH RIÊNG từng xe, rồi cộng tổng; cuối cùng là Tổng Vốn Vận Hành. -->
+          ${(()=>{
+            const jars = (state.vehicles||[]).map(v=>({ id:v.id, label:v.plate||v.name||'Xe', bal: depreciationReserveBalanceForVehicle(v.id) }));
+            const unassigned = depreciationReserveBalanceForVehicle(null);
+            if(Math.abs(unassigned)>0.5) jars.push({ id:'', label:'Chưa gán xe', bal: unassigned });
+            const totalJar = depreciationReserveBalance();
+            const opMoney = workingCapitalTotal - totalJar;
+            return `
+          <div style="font-weight:800; font-size:14px; margin:16px 0 8px;">🫙 Quỹ Khấu Hao Từng Xe</div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px;">
+            ${jars.map(j=>`<button class="wcJarTile" data-vid="${j.id}" style="display:flex; flex-direction:column; align-items:center; gap:4px; padding:12px 8px; border-radius:14px; border:1.5px solid ${j.bal>0.5?'var(--accent)':'var(--border)'}; background:${j.bal>0.5?'var(--accent-soft)':'var(--surface)'}; cursor:pointer; font:inherit; color:var(--ink);">
+              <span style="font-size:26px; line-height:1;">🫙</span>
+              <span style="font-weight:800; font-size:13px;">${escapeHtml(j.label)}</span>
+              <span style="font-weight:900; font-size:14px; color:${j.bal>=0?'var(--profit)':'var(--loss)'}; font-variant-numeric:tabular-nums;">${j.bal<0?'−':''}${fmtVND(Math.abs(j.bal))}</span>
+            </button>`).join('')}
+          </div>
+          <div class="summary-row" style="margin-top:10px; padding:10px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--border);"><span><strong>= TỔNG QUỸ KHẤU HAO</strong></span><span class="val" style="font-weight:900; color:${totalJar>=0?'var(--profit)':'var(--loss)'};">${totalJar<0?'−':''}${fmtVND(Math.abs(totalJar))}</span></div>
+
+          <table class="grid-table" style="margin-top:12px;">
+            <tbody>
+              <tr><td>Tổng tiền vận hành</td><td class="num">${fmtVND(opMoney)}</td></tr>
+              <tr><td>+ Tổng quỹ khấu hao</td><td class="num">${totalJar<0?'−':'+'}${fmtVND(Math.abs(totalJar))}</td></tr>
+              <tr class="grid-total-row"><td style="text-align:left;">= TỔNG VỐN VẬN HÀNH</td><td class="num" style="color:${workingCapitalTotal>=0?'var(--profit)':'var(--loss)'}">${workingCapitalTotal>=0?'+':''}${fmtVND(workingCapitalTotal)}</td></tr>
+            </tbody>
+          </table>`; })()}
 
           <div style="font-weight:800; font-size:15px; margin:18px 0 2px;">🚛 Tài Sản Xe & Vay Nợ</div>
           <div class="hint" style="margin-top:0; margin-bottom:8px;">Giá trị chiếc xe đang còn lại bao nhiêu sau khấu hao, và khoản vay gắn liền với nó — hiện trạng đổi chậm, theo tháng.</div>
@@ -20798,6 +20828,7 @@ function renderCompanyDashboardPage(preserveScroll){
   if(netProfitHubDetailBtn) netProfitHubDetailBtn.addEventListener('click', openROICalculationDetail);
   const editFixedCostsBtn = document.getElementById('editFixedCostsBtn');
   if(editFixedCostsBtn) editFixedCostsBtn.addEventListener('click', openFixedCostsEditor);
+  document.querySelectorAll('.wcJarTile').forEach(b=>b.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationReserveHistoryPage(b.dataset.vid||null); })); // #330
   const vehicleProfileBtn = document.getElementById('vehicleProfileBtn'); // #321 — trang riêng Quản Lý Xe
   if(vehicleProfileBtn) vehicleProfileBtn.addEventListener('click', ()=>{ saveMainScroll(); renderVehicleManagementPage(); });
   ['wcAdvanceBreakdownBtn','wcAdvanceBreakdownBtn2'].forEach(id=>{ const b = document.getElementById(id); if(b) b.addEventListener('click', openDriverAdvanceBreakdownModal); });
@@ -21196,7 +21227,7 @@ function depreciationAccruedForVehicle(vid, asOfDate){
   });
   return total;
 }
-function renderDepreciationReserveHistoryPage(){
+function renderDepreciationReserveHistoryPage(focusVid){
   scrollMainToTop();
   const app = document.getElementById('app');
   const transfers = Array.isArray(state.depreciationReserveTransfers) ? state.depreciationReserveTransfers : [];
@@ -21275,7 +21306,7 @@ function renderDepreciationReserveHistoryPage(){
       </div>`;
   };
   const vehicleCards = summaries.map(x=>`
-    <div class="card" style="margin-bottom:14px;">
+    <div class="card" style="margin-bottom:14px;" id="drCard_${x.vid}">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;">
         <span style="font-weight:800; font-size:15px;">${x.label}</span>
         <span style="font-weight:900; color:${x.balance>=0?'var(--profit)':'var(--loss)'};">${x.balance<0?'−':''}${fmtVND(Math.abs(x.balance))}</span>
@@ -21302,6 +21333,7 @@ function renderDepreciationReserveHistoryPage(){
     </section>
   `;
   document.getElementById('depReserveHistoryBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  if(focusVid){ const el = document.getElementById(`drCard_${focusVid}`); if(el) el.scrollIntoView({block:'start'}); } // #330
   document.querySelectorAll('[data-del-dr-transfer]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm('Xoá lần chuyển tiền quỹ khấu hao này? Số dư TCB/Tiền Mặt sẽ tính lại theo.')) return;
