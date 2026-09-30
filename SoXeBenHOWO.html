@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-30 · #331';
+const APP_BUILD = '2026-09-30 · #332';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2792,10 +2792,59 @@ function fleetLoanRows(){
       const nextStr = next ? `${String(next.dueDate.getDate()).padStart(2,'0')}/${String(next.dueDate.getMonth()+1).padStart(2,'0')}/${next.dueDate.getFullYear()}` : '';
       out.push({ vid, vehicle: v ? (v.plate||v.name||'') : '', name: loan.name||'Khoản vay', owner: (loan.ownerType||'personal')==='company'?'company':'personal',
         principal, paid, remaining: Math.max(0, principal-paid), rate: (loan.rateSchedule&&loan.rateSchedule.length) ? effectiveAnnualRate(loan.rateSchedule, new Date(today+'T00:00:00')) : 0,
-        nextDate: nextStr, nextTotal: next ? next.total : 0 });
+        nextDate: nextStr, nextTotal: next ? next.total : 0, forProject: loanIsForProject(loan) });
     });
   });
   return out;
+}
+
+// ===== MỚI 2026-09-30 (#332 — Ông Chủ duyệt: nhìn theo DỰ ÁN) =====
+// Mọi nguồn lực đưa vào dự án là của dự án: khoản vay (cá nhân hay công ty) dùng
+// cho dự án là NỢ CỦA DỰ ÁN — dư nợ trừ vào giá trị ròng dự án; Vốn Chủ chỉ gồm
+// tiền thật của Ông Chủ. Lãi vay vẫn là chi phí thật (không đổi). Mỗi khoản vay
+// có cờ forProject (mặc định: có); khoản vay không dùng cho dự án bị loại ra.
+function loanIsForProject(loan){ return loan.forProject!==false; }
+function projectPersonalLoanSplit(asOfDate){
+  const d = asOfDate || todayLocalDateStr();
+  let original = 0, paid = 0;
+  Object.entries(state.allVehiclesSettings).forEach(([vid,s0])=>{
+    const s = settingsOfVehicle(vid) || s0;
+    const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
+    loans.forEach(loan=>{
+      if((loan.ownerType||'personal')==='company' || !loanIsForProject(loan)) return;
+      if(loan.disbursementDate && loan.disbursementDate>d) return;
+      original += Number(loan.principal)||0;
+      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
+      computeFullLoanSchedule(loan).forEach(r=>{
+        const ym = `${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}`;
+        const due = `${ym}-${String(r.dueDate.getDate()).padStart(2,'0')}`;
+        if(paidSet.has(ym) && (asOfDate ? due<=d : true)) paid += Number(r.monthlyPrincipal)||0;
+      });
+    });
+  });
+  return { original, paid, remaining: Math.max(0, original - paid) };
+}
+/// ✅ Kiểm tra thiết lập 1 xe — trả về danh sách mục (ok/không) để Ông Chủ biết còn thiếu gì.
+function vehicleSetupChecklist(vid){
+  const s = settingsOfVehicle(vid) || {};
+  const owner = vehicleOwnershipOf(s);
+  const entries = vehicleInvestEntries(vid);
+  const loans = Array.isArray(s.bankLoans) ? s.bankLoans : [];
+  const items = [];
+  items.push({ ok: !!s.ownershipType, text: `Đã chọn xe đứng tên ai (${owner==='company'?'🏢 Công ty':'👤 Cá nhân'})` });
+  items.push({ ok: entries.length>0, text: entries.length ? `Đã gán ${entries.length} lần đầu tư cho xe` : 'Chưa gán lần đầu tư nào cho xe' });
+  if(owner==='company') items.push({ ok: entries.every(e=>e.priceExVat!==undefined && e.priceExVat!==null && (Number(e.vatAmount)||0)>0), text: 'Xe công ty: đã tách giá chưa VAT và tiền VAT (để khấu trừ VAT)' });
+  items.push({ ok: (Number(s.monthlyVehicleDepreciation)||0)>0, text: 'Đã cài khấu hao / tháng' });
+  loans.forEach(l=>{
+    const personal = (l.ownerType||'personal')!=='company';
+    if(personal && owner==='company'){
+      const d = l.disbursementDate, amt = Number(l.principal)||0;
+      const matched = (state.ownerEquityEntries||[]).some(e=>e.type==='contribution' && !e.isRecycled && d && Math.abs(daysBetweenDates(new Date(e.date+'T00:00:00'), new Date(d+'T00:00:00')))<=7 && Math.abs((Number(e.amount)||0)-amt)<=Math.max(1, amt*0.02));
+      items.push({ ok: matched, text: `Khoản vay "${l.name||'Khoản vay'}" (👤 cá nhân, ${fmtVND(amt)}): đã ghi Góp vốn khi tiền về TCB${matched?'':' — chưa thấy khoản Góp vốn tương ứng (±7 ngày)'}` });
+    }
+  });
+  if(owner==='personal'){ const r = rentalOf(s); items.push({ ok: !!r.startDate && (Number(r.monthly)||0)>0, text: 'Xe cá nhân: đã nhập hợp đồng cho công ty thuê' }); }
+  return items;
 }
 
 function companyShiftsWithVehicle(){
@@ -3413,6 +3462,10 @@ function renderVehicleManagementPage(selectedVid){
         ${vehicles.map(x=>`<button class="btn ${x.id===vid?'btn-accent':'btn-ghost'} btn-sm" data-vm-pick="${x.id}" style="width:auto;">🚛 ${escapeHtml(x.name||x.plate||'')}</button>`).join('')}
       </div>
       ${!v ? '<div class="hint">Chưa có xe nào.</div>' : `
+      ${(()=>{ const items = vehicleSetupChecklist(vid); const okAll = items.every(x=>x.ok); return `<div class="card" style="margin-bottom:12px; border:1.5px solid ${okAll?'var(--profit)':'var(--loss)'};">
+        <div style="font-weight:800; margin-bottom:6px;">${okAll?'✅ Xe đã thiết lập đủ':'⚠️ Kiểm tra thiết lập xe — còn thiếu'}</div>
+        ${items.map(x=>`<div style="display:flex; gap:8px; align-items:flex-start; padding:3px 0; font-size:13.5px; color:${x.ok?'var(--ink)':'var(--loss)'};"><span>${x.ok?'✅':'⭕'}</span><span>${escapeHtml(x.text)}</span></div>`).join('')}
+      </div>`; })()}
       <div class="card" style="margin-bottom:12px;">
         <div style="font-weight:800; margin-bottom:8px;">1️⃣ Thông tin xe</div>
         <div class="two-col">
@@ -4313,7 +4366,13 @@ function computeOwnerEquity(){
   return { initialInvestment, contributedExtra, contributed, withdrawn, cumulativeProfit, remainingLoanBalance,
     equity: contributed - withdrawn + cumulativeProfit - remainingLoanBalance,
     contributedRaw, withdrawnRaw, contributedRecycled, withdrawnRecycled,
-    recycledUnmatchedOut: realFlows.recycledUnmatchedOut, recycledUnmatchedIn: realFlows.recycledUnmatchedIn };
+    recycledUnmatchedOut: realFlows.recycledUnmatchedOut, recycledUnmatchedIn: realFlows.recycledUnmatchedIn,
+    ...(()=>{ // #332 — góc nhìn DỰ ÁN
+      const ps = projectPersonalLoanSplit();
+      const legal = contributed - withdrawn + cumulativeProfit - remainingLoanBalance;
+      return { projectLoanOriginal: ps.original, projectLoanRemaining: ps.remaining,
+        ownCapital: contributed - withdrawn - ps.original, projectEquity: legal - ps.remaining };
+    })() };
 }
 /// Dựng dãy [{month, equity, cumulativeProfit}] từ THÁNG BẮT ĐẦU DỰ ÁN
 /// tới THÁNG HIỆN TẠI — mỗi điểm là Vốn Chủ Sở Hữu "chốt" tại đúng ngày
@@ -4352,7 +4411,8 @@ function computeMonthlyEquityTimeline(){
     // số "Vốn Chủ Sở Hữu Hiện Tại" chính (luôn đúng, dùng đúng trạng thái
     // đã tick THẬT tính đến hôm nay).
     const remainingLoanBalance = loanBalancesSplit().personalPrincipalPaid; // #320
-    const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit - remainingLoanBalance;
+    const equity = initialInvestment + contributedExtra - withdrawn + cumulativeProfit - remainingLoanBalance
+      - projectPersonalLoanSplit(snapshotDate).remaining; // #332 — góc nhìn DỰ ÁN: trừ dư nợ vay cá nhân dùng cho dự án tại thời điểm đó
     return { month: ym, equity, cumulativeProfit, remainingLoanBalance, snapshotDate };
   });
 }
@@ -18573,6 +18633,7 @@ function openLoanEditor(loanId){
         </div>
         <div class="field">
           <label>Tiền giải ngân chuyển vào đâu (chỉ áp dụng vay CÔNG TY)</label>
+          <label style="display:flex; align-items:center; gap:8px; margin:0 0 10px 0; font-weight:600;"><input type="checkbox" id="loan_forProject" ${draft.forProject!==false?'checked':''} style="width:auto;"> Tiền vay này dùng cho dự án (tính là nợ của dự án)</label>
           <select id="loan_disbursementTo">
             <option value="companyAccount" ${(draft.disbursementTo||'companyAccount')==='companyAccount'?'selected':''}>🏦 Tài khoản công ty (cộng vào TCB)</option>
             <option value="seller" ${draft.disbursementTo==='seller'?'selected':''}>🚛 Ngân hàng chuyển thẳng cho bên bán xe (không vào TCB)</option>
@@ -18843,6 +18904,7 @@ function openLoanEditor(loanId){
     draft.name = document.getElementById('loan_name').value.trim() || `Khoản vay ${(state.settings.bankLoans||[]).length+1}`;
     draft.ownerType = document.getElementById('loan_ownerType').value;
     draft.disbursementTo = document.getElementById('loan_disbursementTo').value; // #320
+    draft.forProject = document.getElementById('loan_forProject').checked; // #332
     if(!(draft.principal>0)){ showToast('Nhập số tiền vay trước đã.'); return; }
     if(!(draft.termMonths>0)){ showToast('Nhập thời hạn vay trước đã.'); return; }
     if(draft.graceMonths>=draft.termMonths){ showToast('Số tháng ân hạn phải nhỏ hơn Tổng thời hạn vay (phải còn ít nhất 1 tháng để trả gốc).'); return; }
@@ -19539,8 +19601,9 @@ function computeBusinessReport(from, to){
     else notes.push({ ok:false, text:`⚠️ Chưa đạt điểm hoà vốn kỳ này: mới ${breakEven.actualTrips}/${breakEven.breakEvenTrips} chuyến cần — còn thiếu ${breakEven.breakEvenTrips-breakEven.actualTrips} chuyến để hết lỗ chi phí cố định.` });
   } else if(breakEven.note) notes.push({ ok:false, text:`⚠️ ${breakEven.note}` });
 
-  if(equity.equity>=equity.initialInvestment) notes.push({ ok:true, text:`✅ Vốn Chủ Sở Hữu hiện tại (${fmtVND(equity.equity)}) đang CAO HƠN vốn đầu tư ban đầu (${fmtVND(equity.initialInvestment)}) — dự án đang tích luỹ lời so với lúc bỏ vốn.` });
-  else notes.push({ ok:false, text:`⚠️ Vốn Chủ Sở Hữu hiện tại (${fmtVND(equity.equity)}) đang THẤP HƠN vốn đầu tư ban đầu (${fmtVND(equity.initialInvestment)}) — xe đang "ăn" ngược vào vốn gốc, cần theo dõi sát.` });
+  // #332 — góc nhìn DỰ ÁN: so Vốn Chủ Sở Hữu Dự Án với Vốn tự có của Ông Chủ.
+  if(equity.projectEquity>=equity.ownCapital) notes.push({ ok:true, text:`✅ Vốn Chủ Sở Hữu Dự Án (${fmtVND(equity.projectEquity)}) đang CAO HƠN vốn tự có Ông Chủ bỏ vào (${fmtVND(equity.ownCapital)}) — dự án đang tích luỹ lời.` });
+  else notes.push({ ok:false, text:`⚠️ Vốn Chủ Sở Hữu Dự Án (${fmtVND(equity.projectEquity)}) đang THẤP HƠN vốn tự có Ông Chủ bỏ vào (${fmtVND(equity.ownCapital)}) — dự án đang "ăn" ngược vào vốn, cần theo dõi sát.` });
 
   const custRevShareOfDebt = commercialPaymentsInRange+cargoPaymentsInRange>0 ? debtSummary.totalCustomerOwed/(commercialPaymentsInRange+cargoPaymentsInRange) : 0;
   if(debtSummary.totalCustomerOwed>0.5){
@@ -19681,7 +19744,7 @@ function renderBusinessReportPage(from, to, preserveScroll){
         <table class="grid-table">
           <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>Vốn Chủ Sở Hữu hiện tại</td><td class="num" style="font-weight:800; color:${r.equity.equity>=0?'var(--profit)':'var(--loss)'}">${fmtVND(r.equity.equity)}</td></tr>
+            <tr><td>Vốn Chủ Sở Hữu Dự Án</td><td class="num" style="font-weight:800; color:${r.equity.projectEquity>=0?'var(--profit)':'var(--loss)'}">${fmtVND(r.equity.projectEquity)}</td></tr>
             <tr><td>Vốn điều lệ đã đăng ký</td><td class="num">${fmtVND(r.charterStatus.registered)}</td></tr>
             <tr><td>Vốn điều lệ đã góp</td><td class="num">${fmtVND(r.charterStatus.contributed)}</td></tr>
             <tr><td>Còn thiếu vốn điều lệ</td><td class="num" style="color:${r.charterStatus.remaining>0?'var(--loss)':'var(--profit)'};">${r.charterStatus.remaining>0?fmtVND(r.charterStatus.remaining):'Đã góp đủ ✅'}</td></tr>
@@ -20179,8 +20242,9 @@ function renderCompanyDashboardPage(preserveScroll){
       })()}
 
       <div class="card" style="border:1.5px solid var(--accent); background:var(--accent-soft); text-align:center; padding:22px 16px;">
-        <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU HIỆN TẠI</div>
-        <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.equity>=0?'var(--profit)':'var(--loss)'};">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</div>
+        <div style="font-size:12.5px; color:var(--ink-soft); font-weight:700; letter-spacing:0.3px;">VỐN CHỦ SỞ HỮU DỰ ÁN</div>
+        <div style="font-size:32px; font-weight:900; margin-top:4px; color:${eq.projectEquity>=0?'var(--profit)':'var(--loss)'};">${eq.projectEquity>=0?'+':''}${fmtVND(eq.projectEquity)}</div>
+        <div class="hint" style="margin-top:2px;">Góc nhìn DỰ ÁN: tài sản − mọi khoản nợ dùng cho dự án (công ty + đứng tên Ông Chủ)</div>
         <button class="btn btn-ghost btn-sm" id="equityDetailBtn" style="margin-top:12px; width:auto; padding:7px 20px; display:inline-block;">📋 Chi Tiết</button>
       </div>
 
@@ -20320,7 +20384,8 @@ function renderCompanyDashboardPage(preserveScroll){
         const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
           + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + depreciationReserveBalance()
           + driverAdvanceHeld - driverAdvanceOwed - wagePayable + truckVatRemaining; // #321 — hoá đơn mỏ KHÔNG cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
-        const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance;
+        const projectPersonalRemaining = projectPersonalLoanSplit().remaining; // #332 — góc nhìn DỰ ÁN
+        const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance - projectPersonalRemaining;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
         const cb = computeCashBridge(eq, workingCapitalTotal, depreciationSoFar);
         return `
@@ -20380,34 +20445,46 @@ function renderCompanyDashboardPage(preserveScroll){
           ${(()=>{
             const A = fleetAssetRows(); const Ls = fleetLoanRows();
             const compRem = Ls.filter(l=>l.owner==='company').reduce((a,l)=>a+l.remaining,0);
-            const persRem = Ls.filter(l=>l.owner==='personal').reduce((a,l)=>a+l.remaining,0);
+            const persRem = Ls.filter(l=>l.owner==='personal' && l.forProject!==false).reduce((a,l)=>a+l.remaining,0);
             const ownerBadge = o=> o==='company' ? '<span class="resp-badge owner_full" style="margin-left:0;">🏢 Công ty</span>' : '<span class="resp-badge split" style="margin-left:0;">👤 Cá nhân</span>';
             return `
           <div style="font-weight:800; font-size:13.5px; margin:6px 0 6px;">1️⃣ Giá trị từng xe</div>
-          <div class="grid-table-wrap"><table class="grid-table">
-            <thead><tr><th>Xe</th><th>Đứng tên</th><th class="num">Giá trị đầu tư</th><th class="num">− Khấu hao luỹ kế</th><th class="num">= Còn lại</th></tr></thead>
-            <tbody>
-              ${A.rows.map(r=>`<tr><td><strong>🚛 ${escapeHtml(r.label)}</strong>${r.sold?`<div class="hint" style="margin:2px 0 0;">Đã bán ${formatDateVN(r.sold)}</div>`:''}${r.noEntries?`<div class="hint" style="margin:2px 0 0; color:var(--loss);">⚠️ Chưa gán lần đầu tư</div>`:''}</td><td>${ownerBadge(r.owner)}</td><td class="num">${fmtVND(r.base)}</td><td class="num">${r.noEntries && r.depPooled>0.5 ? `<span class="hint">(${fmtVND(r.depPooled)} tính ở dòng chưa gán)</span>` : '−'+fmtVND(r.dep)}</td><td class="num" style="font-weight:800;">${fmtVND(r.remaining)}</td></tr>`).join('')}
-              ${A.unassigned ? `<tr><td colspan="2"><strong>⚠️ Lần đầu tư chưa gán xe</strong><div class="hint" style="margin:2px 0 0;">Vào 🚛 Quản Lý Xe → Sửa → chọn xe</div></td><td class="num">${fmtVND(A.unassigned.base)}</td><td class="num">−${fmtVND(A.unassigned.dep)}</td><td class="num" style="font-weight:800;">${fmtVND(A.unassigned.remaining)}</td></tr>` : ''}
-              <tr class="grid-total-row"><td colspan="4" style="text-align:left;">= TỔNG GIÁ TRỊ XE CÒN LẠI</td><td class="num">${fmtVND(vehicleNetBookValue)}</td></tr>
-            </tbody></table></div>
+          ${A.rows.map(r=>`<div style="border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:8px; background:var(--surface);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;"><strong>🚛 ${escapeHtml(r.label)}</strong>${ownerBadge(r.owner)}</div>
+            ${r.sold?`<div class="hint" style="margin:0 0 4px;">Đã bán ${formatDateVN(r.sold)}</div>`:''}${r.noEntries?`<div class="hint" style="margin:0 0 4px; color:var(--loss);">⚠️ Chưa gán lần đầu tư — vào 🚛 Quản Lý Xe để gán</div>`:''}
+            <div class="summary-row"><span>Giá trị đầu tư</span><span class="val">${fmtVND(r.base)}</span></div>
+            <div class="summary-row"><span>− Khấu hao luỹ kế</span><span class="val">${r.noEntries && r.depPooled>0.5 ? `(${fmtVND(r.depPooled)} tính ở dòng chưa gán)` : '−'+fmtVND(r.dep)}</span></div>
+            <div class="summary-row total"><span>= Còn lại</span><span class="val">${fmtVND(r.remaining)}</span></div>
+          </div>`).join('')}
+          ${A.unassigned ? `<div style="border:1.5px dashed var(--loss); border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+            <strong>⚠️ Lần đầu tư chưa gán xe</strong><div class="hint" style="margin:2px 0 6px;">Vào 🚛 Quản Lý Xe → Sửa → chọn xe</div>
+            <div class="summary-row"><span>Giá trị đầu tư</span><span class="val">${fmtVND(A.unassigned.base)}</span></div>
+            <div class="summary-row"><span>− Khấu hao luỹ kế</span><span class="val">−${fmtVND(A.unassigned.dep)}</span></div>
+            <div class="summary-row total"><span>= Còn lại</span><span class="val">${fmtVND(A.unassigned.remaining)}</span></div>
+          </div>` : ''}
+          <div class="summary-row total" style="padding:10px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--border);"><span><strong>= TỔNG GIÁ TRỊ XE CÒN LẠI</strong></span><span class="val">${fmtVND(vehicleNetBookValue)}</span></div>
           <div class="hint" style="margin-top:4px;">Xe công ty: giá trị đầu tư KHÔNG gồm VAT (VAT nằm ở "VAT chờ khấu trừ"). Xe cá nhân: gồm cả VAT.</div>
 
           <div style="font-weight:800; font-size:13.5px; margin:14px 0 6px;">2️⃣ Từng khoản vay</div>
-          <div class="grid-table-wrap"><table class="grid-table">
-            <thead><tr><th>Khoản vay</th><th>Xe</th><th>Đứng tên</th><th class="num">Gốc vay</th><th class="num">Gốc đã trả</th><th class="num">Dư nợ còn lại</th><th class="num">Lãi suất</th><th>Kỳ tới</th></tr></thead>
-            <tbody>
-              ${Ls.map(l=>`<tr><td><strong>${escapeHtml(l.name)}</strong></td><td style="white-space:nowrap;">${escapeHtml(l.vehicle)}</td><td>${ownerBadge(l.owner)}</td><td class="num">${fmtVND(l.principal)}</td><td class="num">${fmtVND(l.paid)}</td><td class="num" style="font-weight:800; color:var(--loss);">${fmtVND(l.remaining)}</td><td class="num">${l.rate?fmtDec(l.rate,2)+'%':'—'}</td><td style="white-space:nowrap;">${l.nextDate?`${l.nextDate}<div class="hint" style="margin:2px 0 0;">${fmtVND(l.nextTotal)}</div>`:'✅ Đã trả hết'}</td></tr>`).join('') || '<tr><td colspan="8" class="hint">Chưa có khoản vay nào.</td></tr>'}
-              <tr class="grid-total-row"><td colspan="5" style="text-align:left;">🏢 Dư nợ đứng tên CÔNG TY (nợ công ty — trừ vào giá trị ròng)</td><td class="num">${fmtVND(compRem)}</td><td colspan="2"></td></tr>
-              <tr class="grid-total-row"><td colspan="5" style="text-align:left;">👤 Dư nợ đứng tên CÁ NHÂN Ông Chủ (nợ riêng — tham khảo)</td><td class="num">${fmtVND(persRem)}</td><td colspan="2"></td></tr>
-            </tbody></table></div>
-          <div class="hint" style="margin-top:4px;">Vay cá nhân: gốc công ty trả hộ (${fmtVND(loanSplit.personalPrincipalPaid)}) đã tự nằm trong số dư TCB/Tiền Mặt và được ghi là tiền Ông Chủ nhận về ở Vốn Chủ, nên không trừ thêm ở đây.</div>
+          ${Ls.map(l=>`<div style="border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:8px; background:var(--surface);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;"><strong>🏦 ${escapeHtml(l.name)}</strong>${ownerBadge(l.owner)}</div>
+            <div class="hint" style="margin:0 0 4px;">Xe: ${escapeHtml(l.vehicle||'—')}${l.forProject===false?' · không dùng cho dự án':''}</div>
+            <div class="summary-row"><span>Gốc vay</span><span class="val">${fmtVND(l.principal)}</span></div>
+            <div class="summary-row"><span>Gốc đã trả</span><span class="val">${fmtVND(l.paid)}</span></div>
+            <div class="summary-row total"><span>Dư nợ còn lại</span><span class="val" style="color:var(--loss);">${fmtVND(l.remaining)}</span></div>
+            <div class="summary-row"><span>Lãi suất hiện tại</span><span class="val">${l.rate?fmtDec(l.rate,2)+'%/năm':'—'}</span></div>
+            <div class="summary-row"><span>Kỳ tới</span><span class="val">${l.nextDate?`${l.nextDate} · ${fmtVND(l.nextTotal)}`:'✅ Đã trả hết'}</span></div>
+          </div>`).join('') || '<div class="hint">Chưa có khoản vay nào.</div>'}
+          <div class="summary-row" style="padding:8px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--border); margin-bottom:6px;"><span>🏢 Dư nợ đứng tên CÔNG TY</span><span class="val" style="font-weight:800;">${fmtVND(compRem)}</span></div>
+          <div class="summary-row" style="padding:8px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--border);"><span>👤 Dư nợ đứng tên Ông Chủ dùng cho dự án</span><span class="val" style="font-weight:800;">${fmtVND(persRem)}</span></div>
+          <div class="hint" style="margin-top:4px;">Góc nhìn DỰ ÁN: mọi khoản vay dùng cho dự án (đứng tên công ty hay Ông Chủ) đều là nợ của dự án. Cột "Đứng tên" chỉ để tách bạch khi làm thuế/kế toán.</div>
 
           <div style="font-weight:800; font-size:13.5px; margin:14px 0 6px;">3️⃣ Giá trị tài sản xe ròng</div>
           <table class="grid-table">
             <tbody>
               <tr><td>Tổng giá trị xe còn lại</td><td class="num">${fmtVND(vehicleNetBookValue)}</td></tr>
-              <tr><td>− Dư nợ đứng tên công ty</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
+              <tr><td>− Dư nợ vay đứng tên công ty</td><td class="num" style="color:var(--loss);">−${fmtVND(remainingLoanBalance)}</td></tr>
+              <tr><td>− Dư nợ vay đứng tên Ông Chủ dùng cho dự án</td><td class="num" style="color:var(--loss);">−${fmtVND(projectPersonalRemaining)}</td></tr>
               <tr class="grid-total-row"><td style="text-align:left;">= GIÁ TRỊ TÀI SẢN XE (RÒNG)</td><td class="num" style="color:${vehicleAssetNetTotal>=0?'var(--profit)':'var(--loss)'}">${vehicleAssetNetTotal>=0?'+':''}${fmtVND(vehicleAssetNetTotal)}</td></tr>
             </tbody>
           </table>`; })()}
@@ -20419,7 +20496,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ RÒNG TOÀN CÔNG TY</td><td class="num" style="color:${netAssetValue>=0?'var(--profit)':'var(--loss)'}">${netAssetValue>=0?'+':''}${fmtVND(netAssetValue)}</td></tr>
             </tbody>
           </table>
-          ${loanSplit.personalRemaining>0.5 ? `<div class="summary-row" style="margin-top:10px; padding:10px 12px; border-radius:10px; background:var(--warn-soft, #fff3cd); border:1px solid var(--border);"><span>👤 Giá trị ròng nếu tính cả nợ cá nhân Ông Chủ<div class="hint" style="margin:2px 0 0;">= Tổng giá trị ròng công ty − dư nợ cá nhân ${fmtVND(loanSplit.personalRemaining)} (tham khảo: phần thật sự thuộc về Ông Chủ sau khi trả hết mọi khoản vay)</div></span><span class="val" style="font-weight:900; color:${(netAssetValue-loanSplit.personalRemaining)>=0?'var(--profit)':'var(--loss)'};">${(netAssetValue-loanSplit.personalRemaining)<0?'−':''}${fmtVND(Math.abs(netAssetValue-loanSplit.personalRemaining))}</span></div>` : ''}
+          ${projectPersonalRemaining>0.5 ? `<div class="hint" style="margin-top:8px;">ℹ️ Theo pháp lý công ty (không tính nợ đứng tên Ông Chủ): ${fmtVND(netAssetValue + projectPersonalRemaining)}. Số trên là góc nhìn DỰ ÁN — đã trừ đủ mọi khoản nợ dùng cho dự án.</div>` : ''}
         </div>
 
         <!-- MỚI 2026-09-27 (Ông Chủ yêu cầu — "Cầu Nối Dòng Tiền"): CHỈ ĐỌC,
@@ -20552,9 +20629,11 @@ function renderCompanyDashboardPage(preserveScroll){
         <table class="grid-table">
           <thead><tr><th style="color:var(--ink); font-weight:800;">Khoản mục</th><th class="num" style="color:var(--ink); font-weight:800;">Số tiền</th></tr></thead>
           <tbody>
-            <tr><td>Vốn đầu tư ban đầu (mua xe)</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
-            <tr><td>+ Vốn Ông Chủ góp thêm thật (ròng = tổng góp − tổng rút)</td><td class="num" style="color:${(eq.contributedExtra-eq.withdrawn)>=0?'var(--profit)':'var(--loss)'};">${(eq.contributedExtra-eq.withdrawn)>=0?'+':'−'}${fmtVND(Math.abs(eq.contributedExtra-eq.withdrawn))}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">+ Lợi nhuận luỹ kế</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':''}${fmtVND(eq.cumulativeProfit)}</td></tr>
+            <tr><td>Tiền Ông Chủ đưa vào dự án (mua xe + góp ròng)</td><td class="num">${fmtVND(eq.contributed - eq.withdrawn)}</td></tr>
+            <tr><td>− Trong đó là tiền VAY (đứng tên Ông Chủ, dùng cho dự án)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.projectLoanOriginal)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Vốn tự có của Ông Chủ</td><td class="num">${eq.ownCapital<0?'−':''}${fmtVND(Math.abs(eq.ownCapital))}</td></tr>
+            <tr><td>+ Lợi nhuận luỹ kế (đã trừ lãi vay)</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'}">${eq.cumulativeProfit>=0?'+':'−'}${fmtVND(Math.abs(eq.cumulativeProfit))}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= VỐN CHỦ SỞ HỮU DỰ ÁN</td><td class="num" style="color:${eq.projectEquity>=0?'var(--profit)':'var(--loss)'}">${eq.projectEquity>=0?'+':''}${fmtVND(eq.projectEquity)}</td></tr>
           </tbody>
         </table>
       </div>
@@ -22264,11 +22343,12 @@ function renderEquityDetailPage(){
         <table class="grid-table">
           <thead><tr><th>Khoản mục</th><th class="num">Số tiền</th></tr></thead>
           <tbody>
-            <tr><td>Vốn Đầu Tư Ban Đầu</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
+            <tr><td>Vốn Đầu Tư Ban Đầu (phần Ông Chủ trả: tiền riêng + vay cá nhân)</td><td class="num">${fmtVND(eq.initialInvestment)}</td></tr>
             <tr><td>+ Vốn Ông Chủ góp thêm thật (ròng = tổng góp − tổng rút)</td><td class="num" style="color:${(eq.contributedExtra-eq.withdrawn)>=0?'var(--profit)':'var(--loss)'};">${(eq.contributedExtra-eq.withdrawn)>=0?'+':'−'}${fmtVND(Math.abs(eq.contributedExtra-eq.withdrawn))}</td></tr>
-            <tr><td>+ Lợi Nhuận Thực Tế (luỹ kế)</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'};">${eq.cumulativeProfit>=0?'+':'−'}${fmtVND(Math.abs(eq.cumulativeProfit))}</td></tr>
-            <tr><td>− Điều Chỉnh Vay Ngân Hàng</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.remainingLoanBalance)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= VỐN CHỦ SỞ HỮU HIỆN TẠI</td><td class="num" style="color:${eq.equity>=0?'var(--profit)':'var(--loss)'}">${eq.equity>=0?'+':''}${fmtVND(eq.equity)}</td></tr>
+            <tr><td>− Trong đó là tiền VAY đứng tên Ông Chủ dùng cho dự án (gốc vay ban đầu)</td><td class="num" style="color:var(--loss);">−${fmtVND(eq.projectLoanOriginal)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Vốn tự có của Ông Chủ</td><td class="num">${eq.ownCapital<0?'−':''}${fmtVND(Math.abs(eq.ownCapital))}</td></tr>
+            <tr><td>+ Lợi Nhuận Thực Tế luỹ kế (đã trừ lãi vay)</td><td class="num" style="color:${eq.cumulativeProfit>=0?'var(--profit)':'var(--loss)'};">${eq.cumulativeProfit>=0?'+':'−'}${fmtVND(Math.abs(eq.cumulativeProfit))}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= VỐN CHỦ SỞ HỮU DỰ ÁN</td><td class="num" style="color:${eq.projectEquity>=0?'var(--profit)':'var(--loss)'}">${eq.projectEquity>=0?'+':''}${fmtVND(eq.projectEquity)}</td></tr>
           </tbody>
         </table>
       </div>
