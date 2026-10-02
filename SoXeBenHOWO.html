@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-30 · #332';
+const APP_BUILD = '2026-09-30 · #333';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2845,6 +2845,262 @@ function vehicleSetupChecklist(vid){
   });
   if(owner==='personal'){ const r = rentalOf(s); items.push({ ok: !!r.startDate && (Number(r.monthly)||0)>0, text: 'Xe cá nhân: đã nhập hợp đồng cho công ty thuê' }); }
   return items;
+}
+
+// ===== MỚI 2026-09-30 (#333 — Ông Chủ duyệt: Xuất Excel Khách Hàng / Nhà Cung Cấp) =====
+// File ExcelJS sạch đẹp (Times New Roman, viền, canh lề, cố định tiêu đề), theo khoảng
+// ngày chọn, có số dư đầu kỳ/cuối kỳ, sổ đối chiếu công nợ (có ô ký), dòng tự kiểm.
+// 2 chế độ: "internal" (nội bộ — thêm giá vốn/giá bán, lãi gộp) / "partner" (gửi đối tác).
+const PX_VOL = '#,##0.00';
+function pxShiftLabel(sh){ const t = SHIFT_TYPES.find(x=>x.key===sh.shiftType); return t ? t.label : (sh.shiftType||''); }
+function pxDriverName(sh){ const d = driverById(sh.driverId); return d ? d.name : (sh.driverNameSnapshot||''); }
+/// Toàn bộ dữ liệu 1 đối tác trong kỳ (kind = 'supplier' | 'customer').
+function partnerStatementData(kind, id, from, to){
+  const isSup = kind==='supplier';
+  const trips = [], siteRows = [];
+  let openingMoves = 0;
+  for(const sh of allShiftsCompanyWide()){
+    (sh.siteLogs||[]).forEach(s=>{
+      const match = isSup ? (s.siteType==='commercial' && s.supplierId===id) : (s.customerId===id);
+      if(!match) return;
+      const amount = isSup ? commercialCashToSupplier(s) : siteBilledAmount(s);
+      if(sh.date<from){ openingMoves += amount; return; }
+      if(sh.date>to) return;
+      const partnerOther = isSup ? ((s.customerId && customerById(s.customerId)?.name) || s.siteName || '') : (s.siteName || '');
+      siteRows.push({ sh, s, amount, date: sh.date });
+      if(s.siteType==='commercial'){
+        const gross = isSup ? commercialGrossBuy(s) : commercialGrossSell(s);
+        (s.commercialTrips||[]).forEach(t=>{
+          const vol = Number(isSup ? t.buyVolume : t.sellVolume)||0;
+          const price = Number(isSup ? t.buyUnitPrice : t.sellUnitPrice)||0;
+          const lineGross = vol*price;
+          const share = gross>0 ? lineGross/gross : 0;
+          const buyLine = (Number(t.buyVolume)||0)*(Number(t.buyUnitPrice)||0);
+          const sellLine = (Number(t.sellVolume)||0)*(Number(t.sellUnitPrice)||0);
+          trips.push({ date: sh.date, shift: pxShiftLabel(sh), vehicle: vehicleNameById(sh._vehicleId)||'', driver: pxDriverName(sh), other: partnerOther,
+            goods: (isSup ? t.goodsType : (t.sellGoodsType||t.goodsType)) || '', vol, unit: isSup?'tấn':'khối', price, lineGross,
+            vat: (amount-gross)*share, total: amount*share,
+            invoiced: isSup ? (buyIsDeductible(s)?`Có HĐ ${siteInvoicedBuyPercent(s)}%`:'Chưa HĐ') : (s.sellHasInvoice?'Đã xuất HĐ':'Chưa xuất HĐ'),
+            buyLine, sellLine, margin: sellLine - buyLine });
+        });
+      } else {
+        const vol = (Number(s.volumePerTrip)||0)*(Number(s.trips)||0);
+        trips.push({ date: sh.date, shift: pxShiftLabel(sh), vehicle: vehicleNameById(sh._vehicleId)||'', driver: pxDriverName(sh), other: partnerOther,
+          goods: `Cước vận chuyển (${Number(s.trips)||0} chuyến)`, vol, unit:'khối', price: Number(s.materialUnitPrice)||0, lineGross: amount, vat: 0, total: amount,
+          invoiced: '—', buyLine: 0, sellLine: amount, margin: null });
+      }
+    });
+  }
+  const payList = isSup ? (state.supplierPayments||[]).filter(p=>p.supplierId===id) : (state.sitePayments||[]).filter(p=>p.customerId===id);
+  const paidBefore = payList.filter(p=>p.date<from).reduce((a,p)=>a+(Number(p.amount)||0),0);
+  const payments = payList.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
+  const opening = openingMoves - paidBefore;
+  const incurred = siteRows.reduce((a,r)=>a+r.amount,0);
+  const paid = payments.reduce((a,p)=>a+(Number(p.amount)||0),0);
+  const closing = opening + incurred - paid;
+  trips.sort((a,b)=>a.date.localeCompare(b.date));
+  // Sổ đối chiếu: gom theo ngày phát sinh + từng lần thanh toán, số dư chạy.
+  const ledger = []; const byDay = {};
+  siteRows.forEach(r=>{ byDay[r.date] = (byDay[r.date]||0) + r.amount; });
+  Object.entries(byDay).forEach(([d,a])=>ledger.push({ date:d, desc: isSup?'Tiền hàng lấy trong ngày':'Tiền hàng / cước phát sinh trong ngày', inc:a, pay:0 }));
+  payments.forEach(p=>ledger.push({ date:p.date, desc:`${isSup?'Ông Chủ bank cho mỏ':'Khách thanh toán'}${p.notes?' — '+p.notes:''}${p.method==='cash'?' (tiền mặt)':' (TCB)'}`, inc:0, pay:Number(p.amount)||0 }));
+  ledger.sort((a,b)=>a.date.localeCompare(b.date) || (a.pay-b.pay));
+  let bal = opening; ledger.forEach(l=>{ bal += l.inc - l.pay; l.bal = bal; });
+  const mineInvoices = isSup ? (state.mineInvoices||[]).filter(inv=>inv.supplierId===id && ((inv.invoiceDate||inv.deliveryTo||'')>=from) && ((inv.invoiceDate||inv.deliveryFrom||'')<=to)) : [];
+  const issued = !isSup ? siteRows.filter(r=>r.s.siteType==='commercial' && r.s.sellHasInvoice).map(r=>({ date:r.date, site:r.s.siteName||'', vol:(r.s.commercialTrips||[]).reduce((a,t)=>a+(Number(t.sellVolume)||0),0), amount:r.amount })) : [];
+  const byGoods = {};
+  trips.forEach(t=>{ const k = t.goods||'—'; if(!byGoods[k]) byGoods[k] = { vol:0, amount:0, unit:t.unit }; byGoods[k].vol += t.vol; byGoods[k].amount += t.total; });
+  return { kind, id, from, to, opening, incurred, paid, closing, trips, payments, ledger, mineInvoices, issued, byGoods,
+    vatTotal: trips.reduce((a,t)=>a+t.vat,0), grossTotal: trips.reduce((a,t)=>a+t.lineGross,0) };
+}
+function pxTitleBlock(ws, cols, company, mst, title, partnerName, from, to){
+  const last = String.fromCharCode(64+cols);
+  ws.mergeCells(`A1:${last}1`); ktCell(ws,'A1',company,{bold:true,size:13,border:false});
+  ws.mergeCells(`A2:${last}2`); ktCell(ws,'A2',mst?`MST: ${mst}`:'',{size:10,border:false,color:'FF666666'});
+  ws.mergeCells(`A3:${last}3`); ktCell(ws,'A3',title,{bold:true,size:15,align:'center',border:false});
+  ws.mergeCells(`A4:${last}4`); ktCell(ws,'A4',`${partnerName} · Kỳ: ${formatDateVN(from)} — ${formatDateVN(to)}`,{size:11,align:'center',border:false,color:'FF444444'});
+  ws.getRow(3).height = 24;
+  return 6; // hàng bắt đầu bảng
+}
+function pxWidths(ws, widths){ widths.forEach((w,i)=>{ ws.getColumn(i+1).width = w; }); }
+function pxSheetName(base, used){ let n = base.replace(/[\\\/\?\*\[\]:]/g,'').slice(0,31); let k=2; while(used.has(n)){ n = (base.slice(0,27)+' '+k).slice(0,31); k++; } used.add(n); return n; }
+function pxBuildPartnerSheets(wb, D, mode, company, mst, used, compact){
+  const isSup = D.kind==='supplier';
+  const P = isSup ? supplierById(D.id) : customerById(D.id);
+  const pname = P ? P.name : '';
+  const short = (pname||'Doi tac').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D');
+  const internal = mode==='internal';
+  // --- Tổng hợp
+  if(!compact){
+    const ws = wb.addWorksheet(pxSheetName('Tong hop', used));
+    pxWidths(ws,[46,22]);
+    let r = pxTitleBlock(ws,2,company,mst, isSup?'TỔNG HỢP CÔNG NỢ NHÀ CUNG CẤP':'TỔNG HỢP CÔNG NỢ KHÁCH HÀNG', pname, D.from, D.to);
+    ktHeaderRow(ws, r, ['Khoản mục','Số tiền']); r++;
+    const line = (label, val, opts={})=>{ ktCell(ws,`A${r}`,label,{bold:!!opts.bold,fill:opts.fill}); ktCell(ws,`B${r}`,Math.round(val),{align:'right',numFmt:KT_NUMFMT,bold:!!opts.bold,fill:opts.fill,color:opts.color}); r++; };
+    line(`Số dư đầu kỳ (${isSup?'Ông Chủ còn nợ mỏ':'khách còn nợ'}; âm = ${isSup?'đang ứng dư':'khách trả trước'})`, D.opening);
+    line(isSup?'+ Tiền hàng phát sinh trong kỳ (gồm VAT phần có hoá đơn)':'+ Tiền hàng / cước phát sinh trong kỳ (gồm VAT khi đã xuất HĐ)', D.incurred);
+    line('    trong đó: tiền hàng chưa VAT', D.grossTotal);
+    line('    trong đó: VAT', D.vatTotal);
+    line(isSup?'− Đã bank / trả cho mỏ trong kỳ':'− Khách đã thanh toán trong kỳ', D.paid);
+    line('= SỐ DƯ CUỐI KỲ', D.closing, { bold:true, fill:KT_HEAD_FILL, color: D.closing>0?'FFB23A2E':'FF1B7A3D' });
+    r++;
+    ktHeaderRow(ws, r, ['Khối lượng theo loại hàng','Thành tiền (gồm VAT)']); r++;
+    Object.entries(D.byGoods).forEach(([g,v])=>{ ktCell(ws,`A${r}`,`${g} — ${Math.round(v.vol*100)/100} ${v.unit}`); ktCell(ws,`B${r}`,Math.round(v.amount),{align:'right',numFmt:KT_NUMFMT}); r++; });
+    r++;
+    const ok1 = Math.abs(D.trips.reduce((a,t)=>a+t.total,0) - D.incurred) < 2;
+    const ok2 = Math.abs(D.payments.reduce((a,p)=>a+(Number(p.amount)||0),0) - D.paid) < 2;
+    ktCell(ws,`A${r}`,'Tự kiểm: tổng sheet "Chi tiet chuyen" = phát sinh trong kỳ',{border:false,size:10}); ktCell(ws,`B${r}`, ok1?'Khớp ✅':'Lệch ⚠️',{border:false,size:10,align:'right'}); r++;
+    ktCell(ws,`A${r}`,'Tự kiểm: tổng sheet "Thanh toan" = đã trả/thu trong kỳ',{border:false,size:10}); ktCell(ws,`B${r}`, ok2?'Khớp ✅':'Lệch ⚠️',{border:false,size:10,align:'right'});
+  }
+  // --- Chi tiết chuyến
+  {
+    const ws = wb.addWorksheet(pxSheetName(compact?`CT ${short}`:'Chi tiet chuyen', used));
+    const heads = ['Ngày','Ca','Xe','Tài xế', isSup?'Khách / Công trình':'Công trình / Điểm đổ','Loại hàng','Khối lượng','ĐVT','Đơn giá','Thành tiền (chưa VAT)','VAT','Tổng (gồm VAT)','Hoá đơn'];
+    if(internal) heads.push('Tiền mua','Tiền bán','Lãi gộp');
+    pxWidths(ws,[12,9,13,14,26,14,12,7,14,17,13,17,15].concat(internal?[15,15,15]:[]));
+    let r = compact ? 1 : pxTitleBlock(ws, heads.length, company, mst, 'CHI TIẾT TỪNG CHUYẾN', pname, D.from, D.to);
+    if(compact){ ws.mergeCells(1,1,1,heads.length); ktCell(ws,'A1',`${pname} — Chi tiết chuyến (${formatDateVN(D.from)} — ${formatDateVN(D.to)})`,{bold:true,size:12,border:false}); r = 3; }
+    ktHeaderRow(ws, r, heads); const headRow = r; r++;
+    D.trips.forEach(t=>{
+      const vals = [formatDateVN(t.date), t.shift, t.vehicle, t.driver, t.other, t.goods, Math.round(t.vol*100)/100, t.unit, Math.round(t.price), Math.round(t.lineGross), Math.round(t.vat), Math.round(t.total), t.invoiced];
+      if(internal) vals.push(Math.round(t.buyLine), Math.round(t.sellLine), t.margin===null?'':Math.round(t.margin));
+      vals.forEach((v,i)=>{ const num = typeof v==='number'; ktCell(ws, ws.getCell(r,i+1).address, v, { align: num?'right':(i===1||i===7?'center':'left'), numFmt: num ? (i===6?PX_VOL:KT_NUMFMT) : undefined, wrap: i===4||i===5 }); });
+      r++;
+    });
+    const tot = { vol: D.trips.reduce((a,t)=>a+t.vol,0), g: D.trips.reduce((a,t)=>a+t.lineGross,0), v: D.vatTotal, t: D.trips.reduce((a,t)=>a+t.total,0),
+      b: D.trips.reduce((a,t)=>a+t.buyLine,0), s: D.trips.reduce((a,t)=>a+t.sellLine,0), m: D.trips.reduce((a,t)=>a+(t.margin||0),0) };
+    ws.mergeCells(r,1,r,6); ktCell(ws, `A${r}`, `TỔNG (${D.trips.length} dòng)`, {bold:true, fill:KT_HEAD_FILL});
+    const totVals = { 7:[Math.round(tot.vol*100)/100,PX_VOL], 10:[Math.round(tot.g),KT_NUMFMT], 11:[Math.round(tot.v),KT_NUMFMT], 12:[Math.round(tot.t),KT_NUMFMT] };
+    if(internal){ totVals[14]=[Math.round(tot.b),KT_NUMFMT]; totVals[15]=[Math.round(tot.s),KT_NUMFMT]; totVals[16]=[Math.round(tot.m),KT_NUMFMT]; }
+    for(let c=7;c<=heads.length;c++){ const tv = totVals[c]; ktCell(ws, ws.getCell(r,c).address, tv?tv[0]:'', {bold:true, fill:KT_HEAD_FILL, align:'right', numFmt: tv?tv[1]:undefined}); }
+    ws.views = [{ state:'frozen', ySplit: headRow }];
+  }
+  // --- Thanh toán
+  if(!compact){
+    const ws = wb.addWorksheet(pxSheetName('Thanh toan', used));
+    pxWidths(ws,[13,18,14,44]);
+    let r = pxTitleBlock(ws,4,company,mst, isSup?'CÁC LẦN BANK / TRẢ CHO MỎ':'CÁC LẦN KHÁCH THANH TOÁN', pname, D.from, D.to);
+    ktHeaderRow(ws, r, ['Ngày','Số tiền','Nguồn','Ghi chú']); const headRow = r; r++;
+    D.payments.forEach(p=>{ ktCell(ws,`A${r}`,formatDateVN(p.date)); ktCell(ws,`B${r}`,Math.round(Number(p.amount)||0),{align:'right',numFmt:KT_NUMFMT}); ktCell(ws,`C${r}`,p.method==='cash'?'Tiền mặt':'TCB',{align:'center'}); ktCell(ws,`D${r}`,p.notes||'',{wrap:true}); r++; });
+    ktCell(ws,`A${r}`,'TỔNG',{bold:true,fill:KT_HEAD_FILL}); ktCell(ws,`B${r}`,Math.round(D.paid),{bold:true,fill:KT_HEAD_FILL,align:'right',numFmt:KT_NUMFMT}); ktCell(ws,`C${r}`,'',{fill:KT_HEAD_FILL}); ktCell(ws,`D${r}`,'',{fill:KT_HEAD_FILL});
+    ws.views = [{ state:'frozen', ySplit: headRow }];
+  }
+  // --- Hoá đơn
+  if(!compact){
+    const ws = wb.addWorksheet(pxSheetName('Hoa don', used));
+    if(isSup){
+      pxWidths(ws,[14,13,13,13,14,12,12,14,16,14]);
+      let r = pxTitleBlock(ws,10,company,mst,'HOÁ ĐƠN MỎ ĐÃ XUẤT', pname, D.from, D.to);
+      ktHeaderRow(ws, r, ['Số HĐ','Ngày HĐ','Áp dụng từ','Đến','Loại hàng','Tấn','Khối','Đơn giá','Tiền hàng','VAT']); const headRow=r; r++;
+      D.mineInvoices.forEach(inv=>{
+        const tons = Number(inv.totalVolume)||0, khoi = mineInvoiceVolumeKhoi(inv), price = Number(inv.unitPrice)||0, money = tons*price, vat = money*(Number(inv.vatRatePercent)||0)/100;
+        [inv.invoiceNumber||'', inv.invoiceDate?formatDateVN(inv.invoiceDate):'', inv.deliveryFrom?formatDateVN(inv.deliveryFrom):'', inv.deliveryTo?formatDateVN(inv.deliveryTo):'', inv.goodsType||'', Math.round(tons*100)/100, Math.round(khoi*100)/100, Math.round(price), Math.round(money), Math.round(vat)]
+          .forEach((v,i)=>{ const num = typeof v==='number'; ktCell(ws, ws.getCell(r,i+1).address, v, {align:num?'right':'left', numFmt: num?(i===5||i===6?PX_VOL:KT_NUMFMT):undefined}); });
+        r++;
+      });
+      if(!D.mineInvoices.length){ ws.mergeCells(r,1,r,10); ktCell(ws,`A${r}`,'(Không có hoá đơn mỏ trong kỳ)',{border:false,color:'FF888888'}); }
+      ws.views = [{ state:'frozen', ySplit: headRow }];
+    } else {
+      pxWidths(ws,[13,30,14,18]);
+      let r = pxTitleBlock(ws,4,company,mst,'HOÁ ĐƠN ĐÃ XUẤT CHO KHÁCH (theo tick "đã xuất hoá đơn")', pname, D.from, D.to);
+      ktHeaderRow(ws, r, ['Ngày','Công trình','Khối lượng','Tiền (gồm VAT)']); const headRow=r; r++;
+      D.issued.forEach(x=>{ ktCell(ws,`A${r}`,formatDateVN(x.date)); ktCell(ws,`B${r}`,x.site,{wrap:true}); ktCell(ws,`C${r}`,Math.round(x.vol*100)/100,{align:'right',numFmt:PX_VOL}); ktCell(ws,`D${r}`,Math.round(x.amount),{align:'right',numFmt:KT_NUMFMT}); r++; });
+      if(!D.issued.length){ ws.mergeCells(r,1,r,4); ktCell(ws,`A${r}`,'(Chưa tick xuất hoá đơn trong kỳ)',{border:false,color:'FF888888'}); }
+      ws.views = [{ state:'frozen', ySplit: headRow }];
+    }
+  }
+  // --- Sổ đối chiếu công nợ (biên bản)
+  {
+    const ws = wb.addWorksheet(pxSheetName(compact?`DC ${short}`:'So doi chieu cong no', used));
+    pxWidths(ws,[13,46,18,18,18]);
+    let r = pxTitleBlock(ws,5,company,mst,'BIÊN BẢN ĐỐI CHIẾU CÔNG NỢ', pname, D.from, D.to);
+    ktHeaderRow(ws, r, ['Ngày','Diễn giải', isSup?'Phát sinh phải trả':'Phát sinh phải thu', isSup?'Đã trả':'Đã thu','Số dư']); const headRow=r; r++;
+    ktCell(ws,`A${r}`,formatDateVN(D.from)); ktCell(ws,`B${r}`,'Số dư đầu kỳ',{bold:true}); ktCell(ws,`C${r}`,''); ktCell(ws,`D${r}`,''); ktCell(ws,`E${r}`,Math.round(D.opening),{align:'right',numFmt:KT_NUMFMT,bold:true}); r++;
+    D.ledger.forEach(l=>{ ktCell(ws,`A${r}`,formatDateVN(l.date)); ktCell(ws,`B${r}`,l.desc,{wrap:true}); ktCell(ws,`C${r}`,l.inc?Math.round(l.inc):'',{align:'right',numFmt:KT_NUMFMT}); ktCell(ws,`D${r}`,l.pay?Math.round(l.pay):'',{align:'right',numFmt:KT_NUMFMT}); ktCell(ws,`E${r}`,Math.round(l.bal),{align:'right',numFmt:KT_NUMFMT}); r++; });
+    ktCell(ws,`A${r}`,'',{fill:KT_HEAD_FILL}); ktCell(ws,`B${r}`,'CỘNG PHÁT SINH / SỐ DƯ CUỐI KỲ',{bold:true,fill:KT_HEAD_FILL});
+    ktCell(ws,`C${r}`,Math.round(D.incurred),{bold:true,fill:KT_HEAD_FILL,align:'right',numFmt:KT_NUMFMT}); ktCell(ws,`D${r}`,Math.round(D.paid),{bold:true,fill:KT_HEAD_FILL,align:'right',numFmt:KT_NUMFMT}); ktCell(ws,`E${r}`,Math.round(D.closing),{bold:true,fill:KT_HEAD_FILL,align:'right',numFmt:KT_NUMFMT}); r+=2;
+    ws.mergeCells(r,1,r,5); ktCell(ws,`A${r}`, D.closing>0 ? `Kết luận: ${isSup?'Công ty còn phải trả':'Khách còn phải trả'} ${fmtVND(D.closing)}.` : D.closing<0 ? `Kết luận: ${isSup?'Công ty đã ứng dư':'Khách đã trả dư'} ${fmtVND(-D.closing)}.` : 'Kết luận: hai bên đã thanh toán đủ.', {bold:true,border:false}); r+=3;
+    ws.mergeCells(r,1,r,2); ktCell(ws,`A${r}`,'ĐẠI DIỆN CÔNG TY',{bold:true,align:'center',border:false}); ws.mergeCells(r,4,r,5); ktCell(ws,`D${r}`, isSup?'ĐẠI DIỆN NHÀ CUNG CẤP':'ĐẠI DIỆN KHÁCH HÀNG',{bold:true,align:'center',border:false}); r++;
+    ws.mergeCells(r,1,r,2); ktCell(ws,`A${r}`,'(Ký, ghi rõ họ tên)',{align:'center',border:false,size:10,color:'FF888888'}); ws.mergeCells(r,4,r,5); ktCell(ws,`D${r}`,'(Ký, ghi rõ họ tên)',{align:'center',border:false,size:10,color:'FF888888'});
+    ws.views = [{ state:'frozen', ySplit: headRow }];
+  }
+}
+async function exportPartnerWorkbook(kind, id, from, to, mode){
+  if(typeof ExcelJS === 'undefined'){ showToast('Đang tải thư viện xuất file, thử lại sau vài giây (cần mạng).'); return; }
+  let company = 'CÔNG TY TNHH TM&VT LINH CHÍ THÀNH', mst = '';
+  try{ const snap = await withTimeout(sharedDataRef('taxLedger').get()); const cfg = snap.exists && snap.data().cfg; if(cfg){ company = cfg.tenCty || company; mst = cfg.mst || ''; } } catch(e){}
+  const wb = new ExcelJS.Workbook(); const used = new Set();
+  let fname;
+  if(id){
+    pxBuildPartnerSheets(wb, partnerStatementData(kind, id, from, to), mode, company, mst, used, false);
+    const P = kind==='supplier' ? supplierById(id) : customerById(id);
+    fname = `${kind==='supplier'?'NCC':'KH'}_${(P?P.name:'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'_')}_${from}_den_${to}${mode==='internal'?'_NoiBo':''}.xlsx`;
+  } else {
+    const ws = wb.addWorksheet(pxSheetName('Tong hop doi tac', used));
+    pxWidths(ws,[34,14,18,18,18,18]);
+    let r = pxTitleBlock(ws,6,company,mst,'TỔNG HỢP CÔNG NỢ KHÁCH HÀNG & NHÀ CUNG CẤP','Tất cả đối tác', from, to);
+    const all = [];
+    [['customer', state.customers||[]], ['supplier', state.suppliers||[]]].forEach(([k,list])=>{
+      ktHeaderRow(ws, r, [k==='customer'?'KHÁCH HÀNG':'NHÀ CUNG CẤP','Loại','Đầu kỳ','Phát sinh', k==='customer'?'Đã thu':'Đã trả','Cuối kỳ']); r++;
+      const tot = { o:0, i:0, p:0, c:0 };
+      list.forEach(P=>{ const D = partnerStatementData(k, P.id, from, to); all.push(D);
+        [P.name, k==='customer'?'Khách hàng':'Nhà cung cấp', Math.round(D.opening), Math.round(D.incurred), Math.round(D.paid), Math.round(D.closing)].forEach((v,i)=>ktCell(ws, ws.getCell(r,i+1).address, v, {align: typeof v==='number'?'right':'left', numFmt: typeof v==='number'?KT_NUMFMT:undefined}));
+        tot.o+=D.opening; tot.i+=D.incurred; tot.p+=D.paid; tot.c+=D.closing; r++; });
+      ['TỔNG','',Math.round(tot.o),Math.round(tot.i),Math.round(tot.p),Math.round(tot.c)].forEach((v,i)=>ktCell(ws, ws.getCell(r,i+1).address, v, {bold:true, fill:KT_HEAD_FILL, align: typeof v==='number'?'right':'left', numFmt: typeof v==='number'?KT_NUMFMT:undefined}));
+      r += 2;
+    });
+    all.filter(D=>D.trips.length || D.payments.length || Math.abs(D.opening)>0.5).forEach(D=>pxBuildPartnerSheets(wb, D, mode, company, mst, used, true));
+    fname = `CongNo_DoiTac_${from}_den_${to}${mode==='internal'?'_NoiBo':''}.xlsx`;
+  }
+  wb.eachSheet(ws=>{ ws.pageSetup = { paperSize:9, orientation:'landscape', fitToPage:true, fitToWidth:1, fitToHeight:0 }; });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  showToast('Đã xuất file Excel.');
+}
+/// Trang chọn kỳ + chế độ trước khi xuất.
+function renderPartnerExportPage(kind, id, onBack){
+  scrollMainToTop();
+  const app = document.getElementById('app');
+  const P = id ? (kind==='supplier' ? supplierById(id) : customerById(id)) : null;
+  const today = todayLocalDateStr(), ym = today.slice(0,7);
+  const presets = {
+    month: [`${ym}-01`, today],
+    prev: (()=>{ const d = new Date(today+'T00:00:00'); d.setDate(1); d.setMonth(d.getMonth()-1); const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'); return [`${y}-${m}-01`, monthEndDate(`${y}-${m}`)]; })(),
+    quarter: (()=>{ const d = new Date(today+'T00:00:00'); const q = Math.floor(d.getMonth()/3)*3; return [`${d.getFullYear()}-${String(q+1).padStart(2,'0')}-01`, today]; })(),
+    year: [`${today.slice(0,4)}-01-01`, today],
+    all: ['2000-01-01', today]
+  };
+  app.innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="pxBackBtn">← Quay Lại</button></section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">⬇️ Xuất Excel — ${P ? escapeHtml(P.name) : 'Tất cả Khách Hàng & Nhà Cung Cấp'}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Chọn kỳ và chế độ, rồi bấm Xuất. Số dư đầu kỳ tự cộng dồn từ trước ngày bắt đầu.</div>
+      <div class="seg" id="pxPreset">
+        <button data-val="month">Tháng này</button><button data-val="prev">Tháng trước</button><button data-val="quarter">Quý này</button><button data-val="year">Năm nay</button><button data-val="all">Toàn thời gian</button>
+      </div>
+      <div class="date-range" style="margin-top:10px;">
+        <div class="field"><label>Từ ngày</label><input type="date" id="pxFrom" value="${presets.month[0]}"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="pxTo" value="${presets.month[1]}"></div>
+      </div>
+      <div class="field"><label>Chế độ</label>
+        <select id="pxMode"><option value="partner">📤 Bản gửi đối tác (chỉ hàng hoá, tiền, công nợ)</option><option value="internal">🔒 Bản nội bộ (thêm tiền mua/bán, lãi gộp)</option></select></div>
+      <div class="hint">${P ? 'File gồm: Tổng hợp · Chi tiết chuyến · Thanh toán · Hoá đơn · Biên bản đối chiếu công nợ (có ô ký).' : 'File gồm: bảng tổng hợp mọi đối tác + chi tiết chuyến và biên bản đối chiếu của từng đối tác có phát sinh.'}</div>
+      <button class="btn btn-accent btn-block" id="pxExportBtn" style="margin-top:10px;">⬇️ Xuất Excel</button>
+    </section>`;
+  document.getElementById('pxBackBtn').addEventListener('click', ()=>{ if(onBack) onBack(); else { renderAll(); restoreMainScroll(); } });
+  document.querySelectorAll('#pxPreset button').forEach(b=>b.addEventListener('click', e=>{ e.preventDefault(); const [f,t] = presets[b.dataset.val]; document.getElementById('pxFrom').value=f; document.getElementById('pxTo').value=t; document.querySelectorAll('#pxPreset button').forEach(x=>x.classList.toggle('active', x===b)); }));
+  document.getElementById('pxExportBtn').addEventListener('click', async ()=>{
+    const f = document.getElementById('pxFrom').value, t = document.getElementById('pxTo').value;
+    if(!f || !t || f>t){ showToast('Ông Chủ chọn lại khoảng ngày (Từ ≤ Đến).'); return; }
+    const btn = document.getElementById('pxExportBtn'); btn.disabled = true; btn.textContent = '⏳ Đang tạo file…';
+    try { await exportPartnerWorkbook(kind, id, f, t, document.getElementById('pxMode').value); }
+    catch(e){ showToast('Lỗi xuất file: ' + (e?.message||e)); }
+    btn.disabled = false; btn.textContent = '⬇️ Xuất Excel';
+  });
 }
 
 function companyShiftsWithVehicle(){
@@ -16833,6 +17089,7 @@ function renderCustomerSupplierDebtOverview(){
   const custRows = state.customers.map(c=>({ ...c, debt: computeCustomerDebt(c.id) }));
   const supRows = state.suppliers.map(s=>({ ...s, debt: computeSupplierDebt(s.id) }));
   wrap.innerHTML = `
+    <button class="btn btn-accent btn-block" id="partnerExportAllBtn" style="margin-bottom:12px;">⬇️ Xuất Tổng Hợp Tất Cả (Excel)</button>
     <div style="font-weight:700; margin-bottom:6px;">Khách Hàng</div>
     ${custRows.length===0 ? '<div class="hint" style="margin-bottom:12px;">Chưa có khách hàng nào — thêm ở form nhập ca, mục công trình thương mại.</div>' : `
     <div class="card dash-wrap" style="padding:0; margin-bottom:14px;">
@@ -16862,6 +17119,8 @@ function renderCustomerSupplierDebtOverview(){
   `;
   wrap.querySelectorAll('.cust-debt-row').forEach(row=>row.addEventListener('click', ()=>{ saveMainScroll(); openCustomerDetail(row.dataset.id); }));
   wrap.querySelectorAll('.sup-debt-row').forEach(row=>row.addEventListener('click', ()=>{ saveMainScroll(); openSupplierDetail(row.dataset.id); }));
+  const pxAll = document.getElementById('partnerExportAllBtn'); // #333
+  if(pxAll) pxAll.addEventListener('click', ()=>{ saveMainScroll(); renderPartnerExportPage('all', null, ()=>{ if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll(); restoreMainScroll(); }); });
 }
 
 /// Modal chi tiết 1 tháng trong Sổ Công Nợ Theo Tháng — liệt kê đúng từng
@@ -17162,6 +17421,7 @@ function openCustomerDetail(customerId, preserveScroll){
     <section class="group">
       <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
       <div class="hint" style="margin-top:0; margin-bottom:10px;">Toàn bộ chuyến hàng theo từng ngày, kèm trạng thái xuất hoá đơn.</div>
+      <button class="btn btn-accent btn-block" id="custExportBtn" style="margin-bottom:8px;">⬇️ Xuất Excel (chọn kỳ)</button>
       <button class="btn btn-ghost btn-block" id="custTxnDetailBtn">📋 Chi Tiết Giao Dịch</button>
     </section>
     <section class="group">
@@ -17187,6 +17447,7 @@ function openCustomerDetail(customerId, preserveScroll){
   });
   document.getElementById('addCustomerPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openCustomerPaymentEditor(null, customerId); });
   document.getElementById('custTxnDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCustomerTransactionDetailPage(customerId); });
+  document.getElementById('custExportBtn').addEventListener('click', ()=>{ saveMainScroll(); renderPartnerExportPage('customer', customerId, ()=>{ openCustomerDetail(customerId, true); restoreMainScroll(); }); }); // #333
   document.getElementById('custPaymentHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCustomerPaymentHistoryPage(customerId); });
   document.getElementById('bulkTickSellInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(customerId, 'sell'));
   document.querySelectorAll('.monthLedgerDetailBtn').forEach(btn=>{
@@ -17517,6 +17778,7 @@ function openSupplierDetail(supplierId, preserveScroll){
     <section class="group">
       <h3>📋 Chi Tiết Giao Dịch (Thương Mại)</h3>
       <div class="hint" style="margin-top:0; margin-bottom:10px;">Toàn bộ chuyến hàng theo từng ngày, kèm trạng thái xuất hoá đơn.</div>
+      <button class="btn btn-accent btn-block" id="supExportBtn" style="margin-bottom:8px;">⬇️ Xuất Excel (chọn kỳ)</button>
       <button class="btn btn-ghost btn-block" id="supTxnDetailBtn">📋 Chi Tiết Giao Dịch</button>
     </section>
     <section class="group">
@@ -17535,6 +17797,7 @@ function openSupplierDetail(supplierId, preserveScroll){
   });
   document.getElementById('addSupplierPaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openSupplierPaymentEditor(null, supplierId); });
   document.getElementById('supTxnDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderSupplierTransactionDetailPage(supplierId); });
+  document.getElementById('supExportBtn').addEventListener('click', ()=>{ saveMainScroll(); renderPartnerExportPage('supplier', supplierId, ()=>{ openSupplierDetail(supplierId, true); restoreMainScroll(); }); }); // #333
   document.getElementById('supPaymentHistoryDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderSupplierPaymentHistoryPage(supplierId); });
   document.getElementById('bulkTickInvoiceBtn').addEventListener('click', ()=>openBulkInvoiceTickModal(supplierId, 'buy'));
   document.getElementById('sup_rangeApplyBtn').addEventListener('click', ()=>{
