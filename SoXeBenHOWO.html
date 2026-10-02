@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-09-30 · #333';
+const APP_BUILD = '2026-10-02 · #334';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2859,7 +2859,7 @@ function partnerStatementData(kind, id, from, to){
   const isSup = kind==='supplier';
   const trips = [], siteRows = [];
   let openingMoves = 0;
-  for(const sh of allShiftsCompanyWide()){
+  for(const sh of shiftsCompanyWideSafe()){ // #334 — xe đang mở luôn lấy bản mới nhất
     (sh.siteLogs||[]).forEach(s=>{
       const match = isSup ? (s.siteType==='commercial' && s.supplierId===id) : (s.customerId===id);
       if(!match) return;
@@ -2906,7 +2906,13 @@ function partnerStatementData(kind, id, from, to){
   payments.forEach(p=>ledger.push({ date:p.date, desc:`${isSup?'Ông Chủ bank cho mỏ':'Khách thanh toán'}${p.notes?' — '+p.notes:''}${p.method==='cash'?' (tiền mặt)':' (TCB)'}`, inc:0, pay:Number(p.amount)||0 }));
   ledger.sort((a,b)=>a.date.localeCompare(b.date) || (a.pay-b.pay));
   let bal = opening; ledger.forEach(l=>{ bal += l.inc - l.pay; l.bal = bal; });
-  const mineInvoices = isSup ? (state.mineInvoices||[]).filter(inv=>inv.supplierId===id && ((inv.invoiceDate||inv.deliveryTo||'')>=from) && ((inv.invoiceDate||inv.deliveryFrom||'')<=to)) : [];
+  // #334 — hoá đơn mỏ thuộc kỳ theo KHOẢNG NGÀY GIAO HÀNG mà hoá đơn áp dụng (VD hoá đơn
+  // cho 16–30/9 xuất ngày 02/10 vẫn thuộc kỳ tháng 9), không theo ngày in trên hoá đơn.
+  const mineInvoices = isSup ? (state.mineInvoices||[]).filter(inv=>{
+    if(inv.supplierId!==id) return false;
+    const a = inv.deliveryFrom || inv.invoiceDate || '', b = inv.deliveryTo || inv.invoiceDate || '';
+    return a && b && a<=to && b>=from;
+  }) : [];
   const issued = !isSup ? siteRows.filter(r=>r.s.siteType==='commercial' && r.s.sellHasInvoice).map(r=>({ date:r.date, site:r.s.siteName||'', vol:(r.s.commercialTrips||[]).reduce((a,t)=>a+(Number(t.sellVolume)||0),0), amount:r.amount })) : [];
   const byGoods = {};
   trips.forEach(t=>{ const k = t.goods||'—'; if(!byGoods[k]) byGoods[k] = { vol:0, amount:0, unit:t.unit }; byGoods[k].vol += t.vol; byGoods[k].amount += t.total; });
@@ -3080,7 +3086,7 @@ function renderPartnerExportPage(kind, id, onBack){
       <h2 style="margin-bottom:2px;">⬇️ Xuất Excel — ${P ? escapeHtml(P.name) : 'Tất cả Khách Hàng & Nhà Cung Cấp'}</h2>
       <div class="hint" style="margin-top:0; margin-bottom:10px;">Chọn kỳ và chế độ, rồi bấm Xuất. Số dư đầu kỳ tự cộng dồn từ trước ngày bắt đầu.</div>
       <div class="seg" id="pxPreset">
-        <button data-val="month">Tháng này</button><button data-val="prev">Tháng trước</button><button data-val="quarter">Quý này</button><button data-val="year">Năm nay</button><button data-val="all">Toàn thời gian</button>
+        <button data-val="month">Tháng này</button><button data-val="prev">Tháng trước</button><button data-val="quarter">Quý này</button>
       </div>
       <div class="date-range" style="margin-top:10px;">
         <div class="field"><label>Từ ngày</label><input type="date" id="pxFrom" value="${presets.month[0]}"></div>
@@ -3089,10 +3095,33 @@ function renderPartnerExportPage(kind, id, onBack){
       <div class="field"><label>Chế độ</label>
         <select id="pxMode"><option value="partner">📤 Bản gửi đối tác (chỉ hàng hoá, tiền, công nợ)</option><option value="internal">🔒 Bản nội bộ (thêm tiền mua/bán, lãi gộp)</option></select></div>
       <div class="hint">${P ? 'File gồm: Tổng hợp · Chi tiết chuyến · Thanh toán · Hoá đơn · Biên bản đối chiếu công nợ (có ô ký).' : 'File gồm: bảng tổng hợp mọi đối tác + chi tiết chuyến và biên bản đối chiếu của từng đối tác có phát sinh.'}</div>
+      <div id="pxPreview" class="card" style="margin-top:10px;"></div>
       <button class="btn btn-accent btn-block" id="pxExportBtn" style="margin-top:10px;">⬇️ Xuất Excel</button>
     </section>`;
   document.getElementById('pxBackBtn').addEventListener('click', ()=>{ if(onBack) onBack(); else { renderAll(); restoreMainScroll(); } });
-  document.querySelectorAll('#pxPreset button').forEach(b=>b.addEventListener('click', e=>{ e.preventDefault(); const [f,t] = presets[b.dataset.val]; document.getElementById('pxFrom').value=f; document.getElementById('pxTo').value=t; document.querySelectorAll('#pxPreset button').forEach(x=>x.classList.toggle('active', x===b)); }));
+  // #334 — XEM TRƯỚC số của đúng khoảng ngày đang chọn (cập nhật ngay khi đổi ngày),
+  // kèm tự kiểm: số dư cuối kỳ (nếu xem tới hôm nay) phải khớp công nợ đang hiện trên app.
+  const refreshPreview = ()=>{
+    const el = document.getElementById('pxPreview'); if(!el) return;
+    const f = document.getElementById('pxFrom').value, t = document.getElementById('pxTo').value;
+    if(!f || !t || f>t){ el.innerHTML = '<div class="hint" style="margin:0; color:var(--loss);">Khoảng ngày chưa hợp lệ (Từ phải ≤ Đến).</div>'; return; }
+    const kinds = id ? [[kind, id]] : [...(state.customers||[]).map(c=>['customer',c.id]), ...(state.suppliers||[]).map(x=>['supplier',x.id])];
+    let o=0,i=0,pd=0,c=0,n=0; kinds.forEach(([k,pid])=>{ const D = partnerStatementData(k, pid, f, t); o+=D.opening; i+=D.incurred; pd+=D.paid; c+=D.closing; n+=D.trips.length; });
+    let check = '';
+    if(id && t>=todayLocalDateStr()){
+      const app = kind==='supplier' ? computeSupplierDebt(id).owed : computeCustomerDebt(id).owed;
+      check = Math.abs(app - c)<2 ? `<div class="hint" style="margin:6px 0 0; color:var(--profit);">✅ Số dư cuối kỳ khớp công nợ đang hiện trên app (${fmtVND(app)}).</div>`
+        : `<div class="hint" style="margin:6px 0 0; color:var(--loss);">⚠️ Lệch ${fmtVND(Math.abs(app-c))} so với công nợ trên app (${fmtVND(app)}) — có giao dịch ghi ngày sau ${formatDateVN(t)}.</div>`;
+    }
+    el.innerHTML = `<div style="font-weight:800; margin-bottom:6px;">👀 Xem trước kỳ ${formatDateVN(f)} — ${formatDateVN(t)}</div>
+      <div class="summary-row"><span>Số dư đầu kỳ</span><span class="val">${o<0?'−':''}${fmtVND(Math.abs(o))}</span></div>
+      <div class="summary-row"><span>+ Phát sinh trong kỳ (${n} dòng chuyến)</span><span class="val">${fmtVND(i)}</span></div>
+      <div class="summary-row"><span>− Đã ${kind==='customer'?'thu':kind==='supplier'?'trả':'trả/thu'} trong kỳ</span><span class="val">${fmtVND(pd)}</span></div>
+      <div class="summary-row total"><span>= Số dư cuối kỳ</span><span class="val">${c<0?'−':''}${fmtVND(Math.abs(c))}</span></div>${check}`;
+  };
+  ['pxFrom','pxTo'].forEach(x=>{ const el = document.getElementById(x); el.addEventListener('change', refreshPreview); el.addEventListener('input', refreshPreview); });
+  refreshPreview();
+  document.querySelectorAll('#pxPreset button').forEach(b=>b.addEventListener('click', e=>{ e.preventDefault(); const [f,t] = presets[b.dataset.val]; document.getElementById('pxFrom').value=f; document.getElementById('pxTo').value=t; document.querySelectorAll('#pxPreset button').forEach(x=>x.classList.toggle('active', x===b)); refreshPreview(); }));
   document.getElementById('pxExportBtn').addEventListener('click', async ()=>{
     const f = document.getElementById('pxFrom').value, t = document.getElementById('pxTo').value;
     if(!f || !t || f>t){ showToast('Ông Chủ chọn lại khoảng ngày (Từ ≤ Đến).'); return; }
