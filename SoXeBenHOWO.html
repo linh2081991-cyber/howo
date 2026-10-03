@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-02 · #334';
+const APP_BUILD = '2026-10-02 · #335';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1276,9 +1276,9 @@ function computeMaintenanceStatus(schedule){
   const kmRemaining = Math.round(nextDueOdo - current);
   let urgency;
   if(kmRemaining<=0) urgency = { label:'ĐÃ QUÁ HẠN', className:'risk' };
-  else if(kmRemaining<=300) urgency = { label:`Còn ${kmRemaining} km — GẤP`, className:'risk' };
-  else if(kmRemaining<=1000) urgency = { label:`Còn ${kmRemaining} km`, className:'warn' };
-  else urgency = { label:`Còn ${kmRemaining} km`, className:'good' };
+  else if(kmRemaining<=300) urgency = { label:`Còn ${kmRemaining.toLocaleString('vi-VN')} km — GẤP`, className:'risk' };
+  else if(kmRemaining<=1000) urgency = { label:`Còn ${kmRemaining.toLocaleString('vi-VN')} km`, className:'warn' };
+  else urgency = { label:`Còn ${kmRemaining.toLocaleString('vi-VN')} km`, className:'good' };
 
   // Dự đoán khoảng ngày tới hạn, dựa trên tốc độ chạy thực tế gần đây —
   // không đủ dữ liệu (chưa có ca nào) thì để null, không đoán bừa.
@@ -2533,7 +2533,7 @@ function renderInvoiceInventoryDetailPage(selectedGt){
         ${w.daysCover!==null && w.daysCover<alertDays ? `<div class="hint" style="color:var(--loss); font-weight:700;">🔴 Dưới ngưỡng ${alertDays} ngày — nên mua thêm hoá đơn thương mại ${escapeHtml(w.label)}.</div>` : ''}
         ${w.staleLeftover.length ? `<div class="hint" style="color:var(--loss);">⚠️ Có ${fmtKhoi(w.staleLeftover.reduce((a,p)=>a+p.remaining,0))} khối HĐ mỏ dư nằm kho quá 60 ngày.</div>` : ''}
         <div class="two-col" style="margin-top:8px;">
-          <div class="field" style="margin-bottom:0;"><label>Ngưỡng cảnh báo (ngày)</label><input type="number" inputmode="numeric" id="inv_alertDays" value="${alertDays}"></div>
+          <div class="field" style="margin-bottom:0;"><label>Ngưỡng cảnh báo (ngày)</label><input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="inv_alertDays" value="${alertDays}"></div>
           <div class="field" style="margin-bottom:0;"><label>Giá tham chiếu HĐ ${escapeHtml(w.label)} /khối</label><input type="text" inputmode="decimal" id="inv_refPrice" placeholder="Tự tính theo lô: ${fmtVND(w.unit)}"></div>
         </div>
         <div class="hint">Giá tham chiếu dùng để ghi giá trị HĐ mỏ dư. Để trống = tự tính theo giá bình quân lô thương mại cùng loại (sau VAT được trừ).</div>
@@ -3568,7 +3568,7 @@ function openVehicleProfileEditor(){
     <div style="font-weight:800; margin:14px 0 6px;">📉 Gợi ý khấu hao</div>
     <div class="hint" style="margin-top:0;">Giá trị xe đem khấu hao (từ các lần đầu tư đã gán cho xe này): <strong>${fmtVND(base)}</strong>${base===0?' — chưa gán lần đầu tư nào cho xe này (vào Vốn Đầu Tư Ban Đầu → Sửa → chọn xe).':''}</div>
     <div class="two-col">
-      <div class="field"><label>Khấu hao trong bao nhiêu tháng</label><input type="number" inputmode="numeric" id="vp_depMonths" value="${Number(s.depreciationMonths)||''}" placeholder="VD: 60"></div>
+      <div class="field"><label>Khấu hao trong bao nhiêu tháng</label><input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="vp_depMonths" value="${Number(s.depreciationMonths)||''}" placeholder="VD: 60"></div>
       <div class="field"><label>Giá trị còn lại dự kiến khi hết khấu hao</label><input type="text" inputmode="decimal" id="vp_residual"></div>
     </div>
     <div class="hint" id="vp_depSuggest" style="margin-top:0;"></div>
@@ -3781,7 +3781,7 @@ function renderVehicleManagementPage(selectedVid){
       <div class="card" style="margin-bottom:12px;">
         <div style="font-weight:800; margin-bottom:8px;">3️⃣ Khấu hao</div>
         <div class="two-col">
-          <div class="field"><label>Khấu hao trong bao nhiêu tháng</label><input type="number" inputmode="numeric" id="vm_depMonths" value="${Number(s.depreciationMonths)||''}" placeholder="VD: 60"></div>
+          <div class="field"><label>Khấu hao trong bao nhiêu tháng</label><input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="vm_depMonths" value="${Number(s.depreciationMonths)||''}" placeholder="VD: 60"></div>
           <div class="field"><label>Giá trị còn lại khi hết khấu hao</label><input type="text" inputmode="decimal" id="vm_residual"></div>
         </div>
         <div class="hint" id="vm_depSuggest" style="margin-top:0;"></div>
@@ -5469,6 +5469,46 @@ async function handleRestoreFile(file){
 // ========================= FORMAT & COMPUTE =========================
 
 // ===== MỚI 2026-09-29 (#324) — định dạng số thập phân kiểu Việt Nam (1.234,5) =====
+// ===== MỚI 2026-10-02 (#335) — Ô NHẬP SỐ có dấu "." phân tách hàng nghìn, "," thập phân =====
+// Mọi ô trước đây là type="number" (iPhone luôn hiện số trần "27177") giờ là ô chữ có
+// data-numfmt: hiển thị "27.177", "31,47". Thuộc tính .value của chính ô đó được bọc lại
+// để code cũ đọc ra SỐ THÔ ("27177", "31.47") và gán vào vẫn tự định dạng — công thức
+// không đổi. Tự gắn cho mọi ô mới xuất hiện (MutationObserver).
+function _numFmtRawFromDisplay(txt){
+  let t = String(txt==null?'':txt).replace(/\s/g,'').replace(/\./g,'').replace(',', '.');
+  return t.replace(/[^0-9.\-]/g,'');
+}
+function _numFmtDisplay(raw, decimals){
+  if(raw===''||raw==null) return '';
+  let str = String(raw); const neg = str.startsWith('-'); str = str.replace(/-/g,'');
+  let [i, d] = str.split('.');
+  i = (i||'').replace(/^0+(?=\d)/,'');
+  const grouped = (i===''?'0':i).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  return (neg?'-':'') + grouped + (d!==undefined && decimals>0 ? ','+d.slice(0,decimals) : '');
+}
+function bindNumFmtInput(el){
+  if(!el || el._numFmtBound) return; el._numFmtBound = true;
+  const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  const decimals = Number(el.dataset.decimals||0);
+  const initial = proto.get.call(el); // giá trị ban đầu từ HTML: dạng số JS ("27177" / "31.47")
+  Object.defineProperty(el, 'value', { configurable:true,
+    get(){ return _numFmtRawFromDisplay(proto.get.call(el)); },
+    set(v){ proto.set.call(el, (v===null||v===undefined||v==='') ? '' : _numFmtDisplay(String(v), decimals)); } });
+  el.value = initial;
+  el.addEventListener('input', ()=>{
+    let t = proto.get.call(el);
+    if(decimals>0 && /\.$/.test(t) && !/,/.test(t)) t = t.slice(0,-1)+','; // gõ "." cuối = dấu thập phân
+    const raw = _numFmtRawFromDisplay(t);
+    const keepComma = decimals>0 && /,$/.test(t);
+    proto.set.call(el, _numFmtDisplay(raw, decimals) + (keepComma && !/,/.test(_numFmtDisplay(raw, decimals)) ? ',' : ''));
+    try{ const n = proto.get.call(el).length; el.setSelectionRange(n, n); }catch(e){}
+  }, true);
+}
+function bindAllNumFmtInputs(root){ (root||document).querySelectorAll('input[data-numfmt]').forEach(bindNumFmtInput); }
+if(typeof MutationObserver!=='undefined'){
+  new MutationObserver(muts=>{ for(const m of muts) m.addedNodes.forEach(n=>{ if(n.nodeType===1){ if(n.matches && n.matches('input[data-numfmt]')) bindNumFmtInput(n); else if(n.querySelectorAll) bindAllNumFmtInputs(n); } }); })
+    .observe(document.documentElement, { childList:true, subtree:true });
+}
 function fmtDec(n, digits){
   const d = Number.isFinite(Number(digits)) ? Number(digits) : 1;
   return (Number(n)||0).toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -9614,17 +9654,17 @@ function renderShiftForm(){
         <div class="two-col">
           <div class="field">
             <label>Odo đầu ca</label>
-            <input type="number" inputmode="decimal" id="f_odoStart" placeholder="0" value="${blankIfZero(sh.odoStart)}">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="f_odoStart" placeholder="0" value="${blankIfZero(sh.odoStart)}">
           </div>
           <div class="field">
             <label>Odo cuối ca</label>
-            <input type="number" inputmode="decimal" id="f_odoEnd" placeholder="0" value="${blankIfZero(sh.odoEnd)}">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="f_odoEnd" placeholder="0" value="${blankIfZero(sh.odoEnd)}">
           </div>
         </div>
         <div class="stat-highlight" id="odoDrivenHint">
           <span class="ic">🛣️</span>
           <span class="lbl">Số ODO chạy trong ca&nbsp;</span>
-          <input type="number" inputmode="decimal" id="f_kmDriven" class="val-input" placeholder="0" value="${blankIfZero(shiftOdoDriven(sh))}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="f_kmDriven" class="val-input" placeholder="0" value="${blankIfZero(shiftOdoDriven(sh))}">
           <span class="val-suffix">&nbsp;km</span>
         </div>
       </div>
@@ -9636,17 +9676,17 @@ function renderShiftForm(){
         <div class="two-col">
           <div class="field">
             <label>Chỉ số dầu đầu</label>
-            <input type="number" inputmode="decimal" id="f_fuelStart" placeholder="0" value="${blankIfZero(sh.fuelStart)}">
+            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="f_fuelStart" placeholder="0" value="${blankIfZero(sh.fuelStart)}">
           </div>
           <div class="field">
             <label>Chỉ số dầu cuối</label>
-            <input type="number" inputmode="decimal" id="f_fuelEnd" placeholder="0" value="${blankIfZero(sh.fuelEnd)}">
+            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="f_fuelEnd" placeholder="0" value="${blankIfZero(sh.fuelEnd)}">
           </div>
         </div>
         <div class="two-col">
           <div class="field">
             <label>Dầu đổ thêm (lít)</label>
-            <input type="number" inputmode="decimal" id="f_fuelAdded" placeholder="0" value="${blankIfZero(sh.fuelAdded)}">
+            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="f_fuelAdded" placeholder="0" value="${blankIfZero(sh.fuelAdded)}">
           </div>
           <div class="field">
             <label>Đơn giá dầu / lít</label>
@@ -9812,11 +9852,11 @@ function renderSiteRows(){
               <datalist id="tlDL_${i}_${ti}">${allTripLocationsForSupplier(s.supplierId).map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
             </div>
             <div class="two-col">
-              <div class="field"><label>KL mua (tấn)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="buyVolume" placeholder="0" value="${blankIfZero(t.buyVolume)}"></div>
+              <div class="field"><label>KL mua (tấn)</label><input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="buyVolume" placeholder="0" value="${blankIfZero(t.buyVolume)}"></div>
               <div class="field"><label>Đơn giá mua (đ/tấn)</label><input type="text" inputmode="decimal" class="ctrip-money" data-idx="${i}" data-tidx="${ti}" data-field="buyUnitPrice" placeholder="0" value="${t.buyUnitPrice?toIntSafe(t.buyUnitPrice).toLocaleString('vi-VN'):''}"></div>
             </div>
             <div class="two-col" style="margin-bottom:0;">
-              <div class="field" style="margin-bottom:0;"><label>KL bán (khối)</label><input type="number" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="sellVolume" placeholder="0" value="${blankIfZero(t.sellVolume)}"></div>
+              <div class="field" style="margin-bottom:0;"><label>KL bán (khối)</label><input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" class="ctrip-input" data-idx="${i}" data-tidx="${ti}" data-field="sellVolume" placeholder="0" value="${blankIfZero(t.sellVolume)}"></div>
               <div class="field" style="margin-bottom:0;"><label>Đơn giá bán (đ/khối)</label><input type="text" inputmode="decimal" class="ctrip-money" data-idx="${i}" data-tidx="${ti}" data-field="sellUnitPrice" placeholder="0" value="${t.sellUnitPrice?toIntSafe(t.sellUnitPrice).toLocaleString('vi-VN'):''}"></div>
             </div>
             <div class="field" style="margin-top:8px; margin-bottom:0;">
@@ -9903,7 +9943,7 @@ function renderSiteRows(){
         <div class="two-col">
           <div class="field">
             <label>Khối lượng / chuyến</label>
-            <input type="number" inputmode="decimal" class="site-input" data-idx="${i}" data-field="volumePerTrip" placeholder="0" value="${blankIfZero(s.volumePerTrip)}">
+            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" class="site-input" data-idx="${i}" data-field="volumePerTrip" placeholder="0" value="${blankIfZero(s.volumePerTrip)}">
           </div>
           <div class="field">
             <label>Đơn giá cước (đ/tấn hoặc đ/khối)</label>
@@ -9913,7 +9953,7 @@ function renderSiteRows(){
         <div class="two-col">
           <div class="field">
             <label>Số chuyến</label>
-            <input type="number" inputmode="numeric" class="site-input" data-idx="${i}" data-field="trips" placeholder="0" value="${blankIfZero(s.trips)}">
+            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" class="site-input" data-idx="${i}" data-field="trips" placeholder="0" value="${blankIfZero(s.trips)}">
           </div>
           <div class="field">
             <label>Lương / chuyến — áp dụng chuyến 1, 2, 3</label>
@@ -10787,7 +10827,7 @@ function renderDrivers(){
       <div class="card">
         <div class="field" style="margin-bottom:14px;">
           <label>Số ngày công chuẩn / tháng (dùng để chia lương cứng)</label>
-          <input type="number" inputmode="numeric" id="wd_workDays" value="${s.standardWorkDaysPerMonth}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="wd_workDays" value="${s.standardWorkDaysPerMonth}">
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Lương cứng ca vượt ngày công chuẩn (VD ca thứ 29/30/31)</label>
@@ -12446,11 +12486,11 @@ function renderHiringAdvisor(){
       <div class="date-range">
         <div class="field">
           <label>Số chuyến Ca Ngày dự kiến</label>
-          <input type="number" inputmode="numeric" id="ha_tripsDay" value="${draft.tripsPerDayShift}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ha_tripsDay" value="${draft.tripsPerDayShift}">
         </div>
         <div class="field">
           <label>Số chuyến Ca Đêm dự kiến</label>
-          <input type="number" inputmode="numeric" id="ha_tripsNight" value="${draft.tripsPerNightShift}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ha_tripsNight" value="${draft.tripsPerNightShift}">
         </div>
       </div>
     </section>
@@ -12743,7 +12783,7 @@ function renderResultsReal(){
     ${sortedDrivers.length>0 ? `
     <section class="group">
       <h3>🧑‍✈️ Hiệu Suất Từng Tài Xế (Góc Điều Hành Logistics)</h3>
-      ${bestFuelDriver && worstFuelDriver && bestFuelDriver.name!==worstFuelDriver.name ? `<div class="hint" style="margin-top:0; margin-bottom:10px;">Tiết kiệm dầu nhất: <strong>${escapeHtml(bestFuelDriver.name)}</strong> (${bestFuelDriver.fuelPerKm} lít/km) — hao dầu nhất: <strong>${escapeHtml(worstFuelDriver.name)}</strong> (${worstFuelDriver.fuelPerKm} lít/km).</div>` : ''}
+      ${bestFuelDriver && worstFuelDriver && bestFuelDriver.name!==worstFuelDriver.name ? `<div class="hint" style="margin-top:0; margin-bottom:10px;">Tiết kiệm dầu nhất: <strong>${escapeHtml(bestFuelDriver.name)}</strong> (${fmtDec(bestFuelDriver.fuelPerKm, 3)} lít/km) — hao dầu nhất: <strong>${escapeHtml(worstFuelDriver.name)}</strong> (${fmtDec(worstFuelDriver.fuelPerKm, 3)} lít/km).</div>` : ''}
       <div class="grid-table-wrap">
         <table class="grid-table">
           <thead><tr><th>Tài xế</th><th class="num">Số ca</th><th class="num">Km</th><th class="num">Dầu (lít/km)</th></tr></thead>
@@ -13809,20 +13849,20 @@ function openProjectAppraisalEditor(id, newType){
         <div class="two-col">
           <div class="field">
             <label>Số km lượt đi</label>
-            <input type="number" inputmode="decimal" id="ap_kmGo" placeholder="0" value="${blankIfZero(draft.kmOneWay)}">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ap_kmGo" placeholder="0" value="${blankIfZero(draft.kmOneWay)}">
           </div>
           <div class="field">
             <label>Số km lượt về</label>
-            <input type="number" inputmode="decimal" id="ap_kmBack" placeholder="0" value="${blankIfZero(draft.kmReturn)}">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ap_kmBack" placeholder="0" value="${blankIfZero(draft.kmReturn)}">
           </div>
         </div>
         <div class="field">
           <label>Khối lượng / tải trọng dự kiến mỗi chuyến (tấn hoặc khối)</label>
-          <input type="number" inputmode="decimal" id="ap_load" placeholder="0" value="${blankIfZero(draft.loadPerTrip)}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="ap_load" placeholder="0" value="${blankIfZero(draft.loadPerTrip)}">
         </div>
         <div class="field">
           <label>Số chuyến dự tính chạy được trong 1 ca</label>
-          <input type="number" inputmode="decimal" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
           <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế — đây là chỉ số quyết định công trình cần bao nhiêu CA mới hoà vốn, không chỉ bao nhiêu chuyến.</div>
         </div>
         <div class="field">
@@ -14117,16 +14157,16 @@ function openCommercialAppraisalEditor(id){
         <div class="two-col">
           <div class="field">
             <label>Số km lượt đi</label>
-            <input type="number" inputmode="decimal" id="ap_kmGo" placeholder="0" value="${blankIfZero(draft.kmOneWay)}">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ap_kmGo" placeholder="0" value="${blankIfZero(draft.kmOneWay)}">
           </div>
           <div class="field">
             <label>Số km lượt về</label>
-            <input type="number" inputmode="decimal" id="ap_kmBack" placeholder="0" value="${blankIfZero(draft.kmReturn)}">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ap_kmBack" placeholder="0" value="${blankIfZero(draft.kmReturn)}">
           </div>
         </div>
         <div class="field">
           <label>Số chuyến dự tính chạy được trong 1 ca</label>
-          <input type="number" inputmode="decimal" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="ap_tripsPerShift" placeholder="0" value="${blankIfZero(draft.estimatedTripsPerShift)}">
           <div class="hint">Ước tính dựa trên cung đường + thời gian bốc/dỡ thực tế — đây là chỉ số quyết định công trình cần bao nhiêu CA mới hoà vốn, không chỉ bao nhiêu chuyến.</div>
         </div>
         <div class="field">
@@ -14145,7 +14185,7 @@ function openCommercialAppraisalEditor(id){
       <div class="card">
         <div class="field">
           <label>Khối lượng mua mỗi chuyến (tấn)</label>
-          <input type="number" inputmode="decimal" id="ap_buyVolume" placeholder="0" value="${blankIfZero(draft.buyVolumePerTrip)}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="ap_buyVolume" placeholder="0" value="${blankIfZero(draft.buyVolumePerTrip)}">
         </div>
         <div class="field">
           <label>Giá mua</label>
@@ -14166,7 +14206,7 @@ function openCommercialAppraisalEditor(id){
       <div class="card">
         <div class="field">
           <label>Khối lượng bán mỗi chuyến (khối)</label>
-          <input type="number" inputmode="decimal" id="ap_sellVolume" placeholder="0" value="${blankIfZero(draft.sellVolumePerTrip)}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="ap_sellVolume" placeholder="0" value="${blankIfZero(draft.sellVolumePerTrip)}">
           <div class="hint">Mua theo TẤN, bán theo KHỐI — 2 khối lượng này KHÔNG cần bằng nhau, nhập đúng số thực tế mỗi bên.</div>
         </div>
         <div class="field">
@@ -14188,12 +14228,12 @@ function openCommercialAppraisalEditor(id){
       <div class="card">
         <div class="field">
           <label>Tỷ lệ giá trị hàng mua KHÔNG có hoá đơn (%)</label>
-          <input type="number" inputmode="decimal" id="ap_noInvoicePercent" placeholder="0" value="${blankIfZero(draft.noInvoicePercent)}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="ap_noInvoicePercent" placeholder="0" value="${blankIfZero(draft.noInvoicePercent)}">
           <div class="hint">VD mỏ chỉ xuất hoá đơn được 70% giá trị thật → nhập 30.</div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Chi phí mua hoá đơn bù ước tính (% giá trị phần không hoá đơn)</label>
-          <input type="number" inputmode="decimal" id="ap_invoiceBuRate" placeholder="0" value="${blankIfZero(draft.invoiceBuCostRatePercent)}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="ap_invoiceBuRate" placeholder="0" value="${blankIfZero(draft.invoiceBuCostRatePercent)}">
           <div class="hint">Đơn giá thị trường để mua 1 hoá đơn bù hợp lệ, tính theo % giá trị cần bù — app tự trừ vào lãi gộp, đồng thời tự cộng lại đúng phần VAT được khấu trừ (không mất vĩnh viễn).</div>
         </div>
       </div>
@@ -18482,26 +18522,31 @@ function openMaintenanceEditor(id){
         </div>
         <div class="field">
           <label>Chu kỳ (km)</label>
-          <input type="number" inputmode="numeric" id="maint_interval" value="${draft.intervalKm}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="maint_interval" value="${draft.intervalKm}">
         </div>
         <div class="field">
           <label>Đã làm ở Km số${existing?' (đổi số này = ghi nhận LẦN LÀM MỚI, số cũ tự lưu vào lịch sử bên dưới)':''}</label>
-          <input type="number" inputmode="numeric" id="maint_lastOdo" value="${draft.lastDoneOdo}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="maint_lastOdo" value="${draft.lastDoneOdo}">
         </div>
         <div class="field">
           <label>Ngày làm gần nhất</label>
           <input type="date" id="maint_lastDate" value="${draft.lastDoneDate}">
         </div>
-        <div class="field" style="margin-bottom:0;">
+        <div class="field">
           <label>Ghi chú</label>
           <input type="text" id="maint_notes" value="${escapeHtml(draft.notes)}">
         </div>
+        <div class="two-col">
+          <div class="field" style="margin-bottom:0;"><label>💰 Chi phí lần làm này (đ)</label><input type="text" inputmode="numeric" id="maint_cost" placeholder="VD 3.500.000"></div>
+          <div class="field" style="margin-bottom:0;"><label>Trả bằng nguồn nào</label><select id="maint_method"><option value="bank">🏦 TCB</option><option value="cash">💵 Tiền mặt</option></select></div>
+        </div>
+        <div class="hint" style="margin-bottom:0;">Có chi phí thì app tự tạo 1 khoản 🔧 Sửa Chữa (công ty chịu) đúng ngày, đúng xe — tính vào lãi/lỗ và trừ TCB/Tiền mặt đúng 1 lần. Để trống = không có chi phí.</div>
       </div>
       <div class="stat-highlight" style="margin-top:8px;"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>
       ${history.length>0 ? `
       <div class="card" style="margin-top:10px;">
         <div style="font-weight:700; margin-bottom:6px;">🕘 Lịch Sử Đã Làm (${history.length} lần)</div>
-        ${history.map(h=>`<div class="hint">Km ${Number(h.odo).toLocaleString('vi-VN')} — ${formatDateVN(h.date)}</div>`).join('')}
+        ${history.map(h=>{ const rp = h.repairId ? (state.repairs||[]).find(r=>r.id===h.repairId) : null; return `<div class="hint">Km ${Number(h.odo).toLocaleString('vi-VN')} — ${formatDateVN(h.date)}${rp?` · 💰 ${fmtVND(rp.amount)}`:''}</div>`; }).join('')}
       </div>` : ''}
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing ? '<button class="btn btn-danger" id="delMaintenanceBtn">Xoá</button>' : ''}
@@ -18511,6 +18556,11 @@ function openMaintenanceEditor(id){
     </section>
   `;
 
+  // #335 — chi phí bảo dưỡng gắn với 1 khoản Sửa Chữa (lastRepairId)
+  const linkedRepair = draft.lastRepairId ? (state.repairs||[]).find(r=>r.id===draft.lastRepairId) : null;
+  let maintCost = linkedRepair ? (Number(linkedRepair.amount)||0) : 0;
+  attachMoneyInput(document.getElementById('maint_cost'), maintCost, v=>{ maintCost = v; });
+  if(linkedRepair) document.getElementById('maint_method').value = linkedRepair.method==='cash'?'cash':'bank';
   document.getElementById('saveMaintenanceBtn').addEventListener('click', async ()=>{
     const newName = document.getElementById('maint_name').value.trim();
     const newInterval = Number(document.getElementById('maint_interval').value)||0;
@@ -18533,7 +18583,27 @@ function openMaintenanceEditor(id){
     draft.lastDoneOdo = newOdo;
     draft.lastDoneDate = newDate;
     draft.notes = newNotes;
+    // #335 — lần làm mới: lần cũ (kèm khoản sửa chữa của nó) vào lịch sử; tạo/cập nhật khoản sửa chữa cho lần hiện tại.
+    const isNewOccurrence = !!existing && (Number(existing.lastDoneOdo)!==newOdo || existing.lastDoneDate!==newDate);
+    if(isNewOccurrence && newHistory.length){ newHistory[newHistory.length-1].repairId = existing.lastRepairId || null; }
     draft.history = newHistory;
+    const method = document.getElementById('maint_method').value;
+    const repairsBefore = [...(state.repairs||[])];
+    let repairsChanged = false;
+    const curRepair = (!isNewOccurrence && draft.lastRepairId) ? (state.repairs||[]).find(r=>r.id===draft.lastRepairId) : null;
+    if(maintCost>0){
+      const item = `Bảo dưỡng: ${newName} · km ${newOdo.toLocaleString('vi-VN')}`;
+      if(curRepair){ Object.assign(curRepair, { date:newDate, item, amount:maintCost, method }); }
+      else {
+        const rp = { id: uid('repair'), date:newDate, item, invoiceCode:'', amount:maintCost, notes:'Tự tạo từ Bảo Dưỡng', responsibility:'owner_full', responsibleDriverId:null, driverCustomAmount:0, method, maintenanceId: draft.id };
+        state.repairs = [...(state.repairs||[]), rp]; draft.lastRepairId = rp.id;
+      }
+      repairsChanged = true;
+    } else {
+      if(curRepair){ state.repairs = state.repairs.filter(r=>r.id!==curRepair.id); repairsChanged = true; }
+      if(isNewOccurrence || curRepair) draft.lastRepairId = null;
+    }
+    if(repairsChanged && !(await saveRepairs())){ state.repairs = repairsBefore; return; }
     const idx = state.maintenanceSchedules.findIndex(m=>m.id===draft.id);
     if(idx>=0) state.maintenanceSchedules[idx]=draft; else state.maintenanceSchedules.push(draft);
     if(!(await saveMaintenanceSchedules())) return;
@@ -18939,12 +19009,12 @@ function openLoanEditor(loanId){
           </div>
           <div class="field">
             <label>Tổng thời hạn vay (tháng, gồm cả ân hạn nếu có)</label>
-            <input type="number" inputmode="numeric" id="loan_term" value="${blankIfZero(draft.termMonths)}" placeholder="0">
+            <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="loan_term" value="${blankIfZero(draft.termMonths)}" placeholder="0">
           </div>
         </div>
         <div class="field">
           <label>Số tháng ân hạn (chỉ trả lãi, chưa trả gốc)</label>
-          <input type="number" inputmode="numeric" min="0" id="loan_grace" value="${blankIfZero(draft.graceMonths)}" placeholder="0">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="loan_grace" value="${blankIfZero(draft.graceMonths)}" placeholder="0">
           <div class="hint">Để 0 nếu khoản vay trả gốc đều ngay từ kỳ đầu (không có ân hạn). VD hợp đồng "vay 60 tháng, ân hạn gốc 24 tháng đầu" → Tổng thời hạn = 60, Ân hạn = 24 (36 tháng còn lại mới trả gốc).</div>
         </div>
         <div class="field">
@@ -18953,7 +19023,7 @@ function openLoanEditor(loanId){
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ngày đến hạn đóng lãi hàng tháng</label>
-          <input type="number" inputmode="numeric" min="1" max="31" id="loan_dueDay" value="${draft.dueDayOfMonth||20}">
+          <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="loan_dueDay" value="${draft.dueDayOfMonth||20}">
           <div class="hint">Nhập đúng ngày ngân hàng thu (1–31; tháng nào ngắn hơn thì tính ngày cuối tháng). App sẽ cảnh báo trước 3 ngày ở tab Ca Làm Việc.</div>
         </div>
       </div>
@@ -18970,7 +19040,7 @@ function openLoanEditor(loanId){
         <div class="two-col" style="margin-bottom:0;">
           <div class="field" style="margin-bottom:0;">
             <label>Mức lãi (%/năm)</label>
-            <input type="number" inputmode="decimal" id="loanRateNewValue" placeholder="VD 10.2">
+            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="loanRateNewValue" placeholder="VD 10.2">
           </div>
           <div class="field" style="margin-bottom:0; display:flex; flex-direction:column; justify-content:flex-end;">
             <button class="btn btn-accent btn-block" id="addLoanRateBtn">+ Thêm Mức Lãi</button>
@@ -22809,12 +22879,12 @@ function renderSettings(){
       <div class="card">
         <div class="field" style="margin-bottom:14px;">
           <label>Thuế suất VAT mặc định (%)</label>
-          <input type="number" inputmode="decimal" id="tax_vatRate" value="${Number(state.settings.vatRatePercent)||0}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="tax_vatRate" value="${Number(state.settings.vatRatePercent)||0}">
           <div class="hint" style="margin-top:4px;">Dùng khi 1 công trình thương mại không tự khai riêng thuế suất — có thể ghi đè riêng từng công trình ở form nhập ca.</div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Thuế suất TNDN dự kiến (%)</label>
-          <input type="number" inputmode="decimal" id="tax_citRate" value="${Number(state.settings.citRatePercent)||0}">
+          <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="tax_citRate" value="${Number(state.settings.citRatePercent)||0}">
           <div class="hint" style="margin-top:4px;">Mặc định 20% (mức phổ thông) — sửa lại nếu KT thuế xác định công ty thuộc diện ưu đãi khác. Chỉ dùng để ước tính tham khảo ở Kết Quả Kinh Doanh, không phải số quyết toán chính thức.</div>
         </div>
       </div>
@@ -22838,7 +22908,7 @@ function renderSettings(){
             return `
             <div class="field" style="margin-bottom:${i===goodsTypesList.length-1?'0':'14px'};">
               <label>${escapeHtml(gt)} — ${auto.value!==null ? `tự động: ${fmtVND(Math.round(auto.value))}/khối (lô ${formatDateVN(auto.lotDate)})` : 'chưa có lô nào để tự tính'}</label>
-              <input type="number" inputmode="decimal" class="lotPriceOverrideInput" data-goods-type="${escapeHtml(normGoodsType(gt))}" placeholder="Để trống = dùng số tự động" value="${overrideVal?Math.round(overrideVal):''}">
+              <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" class="lotPriceOverrideInput" data-goods-type="${escapeHtml(normGoodsType(gt))}" placeholder="Để trống = dùng số tự động" value="${overrideVal?Math.round(overrideVal):''}">
             </div>`;
           }).join('');
         })()}
