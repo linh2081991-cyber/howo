@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-04 · #337';
+const APP_BUILD = '2026-10-04 · #338';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3270,6 +3270,38 @@ function renderMonthSettlementPage(driverId, ym, onBack){
   }));
 }
 
+
+/// #338 — sửa 1 lần thanh toán lương (ngày, số tiền, nguồn, tháng lương, ghi chú).
+function openSalaryPaymentEditor(driverId, payId){
+  const p = (state.salaryPayments||[]).find(x=>x.id===payId); if(!p) return;
+  const d = driverById(driverId);
+  openModal(`
+    <h3 style="margin-top:0;">✏️ Sửa Lần Thanh Toán Lương — ${escapeHtml(d?d.name:'')}</h3>
+    ${p.settleId ? `<div class="hint" style="margin-top:0;">Lần này thuộc quyết toán ${monthLabelVN(p.settleMonth||'')} (phần tiền thật). Sửa ở đây chỉ đổi dòng này.</div>` : ''}
+    <div class="field"><label>Ngày trả</label><input type="date" id="spe_date" value="${p.date}"></div>
+    <div class="field"><label>Số tiền</label><input type="text" inputmode="decimal" id="spe_amount"></div>
+    <div class="field"><label>Trả bằng nguồn nào</label><select id="spe_method">
+      <option value="bank" ${(p.method||'bank')==='bank'?'selected':''}>🏦 TCB Bank</option>
+      <option value="cash" ${p.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+      <option value="offbook" ${p.method==='offbook'?'selected':''}>📌 Đã trả ngoài sổ (không trừ TCB/Tiền Mặt)</option></select></div>
+    <div class="field"><label>Trả cho lương tháng</label><input type="month" id="spe_forMonth" value="${p.forMonth || p.closeMonth || p.date.slice(0,7)}"></div>
+    <div class="field"><label>Ghi chú</label><input type="text" id="spe_note" value="${escapeHtml(p.note||'')}"></div>
+    <button class="btn btn-accent btn-block" id="spe_save">💾 Lưu Thay Đổi</button>
+    <button class="btn btn-ghost btn-block" id="spe_cancel" style="margin-top:8px;">Huỷ</button>`);
+  let amount = Number(p.amount)||0;
+  attachMoneyInput(document.getElementById('spe_amount'), amount, v=>{ amount = v; });
+  document.getElementById('spe_cancel').addEventListener('click', ()=>openSalaryPaymentModal(driverId));
+  document.getElementById('spe_save').addEventListener('click', async ()=>{
+    if(!(amount>0)){ showToast('Ông Chủ nhập số tiền lớn hơn 0 (muốn bỏ thì bấm Xoá).'); return; }
+    const before = {...p};
+    const ym = document.getElementById('spe_forMonth').value || p.date.slice(0,7);
+    Object.assign(p, { date: document.getElementById('spe_date').value || p.date, amount, method: document.getElementById('spe_method').value, note: document.getElementById('spe_note').value.trim(), forMonth: ym });
+    if(p.closeMonth && p.closeMonth!==ym) delete p.closeMonth;
+    if(!(await saveSalaryPayments())){ Object.keys(p).forEach(k=>delete p[k]); Object.assign(p, before); return; }
+    if(document.getElementById('slBackBtn')) renderSalaryLedgerPage(driverId);
+    openSalaryPaymentModal(driverId, `✅ Đã sửa: ${fmtVND(amount)} · ${formatDateVN(p.date)} · lương tháng ${monthLabelVN(ym)}`);
+  });
+}
 function companyShiftsWithVehicle(){
   const act = activeVehicleIdForEditing();
   const out = [];
@@ -3448,6 +3480,11 @@ function openSalaryPaymentModal(driverId, flash){
   const d = driverById(driverId); if(!d) return;
   const w = driverWagePayable(driverId);
   const list = (state.salaryPayments||[]).filter(p=>p.driverId===driverId).sort((a,b)=>b.date.localeCompare(a.date));
+  // #338 — mỗi lần trả gắn ĐÚNG tháng lương (forMonth); mặc định tháng còn nợ cũ nhất.
+  const monthRows = driverWagePayableByMonth(driverId);
+  const ymOfPay = p=> p.forMonth || p.closeMonth || p.date.slice(0,7);
+  const oldestOwed = monthRows.find(r=>r.net>0.5);
+  const defaultForMonth = oldestOwed ? oldestOwed.ym : todayLocalDateStr().slice(0,7);
   openModal(`
     <h3 style="margin-top:0;">💵 Thanh Toán Lương — ${escapeHtml(d.name)}</h3>
     <div id="salp_status" style="display:${flash?'block':'none'}; padding:10px; border-radius:10px; font-weight:700; margin-bottom:10px; background:var(--profit-soft, #e3f3e8); color:var(--profit);">${flash?escapeHtml(flash):''}</div>
@@ -3472,18 +3509,35 @@ function openSalaryPaymentModal(driverId, flash){
     <div class="field"><label>Số tiền trả</label><input type="text" inputmode="decimal" id="salp_amount" placeholder="0"></div>
     <div class="field"><label>Trả bằng nguồn nào</label>
       <select id="salp_method"><option value="bank">🏦 TCB Bank</option><option value="cash">💵 Tiền mặt</option><option value="offbook">📌 Đã trả ngoài sổ (không trừ TCB/Tiền Mặt — số dư đã phản ánh sẵn)</option></select></div>
+    <div class="field"><label>Trả cho lương tháng</label><input type="month" id="salp_forMonth" value="${defaultForMonth}"></div>
+    <div id="salp_monthWarn" class="hint" style="margin-top:-6px; color:var(--loss); display:none;"></div>
     <div class="field"><label>Ghi chú</label><input type="text" id="salp_note" placeholder="Ví dụ: Thanh toán lương tháng 9"></div>
     <button class="btn btn-accent btn-block" id="salp_saveBtn">💾 Ghi Nhận Thanh Toán</button>
-    ${list.length ? `
-    <div style="font-weight:800; font-size:13px; margin:14px 0 6px;">📜 Các lần đã thanh toán</div>
-    <div class="grid-table-wrap"><table class="grid-table">
-      <thead><tr><th>Ngày</th><th>Nguồn</th><th class="num">Số tiền</th><th></th></tr></thead>
-      <tbody>${list.map(p=>`<tr><td style="white-space:nowrap;">${formatDateVN(p.date)}${p.note?`<div class="hint" style="margin:2px 0 0;">${escapeHtml(p.note)}</div>`:''}</td><td style="white-space:nowrap;">${SALARY_METHOD_LABELS[p.method||'bank']||''}</td><td class="num">${fmtVND(p.amount)}</td><td><button class="link-btn" data-del-sp="${p.id}" style="color:var(--loss); padding:0;">Xoá</button></td></tr>`).join('')}</tbody>
-    </table></div>` : ''}
+    <div style="font-weight:800; font-size:14px; margin:16px 0 6px;">📜 Lịch Sử Thanh Toán Theo Tháng</div>
+    ${monthRows.length ? [...monthRows].reverse().map((r, idx)=>{ const pays = list.filter(p=>ymOfPay(p)===r.ym); const paidTotal = r.advance + r.bonusPaid + r.settled; return `
+    <details ${idx===0?'open':''} style="border:1px solid var(--border); border-radius:12px; padding:8px 12px; margin-bottom:8px; background:var(--surface);">
+      <summary style="display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:pointer; list-style:none;">
+        <strong>Tháng ${monthLabelVN(r.ym)}</strong>
+        <span style="text-align:right; font-size:12.5px;">${salaryStatusOf(r.net)}<br><span class="hint" style="margin:0;">Phải trả ${fmtVND(r.baseFood+r.trip+r.bonus-r.repair)} · Đã trả ${fmtVND(paidTotal)}${Math.abs(r.net)>0.5?` · ${r.net>0?'Còn nợ':'Vượt'} ${fmtVND(Math.abs(r.net))}`:''}</span></span>
+      </summary>
+      <div style="margin-top:8px;">
+        ${r.advance>0.5?`<div class="summary-row" style="font-size:13px;"><span>Ứng lương trên các ca</span><span class="val">${fmtVND(r.advance)}</span></div>`:''}
+        ${r.bonusPaid>0.5?`<div class="summary-row" style="font-size:13px;"><span>Tip/thưởng đã trả</span><span class="val">${fmtVND(r.bonusPaid)}</span></div>`:''}
+        ${pays.map(p=>{ const locked = p.method==='offset'; return `<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:6px 0; border-top:1px dashed var(--border); font-size:13px;">
+          <span>${formatDateVN(p.date)} · ${SALARY_METHOD_LABELS[p.method||'bank']||''}${p.note?`<div class="hint" style="margin:2px 0 0;">${escapeHtml(p.note)}</div>`:''}${p.settleId?`<div class="hint" style="margin:2px 0 0;">thuộc quyết toán ${monthLabelVN(p.settleMonth||r.ym)}</div>`:''}</span>
+          <span style="text-align:right; white-space:nowrap;"><strong>${p.amount<0?'−':''}${fmtVND(Math.abs(Number(p.amount)||0))}</strong><br>${locked ? '<span class="hint" style="margin:0;">🔒 sửa bằng Huỷ quyết toán</span>' : `<button class="link-btn" data-edit-sp="${p.id}" style="padding:0;">✏️ Sửa</button> · <button class="link-btn" data-del-sp="${p.id}" style="padding:0; color:var(--loss);">Xoá</button>`}</span>
+        </div>`; }).join('') || '<div class="hint" style="margin:4px 0 0;">Chưa có lần thanh toán nào gắn tháng này.</div>'}
+      </div>
+    </details>`; }).join('') : '<div class="hint">Chưa có dữ liệu lương.</div>'}
     <button class="btn btn-ghost btn-block" id="salp_closeBtn" style="margin-top:10px;">Đóng</button>
   `);
   let amount = 0;
-  attachMoneyInput(document.getElementById('salp_amount'), 0, v=>{ amount = v; });
+  attachMoneyInput(document.getElementById('salp_amount'), 0, v=>{ amount = v; refreshMonthWarn(); });
+  function refreshMonthWarn(){ const el = document.getElementById('salp_monthWarn'); if(!el) return; const ym = document.getElementById('salp_forMonth').value; const r = monthRows.find(x=>x.ym===ym); const owed = r ? r.net : 0;
+    if(owed<=0.5){ el.style.display='block'; el.textContent = `⚠️ Tháng ${monthLabelVN(ym)} đã trả đủ (hoặc chưa có lương) — ghi thêm sẽ thành trả vượt.`; }
+    else { el.style.display='block'; el.style.color='var(--ink-soft)'; el.textContent = `Tháng ${monthLabelVN(ym)} còn nợ ${fmtVND(owed)}.`; return; }
+    el.style.color='var(--loss)'; }
+  document.getElementById('salp_forMonth').addEventListener('change', refreshMonthWarn); refreshMonthWarn();
   document.getElementById('salp_closeBtn').addEventListener('click', ()=>{ closeModal(); renderAll(); });
   // #327 — nút có trạng thái rõ ràng: "⏳ Đang lưu…" → báo ✅/❌ ngay trong khung, không phụ thuộc toast.
   const saveBtn = document.getElementById('salp_saveBtn');
@@ -3494,7 +3548,11 @@ function openSalaryPaymentModal(driverId, flash){
     const date = document.getElementById('salp_date').value || todayLocalDateStr();
     if(!(amount>0)){ setStatus('⚠️ Ông Chủ nhập số tiền trả trước.', false); document.getElementById('salp_amount').focus(); return; }
     const method = document.getElementById('salp_method').value;
-    const entry = { id: uid('salpay'), driverId, date, amount, method, note: document.getElementById('salp_note').value.trim() };
+    const forMonth = document.getElementById('salp_forMonth').value || date.slice(0,7);
+    const mRow = monthRows.find(r=>r.ym===forMonth);
+    const owedThatMonth = mRow ? mRow.net : 0;
+    if(amount > owedThatMonth + 0.5 && !confirm(owedThatMonth<=0.5 ? `Tháng ${monthLabelVN(forMonth)} đã trả đủ — ghi thêm ${fmtVND(amount)} sẽ thành TRẢ VƯỢT. Vẫn ghi?` : `Tháng ${monthLabelVN(forMonth)} chỉ còn nợ ${fmtVND(owedThatMonth)} — ghi ${fmtVND(amount)} sẽ trả vượt ${fmtVND(amount-owedThatMonth)}. Vẫn ghi?`)) return;
+    const entry = { id: uid('salpay'), driverId, date, amount, method, forMonth, note: document.getElementById('salp_note').value.trim() };
     saveBtn.disabled = true; const oldLabel = saveBtn.textContent; saveBtn.textContent = '⏳ Đang lưu…';
     state.salaryPayments = state.salaryPayments || [];
     state.salaryPayments.push(entry);
@@ -3508,6 +3566,7 @@ function openSalaryPaymentModal(driverId, flash){
     if(document.getElementById('slBackBtn')) renderSalaryLedgerPage(driverId); // đang ở Sổ Lương → cập nhật ngay phía sau
     openSalaryPaymentModal(driverId, `✅ Đã ghi nhận ${fmtVND(amount)} ngày ${formatDateVN(date)} · ${SALARY_METHOD_LABELS[method]||''}`);
   });
+  document.querySelectorAll('[data-edit-sp]').forEach(btn=>btn.addEventListener('click', ()=>openSalaryPaymentEditor(driverId, btn.dataset.editSp)));
   document.querySelectorAll('[data-del-sp]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm('Xoá lần thanh toán lương này?')) return;
@@ -22246,11 +22305,11 @@ function renderBankReconDetailPage(mode){
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
     return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
   }) : [];
-  const cashEntries = bankRecon ? allEntries.filter(e=>{
+  const cashEntries = cashRecon ? allEntries.filter(e=>{ // #338 — dùng ĐÚNG mốc chốt Tiền Mặt (trước đây lấy nhầm mốc TCB)
     if(e.method!=='cash') return false;
     if(e.category==='Ứng riêng cho tài xế' || e.category==='Tip/Thưởng tháng') return false;
     const isEquity = e.category==='Góp vốn' || e.category==='Rút vốn';
-    return isEquity ? e.date>=bankRecon.checkpoint.date : e.date>bankRecon.checkpoint.date;
+    return isEquity ? e.date>=cashRecon.checkpoint.date : e.date>cashRecon.checkpoint.date;
   }) : [];
   // SỬA 2026-08-23 (Ông Chủ xác nhận Q1-Q5 — 6 khoản này ĐỀU là tiền ngân
   // hàng): tách riêng Tiền dầu (chỉ tính ca đánh dấu Ngân hàng) khỏi Tạm
@@ -22292,7 +22351,7 @@ function renderBankReconDetailPage(mode){
   // ở trên — đủ cả 2 phía Ngân hàng VÀ Tiền Mặt, vì 2 khoản này giờ có ô
   // chọn nguồn, không còn mặc định luôn là ngân hàng nữa.
   const bankDriverAdvanceItems = bankRecon ? state.driverAdvances
-    .filter(a=>a.date>bankRecon.checkpoint.date && a.date<=todayLocalDateStr() && a.method!=='cash')
+    .filter(a=>a.date>bankRecon.checkpoint.date && a.date<=todayLocalDateStr() && (a.method||'bank')==='bank') // #338 — đối trừ/📌 không phải tiền TCB
     .map(a=>{ const driver = driverById(a.driverId); return { date:a.date, name: driver?driver.name:'', note:a.note||'', cost:Number(a.amount)||0 }; })
     .sort((a,b)=>b.date.localeCompare(a.date)) : [];
   const bankBonusItems = bankRecon ? allMonthlyBonusesCompanyWide()
@@ -22384,6 +22443,13 @@ function renderBankReconDetailPage(mode){
     .map(p=>({ date:p.date, label:`Đã nộp thuế VAT${p.notes?' — '+escapeHtml(p.notes):''}`, amount: Number(p.amount)||0 })) : [];
   const bankTransferItems = bankRecon ? (state.internalTransfers||[]).filter(t=>t.date>bankRecon.checkpoint.date && t.date<=rangeTo)
     .map(t=>({ date:t.date, label:`${t.direction==='bankToCash'?'🏦→💵 Rút tiền mặt':'💵→🏦 Nộp tiền mặt vào'}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='bankToCash'?-1:1 })) : [];
+  // #338 — các khoản trước đây công thức tổng CÓ tính nhưng bảng chi tiết KHÔNG hiện → báo "đối chiếu lệch".
+  const cashTransferItems = cashRecon ? (state.internalTransfers||[]).filter(t=>t.date>cashRecon.checkpoint.date && t.date<=rangeTo)
+    .map(t=>({ date:t.date, label:`${t.direction==='bankToCash'?'🏦→💵 Nhận tiền rút từ TCB':'💵→🏦 Nộp tiền mặt vào TCB'}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='bankToCash'?1:-1 })) : [];
+  const reserveItemsFor = (recon, isCash)=> recon ? (state.depreciationReserveTransfers||[]).filter(t=>t.date>recon.checkpoint.date && t.date<=rangeTo && (isCash ? t.method==='cash' : (t.method||'bank')!=='cash'))
+    .map(t=>({ date:t.date, label:`${t.direction==='toReserve'?'🫙 Chuyển vào quỹ khấu hao':'🫙 Rút từ quỹ khấu hao'} — 🚛 ${t.vehicleId?vehicleNameById(t.vehicleId):'chưa gán xe'}${t.note?' — '+escapeHtml(t.note):''}`, amount: Number(t.amount)||0, sign: t.direction==='toReserve'?-1:1 })) : [];
+  const bankReserveItems = reserveItemsFor(bankRecon, false);
+  const cashReserveItems = reserveItemsFor(cashRecon, true);
   // SỬA 2026-09-14 LẦN 10 (cùng lỗi gốc với bankLoanRealCostForRange() ở
   // trên — CĂN CỨ DUY NHẤT phải là ĐÃ TICK "Đã trả" (paidMonths), không
   // phải "đã tới hạn trên lịch"): trả sớm hơn hạn thì bị bỏ sót; ngược
@@ -22473,6 +22539,7 @@ function renderBankReconDetailPage(mode){
     - bankInsuranceRegItems.reduce((s,r)=>s+r.amount,0)
     - bankVatPaymentItems.reduce((s,r)=>s+r.amount,0)
     + bankTransferItems.reduce((s,r)=>s+(r.sign||-1)*r.amount,0)
+    + bankReserveItems.reduce((s,r)=>s+r.sign*r.amount,0)
   ) : 0;
   // SO SÁNH ĐÚNG PHẠM VI: cashFlowSince KHÔNG hề gồm Góp/Rút vốn (khoản
   // đó cộng RIÊNG vào computedBalance qua contributedSince/withdrawnSince
@@ -22497,6 +22564,8 @@ function renderBankReconDetailPage(mode){
     - cashLoanPaymentItems.reduce((s,r)=>s+r.amount,0)
     - cashInsuranceRegItems.reduce((s,r)=>s+r.amount,0)
     - cashVatPaymentItems.reduce((s,r)=>s+r.amount,0)
+    + cashTransferItems.reduce((s,r)=>s+r.sign*r.amount,0)
+    + cashReserveItems.reduce((s,r)=>s+r.sign*r.amount,0)
   ) : 0;
   const cashChecksumDiff = cashRecon ? Math.round(cashRecon.cashFlowSince - itemizedSumCash) : 0;
   // SỬA 2026-09-14 LẦN 4: cashRecon giờ khai báo 1 LẦN DUY NHẤT ở ngay
@@ -22701,6 +22770,7 @@ function renderBankReconDetailPage(mode){
       ${renderLedgerItemsTable('🏦 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)', bankInsuranceRegItems)}
       ${renderLedgerItemsTable('🏦 Đã Nộp Thuế VAT', bankVatPaymentItems)}
       ${renderLedgerItemsTable('🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)', bankTransferItems)}
+      ${renderLedgerItemsTable('🫙 Quỹ Khấu Hao (chuyển vào / rút ra, từng xe)', bankReserveItems)}
     </section>
     ` : ''}
 
@@ -22735,6 +22805,8 @@ function renderBankReconDetailPage(mode){
       ${renderLedgerItemsTable('💵 Gốc + Lãi Vay Ngân Hàng (từng khoản, từng kỳ)', cashLoanPaymentItems)}
       ${renderLedgerItemsTable('💵 Bảo Hiểm + Đăng Kiểm (từng xe, từng tháng)', cashInsuranceRegItems)}
       ${renderLedgerItemsTable('💵 Đã Nộp Thuế VAT', cashVatPaymentItems)}
+      ${renderLedgerItemsTable('🔄 Chuyển Tiền Nội Bộ (Ngân Hàng ↔ Tiền Mặt)', cashTransferItems)}
+      ${renderLedgerItemsTable('🫙 Quỹ Khấu Hao (chuyển vào / rút ra, từng xe)', cashReserveItems)}
     </section>
     ` : ''}
   `;
