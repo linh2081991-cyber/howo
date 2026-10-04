@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-04 · #336';
+const APP_BUILD = '2026-10-04 · #337';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2814,7 +2814,9 @@ function fleetLoanRows(){
 // cho dự án là NỢ CỦA DỰ ÁN — dư nợ trừ vào giá trị ròng dự án; Vốn Chủ chỉ gồm
 // tiền thật của Ông Chủ. Lãi vay vẫn là chi phí thật (không đổi). Mỗi khoản vay
 // có cờ forProject (mặc định: có); khoản vay không dùng cho dự án bị loại ra.
-function loanIsForProject(loan){ return loan.forProject!==false; }
+// SỬA 2026-10-04 (#337 — Ông Chủ: "tất cả khoản vay đứng tên tao đều dùng cho dự án"): app chỉ phục
+// vụ dự án, nên MỌI khoản vay đều là nợ dự án; bỏ ô tick dễ nhầm (trước đây nằm dưới dòng "chỉ áp dụng vay CÔNG TY").
+function loanIsForProject(loan){ return true; }
 function projectPersonalLoanSplit(asOfDate){
   const d = asOfDate || todayLocalDateStr();
   let original = 0, paid = 0;
@@ -3949,16 +3951,21 @@ function renderVehicleManagementPage(selectedVid){
       </div>
 
       <div class="card" style="margin-bottom:12px;">
-        <div style="font-weight:800; margin-bottom:8px;">6️⃣ Khoản vay gắn với xe (sửa ở mục Khoản Vay)</div>
+        <div style="font-weight:800; margin-bottom:8px;">6️⃣ Khoản vay gắn với xe</div>
         <div class="grid-table-wrap"><table class="grid-table">
-          <thead><tr><th>Khoản vay</th><th>Đứng tên</th><th class="num">Gốc vay</th></tr></thead>
-          <tbody>${loans.map(l=>`<tr><td>${escapeHtml(l.name||'Khoản vay')}</td><td>${(l.ownerType||'personal')==='company'?'🏢 Công ty':'👤 Cá nhân'}</td><td class="num">${fmtVND(l.principal)}</td></tr>`).join('') || '<tr><td colspan="3" class="hint">Chưa có khoản vay.</td></tr>'}</tbody>
-        </table></div>
+          <thead><tr><th>Khoản vay</th><th>Đứng tên</th><th class="num">Gốc vay</th><th></th></tr></thead>
+          <tbody>${loans.map(l=>`<tr><td>${escapeHtml(l.name||'Khoản vay')}</td><td>${(l.ownerType||'personal')==='company'?'🏢 Công ty':'👤 Cá nhân'}</td><td class="num">${fmtVND(l.principal)}</td><td><button class="link-btn vmLoanEditBtn" data-loan="${l.id}" style="padding:0;">✏️ Sửa</button></td></tr>`).join('') || '<tr><td colspan="3" class="hint">Chưa có khoản vay.</td></tr>'}</tbody>
+        </table>
+        <button class="btn btn-accent btn-block" id="vmLoanAddBtn" style="margin-top:8px;">➕ Thêm khoản vay cho xe này</button></div>
       </div>
 
       <button class="btn btn-accent btn-block" id="vm_save">💾 Lưu Thông Tin Xe</button>`}
     </section>`;
   document.getElementById('vmBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  // #337 — sửa/thêm khoản vay ngay từ trang xe: tự chuyển sang đúng xe rồi mở trang khoản vay.
+  const openLoanForVehicle = async (loanId)=>{ if(activeVehicleIdForEditing()!==vid) await switchVehicle(vid); openLoanEditor(loanId); };
+  document.querySelectorAll('.vmLoanEditBtn').forEach(b=>b.addEventListener('click', ()=>openLoanForVehicle(b.dataset.loan)));
+  const vmLoanAdd = document.getElementById('vmLoanAddBtn'); if(vmLoanAdd) vmLoanAdd.addEventListener('click', ()=>openLoanForVehicle(null));
   document.querySelectorAll('[data-vm-pick]').forEach(b=>b.addEventListener('click', ()=>renderVehicleManagementPage(b.dataset.vmPick)));
   if(!v) return;
   let residualVal = Number(s.depreciationResidual)||0, depVal = Number(s.monthlyVehicleDepreciation)||0;
@@ -19134,8 +19141,7 @@ function openLoanEditor(loanId){
         </div>
         <div class="field">
           <label>Tiền giải ngân chuyển vào đâu (chỉ áp dụng vay CÔNG TY)</label>
-          <label style="display:flex; align-items:center; gap:8px; margin:0 0 10px 0; font-weight:600;"><input type="checkbox" id="loan_forProject" ${draft.forProject!==false?'checked':''} style="width:auto;"> Tiền vay này dùng cho dự án (tính là nợ của dự án)</label>
-          <select id="loan_disbursementTo">
+                    <select id="loan_disbursementTo">
             <option value="companyAccount" ${(draft.disbursementTo||'companyAccount')==='companyAccount'?'selected':''}>🏦 Tài khoản công ty (cộng vào TCB)</option>
             <option value="seller" ${draft.disbursementTo==='seller'?'selected':''}>🚛 Ngân hàng chuyển thẳng cho bên bán xe (không vào TCB)</option>
           </select>
@@ -19405,7 +19411,7 @@ function openLoanEditor(loanId){
     draft.name = document.getElementById('loan_name').value.trim() || `Khoản vay ${(state.settings.bankLoans||[]).length+1}`;
     draft.ownerType = document.getElementById('loan_ownerType').value;
     draft.disbursementTo = document.getElementById('loan_disbursementTo').value; // #320
-    draft.forProject = document.getElementById('loan_forProject').checked; // #332
+    draft.forProject = true; // #337 — mọi khoản vay là nợ dự án
     if(!(draft.principal>0)){ showToast('Nhập số tiền vay trước đã.'); return; }
     if(!(draft.termMonths>0)){ showToast('Nhập thời hạn vay trước đã.'); return; }
     if(draft.graceMonths>=draft.termMonths){ showToast('Số tháng ân hạn phải nhỏ hơn Tổng thời hạn vay (phải còn ít nhất 1 tháng để trả gốc).'); return; }
@@ -20710,7 +20716,8 @@ function renderCompanyDashboardPage(preserveScroll){
       <h2 style="margin-bottom:2px;">🏢 LINH CHÍ THÀNH</h2>
 
       <button class="btn btn-accent btn-block" id="openBizReportBtn" style="font-size:15.5px; padding:14px; margin-bottom:10px;">📊 Báo Cáo Kinh Doanh Tổng Hợp</button>
-      <button class="btn btn-ghost btn-block" id="openPerVehicleBtn" style="margin-bottom:14px;">🚛 Kết Quả Từng Xe</button>
+      <button class="btn btn-ghost btn-block" id="openPerVehicleBtn" style="margin-bottom:8px;">🚛 Kết Quả Từng Xe</button>
+      <button class="btn btn-ghost btn-block" id="vehicleMgmtTopBtn" style="margin-bottom:14px; border:1.5px solid var(--accent);">🛠️ Quản Lý Xe — sở hữu · tiền đầu tư · khấu hao · khoản vay · thuê</button>
 
       ${(()=>{
         // SỬA 2026-09-14 (Ông Chủ yêu cầu — "Kế Toán Nội Bộ là chuyên gia
@@ -20943,6 +20950,7 @@ function renderCompanyDashboardPage(preserveScroll){
 
           <div style="font-weight:800; font-size:15px; margin:18px 0 2px;">🚛 Tài Sản Xe & Vay Nợ</div>
           <div class="hint" style="margin-top:0; margin-bottom:8px;">Bóc tách từng xe và từng khoản vay — khoản nào đứng tên công ty, khoản nào đứng tên cá nhân Ông Chủ.</div>
+          <button class="btn btn-ghost btn-sm" id="vehicleMgmtAssetBtn" style="width:auto; margin-bottom:8px;">🛠️ Sửa ở Quản Lý Xe →</button>
           ${(()=>{
             const A = fleetAssetRows(); const Ls = fleetLoanRows();
             const compRem = Ls.filter(l=>l.owner==='company').reduce((a,l)=>a+l.remaining,0);
@@ -20969,7 +20977,7 @@ function renderCompanyDashboardPage(preserveScroll){
           <div style="font-weight:800; font-size:13.5px; margin:14px 0 6px;">2️⃣ Từng khoản vay</div>
           ${Ls.map(l=>`<div style="border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:8px; background:var(--surface);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;"><strong>🏦 ${escapeHtml(l.name)}</strong>${ownerBadge(l.owner)}</div>
-            <div class="hint" style="margin:0 0 4px;">Xe: ${escapeHtml(l.vehicle||'—')}${l.forProject===false?' · không dùng cho dự án':''}</div>
+            <div class="hint" style="margin:0 0 4px;">Xe: ${escapeHtml(l.vehicle||'—')}</div>
             <div class="summary-row"><span>Gốc vay</span><span class="val">${fmtVND(l.principal)}</span></div>
             <div class="summary-row"><span>Gốc đã trả</span><span class="val">${fmtVND(l.paid)}</span></div>
             <div class="summary-row total"><span>Dư nợ còn lại</span><span class="val" style="color:var(--loss);">${fmtVND(l.remaining)}</span></div>
@@ -21480,6 +21488,7 @@ function renderCompanyDashboardPage(preserveScroll){
   document.querySelectorAll('.wcJarTile').forEach(b=>b.addEventListener('click', ()=>{ saveMainScroll(); renderDepreciationReserveHistoryPage(b.dataset.vid||null); })); // #330
   const vehicleProfileBtn = document.getElementById('vehicleProfileBtn'); // #321 — trang riêng Quản Lý Xe
   if(vehicleProfileBtn) vehicleProfileBtn.addEventListener('click', ()=>{ saveMainScroll(); renderVehicleManagementPage(); });
+  ['vehicleMgmtTopBtn','vehicleMgmtAssetBtn'].forEach(id=>{ const b = document.getElementById(id); if(b) b.addEventListener('click', ()=>{ saveMainScroll(); renderVehicleManagementPage(); }); }); // #337
   ['wcAdvanceBreakdownBtn','wcAdvanceBreakdownBtn2'].forEach(id=>{ const b = document.getElementById(id); if(b) b.addEventListener('click', openDriverAdvanceBreakdownModal); });
   const wcWageBreakdownBtn = document.getElementById('wcWageBreakdownBtn');
   if(wcWageBreakdownBtn) wcWageBreakdownBtn.addEventListener('click', ()=>{ saveMainScroll(); renderSalaryLedgerPage(); }); // #325
