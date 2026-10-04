@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-04 · #338';
+const APP_BUILD = '2026-10-04 · #339';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2848,14 +2848,19 @@ function vehicleSetupChecklist(vid){
   items.push({ ok: entries.length>0, text: entries.length ? `Đã gán ${entries.length} lần đầu tư cho xe` : 'Chưa gán lần đầu tư nào cho xe' });
   if(owner==='company') items.push({ ok: entries.every(e=>e.priceExVat!==undefined && e.priceExVat!==null && (Number(e.vatAmount)||0)>0), text: 'Xe công ty: đã tách giá chưa VAT và tiền VAT (để khấu trừ VAT)' });
   items.push({ ok: (Number(s.monthlyVehicleDepreciation)||0)>0, text: 'Đã cài khấu hao / tháng' });
-  loans.forEach(l=>{
-    const personal = (l.ownerType||'personal')!=='company';
-    if(personal && owner==='company'){
-      const d = l.disbursementDate, amt = Number(l.principal)||0;
-      const matched = (state.ownerEquityEntries||[]).some(e=>e.type==='contribution' && !e.isRecycled && d && Math.abs(daysBetweenDates(new Date(e.date+'T00:00:00'), new Date(d+'T00:00:00')))<=7 && Math.abs((Number(e.amount)||0)-amt)<=Math.max(1, amt*0.02));
-      items.push({ ok: matched, text: `Khoản vay "${l.name||'Khoản vay'}" (👤 cá nhân, ${fmtVND(amt)}): đã ghi Góp vốn khi tiền về TCB${matched?'':' — chưa thấy khoản Góp vốn tương ứng (±7 ngày)'}` });
-    }
-  });
+  // SỬA 2026-10-04 (#339): đối chiếu GỘP — tổng tiền vay cá nhân của xe công ty phải bằng tổng Góp vốn
+  // (TCB + tiền mặt, tiền mới) ghi trong khoảng ±7 ngày quanh các ngày giải ngân. Cho phép 1 khoản vay
+  // được nộp vào nhiều lần / nhiều nguồn (VD 600tr = 550tr TCB + 50tr tiền mặt).
+  const pLoans = loans.filter(l=>(l.ownerType||'personal')!=='company' && l.disbursementDate);
+  if(owner==='company' && pLoans.length){
+    const need = pLoans.reduce((a,l)=>a+(Number(l.principal)||0),0);
+    const dates = pLoans.map(l=>l.disbursementDate).sort();
+    const shift = (d,n)=>{ const x = new Date(d+'T00:00:00'); x.setDate(x.getDate()+n); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; };
+    const lo = shift(dates[0], -7), hi = shift(dates[dates.length-1], 7);
+    const got = (state.ownerEquityEntries||[]).filter(e=>e.type==='contribution' && !e.isRecycled && e.date>=lo && e.date<=hi).reduce((a,e)=>a+(Number(e.amount)||0),0);
+    const ok = Math.abs(got-need) <= Math.max(1, need*0.001);
+    items.push({ ok, text: `Tiền vay cá nhân của xe (${pLoans.length} khoản, ${fmtVND(need)}): đã ghi Góp vốn ${fmtVND(got)} (TCB + tiền mặt, ${formatDateVN(lo)}–${formatDateVN(hi)})${ok?'':` — ${got<need?'còn thiếu':'thừa'} ${fmtVND(Math.abs(need-got))}`}` });
+  }
   if(owner==='personal'){ const r = rentalOf(s); items.push({ ok: !!r.startDate && (Number(r.monthly)||0)>0, text: 'Xe cá nhân: đã nhập hợp đồng cho công ty thuê' }); }
   return items;
 }
