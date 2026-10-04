@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-02 · #335';
+const APP_BUILD = '2026-10-04 · #336';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2613,7 +2613,7 @@ function renderInvoiceInventoryDetailPage(selectedGt){
 }
 
 // ===== MỚI 2026-09-29 (#325 — Ông Chủ duyệt: Sổ Lương Tài Xế, chốt lương đã trả ngoài sổ) =====
-const SALARY_METHOD_LABELS = { bank:'🏦 TCB', cash:'💵 Tiền mặt', offbook:'📌 Đã trả ngoài sổ' };
+const SALARY_METHOD_LABELS = { bank:'🏦 TCB', cash:'💵 Tiền mặt', offbook:'📌 Đã trả ngoài sổ', offset:'🔄 Đối trừ công tác phí' };
 function monthEndDate(ym){ const dim = daysInMonth(`${ym}-01`); return `${ym}-${String(dim).padStart(2,'0')}`; }
 /// Chốt "đã trả đủ" 1 tháng: ghi đúng số còn nợ của tháng đó, nguồn mặc định 📌
 /// (chỉ trừ nợ lương, KHÔNG trừ TCB/Tiền Mặt vì số dư đã phản ánh sẵn).
@@ -2662,6 +2662,11 @@ function renderSalaryLedgerPage(focusDriverId){
             <tr class="grid-total-row"><td colspan="3" style="text-align:left;">= TỔNG LƯƠNG CÒN NỢ (khớp Vốn Vận Hành)</td><td class="num">${totOwed<-0.5?'−':''}${fmtVND(Math.abs(totOwed))}</td></tr>
           </tbody></table></div>
       </div>
+      ${(()=>{ const pym = previousYm(); const need = driversNeedingSettlement(pym); return `<div class="card" style="margin-bottom:12px; border:1.5px solid ${need.length?'var(--loss)':'var(--profit)'};">
+        <div style="font-weight:800; margin-bottom:4px;">🔄 Quyết toán tháng (lương + công tác phí về 0)</div>
+        <div class="hint" style="margin-top:0;">${need.length ? `${monthLabelVN(pym)}: còn <strong>${need.length}</strong> tài xế chưa quyết toán (${need.map(d=>escapeHtml(d.name)).join(', ')}).` : `${monthLabelVN(pym)}: đã quyết toán xong.`}</div>
+        <button class="btn ${need.length?'btn-accent':'btn-ghost'} btn-block" id="sl_settleAllBtn">🔄 Quyết Toán Cả Đội ${monthLabelVN(pym)}</button>
+      </div>`; })()}
       <div class="card" style="margin-bottom:12px;">
         <div style="font-weight:800; margin-bottom:6px;">⚡ Chốt nhanh các tháng đã trả đủ</div>
         <div class="hint" style="margin-top:0;">Ghi đúng số còn nợ của từng tháng thành "đã trả", cho MỌI tài xế, mọi tháng TRƯỚC tháng chọn. Nguồn 📌 = chỉ trừ nợ lương, không trừ TCB/Tiền Mặt (vì số dư đã phản ánh sẵn lần trả đó).</div>
@@ -2678,11 +2683,12 @@ function renderSalaryLedgerPage(focusDriverId){
           <span style="font-weight:900; color:${x.owed>0.5?'var(--loss)':'var(--profit)'};">${x.owed>0.5?'Còn nợ ':x.owed<-0.5?'Trả vượt ':''}${fmtVND(Math.abs(x.owed))}</span>
         </div>
         <div class="grid-table-wrap"><table class="grid-table">
-          <thead><tr><th>Tháng</th><th class="num">Cứng + ăn</th><th class="num">Chuyến</th><th class="num">Thưởng</th><th class="num">Trừ hỏng</th><th class="num">Đã ứng</th><th class="num">Trả thưởng</th><th class="num">Thanh toán</th><th class="num">Còn nợ</th><th>Trạng thái</th><th></th></tr></thead>
+          <thead><tr><th>Tháng</th><th class="num">Cứng + ăn</th><th class="num">Chuyến</th><th class="num">Thưởng</th><th class="num">Trừ hỏng</th><th class="num">Đã ứng</th><th class="num">Trả thưởng</th><th class="num">Thanh toán</th><th class="num">Còn nợ</th><th>Trạng thái</th><th>Quyết toán</th><th></th></tr></thead>
           <tbody>${x.rows.map(r=>{ const closed = payments.some(p=>p.driverId===x.d.id && p.closeMonth===r.ym); return `<tr>
             <td style="white-space:nowrap;"><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${fmtVND(r.baseFood)}</td><td class="num">${fmtVND(r.trip)}</td><td class="num">${fmtVND(r.bonus)}</td>
             <td class="num">−${fmtVND(r.repair)}</td><td class="num">−${fmtVND(r.advance)}</td><td class="num">−${fmtVND(r.bonusPaid)}</td><td class="num">−${fmtVND(r.settled)}</td>
             <td class="num" style="font-weight:800;">${r.net<-0.5?'−':''}${fmtVND(Math.abs(r.net))}</td><td style="white-space:nowrap;">${salaryStatusOf(r.net)}</td>
+            <td style="white-space:nowrap;">${(()=>{ const st = driverMonthSettlement(x.d.id, r.ym); if(st) return `<button class="link-btn" data-sl-settle="${x.d.id}|${r.ym}" style="padding:0; color:var(--profit);">✅ ${formatDateVN(st.date)}</button>`; return r.ym<curYm ? `<button class="link-btn" data-sl-settle="${x.d.id}|${r.ym}" style="padding:0;">🔄 Quyết toán</button>` : '<span class="hint">tháng này</span>'; })()}</td>
             <td style="white-space:nowrap;">${r.net>0.5 ? `<button class="link-btn" data-sl-close="${x.d.id}|${r.ym}" style="padding:0;">✅ Chốt đủ</button>` : ''}${closed ? ` <button class="link-btn" data-sl-undo="${x.d.id}|${r.ym}" style="padding:0; color:var(--loss);">↩️ Huỷ chốt</button>` : ''}</td></tr>`; }).join('')}
           </tbody></table></div>
         ${(()=>{ const list = payments.filter(p=>p.driverId===x.d.id).sort((a,b)=>b.date.localeCompare(a.date)); return list.length ? `
@@ -2728,6 +2734,10 @@ function renderSalaryLedgerPage(focusDriverId){
     showToast('Đã xoá.'); renderSalaryLedgerPage();
   }));
   document.querySelectorAll('.salaryPayBtnSL').forEach(b=>b.addEventListener('click', ()=>openSalaryPaymentModal(b.dataset.id)));
+  // #336 — quyết toán tháng
+  const backToLedger = ()=>{ renderSalaryLedgerPage(); };
+  document.querySelectorAll('[data-sl-settle]').forEach(b=>b.addEventListener('click', ()=>{ const [id, ym] = b.dataset.slSettle.split('|'); renderMonthSettlementPage(id, ym, backToLedger); }));
+  const sab = document.getElementById('sl_settleAllBtn'); if(sab) sab.addEventListener('click', ()=>renderMonthSettlementPage(null, previousYm(), backToLedger));
   if(focusDriverId){ const el = document.getElementById(`sl_driver_${focusDriverId}`); if(el) el.scrollIntoView({block:'start'}); }
 }
 /// Công tác phí của 1 tài xế trong 1 kỳ (cho phiếu lương).
@@ -2750,7 +2760,8 @@ function driverAdvancePeriodStatement(driverId, from, to){
 }
 /// Thanh toán lương trong kỳ (cho phiếu lương).
 function driverSalarySettledInRange(driverId, from, to){
-  const settled = (state.salaryPayments||[]).filter(p=>p.driverId===driverId && p.date>=from && p.date<=to).reduce((a,p)=>a+(Number(p.amount)||0),0);
+  const inRange = p=> p.forMonth ? (p.forMonth>=from.slice(0,7) && p.forMonth<=to.slice(0,7)) : (p.date>=from && p.date<=to); // #336
+  const settled = (state.salaryPayments||[]).filter(p=>p.driverId===driverId && inRange(p)).reduce((a,p)=>a+(Number(p.amount)||0),0);
   const bonusPaid = allMonthlyBonusesCompanyWide().filter(b=>b.driverId===driverId && bonusEffectiveDate(b)>=from && bonusEffectiveDate(b)<=to).reduce((a,b)=>a+(Number(b.amount)||0),0);
   return { settled, bonusPaid };
 }
@@ -3130,6 +3141,131 @@ function renderPartnerExportPage(kind, id, onBack){
     catch(e){ showToast('Lỗi xuất file: ' + (e?.message||e)); }
     btn.disabled = false; btn.textContent = '⬇️ Xuất Excel';
   });
+}
+
+// ===== MỚI 2026-10-04 (#336 — Ông Chủ duyệt: QUYẾT TOÁN THÁNG lương + công tác phí) =====
+// Tại NGÀY CUỐI THÁNG M: L = lương còn nợ luỹ kế, A = công tác phí đang giữ (dương = tài
+// xế cầm tiền công ty, âm = công ty nợ tài xế). Quyết toán đưa CẢ HAI về 0:
+//   ① Đối trừ X = min(max(A,0), max(L,0)) — KHÔNG đụng tiền (tiền đã nằm trong tay tài xế):
+//      ghi 1 lần thanh toán lương method 'offset' (+X) và 1 dòng ứng method 'offset' (−X).
+//   ② Phần lương còn lại L−X: thanh toán lương bằng nguồn Ông Chủ chọn (TCB/TM/📌).
+//   ③ Phần công tác phí còn lại A−X: dương → tài xế HOÀN ỨNG (dòng ứng âm, tiền vào);
+//      âm → công ty TRẢ BÙ chi vượt (dòng ứng dương, tiền ra).
+// Mọi dòng mang settleId + settleMonth để xem/huỷ trọn gói. Lãi/lỗ không đổi.
+function driverPayableAsOfMonth(driverId, ym){
+  return driverWagePayableByMonth(driverId).filter(r=>r.ym<=ym).reduce((a,r)=>a+r.net,0);
+}
+function driverMonthSettlement(driverId, ym){
+  const id = ((state.salaryPayments||[]).find(p=>p.driverId===driverId && p.settleMonth===ym) || (state.driverAdvances||[]).find(a=>a.driverId===driverId && a.settleMonth===ym) || {}).settleId;
+  if(!id) return null;
+  const sal = (state.salaryPayments||[]).filter(p=>p.settleId===id), adv = (state.driverAdvances||[]).filter(a=>a.settleId===id);
+  const date = (sal[0]||adv[0]||{}).date;
+  return { id, date, sal, adv };
+}
+function computeMonthSettlementPlan(driverId, ym){
+  const settled = driverMonthSettlement(driverId, ym);
+  // Nếu đã quyết toán: tính lại "trước quyết toán" để hiển thị đúng số đã chốt.
+  const salSettled = settled ? settled.sal.reduce((a,p)=>a+(Number(p.amount)||0),0) : 0;
+  const advSettled = settled ? settled.adv.reduce((a,x)=>a+(Number(x.amount)||0),0) : 0;
+  const L = Math.round(driverPayableAsOfMonth(driverId, ym) + salSettled);
+  const A = Math.round(driverAdvanceBalance(driverId, monthEndDate(ym)) - (settled && settled.date<=monthEndDate(ym) ? advSettled : 0));
+  const X = Math.min(Math.max(A,0), Math.max(L,0));
+  return { L, A, X, salaryCash: L - X, advanceCash: -(A - X), net: L - A, settled };
+}
+async function applyMonthSettlement(driverId, ym, date, method){
+  const plan = computeMonthSettlementPlan(driverId, ym);
+  if(plan.settled) { showToast('Tháng này đã quyết toán.'); return false; }
+  if(Math.abs(plan.L)<=0.5 && Math.abs(plan.A)<=0.5){ showToast('Không có gì cần quyết toán.'); return false; }
+  const settleId = uid('settle'), lab = monthLabelVN(ym);
+  const sal = [], adv = [];
+  if(plan.X>0){
+    sal.push({ id: uid('salpay'), driverId, date, amount: plan.X, method:'offset', note:`Đối trừ công tác phí vào lương ${lab}`, forMonth: ym, settleId, settleMonth: ym });
+    adv.push({ id: uid('adv'), driverId, date, amount: -plan.X, method:'offset', note:`Đối trừ vào lương ${lab}`, settleId, settleMonth: ym });
+  }
+  if(Math.abs(plan.salaryCash)>0.5) sal.push({ id: uid('salpay'), driverId, date, amount: plan.salaryCash, method, note:`Quyết toán lương ${lab}`, forMonth: ym, settleId, settleMonth: ym });
+  if(Math.abs(plan.advanceCash)>0.5) adv.push({ id: uid('adv'), driverId, date, amount: plan.advanceCash, method, note: plan.advanceCash<0 ? `Tài xế hoàn ứng — quyết toán ${lab}` : `Trả bù chi vượt công tác phí — quyết toán ${lab}`, settleId, settleMonth: ym });
+  const oldS = state.salaryPayments || [], oldA = state.driverAdvances || [];
+  state.salaryPayments = [...oldS, ...sal]; state.driverAdvances = [...oldA, ...adv];
+  const ok1 = await saveSalaryPayments();
+  const ok2 = ok1 && await saveDriverAdvances();
+  if(!ok1 || !ok2){ state.salaryPayments = oldS; state.driverAdvances = oldA; if(ok1) await saveSalaryPayments(); return false; }
+  return true;
+}
+async function undoMonthSettlement(driverId, ym){
+  const st = driverMonthSettlement(driverId, ym); if(!st) return false;
+  const oldS = state.salaryPayments, oldA = state.driverAdvances;
+  state.salaryPayments = oldS.filter(p=>p.settleId!==st.id); state.driverAdvances = oldA.filter(a=>a.settleId!==st.id);
+  const ok1 = await saveSalaryPayments(); const ok2 = ok1 && await saveDriverAdvances();
+  if(!ok1 || !ok2){ state.salaryPayments = oldS; state.driverAdvances = oldA; return false; }
+  return true;
+}
+function previousYm(){ const d = new Date(todayLocalDateStr()+'T00:00:00'); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function driversNeedingSettlement(ym){
+  return (state.drivers||[]).filter(d=>{
+    if(driverMonthSettlement(d.id, ym)) return false;
+    const p = computeMonthSettlementPlan(d.id, ym);
+    return Math.abs(p.L)>0.5 || Math.abs(p.A)>0.5;
+  });
+}
+const SETTLE_METHOD_LABEL = { bank:'🏦 TCB', cash:'💵 Tiền mặt', offbook:'📌 Đã trả ngoài sổ', offset:'🔄 Đối trừ (không đụng tiền)' };
+function settlementRowsHtml(p){
+  const sign = v=> v<0 ? '−' : '';
+  return `
+    <div class="summary-row"><span>Lương còn nợ tài xế (đến hết tháng) <strong>L</strong></span><span class="val">${sign(p.L)}${fmtVND(Math.abs(p.L))}</span></div>
+    <div class="summary-row"><span>Công tác phí ${p.A>=0?'tài xế đang giữ':'công ty còn nợ'} <strong>A</strong></span><span class="val">${sign(p.A)}${fmtVND(Math.abs(p.A))}</span></div>
+    <div class="summary-row" style="color:var(--ink-soft);"><span>① Đối trừ (không đụng tiền)</span><span class="val">${fmtVND(p.X)}</span></div>
+    ${Math.abs(p.salaryCash)>0.5?`<div class="summary-row"><span>② ${p.salaryCash>0?'Trả nốt lương':'Tài xế trả lại lương nhận dư'}</span><span class="val">${fmtVND(Math.abs(p.salaryCash))}</span></div>`:''}
+    ${Math.abs(p.advanceCash)>0.5?`<div class="summary-row"><span>③ ${p.advanceCash<0?'Tài xế hoàn ứng công tác phí':'Công ty trả bù chi vượt'}</span><span class="val">${fmtVND(Math.abs(p.advanceCash))}</span></div>`:''}
+    <div class="summary-row total"><span>= ${p.net>=0?'CÔNG TY TRẢ TÀI XẾ':'TÀI XẾ NỘP LẠI'} (L − A)</span><span class="val" style="color:${p.net>=0?'var(--loss)':'var(--profit)'};">${fmtVND(Math.abs(p.net))}</span></div>`;
+}
+/// Trang quyết toán: 1 tài xế (driverId) hoặc cả đội (driverId=null) cho tháng ym.
+function renderMonthSettlementPage(driverId, ym, onBack){
+  scrollMainToTop();
+  ym = ym || previousYm();
+  const app = document.getElementById('app');
+  const list = driverId ? [driverById(driverId)].filter(Boolean) : (state.drivers||[]).filter(d=>{ const p = computeMonthSettlementPlan(d.id, ym); return p.settled || Math.abs(p.L)>0.5 || Math.abs(p.A)>0.5; });
+  const pending = list.filter(d=>!driverMonthSettlement(d.id, ym));
+  const today = todayLocalDateStr();
+  app.innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="msBackBtn">← Quay Lại</button></section>
+    <section class="group">
+      <h2 style="margin-bottom:2px;">🔄 Quyết Toán ${monthLabelVN(ym)}${driverId?` — ${escapeHtml(list[0]?.name||'')}`:' — Cả Đội'}</h2>
+      <div class="hint" style="margin-top:0; margin-bottom:10px;">Tính tại ngày ${formatDateVN(monthEndDate(ym))}. Đối trừ công tác phí đang giữ vào lương, phần chênh trả/thu bằng tiền — sau quyết toán lương còn nợ và công tác phí của tháng đều về 0. Lãi/lỗ không đổi.</div>
+      <div class="field"><label>Tháng quyết toán</label><input type="month" id="ms_month" value="${ym}"></div>
+      ${list.map(d=>{ const p = computeMonthSettlementPlan(d.id, ym); return `
+      <div class="card" style="margin-bottom:10px; border:1.5px solid ${p.settled?'var(--profit)':'var(--accent)'};">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;"><strong>👷 ${escapeHtml(d.name)}</strong>${p.settled?`<span style="color:var(--profit); font-weight:700;">✅ Đã quyết toán ${formatDateVN(p.settled.date)}</span>`:'<span style="color:var(--loss); font-weight:700;">⏳ Chưa quyết toán</span>'}</div>
+        ${settlementRowsHtml(p)}
+        ${p.settled ? `<div class="hint" style="margin:6px 0 0;">${[...p.settled.sal, ...p.settled.adv].map(x=>`${SETTLE_METHOD_LABEL[x.method]||x.method}: ${fmtVND(Math.abs(Number(x.amount)||0))} — ${escapeHtml(x.note||'')}`).join('<br>')}</div>
+          <button class="link-btn" data-ms-undo="${d.id}" style="padding:0; margin-top:6px; color:var(--loss);">↩️ Huỷ quyết toán</button>` : ''}
+      </div>`; }).join('') || '<div class="hint">Không có tài xế nào cần quyết toán tháng này.</div>'}
+      ${pending.length ? `
+      <div class="card">
+        <div class="two-col">
+          <div class="field"><label>Ngày trả / thu thật</label><input type="date" id="ms_date" value="${today}"></div>
+          <div class="field"><label>Nguồn tiền (phần ② ③)</label><select id="ms_method"><option value="bank">🏦 TCB</option><option value="cash">💵 Tiền mặt</option><option value="offbook">📌 Đã trả ngoài sổ (không trừ số dư)</option></select></div>
+        </div>
+        <button class="btn btn-accent btn-block" id="ms_confirmBtn">✅ Xác Nhận Quyết Toán${pending.length>1?` (${pending.length} tài xế)`:''}</button>
+      </div>` : ''}
+    </section>`;
+  const back = ()=>{ if(onBack) onBack(); else { renderAll(); restoreMainScroll(); } };
+  document.getElementById('msBackBtn').addEventListener('click', back);
+  document.getElementById('ms_month').addEventListener('change', e=>{ if(e.target.value) renderMonthSettlementPage(driverId, e.target.value, onBack); });
+  const cbtn = document.getElementById('ms_confirmBtn');
+  if(cbtn) cbtn.addEventListener('click', async ()=>{
+    const date = document.getElementById('ms_date').value || today, method = document.getElementById('ms_method').value;
+    const total = pending.reduce((a,d)=>a+computeMonthSettlementPlan(d.id, ym).net,0);
+    if(!confirm(`Quyết toán ${monthLabelVN(ym)} cho ${pending.length} tài xế, ngày ${formatDateVN(date)}, nguồn ${SETTLE_METHOD_LABEL[method]}?\nTổng ${total>=0?'công ty trả':'tài xế nộp lại'}: ${fmtVND(Math.abs(total))}`)) return;
+    cbtn.disabled = true; cbtn.textContent = '⏳ Đang lưu…';
+    let n = 0; for(const d of pending){ if(await applyMonthSettlement(d.id, ym, date, method)) n++; }
+    showToast(`Đã quyết toán ${n}/${pending.length} tài xế.`);
+    renderMonthSettlementPage(driverId, ym, onBack);
+  });
+  document.querySelectorAll('[data-ms-undo]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!confirm('Huỷ quyết toán tháng này cho tài xế?')) return;
+    if(await undoMonthSettlement(b.dataset.msUndo, ym)) showToast('Đã huỷ quyết toán.');
+    renderMonthSettlementPage(driverId, ym, onBack);
+  }));
 }
 
 function companyShiftsWithVehicle(){
@@ -3684,7 +3820,7 @@ function driverWagePayableByMonth(driverId){
     const bonusPaid = bonuses.filter(b=>bonusEffectiveDate(b).slice(0,7)===ym && bonusEffectiveDate(b)<=today).reduce((s,b)=>s+(Number(b.amount)||0),0);
     const repair = repairs.filter(r=>r.date.slice(0,7)===ym).reduce((s,r)=>s+repairDriverResponsibleAmount(r),0);
     const advance = mShifts.reduce((s,sh)=>s+(Number(sh.advanceAmount)||0),0);
-    const settled = settlements.filter(p=>p.date.slice(0,7)===ym).reduce((s,p)=>s+(Number(p.amount)||0),0);
+    const settled = settlements.filter(p=>(p.forMonth||p.closeMonth||p.date.slice(0,7))===ym).reduce((s,p)=>s+(Number(p.amount)||0),0); // #336 — gắn đúng tháng được quyết toán
     const net = baseFood + trip + bonus - repair - advance - bonusPaid - settled;
     return { ym, baseFood, trip, bonus, repair, advance, bonusPaid, settled, net };
   });
@@ -10844,6 +10980,7 @@ function renderDrivers(){
     `}
 
     <section class="group">
+      ${(()=>{ const pym = previousYm(); const need = driversNeedingSettlement(pym); return need.length ? `<div class="card" style="margin-bottom:10px; border:1.5px solid var(--loss); background:var(--loss-soft, #f6e3e1);"><div style="font-weight:800;">🔄 ${monthLabelVN(pym)} còn ${need.length} tài xế chưa quyết toán</div><div class="hint" style="margin:2px 0 8px;">${need.map(d=>escapeHtml(d.name)).join(', ')} — đối trừ công tác phí vào lương, đưa cả hai về 0.</div><button class="btn btn-accent btn-block" id="driverSettleReminderBtn">🔄 Quyết Toán Ngay</button></div>` : ''; })()}
       <button class="btn btn-accent btn-block" id="salaryLedgerBtn" style="margin-bottom:12px;">📒 Sổ Lương Tài Xế (toàn bộ quá trình)</button>
       <h3>👥 Danh Sách Tài Xế</h3>
       ${state.drivers.length===0 ? '<div class="empty"><div class="big">👤</div>Chưa có tài xế nào.</div>' :
@@ -10950,6 +11087,8 @@ function renderDrivers(){
     btn.addEventListener('click', ()=>{ saveMainScroll(); openDriverAdvanceDetail(btn.dataset.id); });
   });
   // MỚI 2026-09-28 — Thanh toán lương cuối kỳ.
+  const drvSettleBtn = document.getElementById('driverSettleReminderBtn'); // #336
+  if(drvSettleBtn) drvSettleBtn.addEventListener('click', ()=>{ saveMainScroll(); renderMonthSettlementPage(null, previousYm(), ()=>{ renderAll(); restoreMainScroll(); }); });
   const salaryLedgerBtn = document.getElementById('salaryLedgerBtn'); // #325
   if(salaryLedgerBtn) salaryLedgerBtn.addEventListener('click', ()=>{ saveMainScroll(); renderSalaryLedgerPage(); });
   document.querySelectorAll('.salaryPayBtn').forEach(btn=>{
@@ -15614,7 +15753,7 @@ function computeBankBalanceReconciliation(){
   // ở bất kỳ đâu trong Khớp Số Dư/Tiền Mặt. CHỈ CỘNG THÊM 2 dòng dưới đây
   // — không sửa/xoá bất kỳ dòng công thức nào phía trên (đúng nguyên tắc
   // đóng băng công thức đã xác minh).
-  const driverAdvanceBank = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method!=='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const driverAdvanceBank = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && (a.method||'bank')==='bank').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const bonusBank = allMonthlyBonusesCompanyWide().filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method!=='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
   // MỚI 2026-09-28 — Thanh toán lương cuối kỳ trả bằng TCB.
   const saleBank = saleProceedsInRange(from, today, 'bank'); // #320 — tiền bán xe về TCB
@@ -21380,7 +21519,7 @@ function computeCompanyCashFlowLedger(){
   // SỬA 2026-09-14 (audit "Kế Toán Nội Bộ"): thêm 2 nguồn tiền THẬT trước
   // đây chưa từng hiện ở bảng kê này — Ứng Riêng Cho Tài Xế + Tip/Thưởng
   // Tháng — xem chú thích chi tiết ở computeBankBalanceReconciliation().
-  state.driverAdvances.forEach(a=>{
+  state.driverAdvances.filter(a=>a.method!=='offset' && a.method!=='offbook').forEach(a=>{ // #336 — đối trừ/📌 không phải dòng tiền
     const driver = driverById(a.driverId);
     entries.push({ date:a.date, category:'Ứng riêng cho tài xế', amount:Number(a.amount)||0, sign:-1,
       desc: (driver?driver.name:'') + (a.note?' — '+a.note:''), id:a.id, method: a.method||'bank' });
@@ -21401,7 +21540,7 @@ function computeCompanyCashFlowLedger(){
       desc:`${e.vehicleId?'🚛 '+vehicleNameById(e.vehicleId):'Mua xe'}${e.note?' — '+e.note:''}`, id:e.id, method: f==='companyCash'?'cash':'bank' });
   });
   // MỚI 2026-09-28 — Thanh toán lương cuối kỳ.
-  (state.salaryPayments||[]).filter(p=>(p.method||'bank')!=='offbook').forEach(p=>{ // #325 — 📌 không phải dòng tiền trong kỳ
+  (state.salaryPayments||[]).filter(p=>(p.method||'bank')!=='offbook' && p.method!=='offset').forEach(p=>{ // #325 — 📌 không phải dòng tiền trong kỳ
     const driver = driverById(p.driverId);
     entries.push({ date:p.date, category:'Thanh toán lương', amount:Number(p.amount)||0, sign:-1,
       desc: (driver?driver.name:'') + (p.note?' — '+p.note:''), id:p.id, method: p.method||'bank' });
@@ -24320,6 +24459,16 @@ async function exportDriverPayslipXLSX(driverId){
     if(st.bonusPaid>0) line('− Tiền thưởng đã trả riêng', st.bonusPaid);
     if(st.settled>0) line('− Đã thanh toán lương trong kỳ', st.settled);
     if(st.bonusPaid>0 || st.settled>0) line('CÒN NHẬN', netPay - st.bonusPaid - st.settled, { bold:true, size:16, fill:'FFFFF3CD', color:'FF8A6D00' });
+    // #336 — QUYẾT TOÁN THÁNG (nếu kỳ phiếu có tháng đã quyết toán)
+    const months = []; { let d = new Date(from.slice(0,7)+'-01T00:00:00'); const last = to.slice(0,7); while(true){ const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; if(ym>last) break; months.push(ym); d.setMonth(d.getMonth()+1); } }
+    months.forEach(ym=>{ const qp = computeMonthSettlementPlan(driverId, ym); if(!qp.settled) return;
+      nextRow(10); merge(r,'A',lastColLetter); setCell(`A${r}`, `QUYẾT TOÁN ${monthLabelVN(ym).toUpperCase()} (ngày ${formatDateVN(qp.settled.date)})`, { size:13, bold:true }); nextRow(22);
+      line('Lương còn nợ tài xế đến hết tháng (L)', qp.L);
+      line(`Công tác phí ${qp.A>=0?'tài xế đang giữ':'công ty còn nợ'} (A)`, Math.abs(qp.A));
+      line('Đối trừ công tác phí vào lương (không chuyển tiền)', qp.X);
+      line(qp.net>=0 ? '= CÔNG TY THỰC TRẢ TÀI XẾ (L − A)' : '= TÀI XẾ NỘP LẠI CÔNG TY (A − L)', Math.abs(qp.net), { bold:true, fill:'FFDDF2E0', color:'FF1B7A3D' });
+      merge(r,'A',lastColLetter); setCell(`A${r}`, 'Sau quyết toán: lương còn nợ = 0 và công tác phí = 0 cho tháng này.', { size:11, color:'FF666666' }); nextRow(20);
+    });
   }
 
   // SỬA 2026-09-01 (Ông Chủ yêu cầu — "để lái xe nắm được họ đang cầm của
