@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-04 · #339';
+const APP_BUILD = '2026-10-06 · #340';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2921,7 +2921,7 @@ function partnerStatementData(kind, id, from, to){
   const ledger = []; const byDay = {};
   siteRows.forEach(r=>{ byDay[r.date] = (byDay[r.date]||0) + r.amount; });
   Object.entries(byDay).forEach(([d,a])=>ledger.push({ date:d, desc: isSup?'Tiền hàng lấy trong ngày':'Tiền hàng / cước phát sinh trong ngày', inc:a, pay:0 }));
-  payments.forEach(p=>ledger.push({ date:p.date, desc:`${isSup?'Ông Chủ bank cho mỏ':'Khách thanh toán'}${p.notes?' — '+p.notes:''}${p.method==='cash'?' (tiền mặt)':' (TCB)'}`, inc:0, pay:Number(p.amount)||0 }));
+  payments.forEach(p=>ledger.push({ date:p.date, desc: isSup ? `${Number(p.amount)<0?'Mỏ hoàn tiền':'Đã trả'}${p.notes?' · '+p.notes:''}${p.method==='cash'?' (tiền mặt)':' (TCB)'}` : `Khách thanh toán${p.notes?' — '+p.notes:''}${p.method==='cash'?' (tiền mặt)':' (TCB)'}`, inc:0, pay:Number(p.amount)||0 }));
   ledger.sort((a,b)=>a.date.localeCompare(b.date) || (a.pay-b.pay));
   let bal = opening; ledger.forEach(l=>{ bal += l.inc - l.pay; l.bal = bal; });
   // #334 — hoá đơn mỏ thuộc kỳ theo KHOẢNG NGÀY GIAO HÀNG mà hoá đơn áp dụng (VD hoá đơn
