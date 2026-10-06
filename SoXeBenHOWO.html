@@ -765,7 +765,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-06 · #340';
+const APP_BUILD = '2026-10-06 · #341';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2979,24 +2979,44 @@ function pxBuildPartnerSheets(wb, D, mode, company, mst, used, compact){
   // --- Chi tiết chuyến
   {
     const ws = wb.addWorksheet(pxSheetName(compact?`CT ${short}`:'Chi tiet chuyen', used));
-    const heads = ['Ngày','Ca','Xe','Tài xế', isSup?'Khách / Công trình':'Công trình / Điểm đổ','Loại hàng','Khối lượng','ĐVT','Đơn giá','Thành tiền (chưa VAT)','VAT','Tổng (gồm VAT)','Hoá đơn'];
-    if(internal) heads.push('Tiền mua','Tiền bán','Lãi gộp');
-    pxWidths(ws,[12,9,13,14,26,14,12,7,14,17,13,17,15].concat(internal?[15,15,15]:[]));
+    // #341 (Ông Chủ yêu cầu): file gửi MỎ bỏ 3 cột Ca / Tài xế / Khách-Công trình (mỏ không cần biết).
+    // Bản nội bộ và file khách hàng giữ nguyên đủ cột. Chỉ đổi cách xếp cột — số liệu từng ô không đổi.
+    const hideForMine = isSup && !internal;
+    const R2 = n => Math.round(n*100)/100;
+    let cols = [
+      { k:'date', h:'Ngày', w:12, v:t=>formatDateVN(t.date) },
+      { k:'shift', h:'Ca', w:9, v:t=>t.shift, center:true },
+      { k:'vehicle', h:'Xe', w:13, v:t=>t.vehicle },
+      { k:'driver', h:'Tài xế', w:14, v:t=>t.driver },
+      { k:'other', h: isSup?'Khách / Công trình':'Công trình / Điểm đổ', w:26, v:t=>t.other, wrap:true },
+      { k:'goods', h:'Loại hàng', w:14, v:t=>t.goods, wrap:true },
+      { k:'vol', h:'Khối lượng', w:12, v:t=>R2(t.vol), fmt:PX_VOL, tot:()=>R2(tot.vol) },
+      { k:'unit', h:'ĐVT', w:7, v:t=>t.unit, center:true },
+      { k:'price', h:'Đơn giá', w:14, v:t=>Math.round(t.price) },
+      { k:'gross', h:'Thành tiền (chưa VAT)', w:17, v:t=>Math.round(t.lineGross), tot:()=>Math.round(tot.g) },
+      { k:'vat', h:'VAT', w:13, v:t=>Math.round(t.vat), tot:()=>Math.round(tot.v) },
+      { k:'total', h:'Tổng (gồm VAT)', w:17, v:t=>Math.round(t.total), tot:()=>Math.round(tot.t) },
+      { k:'inv', h:'Hoá đơn', w:15, v:t=>t.invoiced }
+    ];
+    if(internal) cols.push(
+      { k:'buy', h:'Tiền mua', w:15, v:t=>Math.round(t.buyLine), tot:()=>Math.round(tot.b) },
+      { k:'sell', h:'Tiền bán', w:15, v:t=>Math.round(t.sellLine), tot:()=>Math.round(tot.s) },
+      { k:'margin', h:'Lãi gộp', w:15, v:t=>t.margin===null?'':Math.round(t.margin), tot:()=>Math.round(tot.m) });
+    if(hideForMine) cols = cols.filter(c=>c.k!=='shift' && c.k!=='driver' && c.k!=='other');
+    const heads = cols.map(c=>c.h);
+    pxWidths(ws, cols.map(c=>c.w));
+    const tot = { vol: D.trips.reduce((a,t)=>a+t.vol,0), g: D.trips.reduce((a,t)=>a+t.lineGross,0), v: D.vatTotal, t: D.trips.reduce((a,t)=>a+t.total,0),
+      b: D.trips.reduce((a,t)=>a+t.buyLine,0), s: D.trips.reduce((a,t)=>a+t.sellLine,0), m: D.trips.reduce((a,t)=>a+(t.margin||0),0) };
     let r = compact ? 1 : pxTitleBlock(ws, heads.length, company, mst, 'CHI TIẾT TỪNG CHUYẾN', pname, D.from, D.to);
     if(compact){ ws.mergeCells(1,1,1,heads.length); ktCell(ws,'A1',`${pname} — Chi tiết chuyến (${formatDateVN(D.from)} — ${formatDateVN(D.to)})`,{bold:true,size:12,border:false}); r = 3; }
     ktHeaderRow(ws, r, heads); const headRow = r; r++;
     D.trips.forEach(t=>{
-      const vals = [formatDateVN(t.date), t.shift, t.vehicle, t.driver, t.other, t.goods, Math.round(t.vol*100)/100, t.unit, Math.round(t.price), Math.round(t.lineGross), Math.round(t.vat), Math.round(t.total), t.invoiced];
-      if(internal) vals.push(Math.round(t.buyLine), Math.round(t.sellLine), t.margin===null?'':Math.round(t.margin));
-      vals.forEach((v,i)=>{ const num = typeof v==='number'; ktCell(ws, ws.getCell(r,i+1).address, v, { align: num?'right':(i===1||i===7?'center':'left'), numFmt: num ? (i===6?PX_VOL:KT_NUMFMT) : undefined, wrap: i===4||i===5 }); });
+      cols.forEach((c,i)=>{ const v = c.v(t); const num = typeof v==='number'; ktCell(ws, ws.getCell(r,i+1).address, v, { align: num?'right':(c.center?'center':'left'), numFmt: num ? (c.fmt||KT_NUMFMT) : undefined, wrap: !!c.wrap }); });
       r++;
     });
-    const tot = { vol: D.trips.reduce((a,t)=>a+t.vol,0), g: D.trips.reduce((a,t)=>a+t.lineGross,0), v: D.vatTotal, t: D.trips.reduce((a,t)=>a+t.total,0),
-      b: D.trips.reduce((a,t)=>a+t.buyLine,0), s: D.trips.reduce((a,t)=>a+t.sellLine,0), m: D.trips.reduce((a,t)=>a+(t.margin||0),0) };
-    ws.mergeCells(r,1,r,6); ktCell(ws, `A${r}`, `TỔNG (${D.trips.length} dòng)`, {bold:true, fill:KT_HEAD_FILL});
-    const totVals = { 7:[Math.round(tot.vol*100)/100,PX_VOL], 10:[Math.round(tot.g),KT_NUMFMT], 11:[Math.round(tot.v),KT_NUMFMT], 12:[Math.round(tot.t),KT_NUMFMT] };
-    if(internal){ totVals[14]=[Math.round(tot.b),KT_NUMFMT]; totVals[15]=[Math.round(tot.s),KT_NUMFMT]; totVals[16]=[Math.round(tot.m),KT_NUMFMT]; }
-    for(let c=7;c<=heads.length;c++){ const tv = totVals[c]; ktCell(ws, ws.getCell(r,c).address, tv?tv[0]:'', {bold:true, fill:KT_HEAD_FILL, align:'right', numFmt: tv?tv[1]:undefined}); }
+    const goodsCol = cols.findIndex(c=>c.k==='goods') + 1;
+    ws.mergeCells(r,1,r,goodsCol); ktCell(ws, `A${r}`, `TỔNG (${D.trips.length} dòng)`, {bold:true, fill:KT_HEAD_FILL});
+    for(let c=goodsCol+1;c<=cols.length;c++){ const col = cols[c-1]; ktCell(ws, ws.getCell(r,c).address, col.tot?col.tot():'', {bold:true, fill:KT_HEAD_FILL, align:'right', numFmt: col.tot?(col.fmt||KT_NUMFMT):undefined}); }
     ws.views = [{ state:'frozen', ySplit: headRow }];
   }
   // --- Thanh toán
