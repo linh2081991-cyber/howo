@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Linh Chí Thành đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-06 · #342';
+const APP_BUILD = '2026-10-07 · #343';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2845,7 +2845,7 @@ function vehicleSetupChecklist(vid){
   const items = [];
   items.push({ ok: !!s.ownershipType, text: `Đã chọn xe đứng tên ai (${owner==='company'?'🏢 Công ty':'👤 Cá nhân'})` });
   items.push({ ok: entries.length>0, text: entries.length ? `Đã gán ${entries.length} lần đầu tư cho xe` : 'Chưa gán lần đầu tư nào cho xe' });
-  if(owner==='company') items.push({ ok: entries.every(e=>e.priceExVat!==undefined && e.priceExVat!==null && (Number(e.vatAmount)||0)>0), text: 'Xe công ty: đã tách giá chưa VAT và tiền VAT (để khấu trừ VAT)' });
+  if(owner==='company') items.push({ ok: entries.filter(e=>e.kind!=='addon').every(e=>e.priceExVat!==undefined && e.priceExVat!==null && (Number(e.vatAmount)||0)>0), text: 'Xe công ty: đã tách giá chưa VAT và tiền VAT (để khấu trừ VAT)' });
   items.push({ ok: (Number(s.monthlyVehicleDepreciation)||0)>0, text: 'Đã cài khấu hao / tháng' });
   // SỬA 2026-10-04 (#339): đối chiếu GỘP — tổng tiền vay cá nhân của xe công ty phải bằng tổng Góp vốn
   // (TCB + tiền mặt, tiền mới) ghi trong khoảng ±7 ngày quanh các ngày giải ngân. Cho phép 1 khoản vay
@@ -3956,7 +3956,7 @@ function renderVehicleManagementPage(selectedVid){
   const saleRes = vid ? vehicleSaleResult(vid) : null;
   const entryRow = e=>{ const p = investEntryParts(e); return `<tr>
       <td style="white-space:nowrap;">${formatDateVN(e.date)}</td>
-      <td>${escapeHtml(e.note||'')}<div class="hint" style="margin:2px 0 0;">Giá chưa VAT ${fmtVND(p.pre)} · VAT ${fmtVND(p.vat)} · Chi phí kèm ${fmtVND(p.extra)}</div><div class="hint" style="margin:2px 0 0;">${INVEST_FUNDING_LABELS[investFundingOf(e)]||''}</div></td>
+      <td>${e.kind==='addon'?'➕ ':''}${escapeHtml(e.note||'')}<div class="hint" style="margin:2px 0 0;">${e.kind==='addon' ? `Hạng mục kèm · ${p.vat>0 ? `Chưa VAT ${fmtVND(p.pre+p.extra)} · VAT ${fmtVND(p.vat)}` : 'Không có VAT'}` : `Giá chưa VAT ${fmtVND(p.pre)} · VAT ${fmtVND(p.vat)} · Chi phí kèm ${fmtVND(p.extra)}`}</div><div class="hint" style="margin:2px 0 0;">${INVEST_FUNDING_LABELS[investFundingOf(e)]||''}</div></td>
       <td class="num">${fmtVND(p.total)}</td>
       <td><button class="link-btn" data-edit-invest="${e.id}" style="padding:0;">Sửa</button></td></tr>`; };
   app.innerHTML = `
@@ -3987,13 +3987,14 @@ function renderVehicleManagementPage(selectedVid){
       </div>
 
       <div class="card" style="margin-bottom:12px;">
-        <div style="font-weight:800; margin-bottom:8px;">2️⃣ Tiền đầu tư mua xe</div>
+        <div style="font-weight:800; margin-bottom:8px;">2️⃣ Tiền đầu tư mua xe + hạng mục kèm</div>
         <div class="grid-table-wrap"><table class="grid-table">
           <thead><tr><th>Ngày</th><th>Nội dung</th><th class="num">Tổng</th><th></th></tr></thead>
           <tbody>${entries.map(entryRow).join('') || '<tr><td colspan="4" class="hint">Chưa có lần đầu tư nào gán cho xe này.</td></tr>'}
             <tr class="grid-total-row"><td colspan="2" style="text-align:left;">= Giá trị xe đem khấu hao ${vehicleOwnershipOf(s)==='company'?'(không gồm VAT)':'(gồm VAT)'}</td><td class="num">${fmtVND(base)}</td><td></td></tr>
           </tbody></table></div>
-        <button class="btn btn-ghost btn-block" id="vm_addInvest" style="margin-top:8px;">➕ Thêm lần đầu tư cho xe này</button>
+        <button class="btn btn-ghost btn-block" id="vm_addInvest" style="margin-top:8px;">${entries.length ? '➕ Thêm hạng mục đầu tư kèm cho xe này' : '➕ Khai báo tiền mua xe'}</button>
+        ${entries.length ? '<button class="link-btn" id="vm_addPurchase" style="margin-top:8px; padding:0;">Khai thêm 1 lần trả tiền MUA XE (trả nhiều đợt)</button>' : ''}
         ${unassigned.length ? `<div class="hint" style="margin-top:8px;">⚠️ Có ${unassigned.length} lần đầu tư CHƯA gán xe:</div>
           <div class="grid-table-wrap"><table class="grid-table"><tbody>${unassigned.map(entryRow).join('')}</tbody></table></div>
           <div class="hint">Bấm "Sửa" → chọn đúng xe để app tính giá trị riêng từng xe.</div>` : ''}
@@ -4073,7 +4074,8 @@ function renderVehicleManagementPage(selectedVid){
   });
   const toggleRental = ()=>{ document.getElementById('vm_rentalCard').style.display = document.getElementById('vm_owner').value==='personal' ? '' : 'none'; };
   document.getElementById('vm_owner').addEventListener('change', toggleRental); toggleRental();
-  document.getElementById('vm_addInvest').addEventListener('click', ()=>openInvestmentEntryEditor(null, { vehicleId: vid, onBack: ()=>renderVehicleManagementPage(vid) }));
+  document.getElementById('vm_addInvest').addEventListener('click', ()=>openInvestmentEntryEditor(null, { vehicleId: vid, addon: entries.length>0, onBack: ()=>renderVehicleManagementPage(vid) }));
+  { const addPurchaseBtn = document.getElementById('vm_addPurchase'); if(addPurchaseBtn) addPurchaseBtn.addEventListener('click', ()=>openInvestmentEntryEditor(null, { vehicleId: vid, onBack: ()=>renderVehicleManagementPage(vid) })); }
   document.querySelectorAll('[data-edit-invest]').forEach(b=>b.addEventListener('click', ()=>openInvestmentEntryEditor(b.dataset.editInvest, { onBack: ()=>renderVehicleManagementPage(vid) })));
   document.getElementById('vm_save').addEventListener('click', async ()=>{
     const plate = (document.getElementById('vm_plate').value||'').trim();
@@ -20525,6 +20527,8 @@ function renderPerVehicleDataNotice(){
 function openInvestmentEntryEditor(id, opts){
   const existing = id ? investmentEntriesAll().find(e=>e.id===id) : null;
   opts = opts || {};
+  // #343 — hạng mục đầu tư KÈM (sau khi mua xe) có màn nhập riêng.
+  if(existing ? existing.kind==='addon' : !!opts.addon){ openVehicleAddonEditor(id, opts); return; }
   // #321 — trang RIÊNG (không còn cửa sổ phụ); quay lại đúng nơi đã mở.
   const goBack = opts.onBack || (()=>{ if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll(); restoreMainScroll(); });
   if(!opts.onBack) saveMainScroll();
@@ -20618,6 +20622,147 @@ function openInvestmentEntryEditor(id, opts){
     // #329 — xoá đúng dòng xe đầu tiên (số cũ) thì xoá luôn số cũ, để nó không tự hiện lại.
     if(draft.legacyMigrated && Number(state.equityProjectInfo.initialInvestment)>0){ state.equityProjectInfo.initialInvestment = 0; await saveEquityProjectInfo(); }
     afterWrite('Đã xoá.');
+  });
+}
+/// #343 (Linh Chí Thành yêu cầu 2026-10-07) — HẠNG MỤC ĐẦU TƯ KÈM sau khi đã mua xe
+/// (trước bạ, đăng ký, lắp thùng, định vị...). Mỗi hạng mục là 1 dòng riêng: tên, số tiền,
+/// có/không hoá đơn VAT, nguồn trả. Lưu ĐÚNG khuôn dữ liệu lần đầu tư đang có
+/// (priceExVat / vatAmount / extraCosts / fundingSource) + cờ kind:'addon' — nên mọi hàm
+/// tính (khấu hao, VAT chờ khấu trừ, vốn góp, số dư TCB/tiền mặt) chạy y như cũ, không sửa.
+const ADDON_ITEM_SUGGESTIONS = ['Lệ phí trước bạ','Đăng ký + biển số','Đăng kiểm lần đầu','Thùng / cơi thùng','Định vị + camera','Phù hiệu','Lốp / phụ kiện lắp thêm'];
+const ADDON_FUNDING_LABELS = { companyBank:'🏦 TCB công ty (chuyển khoản)', companyCash:'💵 Tiền mặt công ty', owner:'👤 Cá nhân Linh Chí Thành bỏ riêng (tiền mặt / tiền túi)' };
+function openVehicleAddonEditor(id, opts){
+  const existing = id ? investmentEntriesAll().find(e=>e.id===id) : null;
+  opts = opts || {};
+  const goBack = opts.onBack || (()=>{ if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll(); restoreMainScroll(); });
+  if(!opts.onBack) saveMainScroll();
+  const draft = existing ? {...existing} : { id: uid('invest'), kind:'addon', date: todayLocalDateStr(), amount: 0, note: '', vehicleId: opts.vehicleId || null, fundingSource: 'companyBank' };
+  const parts0 = investEntryParts(draft);
+  let netVal = parts0.pre + parts0.extra, vatVal = parts0.vat;
+  let hasVat = existing ? vatVal>0 : true;
+  let sourceTouched = !!existing;
+  const fundingLabels = Object.assign({}, ADDON_FUNDING_LABELS);
+  if(!fundingLabels[investFundingOf(draft)]) fundingLabels[investFundingOf(draft)] = INVEST_FUNDING_LABELS[investFundingOf(draft)] || investFundingOf(draft);
+  scrollMainToTop();
+  document.getElementById('app').innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="ad_backBtn">← Quay Lại</button></section>
+    <section class="group"><div class="card">
+    <h3 style="margin-top:0;">➕ ${existing?'Sửa':'Thêm'} Hạng Mục Đầu Tư Kèm</h3>
+    <div class="hint" style="margin-top:0; margin-bottom:10px;">Khoản chi SAU khi mua xe để xe đủ điều kiện hoạt động, làm TĂNG giá trị xe (trước bạ, đăng ký, lắp thùng, định vị...). Dầu, sửa chữa, bảo hiểm, phí đường bộ vẫn ghi ở mục chi phí như cũ.</div>
+    <div class="two-col">
+      <div class="field"><label>Ngày chi</label><input type="date" id="ad_date" value="${draft.date}"></div>
+      <div class="field"><label>Của xe nào</label>
+        <select id="ad_vehicle">
+          <option value="">— Chưa gán xe —</option>
+          ${(state.vehicles||[]).map(v=>`<option value="${v.id}" ${draft.vehicleId===v.id?'selected':''}>🚛 ${escapeHtml(v.name||v.plate||'')}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="field" style="margin-bottom:6px;">
+      <label>Tên hạng mục</label>
+      <input type="text" id="ad_name" value="${escapeHtml(draft.note||'')}" placeholder="VD: Lệ phí trước bạ">
+    </div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;">
+      ${ADDON_ITEM_SUGGESTIONS.map(n=>`<button type="button" class="btn btn-ghost btn-sm ad-chip" data-name="${escapeHtml(n)}" style="width:auto;">${escapeHtml(n)}</button>`).join('')}
+    </div>
+    <div class="field">
+      <label>Có hoá đơn VAT không?</label>
+      <select id="ad_hasVat">
+        <option value="1" ${hasVat?'selected':''}>🧾 Có hoá đơn VAT</option>
+        <option value="0" ${hasVat?'':'selected'}>📄 Không có VAT (lệ phí, biên lai, mua lẻ)</option>
+      </select>
+    </div>
+    <div class="two-col">
+      <div class="field"><label id="ad_netLabel">Số tiền chưa VAT</label><input type="text" inputmode="decimal" id="ad_net"></div>
+      <div class="field" id="ad_vatWrap"><label>Tiền VAT trên hoá đơn</label><input type="text" inputmode="decimal" id="ad_vat" placeholder="0">
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button type="button" class="btn btn-ghost btn-sm ad-vatpct" data-pct="10" style="width:auto;">= 10%</button>
+          <button type="button" class="btn btn-ghost btn-sm ad-vatpct" data-pct="8" style="width:auto;">= 8%</button>
+        </div></div>
+    </div>
+    <div class="field">
+      <label>Trả bằng nguồn nào</label>
+      <select id="ad_funding">
+        ${Object.entries(fundingLabels).map(([k,l])=>`<option value="${k}" ${investFundingOf(draft)===k?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="hint" id="ad_total" style="margin-top:0;"></div>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      ${existing ? '<button class="btn btn-danger" id="ad_delBtn">Xoá</button>' : ''}
+      <button class="btn btn-ghost" id="ad_cancelBtn">Huỷ</button>
+      <button class="btn btn-accent btn-block" id="ad_saveBtn">Lưu</button>
+    </div>
+    </div></section>
+  `;
+  const $ = x=>document.getElementById(x);
+  $('ad_backBtn').addEventListener('click', goBack);
+  $('ad_cancelBtn').addEventListener('click', goBack);
+  const refresh = ()=>{
+    $('ad_vatWrap').style.display = hasVat ? '' : 'none';
+    $('ad_netLabel').textContent = hasVat ? 'Số tiền chưa VAT' : 'Số tiền';
+    const vat = hasVat ? (vatVal||0) : 0;
+    const total = (netVal||0) + vat;
+    const vidSel = $('ad_vehicle').value;
+    const isCompany = vehicleOwnershipOf(vidSel ? settingsOfVehicle(vidSel) : null)==='company';
+    const src = $('ad_funding').value;
+    const lines = [`Tổng tiền trả: <strong>${fmtVND(total)}</strong>.`];
+    lines.push(`Cộng <strong>${fmtVND(isCompany ? (netVal||0) : total)}</strong> vào giá trị xe đem khấu hao${isCompany && vat>0 ? `; VAT ${fmtVND(vat)} vào "VAT chờ khấu trừ"` : ''}.`);
+    lines.push(src==='companyBank' ? 'Tự trừ vào số dư TCB công ty.' : src==='companyCash' ? 'Tự trừ vào tiền mặt công ty.' : src==='owner' ? 'Tính là tiền Linh Chí Thành bỏ thêm vào (không trừ số dư công ty).' : '');
+    if(vat>0 && src!=='companyBank' && total>=5000000) lines.push('<span style="color:var(--loss);">⚠️ Hoá đơn từ 5 triệu không trả qua tài khoản công ty có thể không được khấu trừ VAT — nên hỏi lại kế toán.</span>');
+    $('ad_total').innerHTML = lines.filter(Boolean).join('<br>');
+  };
+  attachMoneyInput($('ad_net'), netVal, v=>{ netVal=v; refresh(); });
+  attachMoneyInput($('ad_vat'), vatVal, v=>{ vatVal=v; refresh(); });
+  document.querySelectorAll('.ad-chip').forEach(b=>b.addEventListener('click', ()=>{ $('ad_name').value = b.dataset.name; }));
+  document.querySelectorAll('.ad-vatpct').forEach(b=>b.addEventListener('click', ()=>{
+    vatVal = Math.round((netVal||0) * Number(b.dataset.pct) / 100);
+    $('ad_vat').value = vatVal ? vatVal.toLocaleString('vi-VN') : '';
+    refresh();
+  }));
+  $('ad_hasVat').addEventListener('change', ()=>{
+    hasVat = $('ad_hasVat').value==='1';
+    // Gợi ý nguồn theo loại chứng từ, chỉ khi Linh Chí Thành chưa tự chọn nguồn.
+    if(!sourceTouched) $('ad_funding').value = hasVat ? 'companyBank' : 'owner';
+    refresh();
+  });
+  $('ad_funding').addEventListener('change', ()=>{ sourceTouched = true; refresh(); });
+  $('ad_vehicle').addEventListener('change', refresh);
+  refresh();
+  $('ad_saveBtn').addEventListener('click', async ()=>{
+    const date = $('ad_date').value;
+    const name = $('ad_name').value.trim();
+    const vat = hasVat ? (vatVal||0) : 0;
+    if(!date){ showToast('Chọn ngày trước đã.'); return; }
+    if(!name){ showToast('Nhập tên hạng mục trước đã.'); return; }
+    if(!(netVal>0)){ showToast('Nhập số tiền trước đã.'); return; }
+    if(hasVat && !(vat>0)){ showToast('Nhập tiền VAT trên hoá đơn, hoặc chọn "Không có VAT".'); return; }
+    draft.kind = 'addon';
+    draft.date = date;
+    draft.priceExVat = netVal||0; draft.vatAmount = vat; draft.extraCosts = 0;
+    draft.amount = (netVal||0) + vat;
+    draft.vehicleId = $('ad_vehicle').value || null;
+    draft.fundingSource = $('ad_funding').value;
+    draft.note = name;
+    try { await ensureLegacyInvestmentInList(); } catch(e){}
+    if(!Array.isArray(state.initialInvestmentEntries)) state.initialInvestmentEntries = [];
+    const idx = state.initialInvestmentEntries.findIndex(e=>e.id===draft.id);
+    if(idx>=0) state.initialInvestmentEntries[idx]=draft; else state.initialInvestmentEntries.push(draft);
+    if(!(await saveInitialInvestmentEntries())) return;
+    // Giữ đúng quy tắc sẵn có: ngày bắt đầu dự án = ngày lần đầu tư sớm nhất.
+    const earliestEntryDate = state.initialInvestmentEntries.reduce((min,e)=>(!min||e.date<min)?e.date:min, null);
+    if(earliestEntryDate && (!state.equityProjectInfo.startDate || earliestEntryDate<state.equityProjectInfo.startDate)){
+      state.equityProjectInfo.startDate = earliestEntryDate;
+      await saveEquityProjectInfo();
+    }
+    showToast((existing?'Đã lưu.':'Đã thêm.') + ' Giá trị xe đã đổi — kiểm tra lại mục 3️⃣ Khấu hao.');
+    goBack();
+  });
+  const delBtn = $('ad_delBtn');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    if(!confirm('Xoá hạng mục đầu tư kèm này?')) return;
+    state.initialInvestmentEntries = (state.initialInvestmentEntries||[]).filter(e=>e.id!==draft.id);
+    if(!(await saveInitialInvestmentEntries())) return;
+    showToast('Đã xoá. Giá trị xe đã đổi — kiểm tra lại mục 3️⃣ Khấu hao.');
+    goBack();
   });
 }
 // SỬA 2026-09-14 (Linh Chí Thành yêu cầu — "Ảnh 1 trùng lặp với Ảnh 2, gộp lại
