@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Linh Chí Thành đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-07 · #343';
+const APP_BUILD = '2026-10-07 · #345';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3956,7 +3956,7 @@ function renderVehicleManagementPage(selectedVid){
   const saleRes = vid ? vehicleSaleResult(vid) : null;
   const entryRow = e=>{ const p = investEntryParts(e); return `<tr>
       <td style="white-space:nowrap;">${formatDateVN(e.date)}</td>
-      <td>${e.kind==='addon'?'➕ ':''}${escapeHtml(e.note||'')}<div class="hint" style="margin:2px 0 0;">${e.kind==='addon' ? `Hạng mục kèm · ${p.vat>0 ? `Chưa VAT ${fmtVND(p.pre+p.extra)} · VAT ${fmtVND(p.vat)}` : 'Không có VAT'}` : `Giá chưa VAT ${fmtVND(p.pre)} · VAT ${fmtVND(p.vat)} · Chi phí kèm ${fmtVND(p.extra)}`}</div><div class="hint" style="margin:2px 0 0;">${INVEST_FUNDING_LABELS[investFundingOf(e)]||''}</div></td>
+      <td>${e.kind==='addon'?'➕ ':''}${escapeHtml(e.note||'')}<div class="hint" style="margin:2px 0 0;">${e.kind==='addon' ? `Hạng mục kèm · ${p.vat>0 ? `Chưa VAT ${fmtVND(p.pre+p.extra)} · VAT ${fmtVND(p.vat)}` : 'Không có VAT'}` : `Giá chưa VAT ${fmtVND(p.pre)} · VAT ${fmtVND(p.vat)} · Chi phí kèm ${fmtVND(p.extra)}`}</div>${e.kind==='addon' ? `<div class="seg" data-addon-src="${e.id}" style="margin-top:6px;">${[['companyBank','🏦 TCB'],['companyCash','💵 Tiền mặt']].map(([k,l])=>`<button type="button" data-val="${k}" class="${investFundingOf(e)===k?'active':''}" style="padding:7px 0; font-size:12.5px;">${l}</button>`).join('')}</div>${(investFundingOf(e)==='companyBank'||investFundingOf(e)==='companyCash') ? '' : '<div class="hint" style="margin:3px 0 0; color:var(--loss);">⚠️ Chưa trừ quỹ nào — bấm chọn nguồn</div>'}` : `<div class="hint" style="margin:2px 0 0;">${INVEST_FUNDING_LABELS[investFundingOf(e)]||''}</div>`}</td>
       <td class="num">${fmtVND(p.total)}</td>
       <td><button class="link-btn" data-edit-invest="${e.id}" style="padding:0;">Sửa</button></td></tr>`; };
   app.innerHTML = `
@@ -4075,6 +4075,18 @@ function renderVehicleManagementPage(selectedVid){
   const toggleRental = ()=>{ document.getElementById('vm_rentalCard').style.display = document.getElementById('vm_owner').value==='personal' ? '' : 'none'; };
   document.getElementById('vm_owner').addEventListener('change', toggleRental); toggleRental();
   document.getElementById('vm_addInvest').addEventListener('click', ()=>openInvestmentEntryEditor(null, { vehicleId: vid, addon: entries.length>0, onBack: ()=>renderVehicleManagementPage(vid) }));
+  // #345 — đổi nguồn trả ngay trên từng dòng hạng mục kèm (chỉ đổi fundingSource; số tiền giữ nguyên).
+  document.querySelectorAll('[data-addon-src] button').forEach(b=>b.addEventListener('click', async ()=>{
+    const eid = b.parentElement.dataset.addonSrc, val = b.dataset.val;
+    const list = Array.isArray(state.initialInvestmentEntries) ? state.initialInvestmentEntries : [];
+    const idx = list.findIndex(x=>x.id===eid);
+    if(idx<0 || investFundingOf(list[idx])===val) return;
+    const prev = list[idx].fundingSource;
+    list[idx] = Object.assign({}, list[idx], { fundingSource: val });
+    if(!(await saveInitialInvestmentEntries())){ list[idx] = Object.assign({}, list[idx], { fundingSource: prev }); return; }
+    showToast(val==='companyCash' ? 'Đã đổi nguồn: trừ vào quỹ Tiền mặt.' : 'Đã đổi nguồn: trừ vào số dư TCB.');
+    saveMainScroll(); renderVehicleManagementPage(vid); restoreMainScroll();
+  }));
   { const addPurchaseBtn = document.getElementById('vm_addPurchase'); if(addPurchaseBtn) addPurchaseBtn.addEventListener('click', ()=>openInvestmentEntryEditor(null, { vehicleId: vid, onBack: ()=>renderVehicleManagementPage(vid) })); }
   document.querySelectorAll('[data-edit-invest]').forEach(b=>b.addEventListener('click', ()=>openInvestmentEntryEditor(b.dataset.editInvest, { onBack: ()=>renderVehicleManagementPage(vid) })));
   document.getElementById('vm_save').addEventListener('click', async ()=>{
@@ -20630,7 +20642,9 @@ function openInvestmentEntryEditor(id, opts){
 /// (priceExVat / vatAmount / extraCosts / fundingSource) + cờ kind:'addon' — nên mọi hàm
 /// tính (khấu hao, VAT chờ khấu trừ, vốn góp, số dư TCB/tiền mặt) chạy y như cũ, không sửa.
 const ADDON_ITEM_SUGGESTIONS = ['Lệ phí trước bạ','Đăng ký + biển số','Đăng kiểm lần đầu','Thùng / cơi thùng','Định vị + camera','Phù hiệu','Lốp / phụ kiện lắp thêm'];
-const ADDON_FUNDING_LABELS = { companyBank:'🏦 TCB công ty (chuyển khoản)', companyCash:'💵 Tiền mặt công ty', owner:'👤 Cá nhân Linh Chí Thành bỏ riêng (tiền mặt / tiền túi)' };
+// #344 — ghi rõ nguồn nào TRỪ quỹ nào (trước đó chữ "tiền mặt" nằm ở mục tiền túi riêng nên dễ chọn nhầm, quỹ tiền mặt không bị trừ).
+// #345 (Linh Chí Thành yêu cầu) — hạng mục kèm chỉ còn ĐÚNG 2 nguồn: TCB và Tiền mặt. Tiền túi riêng muốn dùng thì ghi "Góp vốn" vào 1 trong 2 quỹ trước.
+const ADDON_FUNDING_LABELS = { companyBank:'🏦 TCB công ty — trừ số dư TCB', companyCash:'💵 Tiền mặt công ty — trừ quỹ tiền mặt' };
 function openVehicleAddonEditor(id, opts){
   const existing = id ? investmentEntriesAll().find(e=>e.id===id) : null;
   opts = opts || {};
@@ -20642,7 +20656,8 @@ function openVehicleAddonEditor(id, opts){
   let hasVat = existing ? vatVal>0 : true;
   let sourceTouched = !!existing;
   const fundingLabels = Object.assign({}, ADDON_FUNDING_LABELS);
-  if(!fundingLabels[investFundingOf(draft)]) fundingLabels[investFundingOf(draft)] = INVEST_FUNDING_LABELS[investFundingOf(draft)] || investFundingOf(draft);
+  // Dòng cũ đang lưu nguồn khác (tiền túi riêng...): vẫn hiện đúng nguồn đang lưu để không tự đổi số, kèm nhắc đổi.
+  if(!fundingLabels[investFundingOf(draft)]) fundingLabels[investFundingOf(draft)] = '⚠️ (cũ) ' + (INVEST_FUNDING_LABELS[investFundingOf(draft)] || investFundingOf(draft)) + ' — CHƯA trừ quỹ nào, nên đổi';
   scrollMainToTop();
   document.getElementById('app').innerHTML = `
     <section class="group"><button class="btn btn-ghost btn-sm" id="ad_backBtn">← Quay Lại</button></section>
@@ -20706,7 +20721,7 @@ function openVehicleAddonEditor(id, opts){
     const src = $('ad_funding').value;
     const lines = [`Tổng tiền trả: <strong>${fmtVND(total)}</strong>.`];
     lines.push(`Cộng <strong>${fmtVND(isCompany ? (netVal||0) : total)}</strong> vào giá trị xe đem khấu hao${isCompany && vat>0 ? `; VAT ${fmtVND(vat)} vào "VAT chờ khấu trừ"` : ''}.`);
-    lines.push(src==='companyBank' ? 'Tự trừ vào số dư TCB công ty.' : src==='companyCash' ? 'Tự trừ vào tiền mặt công ty.' : src==='owner' ? 'Tính là tiền Linh Chí Thành bỏ thêm vào (không trừ số dư công ty).' : '');
+    lines.push(src==='companyBank' ? 'Tự trừ vào số dư TCB công ty.' : src==='companyCash' ? 'Tự trừ vào quỹ tiền mặt công ty.' : src==='owner' ? '<strong>KHÔNG trừ quỹ tiền mặt hay TCB công ty</strong> — app tính đây là vốn Linh Chí Thành bỏ thêm. Chỉ chọn khi số tiền này CHƯA từng ghi "Góp vốn" vào công ty.' : '');
     if(vat>0 && src!=='companyBank' && total>=5000000) lines.push('<span style="color:var(--loss);">⚠️ Hoá đơn từ 5 triệu không trả qua tài khoản công ty có thể không được khấu trừ VAT — nên hỏi lại kế toán.</span>');
     $('ad_total').innerHTML = lines.filter(Boolean).join('<br>');
   };
@@ -20721,7 +20736,7 @@ function openVehicleAddonEditor(id, opts){
   $('ad_hasVat').addEventListener('change', ()=>{
     hasVat = $('ad_hasVat').value==='1';
     // Gợi ý nguồn theo loại chứng từ, chỉ khi Linh Chí Thành chưa tự chọn nguồn.
-    if(!sourceTouched) $('ad_funding').value = hasVat ? 'companyBank' : 'owner';
+    if(!sourceTouched) $('ad_funding').value = hasVat ? 'companyBank' : 'companyCash';
     refresh();
   });
   $('ad_funding').addEventListener('change', ()=>{ sourceTouched = true; refresh(); });
