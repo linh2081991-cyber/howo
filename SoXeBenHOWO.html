@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-08 · #351';
+const APP_BUILD = '2026-10-08 · #352';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9986,17 +9986,17 @@ function renderShiftForm(){
         <div class="two-col">
           <div class="field">
             <label>Chỉ số dầu đầu</label>
-            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="f_fuelStart" placeholder="0" value="${blankIfZero(sh.fuelStart)}">
+            <input type="text" data-numfmt="1" data-decimals="3" inputmode="decimal" id="f_fuelStart" placeholder="0" value="${blankIfZero(sh.fuelStart)}">
           </div>
           <div class="field">
             <label>Chỉ số dầu cuối</label>
-            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="f_fuelEnd" placeholder="0" value="${blankIfZero(sh.fuelEnd)}">
+            <input type="text" data-numfmt="1" data-decimals="3" inputmode="decimal" id="f_fuelEnd" placeholder="0" value="${blankIfZero(sh.fuelEnd)}">
           </div>
         </div>
         <div class="two-col">
           <div class="field">
             <label>Dầu đổ thêm (lít)</label>
-            <input type="text" data-numfmt="1" data-decimals="2" inputmode="decimal" id="f_fuelAdded" placeholder="0" value="${blankIfZero(sh.fuelAdded)}">
+            <input type="text" data-numfmt="1" data-decimals="3" inputmode="decimal" id="f_fuelAdded" placeholder="0" value="${blankIfZero(sh.fuelAdded)}">
           </div>
           <div class="field">
             <label>Đơn giá dầu / lít</label>
