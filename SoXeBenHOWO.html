@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-07 · #346';
+const APP_BUILD = '2026-10-08 · #348';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3991,7 +3991,30 @@ function renderVehicleManagementPage(selectedVid){
         <div class="grid-table-wrap"><table class="grid-table">
           <thead><tr><th>Ngày</th><th>Nội dung</th><th class="num">Tổng</th><th></th></tr></thead>
           <tbody>${entries.map(entryRow).join('') || '<tr><td colspan="4" class="hint">Chưa có lần đầu tư nào gán cho xe này.</td></tr>'}
-            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">= Giá trị xe đem khấu hao ${vehicleOwnershipOf(s)==='company'?'(không gồm VAT)':'(gồm VAT)'}</td><td class="num">${fmtVND(base)}</td><td></td></tr>
+            ${(()=>{
+              // #347 (Ông Chủ yêu cầu) — bảng đối chiếu: Tổng đã chi (gồm VAT) − VAT = Giá trị khấu hao.
+              // CHỈ HIỂN THỊ: cộng lại từ chính các dòng ở trên bằng investEntryParts(); `base` vẫn là số của hàm tính sẵn có.
+              if(!entries.length) return `<tr class="grid-total-row"><td colspan="2" style="text-align:left;">= Giá trị xe đem khấu hao ${vehicleOwnershipOf(s)==='company'?'(không gồm VAT)':'(gồm VAT)'}</td><td class="num">${fmtVND(base)}</td><td></td></tr>`;
+              const isCo = vehicleOwnershipOf(s)==='company';
+              const parts = entries.map(e=>({ e, p: investEntryParts(e) }));
+              const sum = arr=>arr.reduce((a,x)=>a+x,0);
+              const totalPaid = sum(parts.map(x=>x.p.total));
+              const totalVat = sum(parts.map(x=>x.p.vat));
+              const addons = parts.filter(x=>x.e.kind==='addon');
+              const purchasePaid = totalPaid - sum(addons.map(x=>x.p.total));
+              const bySrc = k=>sum(parts.filter(x=>investFundingOf(x.e)===k).map(x=>x.p.total));
+              const srcBits = [['companyBank','🏦 TCB'],['companyCash','💵 Tiền mặt'],['owner','👤 Cá nhân Ông Chủ'],['companyLoan','🏛️ Vay giải ngân thẳng']]
+                .map(([k,l])=>[l,bySrc(k)]).filter(x=>x[1]>0).map(x=>`${x[0]} ${fmtVND(x[1])}`).join(' · ');
+              const expected = totalPaid - (isCo ? totalVat : 0);
+              const gap = Math.round(expected - base);
+              return `
+            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">Tổng tiền đã chi (gồm VAT) — ${parts.length} khoản
+              <div class="hint" style="margin:2px 0 0; font-weight:400;">Mua xe ${fmtVND(purchasePaid)}${addons.length?` · Hạng mục kèm (${addons.length}) ${fmtVND(totalPaid-purchasePaid)}`:''}</div>
+              ${srcBits?`<div class="hint" style="margin:2px 0 0; font-weight:400;">Nguồn: ${srcBits}</div>`:''}</td><td class="num">${fmtVND(totalPaid)}</td><td></td></tr>
+            ${isCo ? `<tr><td colspan="2" style="text-align:left;">− VAT trên hoá đơn<div class="hint" style="margin:2px 0 0;">Không khấu hao — nằm ở "VAT chờ khấu trừ"</div></td><td class="num">${fmtVND(totalVat)}</td><td></td></tr>` : ''}
+            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">= Giá trị xe đem khấu hao ${isCo?'(không gồm VAT)':'(gồm VAT)'}</td><td class="num">${fmtVND(base)}</td><td></td></tr>
+            ${Math.abs(gap)>1 ? `<tr><td colspan="4" style="text-align:left; color:var(--loss);">⚠️ Bảng cộng lệch ${fmtVND(Math.abs(gap))} so với giá trị khấu hao — chụp màn này gửi lại để kiểm tra.</td></tr>` : ''}`;
+            })()}
           </tbody></table></div>
         <button class="btn btn-ghost btn-block" id="vm_addInvest" style="margin-top:8px;">${entries.length ? '➕ Thêm hạng mục đầu tư kèm cho xe này' : '➕ Khai báo tiền mua xe'}</button>
         ${entries.length ? '<button class="link-btn" id="vm_addPurchase" style="margin-top:8px; padding:0;">Khai thêm 1 lần trả tiền MUA XE (trả nhiều đợt)</button>' : ''}
@@ -7412,7 +7435,16 @@ function siteRevenue(s){
     return commercialNetSell(s);
   }
   const gross = (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
-  return s.priceIncludesVat ? gross/(1+vatRateFraction()) : gross;
+  return s.priceIncludesVat ? gross/(1+freightVatRateFraction(s)) : gross;
+}
+/// #348 (Ông Chủ duyệt 2026-10-08 — hợp đồng chở cước VAT 8%): thuế suất VAT RIÊNG cho từng
+/// công trình CHỞ CƯỚC (ô "Thuế suất VAT cước" trên ca). Để trống = dùng mức chung ở Cài Đặt
+/// y như trước — nên mọi ca cũ (chưa có ô này) ra ĐÚNG số cũ, không đổi 1 đồng.
+function freightVatRateFraction(s){
+  const v = s ? s.freightVatRatePercent : undefined;
+  if(v===undefined || v===null || v==='') return vatRateFraction();
+  const n = Number(v);
+  return (isFinite(n) && n>=0) ? n/100 : vatRateFraction();
 }
 /// Giá vốn hàng mua (net, đã bóc VAT) — CHỈ có ở công trình thương mại (mua
 /// rồi bán lại); công trình chở cước không có "hàng mua" nên luôn 0. Đây là
@@ -10180,6 +10212,10 @@ function renderSiteRows(){
             <button type="button" data-idx="${i}" data-vatfield="priceIncludesVat" data-val="1" class="${s.priceIncludesVat?'active':''}">Giá cước có VAT</button>
           </div>
         </div>
+        <div class="field">
+          <label>Thuế suất VAT cước (%) — để trống = ${Number(state.settings.vatRatePercent)||0}% theo Cài Đặt</label>
+          <input type="text" inputmode="decimal" class="site-input" data-idx="${i}" data-field="freightVatRatePercent" placeholder="Để trống = ${Number(state.settings.vatRatePercent)||0}%" value="${(s.freightVatRatePercent===undefined||s.freightVatRatePercent===null||s.freightVatRatePercent==='')?'':String(s.freightVatRatePercent).replace('.',',')}">
+        </div>
         <div class="two-col">
           <div class="field">
             <label>Khối lượng / chuyến</label>
@@ -10247,7 +10283,7 @@ function bindSiteRowEvents(){
     const handle = ()=>{
       const idx = Number(inp.dataset.idx), field=inp.dataset.field;
       const s = sh.siteLogs[idx];
-      const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio'];
+      const emptyMeansDefault = ['vatRatePercent','invoicedBuyPercent','densityRatio','freightVatRatePercent'];
       const parseVN = v => v==='' ? undefined : Number(String(v).replace(',','.'));
       if(field==='siteName' || field==='supplierId' || field==='customerId') s[field] = inp.value;
       else if(emptyMeansDefault.includes(field)) s[field] = parseVN(inp.value); // rỗng = dùng mặc định, không phải 0; chấp nhận cả dấu phẩy lẫn dấu chấm
@@ -10488,7 +10524,8 @@ function updateSiteCalc(idx){
     const detailBtn = el.querySelector('.cashflow-detail-btn');
     if(detailBtn) detailBtn.addEventListener('click', ()=>renderSiteCashFlowExplainerModal(s));
   } else {
-    el.textContent = `Thành tiền: ${fmtVND(siteRevenue(s))}  ·  Lương chuyến: ${fmtVND(siteWageTotal(s))}`;
+    const freightGross = (Number(s.volumePerTrip)||0) * (Number(s.materialUnitPrice)||0) * (Number(s.trips)||0);
+    el.textContent = `Thành tiền: ${fmtVND(siteRevenue(s))}  ·  Lương chuyến: ${fmtVND(siteWageTotal(s))}` + (s.priceIncludesVat ? `  ·  Đã tách VAT ${String(Math.round(freightVatRateFraction(s)*10000)/100).replace('.',',')}%: ${fmtVND(freightGross - siteRevenue(s))}` : '');
   }
 }
 
@@ -18726,7 +18763,7 @@ function renderMaintenanceList(){
   if(!wrap) return;
   const odoHeader = `<div class="stat-highlight"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>`;
   if(state.maintenanceSchedules.length===0){
-    wrap.innerHTML = odoHeader + '<div class="hint" style="margin-top:10px;">Chưa có hạng mục bảo dưỡng nào — bấm "+ Thêm Hạng Mục Bảo Dưỡng" ở Cài Đặt để bắt đầu.</div>';
+    wrap.innerHTML = odoHeader + '<div class="hint" style="margin-top:10px;">Chưa có hạng mục bảo dưỡng nào — bấm "+ Thêm Hạng Mục Bảo Dưỡng" ngay bên dưới để bắt đầu.</div>';
     return;
   }
   const statuses = state.maintenanceSchedules.map(computeMaintenanceStatus).sort((a,b)=>a.kmRemaining-b.kmRemaining);
@@ -21513,16 +21550,28 @@ function renderCompanyDashboardPage(preserveScroll){
 
     <section class="group">
       <h3>🚧 Tiền Luật Đường Theo Tháng</h3>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input type="month" id="dash_rf_newMonth" style="flex:1;" value="${todayLocalDateStr().slice(0,7)}">
+        <button class="btn btn-accent" id="dash_addRoadFeeMonthBtn" style="font-weight:700;">+ Thêm Tháng</button>
+      </div>
       <div id="roadFeeMonthListWrap"></div>
     </section>
 
     <section class="group">
       <h3>🏠 Tiền Thuê Nhà & Điện Nước Theo Tháng</h3>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input type="month" id="dash_hu_newMonth" style="flex:1;" value="${todayLocalDateStr().slice(0,7)}">
+        <button class="btn btn-accent" id="dash_addHousingUtilMonthBtn" style="font-weight:700;">+ Thêm Tháng</button>
+      </div>
       <div id="housingUtilMonthListWrap"></div>
     </section>
 
     <section class="group">
       <h3>🌉 CP Cầu Đường Theo Tháng</h3>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input type="month" id="dash_tf_newMonth" style="flex:1;" value="${todayLocalDateStr().slice(0,7)}">
+        <button class="btn btn-accent" id="dash_addTollFeeMonthBtn" style="font-weight:700;">+ Thêm Tháng</button>
+      </div>
       <div id="tollFeeMonthListWrap"></div>
     </section>
 
@@ -21590,9 +21639,27 @@ function renderCompanyDashboardPage(preserveScroll){
 
     <section class="group">
       <h3>🔧 Lịch Bảo Dưỡng Định Kỳ</h3>
-      ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `<div id="maintenanceListWrap"></div>`}
+      ${noVehicleChosenForPerVehicleData ? renderPerVehicleDataNotice() : `<div id="maintenanceListWrap"></div>
+      <button class="btn btn-ghost btn-block" id="dash_addMaintenanceBtn" style="margin-top:8px;">+ Thêm Hạng Mục Bảo Dưỡng</button>`}
     </section>
   `;
+  // #348 (Ông Chủ yêu cầu) — nút THÊM ngay tại từng bảng (trước đây chỉ có ở Cài Đặt). Dùng lại đúng
+  // các modal sẵn có; tháng đã có thì mở luôn dòng đó để sửa.
+  { const bindAddMonth = (btnId, inputId, getList, open)=>{
+      const b = document.getElementById(btnId); if(!b) return;
+      b.addEventListener('click', ()=>{
+        const picked = document.getElementById(inputId).value;
+        if(!picked){ showToast('Chọn 1 tháng trước đã.'); return; }
+        const ex = (getList()||[]).find(e=>e.month===picked);
+        open(ex ? ex.id : null, picked);
+      });
+    };
+    bindAddMonth('dash_addRoadFeeMonthBtn','dash_rf_newMonth', ()=>state.roadFeeByMonth, (id,m)=>openMonthlyAmountEditor('roadFee', id, m));
+    bindAddMonth('dash_addHousingUtilMonthBtn','dash_hu_newMonth', ()=>state.housingUtilitiesByMonth, (id,m)=>openHousingUtilEditor(id, m));
+    bindAddMonth('dash_addTollFeeMonthBtn','dash_tf_newMonth', ()=>state.tollFeeByMonth, (id,m)=>openMonthlyAmountEditor('tollFee', id, m));
+    const addMaint = document.getElementById('dash_addMaintenanceBtn');
+    if(addMaint) addMaint.addEventListener('click', ()=>openMaintenanceEditor(null));
+  }
   document.getElementById('companyDashBackBtn').addEventListener('click', ()=>{
     state.showCompanyDashboard = false;
     renderAll();
