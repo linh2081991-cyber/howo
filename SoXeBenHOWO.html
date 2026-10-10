@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-10 · #360';
+const APP_BUILD = '2026-10-10 · #361';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9378,6 +9378,27 @@ function renderShiftList(){
 
   const driverColumns = groupShiftsIntoDriverColumns(list);
 
+  // #361 (Ông Chủ yêu cầu 2026-10-10) — có từ 2 xe: LÁI CHÍNH của xe = tài xế lái nhiều nhất trong 10 ca
+  // gần nhất của CHÍNH xe này (cùng căn cứ với gợi ý tài xế khi tạo ca mới, #356). Lái chính được xếp
+  // đầu, gắn nhãn, và tự được chọn sẵn mỗi khi mở/đổi sang xe này — không còn hiện tab trống của
+  // tài xế xe khác. Bấm tay sang tài xế khác thì giữ nguyên lựa chọn cho tới khi đổi xe.
+  let mainDriverId = null;
+  if((state.vehicles||[]).length>1){
+    const activeIds = new Set(state.drivers.filter(d=>d.isActive!==false).map(d=>d.id));
+    mainDriverId = dominantRecentDriverId(state.shifts, '9999-12-31', null, activeIds);
+    if(mainDriverId){
+      const k = driverColumns.findIndex(c=>c.key===mainDriverId);
+      if(k>0){ const moved = driverColumns.splice(k,1)[0]; driverColumns.unshift(moved); }
+    }
+    const curVid = activeVehicleIdForEditing();
+    if(state.shiftDriverTabVehicleId !== curVid){
+      state.shiftDriverTabVehicleId = curVid;
+      const withShifts = driverColumns.filter(c=>c.shifts.length>0);
+      const pick = withShifts.find(c=>c.key===mainDriverId) || withShifts.slice().sort((a,b)=>b.shifts.length-a.shifts.length)[0] || driverColumns[0];
+      state.shiftDriverTab = pick ? pick.key : null;
+    }
+  }
+
   // Tab đang chọn — nếu tài xế đang chọn không còn xuất hiện trong danh
   // sách hiện tại (vd vừa lọc theo 1 ngày mà tài xế đó không có ca), tự
   // rơi về tab đầu tiên để không bao giờ hiện màn hình trống vô lý.
@@ -9398,6 +9419,7 @@ function renderShiftList(){
           <span class="avatar">${driverAvatarIcon()}</span>
           <span class="head-text">
             <span class="name">${escapeHtml(col.name)}</span>
+            ${mainDriverId && col.key===mainDriverId ? '<span style="display:inline-block; font-size:10.5px; font-weight:800; padding:1px 7px; border-radius:999px; background:var(--accent); color:#fff; margin:1px 0;">⭐ Lái chính xe này</span>' : ''}
             ${driverOnlineStatusHtml(col.key)}
             <span class="count">${driverColumnCountsLabel(col.shifts)}</span>
           </span>
