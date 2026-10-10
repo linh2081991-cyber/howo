@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-10 · #358';
+const APP_BUILD = '2026-10-10 · #360';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4440,6 +4440,17 @@ function computeCashBridge(eq, workingCapitalTotal, depreciationSoFar){
 // VAT). Sửa: trừ thêm đúng phần VAT CÒN NẰM TRONG hàng tồn kho (chưa
 // được khấu trừ vì hàng chưa dùng) — khớp đúng chuẩn NET-OF-VAT với bên
 // Lợi Nhuận Thực Tế.
+/// #360 (Ông Chủ duyệt 2026-10-10) — VAT trên hoá đơn của phần HĐ THƯƠNG MẠI CÒN TỒN.
+/// Tồn kho ở hàm dưới ghi theo giá SAU VAT (tiền thật đã trả − VAT), còn phần VAT này trước đây
+/// không nằm ở dòng nào của Vốn Vận Hành dù tiền đã chi → tài sản bị ghi thiếu đúng số này.
+/// Tồn kho + dòng này = đúng tiền thật đã trả cho phần hoá đơn còn tồn. Khi hoá đơn được dùng,
+/// phần VAT tương ứng tự rời dòng này (app tính "VAT hưởng" vào đúng ca dùng, như cũ).
+function invoiceLotStockPendingVat(){
+  return invoiceWarehouseGoodsTypes().reduce((sum,gt)=>{
+    const L = withLedgerReportMode(()=>buildInvoiceLotLedger(gt));
+    return sum + L.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*l._vatPerVol,0);
+  }, 0);
+}
 function companyWideInvoiceLotInventoryValue(){
   // #323 — tiền kho hoá đơn = lô thương mại còn (giá thật sau VAT được trừ) + HĐ mỏ dư còn (giá thay thế).
   return invoiceWarehouseGoodsTypes().reduce((sum,gt)=>{
@@ -6352,10 +6363,12 @@ function renderInvoiceLotOverview(){
           const lotRem = Lg.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume),0);
           const poolRem = Lg.pool.reduce((a,p)=>a+Math.max(0,p.remaining),0);
           const lotVal = Lg.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*(l._netCostPerVol - l._vatPerVol),0);
+          const lotPaid = Lg.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*l._netCostPerVol,0); // #359 — tiền THẬT đã trả cho phần còn tồn
+          const lotVat = Lg.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*l._vatPerVol,0);      // #359 — VAT trên hoá đơn của phần còn tồn
           const poolVal = Lg.pool.reduce((a,p)=>a+Math.max(0,p.remaining)*p.unit,0);
           const shortfall = Object.values(Lg.bySiteLog||{}).reduce((a,x)=>a+(Number(x.shortfall)||0),0);
           const pendingVol = Lg.groups.filter(g=>!g.both).reduce((a,g)=>a+(Number(g.sellVolume)||0),0);
-          return { goodsType: r.goodsType, combined: r.combinedRemaining, lotRem, poolRem, lotVal, poolVal, shortfall, pendingVol, gap: r.combinedRemaining - lotRem - poolRem };
+          return { goodsType: r.goodsType, combined: r.combinedRemaining, lotRem, poolRem, lotVal, lotPaid, lotVat, poolVal, shortfall, pendingVol, gap: r.combinedRemaining - lotRem - poolRem };
         });
         const near = (x,y)=>Math.abs(x-y)<=0.05;
         const allOk = sp.every(x=>near(x.poolRem,0) && near(x.gap,0));
@@ -6378,7 +6391,24 @@ function renderInvoiceLotOverview(){
         </table>
       </div>
       <div class="hint" style="margin:6px 0 0; color:${allOk?'var(--profit)':'var(--loss)'}; font-weight:700;">${allOk ? '✅ Đúng quy tắc: toàn bộ lượng tồn là HĐ thương mại, không còn hoá đơn mỏ dư.' : '⚠️ Chưa khớp quy tắc ở dòng có dấu ⚠️: lượng tồn chưa phải chỉ gồm HĐ thương mại.'}</div>
-      <div class="hint" style="margin:4px 0 0;">Giá trị phần HĐ thương mại còn (theo giá từng lô đã mua, sau VAT): <strong>${fmtVND(totLotVal)}</strong>${totPoolVal>0.5?` · HĐ mỏ dư: ${fmtVND(totPoolVal)}`:''} — cộng lại là dòng "Tổng Tồn Kho Hoá Đơn" ở Vốn Vận Hành.</div>`;
+      <div style="font-weight:800; font-size:13px; margin:14px 0 2px;">💰 Phần HĐ Thương Mại Còn Tồn Đáng Bao Nhiêu Tiền?</div>
+      <div class="hint" style="margin:2px 0 8px;">Tính theo đúng giá từng lô đã nhập. "Tiền thật đã trả" = (tổng giá trị hoá đơn − tiền mặt nhận lại) ÷ số khối của lô × số khối còn tồn.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Loại Hàng</th><th class="num">HĐ TM<br>Còn (khối)</th><th class="num">Tiền Thật<br>Đã Trả</th><th class="num">Trong đó:<br>VAT Chờ<br>Khấu Trừ</th><th class="num">Tồn Kho<br>(Sau VAT)</th></tr></thead>
+          <tbody>
+            ${sp.map(x=>`<tr>
+              <td><strong>${escapeHtml(x.goodsType)}</strong>${x.lotRem>0.05?`<div class="hint" style="margin:2px 0 0;">${fmtVND(x.lotPaid/x.lotRem)}/khối</div>`:''}</td>
+              <td class="num">${fmtQty(x.lotRem)}</td>
+              <td class="num" style="font-weight:800;">${fmtVND(x.lotPaid)}</td>
+              <td class="num">${fmtVND(x.lotVat)}</td>
+              <td class="num">${fmtVND(x.lotVal)}</td>
+            </tr>`).join('')}
+            <tr class="grid-total-row"><td colspan="2" style="text-align:left;">= Tổng</td><td class="num">${fmtVND(sp.reduce((a,x)=>a+x.lotPaid,0))}</td><td class="num">${fmtVND(sp.reduce((a,x)=>a+x.lotVat,0))}</td><td class="num">${fmtVND(totLotVal)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin:6px 0 0;">Vốn Vận Hành ghi đủ cả hai phần: dòng "Tổng Tồn Kho Hoá Đơn" = cột Tồn Kho (Sau VAT)${totPoolVal>0.5?` + HĐ mỏ dư ${fmtVND(totPoolVal)}`:''}, và dòng "VAT HĐ thương mại tồn chờ khấu trừ" = cột VAT. Hai dòng cộng lại bằng cột "Tiền Thật Đã Trả" — số tiền đã bỏ ra, cũng là số tiền sau này không phải bỏ ra mua lại.</div>`;
       })()}
       <button class="btn btn-ghost btn-sm" id="mineInvoiceOpenBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
       <button class="btn btn-ghost btn-sm" id="openInvoiceLotManagerBtn" style="width:auto; padding:8px 14px; margin-top:8px;">📦 Quản Lý Kho Hoá Đơn Bù</button>
@@ -20820,6 +20850,7 @@ function renderCompanyDashboardPage(preserveScroll){
       <h3>📊 Tổng Giá Trị Ròng Toàn Công Ty</h3>
       ${(()=>{
         const inventoryValue = companyWideInvoiceLotInventoryValue();
+        const lotStockVat = invoiceLotStockPendingVat(); // #360
         const depHistory = computeDepreciationMonthlyHistory();
         const depreciationSoFar = depHistory.length ? depHistory[depHistory.length-1].cumulative : 0;
         const vehicleNetBookValue = fleetNetBookValue(); // #320 — theo từng xe, xe công ty không gồm VAT, xe đã bán = 0
@@ -20846,7 +20877,7 @@ function renderCompanyDashboardPage(preserveScroll){
         // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
         // trước.
         const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
-          + debtSummary.totalCustomerOwed + debtSummary.totalFreightOwed - debtSummary.totalSupplierOwed + inventoryValue + depreciationReserveBalance()
+          + debtSummary.totalCustomerOwed + debtSummary.totalFreightOwed - debtSummary.totalSupplierOwed + inventoryValue + lotStockVat + depreciationReserveBalance()
           + driverAdvanceHeld - driverAdvanceOwed - wagePayable + truckVatRemaining; // #353 — cộng công nợ đối tác chở cước // #321 — hoá đơn mỏ KHÔNG cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
         const projectPersonalRemaining = projectPersonalLoanSplit().remaining; // #332 — góc nhìn DỰ ÁN
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance - projectPersonalRemaining;
@@ -20870,6 +20901,7 @@ function renderCompanyDashboardPage(preserveScroll){
               ${Math.abs(debtSummary.totalFreightOwed)>0.5 || debtSummary.freight.billed>0 ? `<tr><td>🤝 ${debtSummary.totalFreightOwed<0?'CT Linh Chí Thành đang giữ dư của đối tác chở cước (đối tác trả dư)':'Đối tác chở cước đang nợ CT Linh Chí Thành'}</td><td class="num" style="color:${debtSummary.totalFreightOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalFreightOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalFreightOwed))}</td></tr>` : ''}
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ CT Linh Chí Thành (đã ứng dư)':'CT Linh Chí Thành đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue)}</td></tr>
+              ${lotStockVat>0.5 ? `<tr><td>🧾 VAT HĐ thương mại tồn chờ khấu trừ<div class="hint" style="margin:2px 0 0;">Cộng với dòng tồn kho ở trên = ${fmtVND(inventoryValue+lotStockVat)}, đúng tiền thật đã trả cho phần hoá đơn còn tồn</div></td><td class="num" style="color:var(--profit);">+${fmtVND(lotStockVat)}</td></tr>` : ''}
               
               <tr><td>👷 Công tác phí tài xế đang giữ <button class="link-btn" id="wcAdvanceBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(driverAdvanceHeld)}</td></tr>
               ${driverAdvanceOwed>0.5 ? `<tr><td>👷 Công ty còn nợ tài xế (chi vượt công tác phí) <button class="link-btn" id="wcAdvanceBreakdownBtn2" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(driverAdvanceOwed)}</td></tr>` : ''}
