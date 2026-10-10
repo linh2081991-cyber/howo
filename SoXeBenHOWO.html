@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-10 · #355';
+const APP_BUILD = '2026-10-10 · #356';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -8712,10 +8712,34 @@ function findPreviousShift(dateStr, shiftType, excludeId){
 // đầu tiên thay thế — tài xế đã nghỉ sẽ không bao giờ còn được tự động
 // chọn sẵn cho ca MỚI nữa (vẫn xem/sửa lại bình thường cho CA CŨ đã ghi
 // nhận đúng tên họ, không đụng gì tới lịch sử).
+// SỬA 2026-10-10 (#356 — Ông Chủ báo: có 2 xe, mỗi xe 1 tài xế chính, nhưng app cứ gợi ý NGƯỢC):
+// quy tắc "2 tài xế thay phiên theo ngày" ở trên chỉ đúng khi cả công ty có 1 xe. Khi có từ 2 xe,
+// gợi ý theo LỊCH SỬ CỦA CHÍNH XE ĐÓ: tài xế lái nhiều nhất trong 10 ca gần nhất của xe (hoà thì
+// lấy người lái gần nhất). Xe chưa có ca nào → ưu tiên tài xế chưa là tài xế chính của xe khác.
+// Công ty chỉ 1 xe → giữ NGUYÊN cơ chế thay phiên cũ. Vẫn chỉ là gợi ý, đổi tay bình thường.
+function dominantRecentDriverId(shifts, uptoDate, excludeId, activeIds){
+  const recent = (shifts||[]).filter(sh=>sh.id!==excludeId && sh.driverId && activeIds.has(sh.driverId) && sh.date<=uptoDate)
+    .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10);
+  const count = {}; let best = null;
+  recent.forEach(sh=>{ count[sh.driverId] = (count[sh.driverId]||0)+1; });
+  recent.forEach(sh=>{ if(best===null || count[sh.driverId]>count[best]) best = sh.driverId; }); // duyệt từ ca mới nhất → hoà thì giữ người lái gần nhất
+  return best;
+}
 function suggestDriverIdForNewShift(dateStr, shiftType, excludeId){
   const activeDrivers = state.drivers.filter(d=>d.isActive!==false);
   const fallbackActive = (activeDrivers[0]||state.drivers[0]||{}).id;
   const prev = findPreviousShift(dateStr, shiftType, excludeId);
+  if((state.vehicles||[]).length>1){
+    const activeIds = new Set(activeDrivers.map(d=>d.id));
+    if(prev && prev.date===dateStr && activeIds.has(prev.driverId)) return prev.driverId; // cùng ngày: chạy thông, không đổi người
+    const own = dominantRecentDriverId(state.shifts, dateStr, excludeId, activeIds);
+    if(own) return own;
+    const curVid = activeVehicleIdForEditing();
+    const taken = new Set(Object.entries(state.allVehiclesShifts||{}).filter(([vid])=>vid!==curVid)
+      .map(([vid,list])=>dominantRecentDriverId(list, dateStr, null, activeIds)).filter(Boolean));
+    const free = activeDrivers.find(d=>!taken.has(d.id));
+    if(free) return free.id;
+  }
   if(!prev) return fallbackActive;
   const prevIsActive = activeDrivers.some(d=>d.id===prev.driverId);
   if(prev.date===dateStr) return prevIsActive ? prev.driverId : fallbackActive;
