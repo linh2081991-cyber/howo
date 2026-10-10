@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-10 · #356';
+const APP_BUILD = '2026-10-10 · #358';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -6342,6 +6342,44 @@ function renderInvoiceLotOverview(){
           </tbody>
         </table>
       </div>
+      ${(()=>{
+        // #358 (Ông Chủ nêu quy tắc 2026-10-10): mỏ xuất 70% theo đúng khoảng ngày ghi trên từng hoá đơn,
+        // phần thiếu dùng HĐ thương mại → lượng tồn phải CHỈ còn là HĐ thương mại. Bảng này bóc lượng tồn
+        // theo đúng sổ xuất kho của app (buildInvoiceLotLedger) để Ông Chủ tự thấy app có chạy đúng quy tắc không.
+        // CHỈ HIỂN THỊ. Thay cho bảng định giá #357 (khó hiểu) — phần tiền dùng lại đúng cách tính của Vốn Vận Hành.
+        const sp = rows.map(r=>{
+          const Lg = withLedgerReportMode(()=>buildInvoiceLotLedger(r.goodsType));
+          const lotRem = Lg.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume),0);
+          const poolRem = Lg.pool.reduce((a,p)=>a+Math.max(0,p.remaining),0);
+          const lotVal = Lg.lots.reduce((a,l)=>a+Math.max(0,l.remainingVolume)*(l._netCostPerVol - l._vatPerVol),0);
+          const poolVal = Lg.pool.reduce((a,p)=>a+Math.max(0,p.remaining)*p.unit,0);
+          const shortfall = Object.values(Lg.bySiteLog||{}).reduce((a,x)=>a+(Number(x.shortfall)||0),0);
+          const pendingVol = Lg.groups.filter(g=>!g.both).reduce((a,g)=>a+(Number(g.sellVolume)||0),0);
+          return { goodsType: r.goodsType, combined: r.combinedRemaining, lotRem, poolRem, lotVal, poolVal, shortfall, pendingVol, gap: r.combinedRemaining - lotRem - poolRem };
+        });
+        const near = (x,y)=>Math.abs(x-y)<=0.05;
+        const allOk = sp.every(x=>near(x.poolRem,0) && near(x.gap,0));
+        const totLotVal = sp.reduce((a,x)=>a+x.lotVal,0), totPoolVal = sp.reduce((a,x)=>a+x.poolVal,0);
+        return `
+      <div style="font-weight:800; font-size:13px; margin:14px 0 2px;">🔎 Lượng Tồn Này Gồm Những Hoá Đơn Nào?</div>
+      <div class="hint" style="margin:2px 0 8px;">Quy tắc: mỗi hoá đơn mỏ (70%) chỉ dùng cho các chuyến trong đúng khoảng ngày ghi trên hoá đơn; phần còn thiếu của chuyến rút từ HĐ thương mại. Chạy đúng thì lượng tồn chỉ còn là HĐ thương mại.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Loại Hàng</th><th class="num">Tồn<br>Tổng Hợp</th><th class="num">= HĐ Thương<br>Mại Còn</th><th class="num">+ HĐ Mỏ<br>Dư Còn</th><th class="num">Lệch</th></tr></thead>
+          <tbody>
+            ${sp.map(x=>`<tr>
+              <td><strong>${escapeHtml(x.goodsType)}</strong> ${near(x.poolRem,0)&&near(x.gap,0)?'✅':'⚠️'}</td>
+              <td class="num">${x.combined<0?'−':''}${fmtQty(Math.abs(x.combined))}</td>
+              <td class="num" style="font-weight:800;">${fmtQty(x.lotRem)}</td>
+              <td class="num" style="color:${near(x.poolRem,0)?'var(--ink-soft)':'var(--loss)'};">${fmtQty(x.poolRem)}</td>
+              <td class="num" style="color:${near(x.gap,0)?'var(--ink-soft)':'var(--loss)'};">${x.gap<0?'−':''}${fmtQty(Math.abs(x.gap))}</td>
+            </tr>${near(x.gap,0)?'':`<tr><td colspan="5" class="hint" style="color:var(--loss);">${escapeHtml(x.goodsType)}: lệch vì ${x.pendingVol>0.05?`còn ${fmtQty(x.pendingVol)} khối đã bán nhưng chuyến CHƯA tick đủ hoá đơn 2 đầu nên chưa xuất kho`:''}${x.pendingVol>0.05&&x.shortfall>0.05?'; ':''}${x.shortfall>0.05?`có ${fmtQty(x.shortfall)} khối thiếu hoá đơn chưa có nguồn bù`:''}${x.pendingVol<=0.05&&x.shortfall<=0.05?'cách quy đổi tỷ trọng giữa các hoá đơn mỏ — bấm 🔍 ở bảng trên để xem chi tiết':''}.</td></tr>`}`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin:6px 0 0; color:${allOk?'var(--profit)':'var(--loss)'}; font-weight:700;">${allOk ? '✅ Đúng quy tắc: toàn bộ lượng tồn là HĐ thương mại, không còn hoá đơn mỏ dư.' : '⚠️ Chưa khớp quy tắc ở dòng có dấu ⚠️: lượng tồn chưa phải chỉ gồm HĐ thương mại.'}</div>
+      <div class="hint" style="margin:4px 0 0;">Giá trị phần HĐ thương mại còn (theo giá từng lô đã mua, sau VAT): <strong>${fmtVND(totLotVal)}</strong>${totPoolVal>0.5?` · HĐ mỏ dư: ${fmtVND(totPoolVal)}`:''} — cộng lại là dòng "Tổng Tồn Kho Hoá Đơn" ở Vốn Vận Hành.</div>`;
+      })()}
       <button class="btn btn-ghost btn-sm" id="mineInvoiceOpenBtn" style="width:auto; padding:8px 14px; margin-top:10px;">📄 Sổ Hoá Đơn Thật Từ Mỏ (Thêm/Sửa)</button>
       <button class="btn btn-ghost btn-sm" id="openInvoiceLotManagerBtn" style="width:auto; padding:8px 14px; margin-top:8px;">📦 Quản Lý Kho Hoá Đơn Bù</button>
     </div>`;
