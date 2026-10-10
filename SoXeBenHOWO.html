@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-08 · #352';
+const APP_BUILD = '2026-10-10 · #353';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -1139,6 +1139,12 @@ function saveMainScroll(){
 /// suốt lúc đang canh lại vị trí, CHỈ hiện lại sau khi lớp CUỐI CÙNG (chắc
 /// chắn nhất) đã áp dụng xong — mắt người không còn thấy bước nhảy nào,
 /// chỉ thấy trang "xuất hiện" thẳng đúng ngay vị trí cũ.
+/// #353 — luồng "Đối Tác & Công Nợ" có 3 tầng (trang công ty → danh sách đối tác → 1 đối tác).
+/// savedMainScrollTop chỉ có 1 ô nhớ nên vào tầng 3 là đè mất vị trí của tầng 1 → quay lại bị
+/// cuộn lên đầu. Nhớ riêng vị trí từng tầng ở đây.
+const partnersFlow = { dashScroll: null, listScroll: null, fromList: false };
+function currentMainScrollTop(){ const el = getActualScrollEl(); return el ? el.scrollTop : 0; }
+function restoreMainScrollTo(v){ if(v!==null && v!==undefined) savedMainScrollTop = v; restoreMainScroll(); }
 function restoreMainScroll(){
   const appEl = document.getElementById('app');
   if(appEl) appEl.style.visibility = 'hidden';
@@ -15768,7 +15774,29 @@ function computeSupplierDebt(supplierId){
 function computeAllPartnersDebtSummary(){
   const totalCustomerOwed = state.customers.reduce((sum,c)=>sum+computeCustomerDebt(c.id).owed, 0);
   const totalSupplierOwed = state.suppliers.reduce((sum,s)=>sum+computeSupplierDebt(s.id).owed, 0);
-  return { totalCustomerOwed, totalSupplierOwed };
+  const freight = computeFreightPartnersReceivable(); // #353
+  return { totalCustomerOwed, totalSupplierOwed, totalFreightOwed: freight.owed, freight };
+}
+/// #353 (Ông Chủ yêu cầu 2026-10-10 — "tiền ở đối tác chạy cước chưa liên kết với các mục tiền"):
+/// công nợ ĐỐI TÁC CHỞ CƯỚC = tiền cước phải thu − tiền đối tác đã trả. Trước đây số này chỉ
+/// hiện ở thẻ "Đối Tác & Công Nợ", KHÔNG nằm trong Vốn Vận Hành (bảng đó chỉ cộng khách THƯƠNG
+/// MẠI theo customerId) — trong khi doanh thu cước đã vào Lãi Ròng, nên bảng đối chiếu vốn bị
+/// hụt đúng phần cước chưa thu. Chỉ tính công trình KHÔNG gắn khách thương mại (customerId) và
+/// khoản thu KHÔNG gắn customerId, để không cộng trùng với dòng "Khách hàng đang nợ".
+function computeFreightPartnersReceivable(){
+  let billed = 0;
+  for(const sh of shiftsCompanyWideSafe()){
+    for(const s of (sh.siteLogs||[])){
+      if(s.siteType==='commercial' || s.customerId) continue;
+      const amt = siteBilledAmount(s);
+      if(amt>0) billed += amt;
+    }
+  }
+  const pays = (state.sitePayments||[]).filter(p=>!p.customerId);
+  const collectedBank = pays.filter(p=>(p.method||'bank')!=='cash').reduce((a,p)=>a+(Number(p.amount)||0),0);
+  const collectedCash = pays.filter(p=>(p.method||'bank')==='cash').reduce((a,p)=>a+(Number(p.amount)||0),0);
+  const collected = collectedBank + collectedCash;
+  return { billed, collected, collectedBank, collectedCash, owed: billed - collected };
 }
 /// Đối chiếu số dư ngân hàng THẬT (2026-08-18) — lấy mốc chốt GẦN NHẤT
 /// (ngày ≤ hôm nay) Ông Chủ đã khai báo, cộng dồn ĐÚNG tiền chảy qua
@@ -18308,18 +18336,20 @@ function renderPartnersOverview(){
     <div class="card">
       <div class="summary-row"><span>Tổng số đối tác đang theo dõi</span><span class="val" style="font-weight:700;">${partners.length} đối tác</span></div>
       <div class="summary-row total"><span>Tổng còn nợ (${owingCount} đối tác đang nợ)</span><span class="val" style="font-weight:800; color:${totalOwedAll>0?'var(--loss)':'var(--profit)'};">${fmtVND(totalOwedAll)}</span></div>
+      ${(()=>{ const f = computeFreightPartnersReceivable(); return `
+      <div class="hint" style="margin:8px 0 0;">Đã thu ${fmtVND(f.collected)} — 🏦 vào TCB ${fmtVND(f.collectedBank)} · 💵 vào Tiền Mặt ${fmtVND(f.collectedCash)} (đã nằm trong số dư TCB / Tiền Mặt). Phần còn nợ được cộng vào bảng "Vốn Vận Hành", dòng 🤝 Đối tác chở cước.</div>`; })()}
       <button class="btn btn-ghost btn-sm" id="partnersFullDetailBtn" style="width:auto; padding:8px 14px; margin-top:10px;">🔍 Chi Tiết (đầy đủ số chuyến, dòng tiền từng đối tác)</button>
     </div>
   `;
-  document.getElementById('partnersFullDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderPartnersFullDetailPage(); });
+  document.getElementById('partnersFullDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); partnersFlow.dashScroll = currentMainScrollTop(); partnersFlow.fromList = false; renderPartnersFullDetailPage(); });
 }
 
 /// Trang riêng (2026-08-22, yêu cầu Ông Chủ) — bảng ĐẦY ĐỦ mọi đối tác chở
 /// cước: số chuyến, đã chở (billed), đã thu, còn nợ, xếp hạng — tách 2
 /// khu ĐANG CHẠY / LÂU KHÔNG CHẠY (quá 60 ngày không có chuyến nào) để
 /// không lẫn lộn đối tác còn hoạt động với đối tác đã ngưng từ lâu.
-function renderPartnersFullDetailPage(){
-  scrollMainToTop();
+function renderPartnersFullDetailPage(preserveScroll){
+  if(!preserveScroll) scrollMainToTop();
   const partners = computePartnersOverview();
   const INACTIVE_DAYS = 60;
   const active = partners.filter(p=>p.daysSinceActivity===null || p.daysSinceActivity<=INACTIVE_DAYS);
@@ -18366,14 +18396,15 @@ function renderPartnersFullDetailPage(){
     // khi quay lại (renderCompanyDashboardPage() bên trong nó luôn tự
     // cuộn về đầu) — gọi thẳng, đúng cờ preserveScroll, y hệt các nút
     // Quay Lại khác đã sửa.
+    partnersFlow.fromList = false;
     if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
-    restoreMainScroll();
+    restoreMainScrollTo(partnersFlow.dashScroll); // #353 — về đúng chỗ đã bấm "Chi Tiết"
   });
   document.querySelectorAll('.partner-detail-row').forEach(row=>{
-    row.addEventListener('click', (e)=>{ if(e.target.closest('.partner-chitiet-btn')) return; saveMainScroll(); openPartnerDetail(row.dataset.partner); });
+    row.addEventListener('click', (e)=>{ if(e.target.closest('.partner-chitiet-btn')) return; partnersFlow.listScroll = currentMainScrollTop(); partnersFlow.fromList = true; saveMainScroll(); openPartnerDetail(row.dataset.partner); });
   });
   document.querySelectorAll('.partner-chitiet-btn').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{ e.stopPropagation(); saveMainScroll(); openPartnerDetail(btn.dataset.partner); });
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); partnersFlow.listScroll = currentMainScrollTop(); partnersFlow.fromList = true; saveMainScroll(); openPartnerDetail(btn.dataset.partner); });
   });
 }
 
@@ -18441,10 +18472,12 @@ function openPartnerDetail(partnerName, preserveScroll){
   renderSitePaymentList(allPayments, partnerName);
 
   document.getElementById('partnerDetailBackBtn').addEventListener('click', ()=>{
+    // #353 — vào từ danh sách đối tác thì quay lại ĐÚNG danh sách đó (đúng vị trí), không nhảy thẳng về trang công ty.
+    if(partnersFlow.fromList){ renderPartnersFullDetailPage(true); restoreMainScrollTo(partnersFlow.listScroll); return; }
     if(state.showCompanyDashboard){ renderCompanyDashboardPage(true); } else { renderAll(); }
     restoreMainScroll();
   });
-  document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); openAddSitePaymentForPartner(partnerName); });
+  document.getElementById('addSitePaymentBtn').addEventListener('click', ()=>{ saveMainScroll(); partnersFlow.detailScroll = currentMainScrollTop(); openAddSitePaymentForPartner(partnerName); });
   app.querySelectorAll('.site-detail-row[data-site]').forEach(row=>{
     row.addEventListener('click', ()=>{ saveMainScroll(); openSiteDetail(row.dataset.site, ALL_TIME_FROM, ALL_TIME_TO); });
   });
@@ -18557,11 +18590,11 @@ function renderSitePaymentList(payments, partnerName){
         <strong>${fmtVND(p.amount)}</strong>
         <button class="link-btn editSitePaymentBtn" data-id="${p.id}">Sửa</button>
       </div>
-      <div class="hint">${formatDateVN(p.date)} ${(p.method||'bank')==='cash'?'💵':'🏦'} · ${escapeHtml(p.siteName)} · ${escapeHtml(p.notes||'')}</div>
+      <div class="hint">${formatDateVN(p.date)} · ${(p.method||'bank')==='cash'?'💵 vào Tiền Mặt':'🏦 vào TCB Bank'} · ${escapeHtml(p.siteName)}${p.notes?` · ${escapeHtml(p.notes)}`:''}</div>
     </div>
   `).join('');
   wrap.querySelectorAll('.editSitePaymentBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ saveMainScroll(); openSitePaymentEditor(btn.dataset.id, null, null, null, partnerName); });
+    btn.addEventListener('click', ()=>{ saveMainScroll(); partnersFlow.detailScroll = currentMainScrollTop(); openSitePaymentEditor(btn.dataset.id, null, null, null, partnerName); });
   });
 }
 
@@ -18604,7 +18637,8 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
   const resolvedSiteName = existing ? existing.siteName : siteName;
   const draft = existing ? {...existing} : { id: uid('pay'), siteName: resolvedSiteName, date: todayLocalDateStr(), partnerName: partnerName||'', amount:0, notes:'', method:'bank' };
   if(!draft.method) draft.method = 'bank';
-  const goBack = () => { openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName, true); restoreMainScroll(); };
+  const backScroll = partnersFlow.detailScroll; partnersFlow.detailScroll = null; // #353 — vị trí trang đối tác lúc rời đi (nếu vào từ đó)
+  const goBack = () => { openPartnerDetail(partnerName || draft.partnerName || derivePartnerForSite(draft.siteName) || draft.siteName, true); restoreMainScrollTo(backScroll); };
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -18623,11 +18657,13 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
           <input type="text" inputmode="decimal" id="sp_amount">
         </div>
         <div class="field">
-          <label>Phương thức</label>
-          <select id="sp_method">
-            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Chuyển khoản ngân hàng</option>
-            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
-          </select>
+          <label>Tiền về nguồn nào</label>
+          <div class="seg" id="sp_methodSeg">
+            <button type="button" data-val="bank" class="${draft.method==='cash'?'':'active'}">🏦 TCB Bank</button>
+            <button type="button" data-val="cash" class="${draft.method==='cash'?'active':''}">💵 Tiền Mặt</button>
+          </div>
+          <input type="hidden" id="sp_method" value="${draft.method==='cash'?'cash':'bank'}">
+          <div class="hint" id="sp_methodHint" style="margin:6px 0 0;"></div>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Nội dung thu tiền</label>
@@ -18642,8 +18678,18 @@ function openSitePaymentEditor(id, siteName, from, to, partnerName){
     </section>
   `;
   attachMoneyInput(document.getElementById('sp_amount'), draft.amount, v=>draft.amount=v);
+  { const hid = document.getElementById('sp_method'), hint = document.getElementById('sp_methodHint');
+    const paint = ()=>{ hint.textContent = hid.value==='cash' ? 'Khoản này sẽ CỘNG vào quỹ Tiền Mặt của công ty.' : 'Khoản này sẽ CỘNG vào số dư TCB Bank của công ty.'; };
+    document.querySelectorAll('#sp_methodSeg button').forEach(b=>b.addEventListener('click', ()=>{
+      hid.value = b.dataset.val;
+      document.querySelectorAll('#sp_methodSeg button').forEach(x=>x.classList.toggle('active', x===b));
+      paint();
+    }));
+    paint();
+  }
 
   document.getElementById('saveSitePaymentBtn').addEventListener('click', async ()=>{
+    if(!(Number(draft.amount)>0)){ showToast('Nhập số tiền thu về trước đã.'); return; }
     draft.date = document.getElementById('sp_date').value || draft.date;
     draft.partnerName = document.getElementById('sp_partner').value.trim();
     draft.notes = document.getElementById('sp_notes').value.trim();
@@ -20439,6 +20485,7 @@ function renderBusinessReportPage(from, to, preserveScroll){
           <thead><tr><th>Đối Tượng</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
             <tr><td>Khách hàng còn nợ / (CT Linh Chí Thành nợ khách nếu âm)</td><td class="num" style="color:${r.debtSummary.totalCustomerOwed>=0?'var(--profit)':'var(--loss)'};">${fmtVND(r.debtSummary.totalCustomerOwed)}</td></tr>
+            ${Math.abs(r.debtSummary.totalFreightOwed||0)>0.5 ? `<tr><td>Đối tác chở cước còn nợ CT Linh Chí Thành</td><td class="num" style="color:${r.debtSummary.totalFreightOwed>=0?'var(--profit)':'var(--loss)'};">${fmtVND(r.debtSummary.totalFreightOwed)}</td></tr>` : ''}
             <tr><td>CT Linh Chí Thành còn nợ nhà cung cấp / (họ nợ lại nếu âm)</td><td class="num" style="color:${r.debtSummary.totalSupplierOwed<=0?'var(--profit)':'var(--loss)'};">${fmtVND(r.debtSummary.totalSupplierOwed)}</td></tr>
           </tbody>
         </table>
@@ -21262,8 +21309,8 @@ function renderCompanyDashboardPage(preserveScroll){
         // đúng 2 bảng nhỏ để dễ nhìn, cộng lại vẫn ra đúng 1 số Tổng như
         // trước.
         const workingCapitalTotal = (bankRecon?bankRecon.computedBalance:0) + (cashRecon?cashRecon.computedBalance:0)
-          + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed + inventoryValue + depreciationReserveBalance()
-          + driverAdvanceHeld - driverAdvanceOwed - wagePayable + truckVatRemaining; // #321 — hoá đơn mỏ KHÔNG cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
+          + debtSummary.totalCustomerOwed + debtSummary.totalFreightOwed - debtSummary.totalSupplierOwed + inventoryValue + depreciationReserveBalance()
+          + driverAdvanceHeld - driverAdvanceOwed - wagePayable + truckVatRemaining; // #353 — cộng công nợ đối tác chở cước // #321 — hoá đơn mỏ KHÔNG cộng tiền (đã nằm trong giá vốn + đã trả mỏ)
         const projectPersonalRemaining = projectPersonalLoanSplit().remaining; // #332 — góc nhìn DỰ ÁN
         const vehicleAssetNetTotal = vehicleNetBookValue - remainingLoanBalance - projectPersonalRemaining;
         const netAssetValue = workingCapitalTotal + vehicleAssetNetTotal;
@@ -21283,6 +21330,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>🏦 TCB Bank</td><td class="num">${fmtVND(bankRecon?bankRecon.computedBalance:0)}</td></tr>
               <tr><td>💵 Tiền Mặt</td><td class="num">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
               <tr><td>🧾 ${debtSummary.totalCustomerOwed<0?'CT Linh Chí Thành đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ CT Linh Chí Thành'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalCustomerOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
+              ${Math.abs(debtSummary.totalFreightOwed)>0.5 || debtSummary.freight.billed>0 ? `<tr><td>🤝 ${debtSummary.totalFreightOwed<0?'CT Linh Chí Thành đang giữ dư của đối tác chở cước (đối tác trả dư)':'Đối tác chở cước đang nợ CT Linh Chí Thành'}</td><td class="num" style="color:${debtSummary.totalFreightOwed<0?'var(--loss)':'var(--profit)'}">${debtSummary.totalFreightOwed<0?'−':'+'}${fmtVND(Math.abs(debtSummary.totalFreightOwed))}</td></tr>` : ''}
               <tr><td>📤 ${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ CT Linh Chí Thành (đã ứng dư)':'CT Linh Chí Thành đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${debtSummary.totalSupplierOwed<0?'+':'−'}${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
               <tr><td>🗄️ Tổng Tồn Kho Hoá Đơn <button class="link-btn" id="invoiceInventoryDetailBtn" style="padding:0; margin-left:2px; font-size:11.5px; vertical-align:middle;">🔍 Chi tiết</button></td><td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(inventoryValue)}</td></tr>
               
@@ -22947,7 +22995,7 @@ function renderBankReconDetailPage(mode){
   // SỬA 2026-09-08 LẦN 4 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài thật
   // sự còn 123tr"): TỔNG GIÁ TRỊ HIỆN CÓ giờ cộng ĐỦ CẢ 3 mảnh — ngân
   // hàng + tiền mặt đang cầm + công nợ ròng — không chỉ 2 mảnh như trước.
-  const totalCurrentValue = (bankRecon ? bankRecon.computedBalance : 0) + (cashRecon ? cashRecon.computedBalance : 0) + debtSummary.totalCustomerOwed - debtSummary.totalSupplierOwed;
+  const totalCurrentValue = (bankRecon ? bankRecon.computedBalance : 0) + (cashRecon ? cashRecon.computedBalance : 0) + debtSummary.totalCustomerOwed + debtSummary.totalFreightOwed - debtSummary.totalSupplierOwed; // #353
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -22968,6 +23016,7 @@ function renderBankReconDetailPage(mode){
             <tr><td>Ngân hàng (app tính hôm nay)</td><td class="num" style="font-weight:700;">${fmtVND(bankRecon.computedBalance)}</td></tr>
             <tr><td>Tiền mặt (đang cầm)</td><td class="num" style="font-weight:700;">${fmtVND(cashRecon?cashRecon.computedBalance:0)}</td></tr>
             <tr><td>${debtSummary.totalCustomerOwed<0?'CT Linh Chí Thành đang nợ khách hàng (khách trả dư)':'Khách hàng đang nợ CT Linh Chí Thành'}</td><td class="num" style="color:${debtSummary.totalCustomerOwed<0?'var(--loss)':'var(--profit)'}">${fmtVND(Math.abs(debtSummary.totalCustomerOwed))}</td></tr>
+            ${Math.abs(debtSummary.totalFreightOwed)>0.5 ? `<tr><td>${debtSummary.totalFreightOwed<0?'CT Linh Chí Thành đang giữ dư của đối tác chở cước':'Đối tác chở cước đang nợ CT Linh Chí Thành'}</td><td class="num" style="color:${debtSummary.totalFreightOwed<0?'var(--loss)':'var(--profit)'}">${fmtVND(Math.abs(debtSummary.totalFreightOwed))}</td></tr>` : ''}
             <tr><td>${debtSummary.totalSupplierOwed<0?'Nhà cung cấp đang nợ CT Linh Chí Thành (đã ứng dư)':'CT Linh Chí Thành đang nợ nhà cung cấp'}</td><td class="num" style="color:${debtSummary.totalSupplierOwed<0?'var(--profit)':'var(--loss)'}">${fmtVND(Math.abs(debtSummary.totalSupplierOwed))}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= TỔNG GIÁ TRỊ HIỆN CÓ</td><td class="num" style="color:${totalCurrentValue>=0?'var(--profit)':'var(--loss)'}">${fmtVND(totalCurrentValue)}</td></tr>
           </tbody>
