@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-10 · #363';
+const APP_BUILD = '2026-10-10 · #364';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -20237,6 +20237,7 @@ function renderPerVehicleResultsPage(from, to, preserveScroll){
           <tbody>
             ${pv.be.ok ? `
             <tr><td>Lãi gộp bình quân mỗi chuyến = ${fmtVND(pv.r.grossProfit)} / ${pv.be.trips.toLocaleString('vi-VN')}</td><td class="num">${fmtVND(pv.be.margin)}</td></tr>
+            <tr><td><strong>Lãi RÒNG bình quân mỗi chuyến</strong> (sau khi trừ cả CP cố định riêng xe) = ${pv.r.netProfit<0?'−':''}${fmtVND(Math.abs(pv.r.netProfit))} / ${pv.be.trips.toLocaleString('vi-VN')}</td><td class="num" style="font-weight:800; color:${pv.r.netProfit>=0?'var(--profit)':'var(--loss)'};">${pv.r.netProfit<0?'−':''}${fmtVND(Math.abs(pv.r.netProfit/pv.be.trips))}</td></tr>
             <tr><td><strong>Hoà vốn RIÊNG XE</strong> = CP cố định riêng xe / lãi gộp bình quân = ${fmtVND(pv.r.fixedCost)} / ${fmtVND(pv.be.margin)}</td><td class="num"><strong>${pv.be.own.toLocaleString('vi-VN')}</strong></td></tr>
             <tr><td>− Phần CP chung phân bổ cho xe này (ƯỚC TÍNH: ${pv.r.activeShifts}/${totalActiveShifts} ca hoạt động = ${(Math.round(pv.share*1000)/10).toLocaleString('vi-VN')}%)</td><td class="num" style="color:var(--loss);">−${fmtVND(pv.allocShared)}</td></tr>
             <tr><td><strong>Hoà vốn GỒM PHẦN CHUNG</strong> (ước tính) = (${fmtVND(pv.r.fixedCost)} + ${fmtVND(pv.allocShared)}) / ${fmtVND(pv.be.margin)}</td><td class="num"><strong>${pv.be.withShared.toLocaleString('vi-VN')}</strong></td></tr>
