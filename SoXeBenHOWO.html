@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #365';
+const APP_BUILD = '2026-10-11 · #366';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -14979,6 +14979,67 @@ function findIncompleteCommercialTrips(inRangeShifts){
   return rows;
 }
 
+/// ===== #366 (Ông Chủ duyệt 2026-10-11) — CHI PHÍ CỐ ĐỊNH CẢ THÁNG TÁCH RIÊNG TỪNG XE =====
+/// Ông Chủ chỉ ra: mỗi xe đang gánh lương cứng + tiền ăn của CẢ 2 tài xế (quy tắc cũ "có ít nhất 1 ca
+/// trên xe này trong 60 ngày" → 2 lái chạy chéo 1 ca là dính cả 2), gánh NGUYÊN tiền nhà chung công ty,
+/// và thiếu hẳn vé cầu đường. Quy tắc mới — 1 nguồn duy nhất cho mọi xe, tổng các xe = LINH CHÍ THÀNH:
+///  - Lương cứng + tiền ăn: MỖI tài xế chỉ tính vào ĐÚNG 1 XE — xe người đó lái NHIỀU CA NHẤT trong 60
+///    ngày gần đây (hoà thì lấy xe lái gần nhất). Không cần nhập thêm gì; tài xế chuyển hẳn xe thì số
+///    tự chuyển theo. Mỗi tài xế được đếm đúng 1 lần nên cộng các xe lại không bao giờ trùng/thiếu.
+///  - Tiền nhà + điện nước (chung công ty): chia ĐỀU cho các xe có ca trong 60 ngày gần đây.
+///  - Vé cầu đường, luật đường, khấu hao/lãi vay/bảo hiểm/đăng kiểm: lấy ĐÚNG số đã nhập của từng xe.
+function shiftsOfVehicleLive(vid){
+  if(!vid || vid===activeVehicleIdForEditing()) return state.shifts||[];
+  return state.allVehiclesShifts[vid] || [];
+}
+function roadFeeListOfVehicleLive(vid){
+  if(!vid || vid===activeVehicleIdForEditing()) return state.roadFeeByMonth||[];
+  return state.allVehiclesRoadFee[vid] || [];
+}
+function computeMonthlyFixedCostByVehicle(){
+  const today = todayLocalDateStr();
+  const recentFrom = addDaysToDateStr(today, -60);
+  const cur = currentMonthRange();
+  const vehicles = state.vehicles||[];
+  const vids = vehicles.length ? vehicles.map(v=>v.id) : [null];
+  // Đếm ca của từng tài xế trên từng xe trong 60 ngày.
+  const tally = {};           // driverId → [{ idx, n, last }]
+  const operating = vids.map(()=>false);
+  vids.forEach((vid,idx)=>{
+    shiftsOfVehicleLive(vid).forEach(sh=>{
+      if(!sh.date || sh.date<recentFrom || sh.date>today) return;
+      operating[idx] = true;
+      if(!sh.driverId) return;
+      const arr = tally[sh.driverId] || (tally[sh.driverId] = []);
+      let e = arr.find(x=>x.idx===idx);
+      if(!e){ e = { idx, n:0, last:'' }; arr.push(e); }
+      e.n++; if(sh.date>e.last) e.last = sh.date;
+    });
+  });
+  const homeIdxOfDriver = {};
+  Object.entries(tally).forEach(([did,arr])=>{
+    arr.sort((x,y)=> (y.n-x.n) || y.last.localeCompare(x.last) || (x.idx-y.idx));
+    homeIdxOfDriver[did] = arr[0].idx;
+  });
+  const housingTotal = houseRentForRange(cur.from, cur.to) + utilitiesForRange(cur.from, cur.to);
+  const opCount = operating.filter(Boolean).length;
+  const rows = vids.map((vid,idx)=>{
+    const st = (vid ? settingsOfVehicle(vid) : state.settings) || defaultSettingsShape();
+    const workDays = Number(st.standardWorkDaysPerMonth)||Number(state.settings.standardWorkDaysPerMonth)||28;
+    const drivers = state.drivers.filter(d=>d.isActive!==false && homeIdxOfDriver[d.id]===idx);
+    const monthlySalary = drivers.reduce((s,d)=>s+(Number(d.monthlyBaseSalary)||0),0);
+    const monthlyFood = drivers.reduce((s,d)=>s+(Number(d.dailyFoodAllowance)||0)*workDays,0);
+    const monthlyHousing = opCount>0 ? (operating[idx] ? housingTotal/opCount : 0) : housingTotal/vids.length;
+    const monthlyToll = vid ? tollFeeForRangeVehicle(vid, cur.from, cur.to) : tollFeeForRange(cur.from, cur.to);
+    const rfList = roadFeeListOfVehicleLive(vid);
+    const monthlyRoadFee = fullMonthlyCostIfTouched(ym=>{ const e = rfList.find(x=>x.month===ym); return e ? (Number(e.amount)||0) : 0; }, cur.from, cur.to);
+    const otherFixedMonthly = vehicleFixedMonthlyBase(st);
+    const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyToll + monthlyRoadFee + otherFixedMonthly;
+    return { vid, name: vid ? vehicleNameById(vid) : '', operating: operating[idx], driverNames: drivers.map(d=>d.name||'(chưa đặt tên)'),
+      monthlySalary, monthlyHousing, monthlyFood, monthlyToll, monthlyRoadFee, otherFixedMonthly, fixedCost };
+  });
+  return { rows, housingTotal, opCount };
+}
 // KHÔNG đụng gì tới computeBreakEvenDetailed() ở trên — hàm đó vẫn tính
 // đúng điểm hoà vốn CỦA KỲ ĐANG XEM như cũ, giữ nguyên 100%. Hàm dưới
 // đây tính thêm 1 MỤC TIÊU riêng, ỔN ĐỊNH cho CẢ THÁNG hiện tại:
@@ -14997,52 +15058,41 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const s = state.settings;
   const workDays = Number(s.standardWorkDaysPerMonth)||28;
   const today = todayLocalDateStr();
-  // SỬA 2026-09-23 (Ông Chủ chỉ ra đúng lỗi thật — ví dụ xe 12345 chưa
-  // vận hành nhưng vẫn bị cộng đủ lương cứng của tài xế đang chạy xe
-  // 69112 vào điểm hoà vốn của NÓ): TRƯỚC ĐÂY dòng dưới lấy TẤT CẢ tài xế
-  // "Đang Hoạt Động" trong toàn công ty (state.drivers), không lọc theo
-  // xe — vì hồ sơ tài xế dùng CHUNG cho cả công ty (1 người có thể chạy
-  // nhiều xe khác ngày), nên xe nào cũng bị cộng y hệt tổng lương của MỌI
-  // tài xế, dù xe đó chưa từng có ai chạy. Ông Chủ xác nhận: không cần
-  // thêm cơ chế/field gán xe mới — ĐÃ CÓ SẴN đúng dữ liệu cần: mỗi ca làm
-  // việc đã ghi rõ driverId chạy xe nào, ngày nào (state.shifts đúng là
-  // ca của XE ĐANG XEM, theo cùng cách windowShifts/tripsSoFarThisMonth
-  // bên dưới đã dùng). Sửa: 1 tài xế chỉ được tính vào chi phí cố định
-  // của xe này nếu có ÍT NHẤT 1 ca lái ĐÚNG xe này trong 60 ngày gần đây
-  // — đủ dài để không bỏ sót tài xế phụ lái/thay ca thỉnh thoảng (như
-  // trường hợp tài xế số 2 thi thoảng phụ lái xe 69112), nhưng vẫn tự
-  // "quên" đúng lúc 1 tài xế thật sự đã chuyển hẳn sang xe khác lâu ngày.
-  const recentFrom = addDaysToDateStr(today, -60);
-  const recentDriverIdsForThisVehicle = new Set(
-    state.shifts.filter(sh=>sh.date>=recentFrom && sh.date<=today && sh.driverId).map(sh=>sh.driverId)
-  );
-  const activeDrivers = state.drivers.filter(d=>d.isActive!==false && recentDriverIdsForThisVehicle.has(d.id));
-
-  const monthlySalary = activeDrivers.reduce((sum,d)=>sum+(Number(d.monthlyBaseSalary)||0),0);
-  const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
-  // SỬA 2026-08-23 (Ông Chủ báo: Bước 1 giải trình Dự Đoán Hoà Vốn Cả Tháng
-  // hiện "Luật đường tháng này" = 322.581đ trong khi luật đường tháng 8 khai
-  // thật là 10.000.000đ) — roadFeeForRange(today, today) truyền from=to=hôm
-  // nay, tức 1 khoảng NGÀY DUY NHẤT → proratedMonthlyCost() chia luật đường
-  // tháng theo đúng 1/số-ngày-trong-tháng (10tr/31≈322.581đ), không phải lấy
-  // trọn tháng. Đây là "Chi phí cố định CẢ THÁNG" nên phải truyền trọn
-  // khoảng ngày của THÁNG HIỆN TẠI, không phải 1 ngày hôm nay.
-  const curMonthRange = currentMonthRange();
-  const monthlyRoadFee = roadFeeForRange(curMonthRange.from, curMonthRange.to);
-  const monthlyHousing = houseRentForRange(curMonthRange.from, curMonthRange.to) + utilitiesForRange(curMonthRange.from, curMonthRange.to);
-  const otherFixedMonthly = vehicleFixedMonthlyBase(s);
-  const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
+  // #366 (Ông Chủ duyệt 2026-10-11) — chi phí cố định lấy từ computeMonthlyFixedCostByVehicle():
+  // đang xem 1 xe → đúng dòng của xe đó; đang xem LINH CHÍ THÀNH (≥2 xe) → TỔNG các xe.
+  const fixedAll = computeMonthlyFixedCostByVehicle();
+  const scopeVid = state.currentVehicleId || activeVehicleIdForEditing();
+  const scopeRows = (scopeVid && fixedAll.rows.some(r=>r.vid===scopeVid)) ? fixedAll.rows.filter(r=>r.vid===scopeVid) : fixedAll.rows;
+  const isCompanyScope = scopeRows.length>1;
+  const sumOf = k=>scopeRows.reduce((a,r)=>a+(Number(r[k])||0),0);
+  const monthlySalary = sumOf('monthlySalary');
+  const monthlyFood = sumOf('monthlyFood');
+  const monthlyHousing = sumOf('monthlyHousing');
+  const monthlyToll = sumOf('monthlyToll');
+  const monthlyRoadFee = sumOf('monthlyRoadFee');
+  const otherFixedMonthly = sumOf('otherFixedMonthly');
+  const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyToll + monthlyRoadFee + otherFixedMonthly;
+  const driverNames = scopeRows.reduce((a,r)=>a.concat(r.driverNames),[]);
 
   const toDate = today;
   const fromDateObj = new Date(); fromDateObj.setDate(fromDateObj.getDate()-(marginWindowDays-1));
   const fromDate = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth()+1).padStart(2,'0')}-${String(fromDateObj.getDate()).padStart(2,'0')}`;
-  const excludedShiftIds = getRevenueExcludedShiftIds();
-  const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
+  // Ca dùng để tính lãi gộp/tốc độ: ĐÚNG các xe trong phạm vi đang xem. Quy tắc loại 2 ca mới nhất còn
+  // thiếu dữ liệu giữ nguyên như getRevenueExcludedShiftIds(), áp riêng cho từng xe.
+  const scopeShifts = [];
+  scopeRows.forEach(r=>{
+    const list = shiftsOfVehicleLive(r.vid);
+    const excl = new Set();
+    [...list].sort((x,y)=>chronoKey(y.date,y.shiftType)-chronoKey(x.date,x.shiftType)).slice(0,2).forEach(sh=>{ if(shiftHasNonFuelOdoIssues(sh)) excl.add(sh.id); });
+    list.forEach(sh=>{ if(!excl.has(sh.id)) scopeShifts.push(sh); });
+  });
+  const windowShifts = scopeShifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate).map(sanitizeShiftForRevenue);
   const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
   const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
 
-  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost };
+  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyToll, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost,
+    isCompanyScope, driverNames, perVehicle: fixedAll.rows, housingTotal: fixedAll.housingTotal, housingVehicleCount: fixedAll.opCount };
   if(totalTrips===0) return { ...base, breakEvenTrips:null, note:`Chưa có chuyến nào trong ${marginWindowDays} ngày gần nhất để tính lãi gộp bình quân.` };
   const marginPerTrip = (totalRevenue-variableCost)/totalTrips;
   if(marginPerTrip<=0) return { ...base, marginPerTrip, breakEvenTrips:null, note:'Doanh thu/chuyến đang thấp hơn chi phí biến đổi/chuyến trong khoảng này — chưa thể hoà vốn dù chạy bao nhiêu chuyến.' };
@@ -15056,7 +15106,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
   const dayOfMonth = now.getDate();
   const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
-  const tripsSoFarThisMonth = state.shifts.filter(sh=>sh.date.slice(0,7)===today.slice(0,7) && !excludedShiftIds.has(sh.id))
+  const tripsSoFarThisMonth = scopeShifts.filter(sh=>sh.date.slice(0,7)===today.slice(0,7))
     .reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const projectedTotalTripsThisMonth = tripsSoFarThisMonth + tripsPerDay*daysRemaining;
   const remainingTripsNeeded = Math.max(0, breakEvenTrips - tripsSoFarThisMonth);
@@ -15146,9 +15196,9 @@ function renderMonthlyProjectionExplainerModal(m){
 
     <div class="modal-step">
       <div class="st-title">Bước 1 — Chi phí cố định cả tháng (từ hồ sơ tháng gốc)</div>
-      <div class="st-body">Lương cứng + tiền nhà + tiền ăn của mọi tài xế đang hoạt động (quy theo ngày công chuẩn/tháng), cộng luật đường tháng này và khấu hao/lãi vay/bảo hiểm/đăng kiểm từ Cài Đặt.</div>
-      <div class="st-formula">Chi phí cố định cả tháng = Lương cứng + Tiền nhà + Tiền ăn + Luật đường tháng này + Khấu hao/vay/bảo hiểm/đăng kiểm
-= ${fmtVND(m.monthlySalary)} + ${fmtVND(m.monthlyHousing)} + ${fmtVND(m.monthlyFood)} + ${fmtVND(m.monthlyRoadFee)} + ${fmtVND(m.otherFixedMonthly)}
+      <div class="st-body">${m.isCompanyScope?'TỔNG các xe. ':'RIÊNG xe đang xem. '}Lương cứng + tiền ăn: mỗi tài xế chỉ tính vào đúng 1 xe — xe người đó lái nhiều ca nhất trong 60 ngày gần đây${m.driverNames&&m.driverNames.length?` (đang tính: ${escapeHtml(m.driverNames.join(', '))})`:''}. Tiền nhà + điện nước chung công ty (${fmtVND(m.housingTotal||0)}) chia đều cho ${Math.max(1,m.housingVehicleCount||0)} xe đang chạy. Vé cầu đường, luật đường, khấu hao/lãi vay/bảo hiểm/đăng kiểm: đúng số đã nhập cho từng xe. Lãi vay chỉ tính phần LÃI của kỳ này (gốc là trả nợ, không phải chi phí).</div>
+      <div class="st-formula">Chi phí cố định cả tháng = Lương cứng + Tiền nhà + Tiền ăn + Vé cầu đường + Luật đường tháng này + Khấu hao/lãi vay/bảo hiểm/đăng kiểm
+= ${fmtVND(m.monthlySalary)} + ${fmtVND(m.monthlyHousing)} + ${fmtVND(m.monthlyFood)} + ${fmtVND(m.monthlyToll||0)} + ${fmtVND(m.monthlyRoadFee)} + ${fmtVND(m.otherFixedMonthly)}
 = ${fmtVND(m.fixedCost)}</div>
     </div>
 
@@ -16913,13 +16963,26 @@ function renderResults(){
             <tr><td>Lương cứng</td><td class="num">${fmtVND(monthlyProjection.monthlySalary)}</td></tr>
             <tr><td>Tiền nhà</td><td class="num">${fmtVND(monthlyProjection.monthlyHousing)}</td></tr>
             <tr><td>Tiền ăn</td><td class="num">${fmtVND(monthlyProjection.monthlyFood)}</td></tr>
+            <tr><td>Vé cầu đường tháng này</td><td class="num">${fmtVND(monthlyProjection.monthlyToll)}</td></tr>
             <tr><td>Luật đường tháng này</td><td class="num">${fmtVND(monthlyProjection.monthlyRoadFee)}</td></tr>
-            <tr><td>Khấu hao/vay/bảo hiểm/đăng kiểm</td><td class="num">${fmtVND(monthlyProjection.otherFixedMonthly)}</td></tr>
+            <tr><td>Khấu hao/lãi vay/bảo hiểm/đăng kiểm</td><td class="num">${fmtVND(monthlyProjection.otherFixedMonthly)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Tổng chi phí cố định cả tháng</td><td class="num">${fmtVND(monthlyProjection.fixedCost)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">Lấy từ số THÁNG gốc trong hồ sơ TỪNG TÀI XẾ đã có ca chạy ĐÚNG xe này trong 60 ngày gần đây (không tính tài xế chỉ chạy xe khác) — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
+      <div class="hint" style="margin-top:6px;">${monthlyProjection.isCompanyScope
+        ? `LINH CHÍ THÀNH = TỔNG các xe bên dưới. Mỗi tài xế chỉ tính vào đúng 1 xe nên không trùng, không thiếu.`
+        : `Riêng xe này. Lương cứng + tiền ăn: chỉ tài xế lái xe này NHIỀU CA NHẤT trong 60 ngày gần đây${monthlyProjection.driverNames.length?` (${escapeHtml(monthlyProjection.driverNames.join(', '))})`:' (chưa có ai)'}. Tiền nhà: ${fmtVND(monthlyProjection.housingTotal)} chung công ty chia đều ${Math.max(1,monthlyProjection.housingVehicleCount)} xe đang chạy. Vé cầu đường, luật đường, khấu hao, lãi vay: đúng số đã nhập cho xe này.`} Không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
+      ${monthlyProjection.isCompanyScope ? `
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <thead><tr><th>Từng Xe</th><th class="num">Chi Phí Cố Định</th></tr></thead>
+          <tbody>
+            ${monthlyProjection.perVehicle.map(r=>`<tr><td>🚛 ${escapeHtml(r.name)}${r.driverNames.length?` — ${escapeHtml(r.driverNames.join(', '))}`:''}</td><td class="num">${fmtVND(r.fixedCost)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">= Cộng các xe ${Math.round(monthlyProjection.perVehicle.reduce((a,r)=>a+r.fixedCost,0))===Math.round(monthlyProjection.fixedCost)?'✓ khớp tổng':'⚠ LỆCH tổng'}</td><td class="num">${fmtVND(monthlyProjection.perVehicle.reduce((a,r)=>a+r.fixedCost,0))}</td></tr>
+          </tbody>
+        </table>
+      </div>` : ''}
 
       <div class="card" style="margin-top:10px;">
         ${monthlyProjection.breakEvenTrips===null ? `<div class="hint">${escapeHtml(monthlyProjection.note)}</div>` : `
