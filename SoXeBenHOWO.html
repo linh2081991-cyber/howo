@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #368';
+const APP_BUILD = '2026-10-11 · #369';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -15179,6 +15179,38 @@ function findIncompleteCommercialTrips(inRangeShifts){
   return rows;
 }
 
+/// #369 (Ông Chủ yêu cầu 2026-10-11 — "mỗi xe hoạt động độc lập, điểm hoà vốn khác nhau"):
+/// GÁN MỖI TÀI XẾ CHO ĐÚNG 1 XE = xe mà tài xế đó lái nhiều ca nhất trong 7 ngày gần nhất (hoà thì lấy
+/// xe lái gần nhất; cả 7 ngày không có ca thì xét 10 ca gần nhất). Nhờ vậy lương cứng + tiền ăn của mỗi
+/// tài xế chỉ nằm ở 1 xe, cộng mọi xe lại đúng bằng quỹ lương cả công ty — không còn cảnh 1 xe gánh lương
+/// của cả 2 tài xế chỉ vì người kia từng lái thay vài ca.
+function shiftsOfVehicleCached(vid){
+  if(Array.isArray(state.allVehiclesShifts && state.allVehiclesShifts[vid])) return state.allVehiclesShifts[vid];
+  return vid===activeVehicleIdForEditing() ? (state.shifts||[]) : [];
+}
+function driverMainVehicleId(driverId, uptoDate){
+  const today = uptoDate || todayLocalDateStr();
+  const weekStart = addDaysToDateStr(today, -6);
+  const all = [];
+  (state.vehicles||[]).forEach(v=>shiftsOfVehicleCached(v.id).forEach(sh=>{ if(sh.driverId===driverId && sh.date<=today) all.push({ vid: v.id, date: sh.date }); }));
+  all.sort((a,b)=>b.date.localeCompare(a.date));
+  const inWeek = all.filter(x=>x.date>=weekStart);
+  const pool = inWeek.length ? inWeek : all.slice(0,10);
+  const count = {}; let best = null;
+  pool.forEach(x=>{ count[x.vid] = (count[x.vid]||0)+1; });
+  pool.forEach(x=>{ if(best===null || count[x.vid]>count[best]) best = x.vid; });
+  return best;
+}
+/// Phần chi phí CHUNG (nhà, điện nước) ước tính cho 1 xe trong tháng hiện tại: chia theo số ca có chuyến của từng xe.
+function vehicleSharedCostShareThisMonth(vid){
+  const ym = todayLocalDateStr().slice(0,7);
+  const active = v=>shiftsOfVehicleCached(v).filter(sh=>(sh.date||'').slice(0,7)===ym && (sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0)>0).length;
+  const vehicles = state.vehicles||[];
+  if(vehicles.length<=1) return { share: 1, mine: active(vid), total: active(vid) };
+  const total = vehicles.reduce((a,v)=>a+active(v.id),0);
+  const mine = active(vid);
+  return { share: total>0 ? mine/total : 1/vehicles.length, mine, total };
+}
 // KHÔNG đụng gì tới computeBreakEvenDetailed() ở trên — hàm đó vẫn tính
 // đúng điểm hoà vốn CỦA KỲ ĐANG XEM như cũ, giữ nguyên 100%. Hàm dưới
 // đây tính thêm 1 MỤC TIÊU riêng, ỔN ĐỊNH cho CẢ THÁNG hiện tại:
@@ -15212,26 +15244,39 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   // — đủ dài để không bỏ sót tài xế phụ lái/thay ca thỉnh thoảng (như
   // trường hợp tài xế số 2 thi thoảng phụ lái xe 69112), nhưng vẫn tự
   // "quên" đúng lúc 1 tài xế thật sự đã chuyển hẳn sang xe khác lâu ngày.
-  const recentFrom = addDaysToDateStr(today, -60);
-  const recentDriverIdsForThisVehicle = new Set(
-    state.shifts.filter(sh=>sh.date>=recentFrom && sh.date<=today && sh.driverId).map(sh=>sh.driverId)
-  );
-  const activeDrivers = state.drivers.filter(d=>d.isActive!==false && recentDriverIdsForThisVehicle.has(d.id));
-
+  // #369 — chi phí cố định CẢ THÁNG của RIÊNG xe đang xem.
+  const vid = activeVehicleIdForEditing();
+  const multiVeh = (state.vehicles||[]).length>1;
+  let activeDrivers;
+  if(multiVeh){
+    // Mỗi tài xế chỉ thuộc 1 xe (xe lái nhiều nhất 7 ngày gần nhất) — xem driverMainVehicleId().
+    activeDrivers = state.drivers.filter(d=>d.isActive!==false && driverMainVehicleId(d.id, today)===vid);
+  } else {
+    // Công ty chỉ 1 xe: giữ cách cũ — mọi tài xế đã có ca trên xe này trong 60 ngày gần đây.
+    const recentFrom = addDaysToDateStr(today, -60);
+    const recentIds = new Set(state.shifts.filter(sh=>sh.date>=recentFrom && sh.date<=today && sh.driverId).map(sh=>sh.driverId));
+    activeDrivers = state.drivers.filter(d=>d.isActive!==false && recentIds.has(d.id));
+  }
+  const assignedDriverNames = activeDrivers.map(d=>d.name||'');
   const monthlySalary = activeDrivers.reduce((sum,d)=>sum+(Number(d.monthlyBaseSalary)||0),0);
   const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
-  // SỬA 2026-08-23 (Ông Chủ báo: Bước 1 giải trình Dự Đoán Hoà Vốn Cả Tháng
-  // hiện "Luật đường tháng này" = 322.581đ trong khi luật đường tháng 8 khai
-  // thật là 10.000.000đ) — roadFeeForRange(today, today) truyền from=to=hôm
-  // nay, tức 1 khoảng NGÀY DUY NHẤT → proratedMonthlyCost() chia luật đường
-  // tháng theo đúng 1/số-ngày-trong-tháng (10tr/31≈322.581đ), không phải lấy
-  // trọn tháng. Đây là "Chi phí cố định CẢ THÁNG" nên phải truyền trọn
-  // khoảng ngày của THÁNG HIỆN TẠI, không phải 1 ngày hôm nay.
   const curMonthRange = currentMonthRange();
   const monthlyRoadFee = roadFeeForRange(curMonthRange.from, curMonthRange.to);
-  const monthlyHousing = houseRentForRange(curMonthRange.from, curMonthRange.to) + utilitiesForRange(curMonthRange.from, curMonthRange.to);
+  const monthlyTollFee = tollFeeForRangeVehicle(vid, curMonthRange.from, curMonthRange.to);
   const otherFixedMonthly = vehicleFixedMonthlyBase(s);
-  const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
+  // Nhà + điện nước là chi phí CHUNG công ty: KHÔNG nằm trong chi phí cố định riêng xe; chỉ ước tính
+  // phần phân bổ để xem thêm mức hoà vốn "gồm phần chung".
+  const sharedMonthlyTotal = houseRentForRange(curMonthRange.from, curMonthRange.to) + utilitiesForRange(curMonthRange.from, curMonthRange.to);
+  const sharedInfo = vehicleSharedCostShareThisMonth(vid);
+  const monthlyHousing = sharedMonthlyTotal * sharedInfo.share;
+  const fixedParts = [
+    [`Lương cứng lái chính${assignedDriverNames.length?` (${assignedDriverNames.join(', ')})`:''}`, monthlySalary],
+    [`Tiền ăn (${workDays} ngày công chuẩn)`, monthlyFood],
+    ['Luật đường tháng này', monthlyRoadFee], ['Cầu đường tháng này', monthlyTollFee],
+    ['Khấu hao', Number(s.monthlyVehicleDepreciation)||0], ['Lãi vay', liveMonthlyLoanInterest(s)],
+    ['Bảo hiểm', Number(s.monthlyInsurance)||0], ['Đăng kiểm / đăng ký / phù hiệu', Number(s.monthlyRegistrationFee)||0]
+  ];
+  const fixedCost = monthlySalary + monthlyFood + monthlyRoadFee + monthlyTollFee + otherFixedMonthly;
 
   const toDate = today;
   const fromDateObj = new Date(); fromDateObj.setDate(fromDateObj.getDate()-(marginWindowDays-1));
@@ -15240,13 +15285,16 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
-  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
+  // #369 — thêm chi phí hoá đơn bù (sau VAT hưởng) vào biến đổi, cho khớp định nghĩa lãi gộp dùng chung (#367).
+  const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh)+shiftInvoiceSupplementCost(sh)-shiftInvoiceSupplementVatCredit(sh),0);
 
-  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost };
+  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, monthlyTollFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost,
+    fixedParts, assignedDriverNames, sharedMonthlyTotal, sharedInfo, multiVeh, fixedCostWithShared: fixedCost + monthlyHousing, breakEvenTripsWithShared: null };
   if(totalTrips===0) return { ...base, breakEvenTrips:null, note:`Chưa có chuyến nào trong ${marginWindowDays} ngày gần nhất để tính lãi gộp bình quân.` };
   const marginPerTrip = (totalRevenue-variableCost)/totalTrips;
   if(marginPerTrip<=0) return { ...base, marginPerTrip, breakEvenTrips:null, note:'Doanh thu/chuyến đang thấp hơn chi phí biến đổi/chuyến trong khoảng này — chưa thể hoà vốn dù chạy bao nhiêu chuyến.' };
   const breakEvenTrips = Math.ceil(fixedCost/marginPerTrip);
+  const breakEvenTripsWithShared = Math.ceil((fixedCost + monthlyHousing)/marginPerTrip);
 
   // Chiếu tốc độ chạy thực tế (chuyến/ngày, bình quân cửa sổ N ngày) ra
   // hết những ngày còn lại của tháng — để biết có khả năng đạt hoà vốn
@@ -15263,7 +15311,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const neededPacePerRemainingDay = daysRemaining>0 ? remainingTripsNeeded/daysRemaining : null;
   const onTrackToHitBreakEven = projectedTotalTripsThisMonth >= breakEvenTrips;
 
-  return { ...base, marginPerTrip, breakEvenTrips, tripsPerDay, daysInMonth, dayOfMonth, daysRemaining,
+  return { ...base, marginPerTrip, breakEvenTrips, breakEvenTripsWithShared, tripsPerDay, daysInMonth, dayOfMonth, daysRemaining,
     tripsSoFarThisMonth, projectedTotalTripsThisMonth, remainingTripsNeeded, neededPacePerRemainingDay, onTrackToHitBreakEven, note:null };
 }
 
@@ -15280,16 +15328,15 @@ function renderMonthlyProjectionExplainerModal(m){
     <div class="hint" style="margin-bottom:10px;">Khối này KHÔNG dùng chi phí cộng dồn theo từng ca đã ghi như "Điểm Hoà Vốn Trong Kỳ" — mà lấy chi phí cố định ỔN ĐỊNH từ hồ sơ tháng gốc (lương/nhà/ăn theo ngày công chuẩn), rồi ước tính biên lãi gộp/chuyến từ dữ liệu vận hành ${m.marginWindowDays} ngày gần nhất, để ra 1 mục tiêu đứng yên suốt tháng.</div>
 
     <div class="modal-step">
-      <div class="st-title">Bước 1 — Chi phí cố định cả tháng (từ hồ sơ tháng gốc)</div>
-      <div class="st-body">Lương cứng + tiền nhà + tiền ăn của mọi tài xế đang hoạt động (quy theo ngày công chuẩn/tháng), cộng luật đường tháng này và khấu hao/lãi vay/bảo hiểm/đăng kiểm từ Cài Đặt.</div>
-      <div class="st-formula">Chi phí cố định cả tháng = Lương cứng + Tiền nhà + Tiền ăn + Luật đường tháng này + Khấu hao/vay/bảo hiểm/đăng kiểm
-= ${fmtVND(m.monthlySalary)} + ${fmtVND(m.monthlyHousing)} + ${fmtVND(m.monthlyFood)} + ${fmtVND(m.monthlyRoadFee)} + ${fmtVND(m.otherFixedMonthly)}
+      <div class="st-title">Bước 1 — Chi phí cố định cả tháng của RIÊNG xe này</div>
+      <div class="st-body">Lương cứng + tiền ăn của tài xế lái chính xe này (mỗi tài xế chỉ gán cho 1 xe — xe lái nhiều ca nhất trong 7 ngày gần nhất), cộng luật đường, cầu đường tháng này của xe và khấu hao / lãi vay / bảo hiểm / đăng kiểm của xe. Nhà, điện nước là chi phí chung công ty nên không nằm ở đây.</div>
+      <div class="st-formula">${m.fixedParts.filter(x=>Math.abs(x[1])>0.5).map(x=>`${escapeHtml(x[0])}: ${fmtVND(x[1])}`).join('\n+ ')}
 = ${fmtVND(m.fixedCost)}</div>
     </div>
 
     <div class="modal-step">
       <div class="st-title">Bước 2 — Biên lãi gộp bình quân/chuyến (${m.marginWindowDays} ngày gần nhất: ${formatDateVN(m.fromDate)} → ${formatDateVN(m.toDate)})</div>
-      <div class="st-body">Lấy đúng doanh thu và chi phí biến đổi (dầu + lương chuyến + phát sinh + luật đường/ca + giá vốn hàng mua-bán) của ${m.totalTrips} chuyến gần nhất, chia đều ra biên lãi gộp trung bình mỗi chuyến.</div>
+      <div class="st-body">Lấy đúng doanh thu và chi phí biến đổi (dầu + lương chuyến + phát sinh + luật đường/ca + giá vốn hàng mua-bán + hoá đơn bù sau VAT) của ${m.totalTrips} chuyến gần nhất, chia đều ra biên lãi gộp trung bình mỗi chuyến.</div>
       <div class="st-formula">Biên lãi gộp BQ/chuyến = (Doanh thu − Chi phí biến đổi) ÷ Số chuyến
 = (${fmtVND(m.totalRevenue)} − ${fmtVND(m.variableCost)}) ÷ ${m.totalTrips}
 = ${m.marginPerTrip!==undefined?fmtVND(m.marginPerTrip):'—'}</div>
@@ -17060,22 +17107,23 @@ function renderResults(){
         <table class="grid-table">
           <thead><tr><th>Khoản Mục Cố Định Cả Tháng</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>Lương cứng</td><td class="num">${fmtVND(monthlyProjection.monthlySalary)}</td></tr>
-            <tr><td>Tiền nhà</td><td class="num">${fmtVND(monthlyProjection.monthlyHousing)}</td></tr>
-            <tr><td>Tiền ăn</td><td class="num">${fmtVND(monthlyProjection.monthlyFood)}</td></tr>
-            <tr><td>Luật đường tháng này</td><td class="num">${fmtVND(monthlyProjection.monthlyRoadFee)}</td></tr>
-            <tr><td>Khấu hao/vay/bảo hiểm/đăng kiểm</td><td class="num">${fmtVND(monthlyProjection.otherFixedMonthly)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">= Tổng chi phí cố định cả tháng</td><td class="num">${fmtVND(monthlyProjection.fixedCost)}</td></tr>
+            ${monthlyProjection.fixedParts.filter(x=>Math.abs(x[1])>0.5).map(x=>`<tr><td>${escapeHtml(x[0])}</td><td class="num">${fmtVND(x[1])}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">= Chi phí cố định RIÊNG XE cả tháng</td><td class="num">${fmtVND(monthlyProjection.fixedCost)}</td></tr>
+            ${monthlyProjection.sharedMonthlyTotal>0.5 ? `
+            <tr><td>+ Nhà, điện nước — phần phân bổ cho xe này<div class="hint" style="margin:2px 0 0;">ƯỚC TÍNH: ${fmtVND(monthlyProjection.sharedMonthlyTotal)} × ${(Math.round(monthlyProjection.sharedInfo.share*1000)/10).toLocaleString('vi-VN')}%${monthlyProjection.multiVeh?` (${monthlyProjection.sharedInfo.mine}/${monthlyProjection.sharedInfo.total} ca có chuyến tháng này)`:''}</div></td><td class="num">${fmtVND(monthlyProjection.monthlyHousing)}</td></tr>
+            <tr><td>= Gồm cả phần chung (ước tính)</td><td class="num">${fmtVND(monthlyProjection.fixedCostWithShared)}</td></tr>` : ''}
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">Lấy từ số THÁNG gốc trong hồ sơ TỪNG TÀI XẾ đã có ca chạy ĐÚNG xe này trong 60 ngày gần đây (không tính tài xế chỉ chạy xe khác) — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
+      <div class="hint" style="margin-top:6px;">${monthlyProjection.multiVeh
+        ? `Chỉ tính chi phí của RIÊNG xe này. Lương cứng và tiền ăn lấy từ hồ sơ tài xế LÁI CHÍNH của xe${monthlyProjection.assignedDriverNames.length?` (${escapeHtml(monthlyProjection.assignedDriverNames.join(', '))})`:' — hiện CHƯA có tài xế nào lái chính xe này trong 7 ngày gần nhất nên lương cứng đang là 0'}: mỗi tài xế chỉ được gán cho 1 xe, là xe người đó lái nhiều ca nhất trong 7 ngày gần nhất. Nhà, điện nước là chi phí chung công ty nên tách riêng ở dưới.`
+        : 'Lương cứng và tiền ăn lấy từ số THÁNG gốc trong hồ sơ tài xế đã có ca chạy xe này trong 60 ngày gần đây — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.'}</div>
 
       <div class="card" style="margin-top:10px;">
         ${monthlyProjection.breakEvenTrips===null ? `<div class="hint">${escapeHtml(monthlyProjection.note)}</div>` : `
         <div class="be-formula">
           <div class="be-frac">
-            <div class="fr-num">Chi phí cố định cả tháng<strong>${fmtVND(monthlyProjection.fixedCost)}</strong></div>
+            <div class="fr-num">Chi phí cố định riêng xe cả tháng<strong>${fmtVND(monthlyProjection.fixedCost)}</strong></div>
             <div class="fr-line"></div>
             <div class="fr-den">Lãi gộp BQ/chuyến (${monthlyProjection.marginWindowDays} ngày gần nhất)<strong>${fmtVND(monthlyProjection.marginPerTrip)}</strong></div>
           </div>
@@ -17085,6 +17133,7 @@ function renderResults(){
             <div class="lbl">chuyến cần cho cả tháng</div>
           </div>
         </div>
+        ${monthlyProjection.sharedMonthlyTotal>0.5 ? `<div class="hint" style="margin:4px 0 0; text-align:center;">Nếu gánh thêm phần nhà, điện nước phân bổ (ước tính): ${fmtVND(monthlyProjection.fixedCostWithShared)} ÷ ${fmtVND(monthlyProjection.marginPerTrip)} = <strong>${monthlyProjection.breakEvenTripsWithShared} chuyến</strong></div>` : ''}
         <div class="formula-divider"></div>
         <div class="summary-row">
           <span>Đã chạy từ đầu tháng đến nay</span>
