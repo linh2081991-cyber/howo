@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #366';
+const APP_BUILD = '2026-10-11 · #367';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -4603,9 +4603,16 @@ function computeVehicleAccrualProfit(vid, from, to){
     ['Thuế tiền thuê xe', afb.rentalTax], ['Luật đường', roadFee], ['Cầu đường', tollFee], ['Sửa chữa', repairTotal],
     ['Lương cứng phân bổ theo ca', breakEven.fixedCost - roadFee - repairTotal - accrualFixedMonthly], ['Thưởng / chi hộ tài xế', driverExtraCost]
   ].filter(x=>Math.abs(Number(x[1])||0)>0.5);
+  // #367 — bóc chi phí BIẾN ĐỔI (cộng lại đúng bằng Doanh thu − LN Gộp).
+  const sumOf = fn => shifts.reduce((a,sh)=>a+fn(sh),0);
+  const variableParts = [
+    ['Dầu tiêu hao', sumOf(shiftFuelCost)], ['Lương chuyến', sumOf(shiftTotalTripWage)], ['Tiền ăn', sumOf(sh=>Number(sh.foodAllowance)||0)],
+    ['Phát sinh trong ca', sumOf(sh=>Number(sh.incidentalCost)||0)], ['Luật đường phát sinh theo ca', sumOf(sh=>Number(sh.roadFeeIncidental)||0)],
+    ['Giá vốn hàng mua từ mỏ', sumOf(shiftMaterialCost)], ['Chi phí hoá đơn bù (sau VAT hưởng)', invoiceSupplementCost]
+  ].filter(x=>Math.abs(Number(x[1])||0)>0.5);
   const openShifts = shifts.filter(shiftFuelEndPending)
     .map(sh=>({ date: sh.date, charged: shiftFuelCost(sh), hasOdoEnd: Number(sh.odoEnd)>0 }));
-  return { totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee + driverExtraCost, tollFee, invoiceSupplementCost, netProfit, tripCount: shifts.length, totalTrips: breakEven.totalTrips||0, activeShifts, fixedParts, openShifts };
+  return { totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee + driverExtraCost, tollFee, invoiceSupplementCost, netProfit, tripCount: shifts.length, totalTrips: breakEven.totalTrips||0, activeShifts, fixedParts, variableParts, openShifts };
 }
 // ================= 2026-08-15/18: SỔ VỐN CHỦ SỞ HỮU + DỰ ÁN ĐẦU TƯ XE =================
 /// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
@@ -7340,6 +7347,167 @@ function siteRevenue(s){
   const gross = siteFreightGross(s);
   return s.priceIncludesVat ? gross/(1+freightVatRateFraction(s)) : gross;
 }
+/// ===== #367 (Ông Chủ yêu cầu 2026-10-11) — ĐIỂM HOÀ VỐN: 1 ĐỊNH NGHĨA DÙNG CHUNG =====
+/// Trước đây tab Kết Quả và trang "Kết Quả Từng Xe" tính hoà vốn theo 2 bộ chi phí khác nhau (tab Kết Quả
+/// thiếu cầu đường, thưởng/chi hộ tài xế ở phần cố định và thiếu chi phí hoá đơn bù ở phần biến đổi), nên
+/// cùng 1 xe cùng 1 kỳ ra 2 con số hoà vốn. Nay mọi nơi dùng chung đúng 1 phép tính:
+///   Lãi gộp = Doanh thu − Tổng chi phí BIẾN ĐỔI;  Lãi gộp/chuyến = Lãi gộp ÷ số chuyến;
+///   Số chuyến hoà vốn = Tổng chi phí CỐ ĐỊNH ÷ Lãi gộp/chuyến (làm tròn lên).
+/// và Doanh thu − Biến đổi − Cố định = đúng Lợi nhuận thực tế của kỳ (chưa kể lãi/lỗ bán xe).
+function unifiedBreakEven(revenue, trips, fixed, variable){
+  const gross = revenue - variable;
+  const margin = trips>0 ? gross/trips : 0;
+  const ok = trips>0 && margin>0;
+  return { revenue, trips, fixed, variable, gross, margin, ok,
+    breakEvenTrips: ok ? Math.ceil(fixed/margin) : null,
+    note: trips<=0 ? 'Chưa có chuyến nào trong kỳ để tính điểm hoà vốn.' : (margin<=0 ? 'Lãi gộp mỗi chuyến đang âm hoặc bằng 0 — chưa thể hoà vốn với cơ cấu giá hiện tại, dù chạy bao nhiêu chuyến.' : null) };
+}
+/// Ghi chú "cách tính" cho từng khoản — hiện ở trang chi tiết.
+const COST_PART_NOTES = {
+  'Lương cứng phân bổ theo ca': 'Lương cứng tháng của tài xế chia cho từng ca đã chạy trong kỳ',
+  'Khấu hao': 'Giá trị xe đem khấu hao ÷ số tháng khấu hao, tính theo số ngày của kỳ',
+  'Lãi vay': 'Lãi các khoản vay của xe phát sinh trong kỳ',
+  'Bảo hiểm': 'Phí bảo hiểm chia đều theo tháng, tính theo số ngày của kỳ',
+  'Đăng kiểm / đăng ký / phù hiệu': 'Phí đăng kiểm, đăng ký, phù hiệu chia đều theo tháng',
+  'Đăng kiểm': 'Phí đăng kiểm, đăng ký, phù hiệu chia đều theo tháng',
+  'Thuế tiền thuê xe': 'Thuế trên tiền công ty thuê xe đứng tên cá nhân',
+  'Chi phí cố định khác': 'Phần chi phí cố định tháng còn lại ngoài các dòng trên',
+  'Luật đường': 'Số nhập ở bảng "Tiền Luật Đường Theo Tháng" của xe — tính đủ cả tháng khi kỳ chạm vào tháng đó',
+  'Cầu đường': 'Số nhập ở bảng "CP Cầu Đường Theo Tháng" của xe — tính đủ cả tháng khi kỳ chạm vào tháng đó',
+  'Sửa chữa': 'Các khoản sửa chữa trong kỳ, đã trừ phần tài xế đền',
+  'Sửa chữa (đã trừ phần tài xế đền)': 'Các khoản sửa chữa trong kỳ, đã trừ phần tài xế đền',
+  'Nhà': 'Tiền thuê nhà — chi phí CHUNG công ty, không thuộc riêng xe nào',
+  'Điện nước': 'Tiền điện nước — chi phí CHUNG công ty, không thuộc riêng xe nào',
+  'Thưởng tài xế': 'Tip / thưởng tháng của tài xế tính vào kỳ',
+  'Chi phí tài xế báo tay': 'Chi phí tài xế tự báo (công tác phí) trong kỳ',
+  'Thưởng / chi hộ tài xế': 'Tip, thưởng tháng và chi phí tài xế tự báo trong kỳ',
+  'Dầu tiêu hao': '(Dầu đầu ca + đổ thêm − cuối ca) × đơn giá dầu của từng ca; ca chưa nhập dầu cuối ca tạm tính = dầu đổ thêm',
+  'Lương chuyến': 'Số chuyến × mức lương/chuyến của từng công trình trong ca',
+  'Tiền ăn': 'Tiền ăn nhập ở từng ca',
+  'Phát sinh trong ca': 'Chi phí phát sinh nhập ở từng ca',
+  'Luật đường phát sinh theo ca': 'Tiền luật phát sinh nhập riêng ở từng ca (ngoài khoản theo tháng)',
+  'Giá vốn hàng mua từ mỏ': 'Tiền mua vật liệu của các chuyến thương mại trong kỳ',
+  'Chi phí hoá đơn bù (sau VAT hưởng)': 'Tiền HĐ thương mại rút cho các ca trong kỳ, đã trừ phần VAT được hưởng'
+};
+/// Trang chi tiết kẻ ô: mỗi khoản 1 dòng, mỗi xe (hoặc phần chung) 1 cột, có dòng tổng.
+/// opts = { title, subtitle, columns:[{ name, parts:[[label, amount], ...] }], totalLabel, footHtml, onBack }
+function renderCostPartsDetailPage(opts){
+  const cols = opts.columns || [];
+  const labels = [];
+  cols.forEach(c=>c.parts.forEach(p=>{ if(!labels.includes(p[0])) labels.push(p[0]); }));
+  const val = (c,label)=>{ const p = c.parts.find(x=>x[0]===label); return p ? (Number(p[1])||0) : 0; };
+  const rowTotal = label => cols.reduce((a,c)=>a+val(c,label),0);
+  const colTotal = c => c.parts.reduce((a,p)=>a+(Number(p[1])||0),0);
+  const grand = cols.reduce((a,c)=>a+colTotal(c),0);
+  const multi = cols.length>1;
+  const money = n => Math.abs(n)<0.5 ? '<span style="color:var(--ink-soft);">—</span>' : (n<0?'−':'')+fmtVND(Math.abs(n));
+  scrollMainToTop();
+  document.getElementById('app').innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="cpd_backBtn">← Quay Lại</button></section>
+    <section class="group">
+      <h2 style="margin-bottom:4px;">${opts.title}</h2>
+      ${opts.subtitle ? `<div class="hint" style="margin-top:0;">${opts.subtitle}</div>` : ''}
+    </section>
+    <section class="group">
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th style="text-align:left;">Khoản Mục</th>${cols.map(c=>`<th class="num">${escapeHtml(c.name)}</th>`).join('')}${multi?'<th class="num">Tổng</th>':''}</tr></thead>
+          <tbody>
+            ${labels.map((label,i)=>`<tr>
+              <td><strong>${i+1}. ${escapeHtml(label)}</strong>${COST_PART_NOTES[label]?`<div class="hint" style="margin:2px 0 0;">${escapeHtml(COST_PART_NOTES[label])}</div>`:''}</td>
+              ${cols.map(c=>`<td class="num">${money(val(c,label))}</td>`).join('')}
+              ${multi?`<td class="num" style="font-weight:800;">${money(rowTotal(label))}</td>`:''}
+            </tr>`).join('')}
+            ${labels.length===0 ? `<tr><td colspan="${cols.length+2}" class="hint">Không có khoản nào trong kỳ.</td></tr>` : ''}
+            <tr class="grid-total-row"><td style="text-align:left;">= ${escapeHtml(opts.totalLabel||'Tổng cộng')}</td>${cols.map(c=>`<td class="num">${fmtVND(colTotal(c))}</td>`).join('')}${multi?`<td class="num">${fmtVND(grand)}</td>`:''}</tr>
+          </tbody>
+        </table>
+      </div>
+      ${opts.footHtml ? `<div class="hint" style="margin-top:8px;">${opts.footHtml}</div>` : ''}
+    </section>
+  `;
+  document.getElementById('cpd_backBtn').addEventListener('click', opts.onBack);
+}
+/// #367 — VAT bán ra của CHỞ CƯỚC theo từng công trình (CHỈ để hiển thị; chưa nằm trong "VAT phải nộp" của app).
+/// Giá đã gồm VAT: tách từ giá gộp. Giá chưa VAT: chỉ tính khi có nhập thuế suất riêng trên công trình.
+function siteFreightOutputVat(s){
+  if(s.siteType==='commercial') return 0;
+  const gross = siteFreightGross(s);
+  if(s.priceIncludesVat) return gross - siteRevenue(s);
+  const has = s.freightVatRatePercent!==undefined && s.freightVatRatePercent!==null && s.freightVatRatePercent!=='';
+  return has ? gross*freightVatRateFraction(s) : 0;
+}
+/// Trang "Thuế VAT Công Ty — Chi Tiết Theo Tháng": mỗi tháng 1 dòng, kẻ ô đủ từng bước tính.
+function renderCompanyVatDetailPage(onBack){
+  const shifts = shiftsCompanyWideSafe();
+  const byMonth = {};
+  shifts.forEach(sh=>{ const ym = (sh.date||'').slice(0,7); if(ym){ (byMonth[ym] = byMonth[ym]||[]).push(sh); } });
+  const sched = truckVatCreditSchedule();
+  const paidByMonth = {};
+  (state.vatPayments||[]).forEach(p=>{ const ym = (p.date||'').slice(0,7); paidByMonth[ym] = (paidByMonth[ym]||0) + (Number(p.amount)||0); });
+  const months = Array.from(new Set([...Object.keys(byMonth), ...Object.keys(paidByMonth), ...Object.keys(sched.usedByMonth||{})])).sort();
+  let running = 0;
+  const rows = months.map(ym=>{
+    const b = periodVatBreakdown(byMonth[ym]||[]);
+    const freightVat = (byMonth[ym]||[]).reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,s)=>x+siteFreightOutputVat(s),0),0);
+    const truck = (sched.usedByMonth||{})[ym]||0;
+    const paid = paidByMonth[ym]||0;
+    const due = b.totalPayableClamped - truck - paid;
+    running += due;
+    return { ym, out: b.totalOutputRaw, inMine: b.totalInputRaw, inLot: b.totalSupplementCredit, payable: b.totalPayableClamped, truck, paid, due, running, freightVat };
+  });
+  const T = k => rows.reduce((a,r)=>a+r[k],0);
+  const m = n => Math.abs(n)<0.5 ? '<span style="color:var(--ink-soft);">—</span>' : (n<0?'−':'')+fmtVND(Math.abs(n));
+  scrollMainToTop();
+  document.getElementById('app').innerHTML = `
+    <section class="group"><button class="btn btn-ghost btn-sm" id="vatd_backBtn">← Quay Lại</button></section>
+    <section class="group">
+      <h2 style="margin-bottom:4px;">🧾 Thuế VAT Công Ty — Chi Tiết Theo Tháng</h2>
+      <div class="hint" style="margin-top:0;">Mọi xe, từ ca đầu tiên tới nay. Mỗi tháng 1 dòng; đọc từ trái sang phải là đúng thứ tự phép tính.</div>
+    </section>
+    <section class="group">
+      <h3>① VAT Mảng Thương Mại (Mua-Bán Vật Liệu)</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">VAT<br>Bán Ra</th><th class="num">− VAT<br>HĐ Mỏ</th><th class="num">− VAT HĐ<br>Thương Mại<br>Đã Dùng</th><th class="num">= VAT<br>Phải Nộp</th></tr></thead>
+          <tbody>
+            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.out)}</td><td class="num">${m(r.inMine)}</td><td class="num">${m(r.inLot)}</td><td class="num" style="font-weight:800;">${m(r.payable)}</td></tr>`).join('')}
+            ${rows.length===0?'<tr><td colspan="5" class="hint">Chưa có dữ liệu.</td></tr>':''}
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('out'))}</td><td class="num">${fmtVND(T('inMine'))}</td><td class="num">${fmtVND(T('inLot'))}</td><td class="num">${fmtVND(T('payable'))}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">"VAT phải nộp" tính trên TỪNG công trình rồi cộng lại; công trình nào ra âm thì tính là 0, nên có tháng cột cuối lớn hơn (bán ra − hai cột trừ).</div>
+    </section>
+    <section class="group">
+      <h3>② Khấu Trừ & Nộp</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">VAT<br>Phải Nộp</th><th class="num">− Khấu Trừ<br>VAT Mua Xe</th><th class="num">− Đã Nộp<br>Nhà Nước</th><th class="num">= Còn Lại<br>Của Tháng</th><th class="num">Luỹ Kế<br>Còn Phải Nộp</th></tr></thead>
+          <tbody>
+            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.payable)}</td><td class="num">${m(r.truck)}</td><td class="num">${m(r.paid)}</td><td class="num">${m(r.due)}</td><td class="num" style="font-weight:800; color:${r.running>0.5?'var(--loss)':'var(--profit)'};">${m(r.running)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('payable'))}</td><td class="num">${fmtVND(T('truck'))}</td><td class="num">${fmtVND(T('paid'))}</td><td class="num">${m(T('due'))}</td><td class="num">${m(running)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">VAT mua xe công ty: tổng ${fmtVND(sched.total)} · đã khấu trừ ${fmtVND(sched.used)} · còn chờ khấu trừ ${fmtVND(sched.remaining)}.</div>
+    </section>
+    <section class="group">
+      <h3>③ VAT Bán Ra Của Chở Cước (Để Đối Chiếu — CHƯA Cộng Vào ①②)</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">VAT Cước</th></tr></thead>
+          <tbody>
+            ${rows.filter(r=>r.freightVat>0.5).map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${fmtVND(r.freightVat)}</td></tr>`).join('') || '<tr><td colspan="2" class="hint">Chưa có ca chở cước nào có VAT.</td></tr>'}
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('freightVat'))}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">Tính từ từng công trình cước: giá đã gồm VAT thì tách ra; giá chưa VAT thì chỉ tính khi có nhập "Thuế suất VAT cước". Số này cũng là VAT phải kê khai, nhưng app CHƯA cộng vào ① ②. App cũng chưa trừ VAT đầu vào của dầu, sửa chữa. Số chính thức theo tờ khai của kế toán.</div>
+    </section>
+  `;
+  document.getElementById('vatd_backBtn').addEventListener('click', onBack);
+}
 /// ===== #355 (Ông Chủ duyệt 2026-10-10) — CÔNG THỨC DÙNG CHUNG =====
 /// Gộp các công thức trước đây viết lặp ở nhiều chỗ về 1 hàm duy nhất. Mỗi hàm giữ NGUYÊN VĂN
 /// biểu thức cũ, nên kết quả từng chỗ gọi không đổi — từ nay sửa 1 chỗ là mọi nơi cùng đổi.
@@ -8812,8 +8980,13 @@ function findPreviousShift(dateStr, shiftType, excludeId){
 // lấy người lái gần nhất). Xe chưa có ca nào → ưu tiên tài xế chưa là tài xế chính của xe khác.
 // Công ty chỉ 1 xe → giữ NGUYÊN cơ chế thay phiên cũ. Vẫn chỉ là gợi ý, đổi tay bình thường.
 function dominantRecentDriverId(shifts, uptoDate, excludeId, activeIds){
-  const recent = (shifts||[]).filter(sh=>sh.id!==excludeId && sh.driverId && activeIds.has(sh.driverId) && sh.date<=uptoDate)
-    .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10);
+  // #367 (Ông Chủ yêu cầu): căn cứ các ca trong 7 NGÀY gần nhất (tính tới uptoDate). Xe không có ca nào
+  // trong 7 ngày đó (nằm bãi lâu) thì lấy tạm 10 ca gần nhất để vẫn có lái chính.
+  const eligible = (shifts||[]).filter(sh=>sh.id!==excludeId && sh.driverId && activeIds.has(sh.driverId) && sh.date<=uptoDate)
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  const weekStart = addDaysToDateStr(uptoDate, -6);
+  const inWeek = eligible.filter(sh=>sh.date>=weekStart);
+  const recent = inWeek.length ? inWeek : eligible.slice(0,10);
   const count = {}; let best = null;
   recent.forEach(sh=>{ count[sh.driverId] = (count[sh.driverId]||0)+1; });
   recent.forEach(sh=>{ if(best===null || count[sh.driverId]>count[best]) best = sh.driverId; }); // duyệt từ ca mới nhất → hoà thì giữ người lái gần nhất
@@ -9406,12 +9579,12 @@ function renderShiftList(){
 
   // #361 (Ông Chủ yêu cầu 2026-10-10) — có từ 2 xe: LÁI CHÍNH của xe = tài xế lái nhiều nhất trong 10 ca
   // gần nhất của CHÍNH xe này (cùng căn cứ với gợi ý tài xế khi tạo ca mới, #356). Lái chính được xếp
-  // đầu, gắn nhãn, và tự được chọn sẵn mỗi khi mở/đổi sang xe này — không còn hiện tab trống của
+  // (từ #367: căn cứ 7 ngày gần nhất) đầu, gắn nhãn, và tự được chọn sẵn mỗi khi mở/đổi sang xe này — không còn hiện tab trống của
   // tài xế xe khác. Bấm tay sang tài xế khác thì giữ nguyên lựa chọn cho tới khi đổi xe.
   let mainDriverId = null;
   if((state.vehicles||[]).length>1){
     const activeIds = new Set(state.drivers.filter(d=>d.isActive!==false).map(d=>d.id));
-    mainDriverId = dominantRecentDriverId(state.shifts, '9999-12-31', null, activeIds);
+    mainDriverId = dominantRecentDriverId(state.shifts, todayLocalDateStr(), null, activeIds);
     if(mainDriverId){
       const k = driverColumns.findIndex(c=>c.key===mainDriverId);
       if(k>0){ const moved = driverColumns.splice(k,1)[0]; driverColumns.unshift(moved); }
@@ -10442,7 +10615,9 @@ function updateSiteCalc(idx){
     if(detailBtn) detailBtn.addEventListener('click', ()=>renderSiteCashFlowExplainerModal(s));
   } else {
     const freightGross = siteFreightGross(s);
-    el.textContent = `Thành tiền: ${fmtVND(siteRevenue(s))}  ·  Lương chuyến: ${fmtVND(siteWageTotal(s))}` + (s.priceIncludesVat ? `  ·  Đã tách VAT ${String(Math.round(freightVatRateFraction(s)*10000)/100).replace('.',',')}%: ${fmtVND(freightGross - siteRevenue(s))}` : '');
+    el.textContent = `Thành tiền: ${fmtVND(siteRevenue(s))}  ·  Lương chuyến: ${fmtVND(siteWageTotal(s))}` + (s.priceIncludesVat ? `  ·  Đã tách VAT ${String(Math.round(freightVatRateFraction(s)*10000)/100).replace('.',',')}%: ${fmtVND(freightGross - siteRevenue(s))}`
+      // #366 — giá CHƯA VAT và có nhập thuế suất riêng: hiện tiền VAT cộng thêm và số khách phải trả (chỉ hiển thị).
+      : ((s.freightVatRatePercent!==undefined && s.freightVatRatePercent!==null && s.freightVatRatePercent!=='') ? `  ·  + VAT ${String(Math.round(freightVatRateFraction(s)*10000)/100).replace('.',',')}%: ${fmtVND(freightGross*freightVatRateFraction(s))}  ·  Khách phải trả: ${fmtVND(freightGross*(1+freightVatRateFraction(s)))}` : ''));
   }
 }
 
@@ -14979,67 +15154,6 @@ function findIncompleteCommercialTrips(inRangeShifts){
   return rows;
 }
 
-/// ===== #366 (Ông Chủ duyệt 2026-10-11) — CHI PHÍ CỐ ĐỊNH CẢ THÁNG TÁCH RIÊNG TỪNG XE =====
-/// Ông Chủ chỉ ra: mỗi xe đang gánh lương cứng + tiền ăn của CẢ 2 tài xế (quy tắc cũ "có ít nhất 1 ca
-/// trên xe này trong 60 ngày" → 2 lái chạy chéo 1 ca là dính cả 2), gánh NGUYÊN tiền nhà chung công ty,
-/// và thiếu hẳn vé cầu đường. Quy tắc mới — 1 nguồn duy nhất cho mọi xe, tổng các xe = LINH CHÍ THÀNH:
-///  - Lương cứng + tiền ăn: MỖI tài xế chỉ tính vào ĐÚNG 1 XE — xe người đó lái NHIỀU CA NHẤT trong 60
-///    ngày gần đây (hoà thì lấy xe lái gần nhất). Không cần nhập thêm gì; tài xế chuyển hẳn xe thì số
-///    tự chuyển theo. Mỗi tài xế được đếm đúng 1 lần nên cộng các xe lại không bao giờ trùng/thiếu.
-///  - Tiền nhà + điện nước (chung công ty): chia ĐỀU cho các xe có ca trong 60 ngày gần đây.
-///  - Vé cầu đường, luật đường, khấu hao/lãi vay/bảo hiểm/đăng kiểm: lấy ĐÚNG số đã nhập của từng xe.
-function shiftsOfVehicleLive(vid){
-  if(!vid || vid===activeVehicleIdForEditing()) return state.shifts||[];
-  return state.allVehiclesShifts[vid] || [];
-}
-function roadFeeListOfVehicleLive(vid){
-  if(!vid || vid===activeVehicleIdForEditing()) return state.roadFeeByMonth||[];
-  return state.allVehiclesRoadFee[vid] || [];
-}
-function computeMonthlyFixedCostByVehicle(){
-  const today = todayLocalDateStr();
-  const recentFrom = addDaysToDateStr(today, -60);
-  const cur = currentMonthRange();
-  const vehicles = state.vehicles||[];
-  const vids = vehicles.length ? vehicles.map(v=>v.id) : [null];
-  // Đếm ca của từng tài xế trên từng xe trong 60 ngày.
-  const tally = {};           // driverId → [{ idx, n, last }]
-  const operating = vids.map(()=>false);
-  vids.forEach((vid,idx)=>{
-    shiftsOfVehicleLive(vid).forEach(sh=>{
-      if(!sh.date || sh.date<recentFrom || sh.date>today) return;
-      operating[idx] = true;
-      if(!sh.driverId) return;
-      const arr = tally[sh.driverId] || (tally[sh.driverId] = []);
-      let e = arr.find(x=>x.idx===idx);
-      if(!e){ e = { idx, n:0, last:'' }; arr.push(e); }
-      e.n++; if(sh.date>e.last) e.last = sh.date;
-    });
-  });
-  const homeIdxOfDriver = {};
-  Object.entries(tally).forEach(([did,arr])=>{
-    arr.sort((x,y)=> (y.n-x.n) || y.last.localeCompare(x.last) || (x.idx-y.idx));
-    homeIdxOfDriver[did] = arr[0].idx;
-  });
-  const housingTotal = houseRentForRange(cur.from, cur.to) + utilitiesForRange(cur.from, cur.to);
-  const opCount = operating.filter(Boolean).length;
-  const rows = vids.map((vid,idx)=>{
-    const st = (vid ? settingsOfVehicle(vid) : state.settings) || defaultSettingsShape();
-    const workDays = Number(st.standardWorkDaysPerMonth)||Number(state.settings.standardWorkDaysPerMonth)||28;
-    const drivers = state.drivers.filter(d=>d.isActive!==false && homeIdxOfDriver[d.id]===idx);
-    const monthlySalary = drivers.reduce((s,d)=>s+(Number(d.monthlyBaseSalary)||0),0);
-    const monthlyFood = drivers.reduce((s,d)=>s+(Number(d.dailyFoodAllowance)||0)*workDays,0);
-    const monthlyHousing = opCount>0 ? (operating[idx] ? housingTotal/opCount : 0) : housingTotal/vids.length;
-    const monthlyToll = vid ? tollFeeForRangeVehicle(vid, cur.from, cur.to) : tollFeeForRange(cur.from, cur.to);
-    const rfList = roadFeeListOfVehicleLive(vid);
-    const monthlyRoadFee = fullMonthlyCostIfTouched(ym=>{ const e = rfList.find(x=>x.month===ym); return e ? (Number(e.amount)||0) : 0; }, cur.from, cur.to);
-    const otherFixedMonthly = vehicleFixedMonthlyBase(st);
-    const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyToll + monthlyRoadFee + otherFixedMonthly;
-    return { vid, name: vid ? vehicleNameById(vid) : '', operating: operating[idx], driverNames: drivers.map(d=>d.name||'(chưa đặt tên)'),
-      monthlySalary, monthlyHousing, monthlyFood, monthlyToll, monthlyRoadFee, otherFixedMonthly, fixedCost };
-  });
-  return { rows, housingTotal, opCount };
-}
 // KHÔNG đụng gì tới computeBreakEvenDetailed() ở trên — hàm đó vẫn tính
 // đúng điểm hoà vốn CỦA KỲ ĐANG XEM như cũ, giữ nguyên 100%. Hàm dưới
 // đây tính thêm 1 MỤC TIÊU riêng, ỔN ĐỊNH cho CẢ THÁNG hiện tại:
@@ -15058,41 +15172,52 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const s = state.settings;
   const workDays = Number(s.standardWorkDaysPerMonth)||28;
   const today = todayLocalDateStr();
-  // #366 (Ông Chủ duyệt 2026-10-11) — chi phí cố định lấy từ computeMonthlyFixedCostByVehicle():
-  // đang xem 1 xe → đúng dòng của xe đó; đang xem LINH CHÍ THÀNH (≥2 xe) → TỔNG các xe.
-  const fixedAll = computeMonthlyFixedCostByVehicle();
-  const scopeVid = state.currentVehicleId || activeVehicleIdForEditing();
-  const scopeRows = (scopeVid && fixedAll.rows.some(r=>r.vid===scopeVid)) ? fixedAll.rows.filter(r=>r.vid===scopeVid) : fixedAll.rows;
-  const isCompanyScope = scopeRows.length>1;
-  const sumOf = k=>scopeRows.reduce((a,r)=>a+(Number(r[k])||0),0);
-  const monthlySalary = sumOf('monthlySalary');
-  const monthlyFood = sumOf('monthlyFood');
-  const monthlyHousing = sumOf('monthlyHousing');
-  const monthlyToll = sumOf('monthlyToll');
-  const monthlyRoadFee = sumOf('monthlyRoadFee');
-  const otherFixedMonthly = sumOf('otherFixedMonthly');
-  const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyToll + monthlyRoadFee + otherFixedMonthly;
-  const driverNames = scopeRows.reduce((a,r)=>a.concat(r.driverNames),[]);
+  // SỬA 2026-09-23 (Ông Chủ chỉ ra đúng lỗi thật — ví dụ xe 12345 chưa
+  // vận hành nhưng vẫn bị cộng đủ lương cứng của tài xế đang chạy xe
+  // 69112 vào điểm hoà vốn của NÓ): TRƯỚC ĐÂY dòng dưới lấy TẤT CẢ tài xế
+  // "Đang Hoạt Động" trong toàn công ty (state.drivers), không lọc theo
+  // xe — vì hồ sơ tài xế dùng CHUNG cho cả công ty (1 người có thể chạy
+  // nhiều xe khác ngày), nên xe nào cũng bị cộng y hệt tổng lương của MỌI
+  // tài xế, dù xe đó chưa từng có ai chạy. Ông Chủ xác nhận: không cần
+  // thêm cơ chế/field gán xe mới — ĐÃ CÓ SẴN đúng dữ liệu cần: mỗi ca làm
+  // việc đã ghi rõ driverId chạy xe nào, ngày nào (state.shifts đúng là
+  // ca của XE ĐANG XEM, theo cùng cách windowShifts/tripsSoFarThisMonth
+  // bên dưới đã dùng). Sửa: 1 tài xế chỉ được tính vào chi phí cố định
+  // của xe này nếu có ÍT NHẤT 1 ca lái ĐÚNG xe này trong 60 ngày gần đây
+  // — đủ dài để không bỏ sót tài xế phụ lái/thay ca thỉnh thoảng (như
+  // trường hợp tài xế số 2 thi thoảng phụ lái xe 69112), nhưng vẫn tự
+  // "quên" đúng lúc 1 tài xế thật sự đã chuyển hẳn sang xe khác lâu ngày.
+  const recentFrom = addDaysToDateStr(today, -60);
+  const recentDriverIdsForThisVehicle = new Set(
+    state.shifts.filter(sh=>sh.date>=recentFrom && sh.date<=today && sh.driverId).map(sh=>sh.driverId)
+  );
+  const activeDrivers = state.drivers.filter(d=>d.isActive!==false && recentDriverIdsForThisVehicle.has(d.id));
+
+  const monthlySalary = activeDrivers.reduce((sum,d)=>sum+(Number(d.monthlyBaseSalary)||0),0);
+  const monthlyFood = activeDrivers.reduce((sum,d)=>sum+(Number(d.dailyFoodAllowance)||0)*workDays,0);
+  // SỬA 2026-08-23 (Ông Chủ báo: Bước 1 giải trình Dự Đoán Hoà Vốn Cả Tháng
+  // hiện "Luật đường tháng này" = 322.581đ trong khi luật đường tháng 8 khai
+  // thật là 10.000.000đ) — roadFeeForRange(today, today) truyền from=to=hôm
+  // nay, tức 1 khoảng NGÀY DUY NHẤT → proratedMonthlyCost() chia luật đường
+  // tháng theo đúng 1/số-ngày-trong-tháng (10tr/31≈322.581đ), không phải lấy
+  // trọn tháng. Đây là "Chi phí cố định CẢ THÁNG" nên phải truyền trọn
+  // khoảng ngày của THÁNG HIỆN TẠI, không phải 1 ngày hôm nay.
+  const curMonthRange = currentMonthRange();
+  const monthlyRoadFee = roadFeeForRange(curMonthRange.from, curMonthRange.to);
+  const monthlyHousing = houseRentForRange(curMonthRange.from, curMonthRange.to) + utilitiesForRange(curMonthRange.from, curMonthRange.to);
+  const otherFixedMonthly = vehicleFixedMonthlyBase(s);
+  const fixedCost = monthlySalary + monthlyHousing + monthlyFood + monthlyRoadFee + otherFixedMonthly;
 
   const toDate = today;
   const fromDateObj = new Date(); fromDateObj.setDate(fromDateObj.getDate()-(marginWindowDays-1));
   const fromDate = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth()+1).padStart(2,'0')}-${String(fromDateObj.getDate()).padStart(2,'0')}`;
-  // Ca dùng để tính lãi gộp/tốc độ: ĐÚNG các xe trong phạm vi đang xem. Quy tắc loại 2 ca mới nhất còn
-  // thiếu dữ liệu giữ nguyên như getRevenueExcludedShiftIds(), áp riêng cho từng xe.
-  const scopeShifts = [];
-  scopeRows.forEach(r=>{
-    const list = shiftsOfVehicleLive(r.vid);
-    const excl = new Set();
-    [...list].sort((x,y)=>chronoKey(y.date,y.shiftType)-chronoKey(x.date,x.shiftType)).slice(0,2).forEach(sh=>{ if(shiftHasNonFuelOdoIssues(sh)) excl.add(sh.id); });
-    list.forEach(sh=>{ if(!excl.has(sh.id)) scopeShifts.push(sh); });
-  });
-  const windowShifts = scopeShifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate).map(sanitizeShiftForRevenue);
+  const excludedShiftIds = getRevenueExcludedShiftIds();
+  const windowShifts = state.shifts.filter(sh=>sh.date>=fromDate && sh.date<=toDate && !excludedShiftIds.has(sh.id)).map(sanitizeShiftForRevenue);
   const totalTrips = windowShifts.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const totalRevenue = windowShifts.reduce((sum,sh)=>sum+shiftTotalRevenue(sh),0);
   const variableCost = windowShifts.reduce((sum,sh)=>sum+shiftFuelCost(sh)+shiftTotalTripWage(sh)+(Number(sh.incidentalCost)||0)+(Number(sh.roadFeeIncidental)||0)+shiftMaterialCost(sh),0);
 
-  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyToll, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost,
-    isCompanyScope, driverNames, perVehicle: fixedAll.rows, housingTotal: fixedAll.housingTotal, housingVehicleCount: fixedAll.opCount };
+  const base = { fixedCost, monthlySalary, monthlyHousing, monthlyFood, monthlyRoadFee, otherFixedMonthly, marginWindowDays, fromDate, toDate, totalTrips, totalRevenue, variableCost };
   if(totalTrips===0) return { ...base, breakEvenTrips:null, note:`Chưa có chuyến nào trong ${marginWindowDays} ngày gần nhất để tính lãi gộp bình quân.` };
   const marginPerTrip = (totalRevenue-variableCost)/totalTrips;
   if(marginPerTrip<=0) return { ...base, marginPerTrip, breakEvenTrips:null, note:'Doanh thu/chuyến đang thấp hơn chi phí biến đổi/chuyến trong khoảng này — chưa thể hoà vốn dù chạy bao nhiêu chuyến.' };
@@ -15106,7 +15231,7 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
   const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
   const dayOfMonth = now.getDate();
   const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
-  const tripsSoFarThisMonth = scopeShifts.filter(sh=>sh.date.slice(0,7)===today.slice(0,7))
+  const tripsSoFarThisMonth = state.shifts.filter(sh=>sh.date.slice(0,7)===today.slice(0,7) && !excludedShiftIds.has(sh.id))
     .reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0),0);
   const projectedTotalTripsThisMonth = tripsSoFarThisMonth + tripsPerDay*daysRemaining;
   const remainingTripsNeeded = Math.max(0, breakEvenTrips - tripsSoFarThisMonth);
@@ -15117,71 +15242,6 @@ function computeMonthlyBreakEvenProjection(marginWindowDays){
     tripsSoFarThisMonth, projectedTotalTripsThisMonth, remainingTripsNeeded, neededPacePerRemainingDay, onTrackToHitBreakEven, note:null };
 }
 
-/// Renders the full plain-language accounting walkthrough shown inside the
-/// "Chi Tiết" modal — every number here is pulled straight from the same
-/// `breakEven` object the summary card already displays, so the two can
-/// never drift out of sync.
-function renderBreakEvenExplainerModal(breakEven){
-  const be = breakEven;
-  openModal(`
-    <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
-    <h3>⚖️ Cách Tính Điểm Hoà Vốn — Giải Trình Chi Tiết</h3>
-    <div class="hint" style="margin-bottom:10px;">Toàn bộ công thức dưới đây dùng đúng số liệu thực tế của kỳ đang xem, theo đúng cách kế toán vận tải: tách chi phí thành CỐ ĐỊNH và BIẾN ĐỔI, rồi tìm ra cần bao nhiêu chuyến để doanh thu bù đủ chi phí cố định.</div>
-
-    <div class="modal-step">
-      <div class="st-title">Bước 1 — Sản lượng &amp; doanh thu theo ca</div>
-      <div class="st-body">Ca Ngày: ${be.dayTrips} chuyến, doanh thu ${fmtVND(be.dayRevenue)}. Ca Đêm: ${be.nightTrips} chuyến, doanh thu ${fmtVND(be.nightRevenue)}. Cộng lại là tổng sản lượng và doanh thu cả kỳ.</div>
-      <div class="st-formula">Tổng chuyến = ${be.dayTrips} + ${be.nightTrips} = ${be.totalTrips} chuyến
-Tổng doanh thu = ${fmtVND(be.dayRevenue)} + ${fmtVND(be.nightRevenue)} = ${fmtVND(be.totalRevenue)}</div>
-    </div>
-
-    <div class="modal-step">
-      <div class="st-title">Bước 2 — Tách chi phí CỐ ĐỊNH (không đổi theo số chuyến)</div>
-      <div class="st-body">Đây là các khoản phải trả dù xe chạy nhiều hay ít trong kỳ: lương cứng phân bổ, tiền nhà cho tài xế, chi phí luật đường, chi phí sửa chữa/khấu hao phát sinh trong kỳ, và các chi phí cố định khác (khấu hao xe dự kiến, gốc+lãi vay ngân hàng, bảo hiểm xe, đăng kiểm/đăng ký/phù hiệu vận tải — cài ở tab Cài Đặt).</div>
-      <div class="st-formula">Chi phí cố định = Lương cứng + Tiền nhà + Luật đường + Sửa chữa/khấu hao + Chi phí cố định khác
-= ${fmtVND(be.fixedCost - be.roadFee - be.repairTotal - (be.otherFixedMonthly||0))} + ${fmtVND(be.roadFee)} + ${fmtVND(be.repairTotal)} + ${fmtVND(be.otherFixedMonthly||0)}
-= ${fmtVND(be.fixedCost)}</div>
-    </div>
-
-    <div class="modal-step">
-      <div class="st-title">Bước 3 — Tách chi phí BIẾN ĐỔI (tăng/giảm theo số chuyến)</div>
-      <div class="st-body">Đây là các khoản chỉ phát sinh khi xe thực sự chạy: tiền dầu tiêu hao, lương/chuyến trả tài xế, tiền ăn theo ca, luật đường phát sinh/ca, chi phí phát sinh lặt vặt, và giá vốn hàng mua-bán (thương mại).</div>
-      <div class="st-formula">Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường/ca) = ${fmtVND(be.pureOperatingVariable!==undefined?be.pureOperatingVariable:be.variableCost)}
-Giá vốn hàng mua-bán thương mại trong kỳ = ${fmtVND(be.materialCost||0)}
-→ Chi phí biến đổi (cả kỳ) = ${fmtVND(be.variableCost)}
-Chi phí biến đổi bình quân / chuyến = ${fmtVND(be.variableCost)} ÷ ${be.totalTrips} = ${be.avgVariableCostPerTrip!==undefined?fmtVND(be.avgVariableCostPerTrip):'—'}</div>
-    </div>
-
-    <div class="modal-step">
-      <div class="st-title">Bước 4 — Lợi nhuận gộp (biên đóng góp)</div>
-      <div class="st-body">Lợi nhuận gộp là phần doanh thu còn lại sau khi trừ chi phí biến đổi — đây chính là "quỹ" dùng để bù đắp chi phí cố định. Lợi nhuận gộp CHƯA trừ chi phí cố định, nên chưa phải lãi thật.</div>
-      <div class="st-formula">Lợi nhuận gộp = Tổng doanh thu − Chi phí biến đổi
-= ${fmtVND(be.totalRevenue)} − ${fmtVND(be.variableCost)} = ${fmtVND(be.grossProfit)}</div>
-    </div>
-
-    <div class="modal-step">
-      <div class="st-title">Bước 5 — Doanh thu &amp; biên lãi bình quân mỗi chuyến</div>
-      <div class="st-body">Chia đều tổng doanh thu và biên lãi gộp cho tổng số chuyến để biết trung bình mỗi chuyến đóng góp được bao nhiêu vào việc bù chi phí cố định.</div>
-      <div class="st-formula">Doanh thu bình quân/chuyến = ${fmtVND(be.totalRevenue)} ÷ ${be.totalTrips} = ${be.avgRevenuePerTrip!==undefined?fmtVND(be.avgRevenuePerTrip):'—'}
-Biên lãi gộp bình quân/chuyến = Doanh thu bình quân − Chi phí biến đổi bình quân
-= ${be.marginPerTrip!==undefined?fmtVND(be.marginPerTrip):'—'}</div>
-    </div>
-
-    <div class="modal-step">
-      <div class="st-title">Bước 6 — Điểm hoà vốn</div>
-      <div class="st-body">Lấy chi phí cố định chia cho biên lãi gộp bình quân mỗi chuyến — ra số chuyến TỐI THIỂU cần chạy trong kỳ để doanh thu bù đủ chi phí cố định. Chạy nhiều hơn số này mới thật sự có lãi.</div>
-      <div class="st-formula">Số chuyến hoà vốn = Chi phí cố định ÷ Biên lãi gộp bình quân/chuyến
-= ${fmtVND(be.fixedCost)} ÷ ${be.marginPerTrip!==undefined?fmtVND(be.marginPerTrip):'—'}
-= ${be.breakEvenTrips!==null?be.breakEvenTrips+' chuyến':'Không xác định — '+escapeHtml(be.note||'')}</div>
-    </div>
-
-    ${be.breakEvenTrips!==null ? `
-    <div class="modal-step">
-      <div class="st-title">Kết luận</div>
-      <div class="st-body">Kỳ này đã chạy thực tế ${be.actualTrips} chuyến, so với ${be.breakEvenTrips} chuyến cần để hoà vốn → ${be.surplusTrips>=0?`DƯ ${be.surplusTrips} chuyến, tức đã có lãi thật sau khi bù đủ chi phí cố định`:`THIẾU ${Math.abs(be.surplusTrips)} chuyến, tức lợi nhuận gộp kỳ này chưa đủ bù chi phí cố định`}.</div>
-    </div>` : ''}
-  `);
-}
 
 /// Modal "Chi Tiết Cách Tính" cho khối "Dự Đoán Hoà Vốn Cả Tháng" — cùng
 /// phong cách renderBreakEvenExplainerModal() ở trên, nhưng dùng đúng số
@@ -15196,9 +15256,9 @@ function renderMonthlyProjectionExplainerModal(m){
 
     <div class="modal-step">
       <div class="st-title">Bước 1 — Chi phí cố định cả tháng (từ hồ sơ tháng gốc)</div>
-      <div class="st-body">${m.isCompanyScope?'TỔNG các xe. ':'RIÊNG xe đang xem. '}Lương cứng + tiền ăn: mỗi tài xế chỉ tính vào đúng 1 xe — xe người đó lái nhiều ca nhất trong 60 ngày gần đây${m.driverNames&&m.driverNames.length?` (đang tính: ${escapeHtml(m.driverNames.join(', '))})`:''}. Tiền nhà + điện nước chung công ty (${fmtVND(m.housingTotal||0)}) chia đều cho ${Math.max(1,m.housingVehicleCount||0)} xe đang chạy. Vé cầu đường, luật đường, khấu hao/lãi vay/bảo hiểm/đăng kiểm: đúng số đã nhập cho từng xe. Lãi vay chỉ tính phần LÃI của kỳ này (gốc là trả nợ, không phải chi phí).</div>
-      <div class="st-formula">Chi phí cố định cả tháng = Lương cứng + Tiền nhà + Tiền ăn + Vé cầu đường + Luật đường tháng này + Khấu hao/lãi vay/bảo hiểm/đăng kiểm
-= ${fmtVND(m.monthlySalary)} + ${fmtVND(m.monthlyHousing)} + ${fmtVND(m.monthlyFood)} + ${fmtVND(m.monthlyToll||0)} + ${fmtVND(m.monthlyRoadFee)} + ${fmtVND(m.otherFixedMonthly)}
+      <div class="st-body">Lương cứng + tiền nhà + tiền ăn của mọi tài xế đang hoạt động (quy theo ngày công chuẩn/tháng), cộng luật đường tháng này và khấu hao/lãi vay/bảo hiểm/đăng kiểm từ Cài Đặt.</div>
+      <div class="st-formula">Chi phí cố định cả tháng = Lương cứng + Tiền nhà + Tiền ăn + Luật đường tháng này + Khấu hao/vay/bảo hiểm/đăng kiểm
+= ${fmtVND(m.monthlySalary)} + ${fmtVND(m.monthlyHousing)} + ${fmtVND(m.monthlyFood)} + ${fmtVND(m.monthlyRoadFee)} + ${fmtVND(m.otherFixedMonthly)}
 = ${fmtVND(m.fixedCost)}</div>
     </div>
 
@@ -16749,7 +16809,29 @@ function renderResults(){
   // computeBreakEvenDetailed, đã đóng băng). breakEvenPureOperatingVariable
   // + breakEvenMaterialCost cộng lại luôn khớp tuyệt đối = breakEven.variableCost.
   const breakEvenMaterialCost = inRange.reduce((s,sh)=>s+shiftMaterialCost(sh),0);
-  const breakEvenPureOperatingVariable = breakEven.variableCost - breakEvenMaterialCost;
+  // #367 — điểm hoà vốn theo định nghĩa DÙNG CHUNG (xem unifiedBreakEven): thêm cầu đường, thưởng/chi hộ
+  // tài xế vào phần cố định và chi phí hoá đơn bù vào phần biến đổi, để khớp với "Kết Quả Từng Xe" và với
+  // Lợi nhuận ròng của chính tab này. Chỉ đọc lại các số đã tính ở trên, không sửa hàm tính nào.
+  const beNonZero = x => Math.abs(Number(x[1])||0)>0.5;
+  const beSum = arr => arr.reduce((a,x)=>a+(Number(x[1])||0),0);
+  const beFb = vehicleAccrualFixedBreakdown(activeVehicleIdForEditing(), state.settings, from, to);
+  const beFixedParts = [
+    ['Lương cứng phân bổ theo ca', inRange.reduce((a,sh)=>a+(Number(sh.baseSalaryAllocation)||0),0)],
+    ['Khấu hao', beFb.depreciation], ['Lãi vay', beFb.loanInterest], ['Bảo hiểm', beFb.insurance], ['Đăng kiểm / đăng ký / phù hiệu', beFb.registration],
+    ['Thuế tiền thuê xe', beFb.rentalTax], ['Chi phí cố định khác', otherFixedMonthly - beFb.total],
+    ['Luật đường', roadFee], ['Cầu đường', tollFee], ['Sửa chữa (đã trừ phần tài xế đền)', repairTotal - periodSummary.repairDriverRecovery],
+    ['Nhà', houseRent], ['Điện nước', utilities], ['Thưởng tài xế', periodSummary.driverBonusCost], ['Chi phí tài xế báo tay', periodSummary.driverExpenseReportCost]
+  ].filter(beNonZero);
+  const beVariableParts = [
+    ['Dầu tiêu hao', inRange.reduce((a,sh)=>a+shiftFuelCost(sh),0)], ['Lương chuyến', inRange.reduce((a,sh)=>a+shiftTotalTripWage(sh),0)],
+    ['Tiền ăn', inRange.reduce((a,sh)=>a+(Number(sh.foodAllowance)||0),0)], ['Phát sinh trong ca', inRange.reduce((a,sh)=>a+(Number(sh.incidentalCost)||0),0)],
+    ['Luật đường phát sinh theo ca', inRange.reduce((a,sh)=>a+(Number(sh.roadFeeIncidental)||0),0)], ['Giá vốn hàng mua từ mỏ', breakEvenMaterialCost],
+    ['Chi phí hoá đơn bù (sau VAT hưởng)', inRange.reduce((a,sh)=>a+shiftInvoiceSupplementCost(sh),0) - periodSummary.invoiceSupplementVatCredit]
+  ].filter(beNonZero);
+  const beU = unifiedBreakEven(breakEven.totalRevenue, breakEven.totalTrips, beSum(beFixedParts), beSum(beVariableParts));
+  // Tự đối chiếu: Doanh thu − biến đổi − cố định (+ lãi/lỗ bán xe) phải bằng Lợi nhuận ròng của kỳ (bỏ qua khi đang thử số luật đường khác).
+  const beCheckGap = state.resultsRoadFeeOverride===null ? (beU.gross - beU.fixed + periodSummary.saleGain) - periodSummary.finalNetProfit : 0;
+  const beVehName = ((state.vehicles||[]).find(v=>v.id===activeVehicleIdForEditing())||{}).name || 'Xe đang chọn';
   const monthlyProjection = computeMonthlyBreakEvenProjection(state.resultsMarginWindowDays===10 ? 10 : 30);
   const costTrend = computeCostPerKmTrend(6);
 
@@ -16834,6 +16916,7 @@ function renderResults(){
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">🧾 CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
         <button class="btn btn-ghost btn-sm" id="vatDetailBtn" style="margin:2px 0 6px;">🔍 Chi Tiết Cách Tính VAT</button>
+        <button class="btn btn-ghost btn-sm" id="vatCompanyDetailBtn" style="margin:2px 0 6px;">🔍 Bảng VAT Cả Công Ty Theo Tháng</button>
         <div class="field" style="margin-top:8px; margin-bottom:0;">
           <label>Thuế TNDN dự kiến (KT thuế tư vấn — Ông Chủ tự nhập theo đúng kỳ này)</label>
           <input type="text" inputmode="decimal" id="res_manualCit" placeholder="Chưa nhập">
@@ -16910,40 +16993,38 @@ function renderResults(){
         <table class="grid-table">
           <thead><tr><th>Khoản Mục</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>Tổng chi phí cố định (lương cứng + nhà + luật đường + sửa chữa/khấu hao + khấu hao xe dự kiến + vay ngân hàng + bảo hiểm + đăng kiểm/đăng ký/phù hiệu)</td><td class="num">${fmtVND(breakEven.fixedCost)}</td></tr>
-            <tr><td>Chi phí vận hành thuần (dầu + lương chuyến + tiền ăn + phát sinh + luật đường phát sinh/ca)</td><td class="num">${fmtVND(breakEvenPureOperatingVariable)}</td></tr>
-            <tr><td>Giá vốn hàng mua-bán thương mại trong kỳ (tiền mua vật liệu từ mỏ)</td><td class="num">${fmtVND(breakEvenMaterialCost)}</td></tr>
-            <tr class="grid-total-row"><td style="text-align:left;">→ Tổng chi phí biến đổi thực tế</td><td class="num">${fmtVND(breakEven.variableCost)}</td></tr>
+            <tr><td><strong>Tổng chi phí CỐ ĐỊNH</strong> <button class="link-btn" id="beFixedDetailBtn" style="padding:0 0 0 4px; font-weight:700;">🔍 Chi tiết</button><div class="hint" style="margin:2px 0 0;">${beFixedParts.map(x=>x[0]).join(' + ') || 'chưa có khoản nào'}</div></td><td class="num">${fmtVND(beU.fixed)}</td></tr>
+            <tr><td><strong>Tổng chi phí BIẾN ĐỔI</strong> <button class="link-btn" id="beVariableDetailBtn" style="padding:0 0 0 4px; font-weight:700;">🔍 Chi tiết</button><div class="hint" style="margin:2px 0 0;">${beVariableParts.map(x=>x[0]).join(' + ') || 'chưa có khoản nào'}</div></td><td class="num">${fmtVND(beU.variable)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="card" style="text-align:center; border:1.5px solid ${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'};">
+      <div class="card" style="text-align:center; border:1.5px solid ${beU.gross>=0?'var(--profit)':'var(--loss)'};">
         <div style="font-weight:700; font-size:13px; color:var(--ink-soft);">LỢI NHUẬN GỘP (Doanh thu − Chi phí biến đổi)</div>
-        <div style="font-weight:800; font-size:22px; color:${breakEven.grossProfit>=0?'var(--profit)':'var(--loss)'}; margin-top:4px;">${fmtVND(breakEven.grossProfit)}</div>
+        <div style="font-weight:800; font-size:22px; color:${beU.gross>=0?'var(--profit)':'var(--loss)'}; margin-top:4px;">${beU.gross<0?'−':''}${fmtVND(Math.abs(beU.gross))}</div>
       </div>
 
       <div class="card" style="margin-top:10px;">
-        ${breakEven.breakEvenTrips===null ? `<div class="hint">${escapeHtml(breakEven.note)}</div>` : `
+        ${beU.breakEvenTrips===null ? `<div class="hint">${escapeHtml(beU.note)}</div>` : `
         <div class="be-formula">
           <div class="be-frac">
-            <div class="fr-num">Tổng chi phí cố định<strong>${fmtVND(breakEven.fixedCost)}</strong></div>
+            <div class="fr-num">Tổng chi phí cố định<strong>${fmtVND(beU.fixed)}</strong></div>
             <div class="fr-line"></div>
-            <div class="fr-den">Lãi gộp bình quân / chuyến<strong>${fmtVND(breakEven.marginPerTrip)}</strong></div>
+            <div class="fr-den">Lãi gộp bình quân / chuyến<strong>${fmtVND(beU.margin)}</strong></div>
           </div>
           <div class="be-eq-sign">=</div>
           <div class="be-result">
-            <div class="val">${breakEven.breakEvenTrips}</div>
+            <div class="val">${beU.breakEvenTrips}</div>
             <div class="lbl">chuyến tối thiểu để hoà vốn</div>
           </div>
         </div>
         <div class="formula-divider"></div>
         <div class="summary-row">
           <span>Thực tế đã chạy trong kỳ</span>
-          <span class="val"><span style="color:var(--profit); font-weight:800;">${breakEven.actualTrips} chuyến</span>${breakEven.surplusTrips<0 ? ` <span style="color:var(--loss); font-weight:800;">(thiếu ${Math.abs(breakEven.surplusTrips)} chuyến)</span>` : breakEven.surplusTrips>0 ? ` <span style="color:var(--profit); font-weight:800;">(dư ${breakEven.surplusTrips} chuyến)</span>` : ''}</span>
+          <span class="val"><span style="color:var(--profit); font-weight:800;">${beU.trips} chuyến</span>${beU.trips<beU.breakEvenTrips ? ` <span style="color:var(--loss); font-weight:800;">(thiếu ${beU.breakEvenTrips-beU.trips} chuyến)</span>` : beU.trips>beU.breakEvenTrips ? ` <span style="color:var(--profit); font-weight:700;">(vượt ${beU.trips-beU.breakEvenTrips} chuyến)</span>` : ''}</span>
         </div>
         `}
       </div>
-      <button class="btn btn-ghost btn-block" id="breakEvenDetailBtn" style="margin-top:10px;">📖 Chi Tiết Cách Tính</button>
+      <div class="hint" style="margin-top:8px; color:${Math.abs(beCheckGap)<1?'var(--ink-soft)':'var(--loss)'};">${Math.abs(beCheckGap)<1 ? '✅ Doanh thu − biến đổi − cố định = đúng Lợi Nhuận Ròng của kỳ. Cùng cách tính với trang "Kết Quả Từng Xe".' : `⚠️ Bảng này lệch ${fmtVND(Math.abs(beCheckGap))} so với Lợi Nhuận Ròng của kỳ — chụp màn này gửi lại để kiểm tra.`}</div>
 
     </section>
 
@@ -16963,26 +17044,13 @@ function renderResults(){
             <tr><td>Lương cứng</td><td class="num">${fmtVND(monthlyProjection.monthlySalary)}</td></tr>
             <tr><td>Tiền nhà</td><td class="num">${fmtVND(monthlyProjection.monthlyHousing)}</td></tr>
             <tr><td>Tiền ăn</td><td class="num">${fmtVND(monthlyProjection.monthlyFood)}</td></tr>
-            <tr><td>Vé cầu đường tháng này</td><td class="num">${fmtVND(monthlyProjection.monthlyToll)}</td></tr>
             <tr><td>Luật đường tháng này</td><td class="num">${fmtVND(monthlyProjection.monthlyRoadFee)}</td></tr>
-            <tr><td>Khấu hao/lãi vay/bảo hiểm/đăng kiểm</td><td class="num">${fmtVND(monthlyProjection.otherFixedMonthly)}</td></tr>
+            <tr><td>Khấu hao/vay/bảo hiểm/đăng kiểm</td><td class="num">${fmtVND(monthlyProjection.otherFixedMonthly)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= Tổng chi phí cố định cả tháng</td><td class="num">${fmtVND(monthlyProjection.fixedCost)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">${monthlyProjection.isCompanyScope
-        ? `LINH CHÍ THÀNH = TỔNG các xe bên dưới. Mỗi tài xế chỉ tính vào đúng 1 xe nên không trùng, không thiếu.`
-        : `Riêng xe này. Lương cứng + tiền ăn: chỉ tài xế lái xe này NHIỀU CA NHẤT trong 60 ngày gần đây${monthlyProjection.driverNames.length?` (${escapeHtml(monthlyProjection.driverNames.join(', '))})`:' (chưa có ai)'}. Tiền nhà: ${fmtVND(monthlyProjection.housingTotal)} chung công ty chia đều ${Math.max(1,monthlyProjection.housingVehicleCount)} xe đang chạy. Vé cầu đường, luật đường, khấu hao, lãi vay: đúng số đã nhập cho xe này.`} Không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
-      ${monthlyProjection.isCompanyScope ? `
-      <div class="grid-table-wrap" style="margin-top:8px;">
-        <table class="grid-table">
-          <thead><tr><th>Từng Xe</th><th class="num">Chi Phí Cố Định</th></tr></thead>
-          <tbody>
-            ${monthlyProjection.perVehicle.map(r=>`<tr><td>🚛 ${escapeHtml(r.name)}${r.driverNames.length?` — ${escapeHtml(r.driverNames.join(', '))}`:''}</td><td class="num">${fmtVND(r.fixedCost)}</td></tr>`).join('')}
-            <tr class="grid-total-row"><td style="text-align:left;">= Cộng các xe ${Math.round(monthlyProjection.perVehicle.reduce((a,r)=>a+r.fixedCost,0))===Math.round(monthlyProjection.fixedCost)?'✓ khớp tổng':'⚠ LỆCH tổng'}</td><td class="num">${fmtVND(monthlyProjection.perVehicle.reduce((a,r)=>a+r.fixedCost,0))}</td></tr>
-          </tbody>
-        </table>
-      </div>` : ''}
+      <div class="hint" style="margin-top:6px;">Lấy từ số THÁNG gốc trong hồ sơ TỪNG TÀI XẾ đã có ca chạy ĐÚNG xe này trong 60 ngày gần đây (không tính tài xế chỉ chạy xe khác) — không cộng dồn theo từng ca đã ghi, nên đứng yên suốt tháng.</div>
 
       <div class="card" style="margin-top:10px;">
         ${monthlyProjection.breakEvenTrips===null ? `<div class="hint">${escapeHtml(monthlyProjection.note)}</div>` : `
@@ -17145,7 +17213,13 @@ function renderResults(){
     state.resultsRange.to = e.target.value; state.resultsRoadFeeOverride=null; renderResults();
   });
   document.getElementById('addRepairBtn').addEventListener('click', ()=>openRepairEditor(null));
-  document.getElementById('breakEvenDetailBtn').addEventListener('click', ()=>renderBreakEvenExplainerModal({...breakEven, materialCost: breakEvenMaterialCost, pureOperatingVariable: breakEvenPureOperatingVariable}));
+  { const vb = document.getElementById('vatCompanyDetailBtn'); if(vb) vb.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyVatDetailPage(()=>{ renderAll(); restoreMainScroll(); }); }); }
+  { // #367 — 🔍 mở trang kẻ ô chi tiết từng khoản
+    const beBack = ()=>{ renderAll(); restoreMainScroll(); };
+    const beSub = `🚛 ${escapeHtml(beVehName)} · ${formatDateVN(from)} → ${formatDateVN(to)}`;
+    document.getElementById('beFixedDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCostPartsDetailPage({ title:'🔍 Chi Phí Cố Định Trong Kỳ', subtitle: beSub, columns:[{ name: beVehName, parts: beFixedParts }], totalLabel:'Tổng chi phí cố định', footHtml:'Chi phí cố định là khoản phải trả dù xe chạy nhiều hay ít. Điểm hoà vốn = tổng này ÷ lãi gộp bình quân mỗi chuyến.', onBack: beBack }); });
+    document.getElementById('beVariableDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCostPartsDetailPage({ title:'🔍 Chi Phí Biến Đổi Trong Kỳ', subtitle: beSub, columns:[{ name: beVehName, parts: beVariableParts }], totalLabel:'Tổng chi phí biến đổi', footHtml:'Chi phí biến đổi tăng giảm theo số chuyến chạy. Doanh thu − tổng này = Lợi nhuận gộp.', onBack: beBack }); });
+  }
   const monthlyProjectionDetailBtn = document.getElementById('monthlyProjectionDetailBtn');
   if(monthlyProjectionDetailBtn) monthlyProjectionDetailBtn.addEventListener('click', ()=>renderMonthlyProjectionExplainerModal(monthlyProjection));
   const costPerKmTrendDetailBtn = document.getElementById('costPerKmTrendDetailBtn');
@@ -20253,6 +20327,9 @@ function renderPerVehicleResultsPage(from, to, preserveScroll){
   const sumFixed = perVehicle.reduce((s,pv)=>s+pv.r.fixedCost,0);
   const sumNetBeforeShared = perVehicle.reduce((s,pv)=>s+pv.r.netProfit,0);
   const totalNetProfit = sumNetBeforeShared - sharedCost;
+  // #367 — điểm hoà vốn CẢ CÔNG TY: cố định = mọi xe + phần chung; lãi gộp/chuyến = tổng lãi gộp ÷ tổng chuyến.
+  const sumTrips = perVehicle.reduce((s,pv)=>s+(pv.r.totalTrips||0),0);
+  const companyBE = unifiedBreakEven(sumRevenue, sumTrips, sumFixed + sharedCost, sumRevenue - sumGross);
   // Đối chiếu chéo — PHẢI khớp tuyệt đối với computeCumulativeAccrualProfit()
   const companyWide = computeCumulativeAccrualProfit(to, from);
   const matches = Math.abs(totalNetProfit - companyWide.netProfit) < 1;
@@ -20327,9 +20404,34 @@ function renderPerVehicleResultsPage(from, to, preserveScroll){
         </table>
       </div>
       <div class="hint" style="margin-top:8px; color:${matches?'var(--profit)':'var(--loss)'}; font-weight:${matches?'400':'700'};">${matches ? '✅ Đã tự đối chiếu — khớp tuyệt đối với số ở "Hiệu Quả Đầu Tư".' : '⚠️ LỆCH với số ở "Hiệu Quả Đầu Tư" ('+fmtVND(companyWide.netProfit)+') — báo lại ngay cho tao kiểm tra.'}</div>
+      <div class="grid-table-wrap" style="margin-top:12px;">
+        <table class="grid-table">
+          <thead><tr><th style="text-align:left;">⚖️ Điểm hoà vốn CẢ CÔNG TY trong kỳ</th><th class="num">Số</th></tr></thead>
+          <tbody>
+            <tr><td>Tổng chi phí CỐ ĐỊNH = mọi xe ${fmtVND(sumFixed)} + chung công ty ${fmtVND(sharedCost)} <button class="link-btn" id="pvFixedDetailBtn" style="padding:0 0 0 4px; font-weight:700;">🔍 Chi tiết</button></td><td class="num">${fmtVND(companyBE.fixed)}</td></tr>
+            <tr><td>Tổng chi phí BIẾN ĐỔI (mọi xe) <button class="link-btn" id="pvVariableDetailBtn" style="padding:0 0 0 4px; font-weight:700;">🔍 Chi tiết</button></td><td class="num">${fmtVND(companyBE.variable)}</td></tr>
+            ${companyBE.ok ? `
+            <tr><td>Lãi gộp bình quân mỗi chuyến = ${fmtVND(companyBE.gross)} / ${companyBE.trips.toLocaleString('vi-VN')}</td><td class="num">${fmtVND(companyBE.margin)}</td></tr>
+            <tr><td><strong>Số chuyến hoà vốn cả công ty</strong> = ${fmtVND(companyBE.fixed)} / ${fmtVND(companyBE.margin)}</td><td class="num"><strong>${companyBE.breakEvenTrips.toLocaleString('vi-VN')}</strong></td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">Thực tế đã chạy (mọi xe) ${companyBE.trips>=companyBE.breakEvenTrips ? '' : `<span style="color:var(--loss); font-weight:700;">(thiếu ${(companyBE.breakEvenTrips-companyBE.trips).toLocaleString('vi-VN')} chuyến)</span>`}</td><td class="num" style="color:var(--profit);">${companyBE.trips.toLocaleString('vi-VN')}</td></tr>
+            ` : `<tr><td colspan="2" class="hint">${escapeHtml(companyBE.note)}</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">Cùng 1 cách tính ở mọi nơi: số chuyến hoà vốn = chi phí cố định ÷ lãi gộp bình quân mỗi chuyến. Từng xe dùng chi phí của riêng xe; cả công ty cộng thêm nhà, điện nước.</div>
     </section>
   `;
   document.getElementById('perVehicleBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
+  { // #367 — 🔍 trang kẻ ô: mỗi xe 1 cột, phần chung 1 cột
+    const pvBack = ()=>{ renderPerVehicleResultsPage(from, to, true); restoreMainScroll(); };
+    const pvSub = `🏢 Toàn công ty · ${formatDateVN(from)} → ${formatDateVN(to)}`;
+    const vehCols = key => perVehicle.map(pv=>({ name: pv.vehicle.name||pv.vehicle.plate||'Xe', parts: pv.r[key]||[] }));
+    document.getElementById('pvFixedDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCostPartsDetailPage({ title:'🔍 Chi Phí Cố Định Trong Kỳ', subtitle: pvSub,
+      columns: vehCols('fixedParts').concat([{ name:'Chung công ty', parts:[['Nhà', houseRentForRange(from, to)], ['Điện nước', utilitiesForRange(from, to)]].filter(x=>Math.abs(x[1])>0.5) }]),
+      totalLabel:'Tổng chi phí cố định', footHtml:'Mỗi xe 1 cột chi phí của riêng xe; cột "Chung công ty" là khoản không thuộc xe nào.', onBack: pvBack }); });
+    document.getElementById('pvVariableDetailBtn').addEventListener('click', ()=>{ saveMainScroll(); renderCostPartsDetailPage({ title:'🔍 Chi Phí Biến Đổi Trong Kỳ', subtitle: pvSub,
+      columns: vehCols('variableParts'), totalLabel:'Tổng chi phí biến đổi', footHtml:'Doanh thu − tổng chi phí biến đổi = Lợi nhuận gộp của từng xe.', onBack: pvBack }); });
+  }
   document.getElementById('pvApplyBtn').addEventListener('click', ()=>{
     const f = document.getElementById('pvFrom').value;
     const t = document.getElementById('pvTo').value;
@@ -21417,6 +21519,7 @@ function renderCompanyDashboardPage(preserveScroll){
           </tbody>
         </table>
       </div>
+      <button class="btn btn-ghost btn-sm" id="dashVatDetailBtn" style="width:auto; padding:8px 14px; margin:0 0 8px;">🔍 Chi tiết VAT từng tháng</button>
       <div class="hint" style="margin:0 0 10px;">VAT phát sinh = VAT bán ra − VAT hoá đơn mỏ − VAT hoá đơn thương mại đã dùng, tính trên từng công trình thương mại. CHƯA gồm VAT bán ra của chở cước và VAT đầu vào khác (dầu, sửa chữa...) — số chính thức theo tờ khai của kế toán. Xem cách tính theo từng kỳ: tab Kết Quả → "🔍 Chi Tiết Cách Tính VAT".</div>`;
       })()}
       <button class="btn btn-ghost btn-block" id="openVatPaymentsBtn">🧾 Xem / Ghi Nhận Đã Nộp Thuế VAT</button>
@@ -21637,6 +21740,7 @@ function renderCompanyDashboardPage(preserveScroll){
   const addLoanBtn = document.getElementById('addLoanBtn');
   if(addLoanBtn) addLoanBtn.addEventListener('click', ()=>openLoanEditor(null));
   document.getElementById('openVatPaymentsBtn').addEventListener('click', ()=>{ saveMainScroll(); renderVatPaymentListPage(); });
+  { const dv = document.getElementById('dashVatDetailBtn'); if(dv) dv.addEventListener('click', ()=>{ saveMainScroll(); renderCompanyVatDetailPage(()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); }); }); }
   // #351 (Ông Chủ yêu cầu) — đổi xe NGAY trong khung "Phần riêng từng xe", giữ nguyên vị trí cuộn.
   document.querySelectorAll('.dash-veh-switch').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
