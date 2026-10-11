@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #369';
+const APP_BUILD = '2026-10-11 · #370';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -10993,11 +10993,25 @@ function shiftFinancialSummaryHtml(sh){
     sum + (s.siteType==='commercial' ? siteCashTakeHome(s) : siteRevenue(s)), 0);
   const cashPocketTotal = cashPocketBySite - shiftOperatingCashCostReal(sh);
   return `
-    <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
-    ${(()=>{ const fv = (sh.siteLogs||[]).reduce((a,st)=>a+siteFreightOutputVat(st),0); if(!(fv>0.5)) return '';
+    ${(()=>{
+      // #370 (Ông Chủ yêu cầu) — ca chở cước có VAT: đọc từ trên xuống đúng thứ tự tiền:
+      // Khách cước phải trả (cả VAT) − VAT phải nộp nhà nước = Tổng doanh thu. Chỉ đổi thứ tự hiển thị.
+      const fv = (sh.siteLogs||[]).reduce((a,st)=>a+siteFreightOutputVat(st),0);
+      const revRow = label => `<div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>${label}</span><span class="val">${fmtVND(revenue)}</span></div>`;
+      if(!(fv>0.5)) return revRow('Tổng doanh thu');
       const billed = (sh.siteLogs||[]).filter(st=>st.siteType!=='commercial').reduce((a,st)=>a+siteBilledAmount(st),0);
-      return `<div class="summary-row"><span>+ VAT chở cước thu hộ nhà nước (không tính vào doanh thu)</span><span class="val" style="color:var(--loss);">${fmtVND(fv)}</span></div>
-    <div class="summary-row"><span>= Khách cước phải trả (gồm VAT)</span><span class="val">${fmtVND(billed)}</span></div>`; })()}
+      const hasCommercial = (sh.siteLogs||[]).some(st=>st.siteType==='commercial');
+      if(hasCommercial){
+        // Ca vừa chở cước vừa thương mại: doanh thu gồm cả 2 mảng nên giữ Tổng doanh thu ở trên, phần cước ghi kèm bên dưới.
+        return revRow('Tổng doanh thu') + `
+    <div class="summary-row"><span>Riêng chở cước: khách phải trả (cả VAT)</span><span class="val">${fmtVND(billed)}</span></div>
+    <div class="summary-row"><span>− VAT phải nộp nhà nước</span><span class="val" style="color:var(--loss);">${fmtVND(fv)}</span></div>`;
+      }
+      return `
+    <div class="summary-row"><span>Khách cước phải trả (cả VAT)</span><span class="val">${fmtVND(billed)}</span></div>
+    <div class="summary-row"><span>− VAT phải nộp nhà nước</span><span class="val" style="color:var(--loss);">${fmtVND(fv)}</span></div>
+    <div class="formula-divider" style="margin:8px 0;"></div>` + revRow('= Tổng doanh thu');
+    })()}
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${hasCommercialCost ? `
     ${buyRelatedItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
