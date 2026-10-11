@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #367';
+const APP_BUILD = '2026-10-11 · #368';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3697,7 +3697,7 @@ function commercialVatPayableByMonthCompanyWide(){
   const payableByMonth = {};
   shiftsCompanyWideSafe().forEach(sh=>{
     const ym = (sh.date||'').slice(0,7);
-    const v = (sh.siteLogs||[]).reduce((s2,site)=>s2+commercialVatPayable(site),0);
+    const v = (sh.siteLogs||[]).reduce((s2,site)=>s2+siteOutputVatPayable(site),0); // #368 — gồm cả VAT cước
     if(v) payableByMonth[ym] = (payableByMonth[ym]||0) + v;
   });
   return payableByMonth;
@@ -7430,6 +7430,13 @@ function renderCostPartsDetailPage(opts){
 }
 /// #367 — VAT bán ra của CHỞ CƯỚC theo từng công trình (CHỈ để hiển thị; chưa nằm trong "VAT phải nộp" của app).
 /// Giá đã gồm VAT: tách từ giá gộp. Giá chưa VAT: chỉ tính khi có nhập thuế suất riêng trên công trình.
+/// #368 (Ông Chủ yêu cầu 2026-10-11 — "VAT cước là tiền phải nộp nhà nước, phải bóc rõ"):
+/// VAT phải nộp của 1 công trình, BẤT KỂ loại: thương mại = commercialVatPayable() như cũ;
+/// chở cước = VAT bán ra của cước. Mọi chỗ cộng "VAT phải nộp" (tab Kết Quả, bảng VAT công ty,
+/// lịch khấu trừ VAT mua xe) dùng chung hàm này.
+function siteOutputVatPayable(s){
+  return s.siteType==='commercial' ? commercialVatPayable(s) : siteFreightOutputVat(s);
+}
 function siteFreightOutputVat(s){
   if(s.siteType==='commercial') return 0;
   const gross = siteFreightGross(s);
@@ -7452,9 +7459,9 @@ function renderCompanyVatDetailPage(onBack){
     const freightVat = (byMonth[ym]||[]).reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,s)=>x+siteFreightOutputVat(s),0),0);
     const truck = (sched.usedByMonth||{})[ym]||0;
     const paid = paidByMonth[ym]||0;
-    const due = b.totalPayableClamped - truck - paid;
+    const due = b.totalPayableClamped + freightVat - truck - paid; // #368 — VAT cước đã vào VAT phải nộp
     running += due;
-    return { ym, out: b.totalOutputRaw, inMine: b.totalInputRaw, inLot: b.totalSupplementCredit, payable: b.totalPayableClamped, truck, paid, due, running, freightVat };
+    return { ym, out: b.totalOutputRaw, inMine: b.totalInputRaw, inLot: b.totalSupplementCredit, payable: b.totalPayableClamped, totalPayable: b.totalPayableClamped + freightVat, truck, paid, due, running, freightVat };
   });
   const T = k => rows.reduce((a,r)=>a+r[k],0);
   const m = n => Math.abs(n)<0.5 ? '<span style="color:var(--ink-soft);">—</span>' : (n<0?'−':'')+fmtVND(Math.abs(n));
@@ -7480,30 +7487,30 @@ function renderCompanyVatDetailPage(onBack){
       <div class="hint" style="margin-top:6px;">"VAT phải nộp" tính trên TỪNG công trình rồi cộng lại; công trình nào ra âm thì tính là 0, nên có tháng cột cuối lớn hơn (bán ra − hai cột trừ).</div>
     </section>
     <section class="group">
-      <h3>② Khấu Trừ & Nộp</h3>
+      <h3>② VAT Của Chở Cước</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Tháng</th><th class="num">VAT<br>Phải Nộp</th><th class="num">− Khấu Trừ<br>VAT Mua Xe</th><th class="num">− Đã Nộp<br>Nhà Nước</th><th class="num">= Còn Lại<br>Của Tháng</th><th class="num">Luỹ Kế<br>Còn Phải Nộp</th></tr></thead>
+          <thead><tr><th>Tháng</th><th class="num">VAT Cước<br>Phải Nộp</th></tr></thead>
           <tbody>
-            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.payable)}</td><td class="num">${m(r.truck)}</td><td class="num">${m(r.paid)}</td><td class="num">${m(r.due)}</td><td class="num" style="font-weight:800; color:${r.running>0.5?'var(--loss)':'var(--profit)'};">${m(r.running)}</td></tr>`).join('')}
-            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('payable'))}</td><td class="num">${fmtVND(T('truck'))}</td><td class="num">${fmtVND(T('paid'))}</td><td class="num">${m(T('due'))}</td><td class="num">${m(running)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="hint" style="margin-top:6px;">VAT mua xe công ty: tổng ${fmtVND(sched.total)} · đã khấu trừ ${fmtVND(sched.used)} · còn chờ khấu trừ ${fmtVND(sched.remaining)}.</div>
-    </section>
-    <section class="group">
-      <h3>③ VAT Bán Ra Của Chở Cước (Để Đối Chiếu — CHƯA Cộng Vào ①②)</h3>
-      <div class="grid-table-wrap">
-        <table class="grid-table">
-          <thead><tr><th>Tháng</th><th class="num">VAT Cước</th></tr></thead>
-          <tbody>
-            ${rows.filter(r=>r.freightVat>0.5).map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${fmtVND(r.freightVat)}</td></tr>`).join('') || '<tr><td colspan="2" class="hint">Chưa có ca chở cước nào có VAT.</td></tr>'}
+            ${rows.filter(r=>r.freightVat>0.5).map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num" style="font-weight:800;">${fmtVND(r.freightVat)}</td></tr>`).join('') || '<tr><td colspan="2" class="hint">Chưa có ca chở cước nào có VAT.</td></tr>'}
             <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('freightVat'))}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">Tính từ từng công trình cước: giá đã gồm VAT thì tách ra; giá chưa VAT thì chỉ tính khi có nhập "Thuế suất VAT cước". Số này cũng là VAT phải kê khai, nhưng app CHƯA cộng vào ① ②. App cũng chưa trừ VAT đầu vào của dầu, sửa chữa. Số chính thức theo tờ khai của kế toán.</div>
+      <div class="hint" style="margin-top:6px;">Tính từ từng công trình cước: giá đã gồm VAT thì tách ra; giá chưa VAT thì giá × "Thuế suất VAT cước" đã điền trên ca (không điền thì không tính).</div>
+    </section>
+    <section class="group">
+      <h3>③ Tổng Hợp: Phải Nộp − Khấu Trừ − Đã Nộp</h3>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th>Tháng</th><th class="num">VAT Phải Nộp<br>(① + ②)</th><th class="num">− Khấu Trừ<br>VAT Mua Xe</th><th class="num">− Đã Nộp<br>Nhà Nước</th><th class="num">= Còn Lại<br>Của Tháng</th><th class="num">Luỹ Kế<br>Còn Phải Nộp</th></tr></thead>
+          <tbody>
+            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.totalPayable)}</td><td class="num">${m(r.truck)}</td><td class="num">${m(r.paid)}</td><td class="num">${m(r.due)}</td><td class="num" style="font-weight:800; color:${r.running>0.5?'var(--loss)':'var(--profit)'};">${m(r.running)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('totalPayable'))}</td><td class="num">${fmtVND(T('truck'))}</td><td class="num">${fmtVND(T('paid'))}</td><td class="num">${m(T('due'))}</td><td class="num">${m(running)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">VAT mua xe công ty: tổng ${fmtVND(sched.total)} · đã khấu trừ ${fmtVND(sched.used)} · còn chờ khấu trừ ${fmtVND(sched.remaining)}. Cột luỹ kế âm = đã nộp dư. App chưa trừ VAT đầu vào của dầu, sửa chữa — số chính thức theo tờ khai của kế toán.</div>
     </section>
   `;
   document.getElementById('vatd_backBtn').addEventListener('click', onBack);
@@ -8571,13 +8578,13 @@ function siteCashTakeHome(s){
 /// đúng phần VAT mỗi khi giá đã gồm VAT — sửa lại cho đúng tại đây.
 function siteBilledAmount(s){
   if(s.siteType==='commercial') return commercialCashFromCustomer(s);
-  // Chở cước: số khách phải trả LUÔN đúng bằng số đã nhập (khối lượng ×
-  // đơn giá × số chuyến) — cờ "giá đã gồm VAT" chỉ ảnh hưởng cách tính
-  // "Doanh thu" cho P&L nội bộ (bóc VAT ra để báo cáo), KHÔNG có nghĩa là
-  // cộng thêm VAT lên số đã thu/phải thu của khách. Không được tự cộng
-  // thêm VAT ở đây — làm vậy sẽ khiến đối tác cũ ĐÃ TRẢ ĐỦ tự dưng hiện
-  // còn nợ đúng phần VAT đó.
-  return siteFreightGross(s);
+  // Chở cước: số khách phải trả = số đã nhập (khối lượng × đơn giá × số chuyến). Cờ "giá đã gồm VAT"
+  // chỉ ảnh hưởng cách tính "Doanh thu" (bóc VAT ra), không cộng thêm gì.
+  // #368 (Ông Chủ duyệt): riêng trường hợp nhập "Giá cước CHƯA VAT" VÀ có điền "Thuế suất VAT cước"
+  // thì khách phải trả thêm đúng phần VAT đó. Ca cũ không điền thuế suất → giữ nguyên số cũ, nên
+  // đối tác cũ đã trả đủ không tự dưng hiện còn nợ.
+  const gross = siteFreightGross(s);
+  return s.priceIncludesVat ? gross : gross + siteFreightOutputVat(s);
 }
 function commercialCashFromCustomer(s){
   const entered = commercialGrossSell(s);
@@ -10880,11 +10887,16 @@ function periodVatBreakdown(inRangeShifts){
 }
 function renderPeriodVatDetailModal(inRangeShifts, vatPayableInRange){
   const b = periodVatBreakdown(inRangeShifts);
+  // #368 — VAT của chở cước, gom theo công trình
+  const freightMap = {};
+  inRangeShifts.forEach(sh=>(sh.siteLogs||[]).forEach(st=>{ const v = siteFreightOutputVat(st); if(v>0.5){ const k = st.siteName||'(chưa đặt tên)'; if(!freightMap[k]) freightMap[k] = { name:k, vat:0, sites:0 }; freightMap[k].vat += v; freightMap[k].sites += 1; } }));
+  const freightRows = Object.values(freightMap).sort((x,y)=>y.vat-x.vat);
+  const freightVatTotal = freightRows.reduce((a,r)=>a+r.vat,0);
   const rowHtml = r=>`<div class="summary-row"><span>${escapeHtml(r.name)} <span style="color:var(--ink-soft); font-size:11px;">(${r.sites} công trình)</span></span><span class="val">${fmtVND(r.vat)}</span></div>`;
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
     <h3>🧾 VAT Phải Nộp — Giải Trình Chi Tiết</h3>
-    <div class="hint" style="margin-bottom:10px;">Cộng dồn đúng từng công trình thương mại trong kỳ đang xem — số liệu lấy trực tiếp từ đúng hàm đang chạy thật (commercialVatPayable), không tính lại theo cách khác.</div>
+    <div class="hint" style="margin-bottom:10px;">Gồm 2 mảng: THƯƠNG MẠI (bước 1–4) và CHỞ CƯỚC (bước 5). Cộng dồn đúng từng công trình trong kỳ đang xem — số liệu lấy trực tiếp từ đúng hàm đang chạy thật (commercialVatPayable), không tính lại theo cách khác.</div>
 
     <div class="modal-step">
       <div class="st-title">1. VAT đã thu từ khách hàng (đầu ra) — theo từng khách</div>
@@ -10910,11 +10922,20 @@ function renderPeriodVatDetailModal(inRangeShifts, vatPayableInRange){
       <div class="st-body">Mỗi công trình tính riêng rồi mới cộng lại (không gộp trước) — nếu 1 công trình tự nó bị âm (khấu trừ nhiều hơn phải nộp) thì phần âm đó bị kẹp về 0 cho đúng công trình đó (luật không cho bù chéo sang công trình khác, cũng không tự hoàn thuế).</div>
       <div class="st-formula">VAT đầu ra − VAT đầu vào − Hoá đơn bù = ${fmtVND(b.totalOutputRaw)} − ${fmtVND(b.totalInputRaw)} − ${fmtVND(b.totalSupplementCredit)} = ${fmtVND(b.totalPayableRaw)}${b.totalLostCredit>0.5?`
 + Khấu trừ dư bị mất (công trình lẻ âm VAT, không được bù chéo) = ${fmtVND(b.totalLostCredit)}`:''}
+= VAT PHẢI NỘP MẢNG THƯƠNG MẠI = ${fmtVND(b.totalPayableClamped)}</div>
+    </div>
+
+    <div class="modal-step">
+      <div class="st-title">5. VAT của CHỞ CƯỚC — theo từng công trình</div>
+      <div class="st-body">Giá cước đã gồm VAT: tách VAT ra từ giá. Giá cước chưa VAT: giá × thuế suất VAT cước đã điền trên ca (không điền thuế suất thì không tính).</div>
+      ${freightRows.length===0?'<div class="hint">Chưa có công trình cước nào có VAT trong kỳ.</div>':freightRows.map(rowHtml).join('')}
+      <div class="summary-row total"><span>Tổng VAT chở cước</span><span class="val">${fmtVND(freightVatTotal)}</span></div>
+      <div class="st-formula">VAT thương mại + VAT chở cước = ${fmtVND(b.totalPayableClamped)} + ${fmtVND(freightVatTotal)}
 = VAT PHẢI NỘP THỰC TẾ = ${fmtVND(vatPayableInRange)}</div>
     </div>
 
     <div class="modal-step">
-      <div class="st-title">5. Còn phải nộp cho ai</div>
+      <div class="st-title">6. Còn phải nộp cho ai</div>
       <div class="st-body">Toàn bộ <b>${fmtVND(vatPayableInRange)}</b> là nghĩa vụ còn phải nộp cho <b>NHÀ NƯỚC (Cơ Quan Thuế)</b> — không phải nộp cho khách hàng hay nhà cung cấp nào cả. Phần VAT đã trả cho nhà cung cấp ở mục 2 đã được khấu trừ ngay trong phép tính trên rồi, không phải trả/nộp thêm lần nữa.</div>
     </div>
   `);
@@ -10973,6 +10994,10 @@ function shiftFinancialSummaryHtml(sh){
   const cashPocketTotal = cashPocketBySite - shiftOperatingCashCostReal(sh);
   return `
     <div class="summary-row" style="font-weight:800; font-size:15.5px;"><span>Tổng doanh thu</span><span class="val">${fmtVND(revenue)}</span></div>
+    ${(()=>{ const fv = (sh.siteLogs||[]).reduce((a,st)=>a+siteFreightOutputVat(st),0); if(!(fv>0.5)) return '';
+      const billed = (sh.siteLogs||[]).filter(st=>st.siteType!=='commercial').reduce((a,st)=>a+siteBilledAmount(st),0);
+      return `<div class="summary-row"><span>+ VAT chở cước thu hộ nhà nước (không tính vào doanh thu)</span><span class="val" style="color:var(--loss);">${fmtVND(fv)}</span></div>
+    <div class="summary-row"><span>= Khách cước phải trả (gồm VAT)</span><span class="val">${fmtVND(billed)}</span></div>`; })()}
     <div class="formula-divider" style="margin:8px 0;"></div>
     ${hasCommercialCost ? `
     ${buyRelatedItems.filter(it=>it.value>0).map(it=>`<div class="summary-row"><span>− ${it.label}</span><span class="val">${fmtVND(it.value)}</span></div>`).join('')}
@@ -16454,7 +16479,7 @@ function computePeriodSummary(from, to){
   const saleGain = saleGainInRange(from, to, vidScope); // #320 — lãi/lỗ bán xe
   const periodExtraCost = driverBonusCost + driverExpenseReportCost - repairDriverRecovery - saleGain;
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly + invoiceSupplementVatCredit - periodExtraCost;
-  const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+commercialVatPayable(site),0),0);
+  const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+siteOutputVatPayable(site),0),0); // #368 — gồm cả VAT cước
   const citPeriodKey = `${from}_${to}`;
   const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey] || 0;
   const cashIn = sitePaymentsTotalInRange(from, to);
@@ -16704,7 +16729,7 @@ function renderResults(){
 
   const repairsHere = repairsInRange(from, to);
   const repairTotal = periodSummary.repairTotal;
-  const roadFee = state.resultsRoadFeeOverride!==null ? state.resultsRoadFeeOverride : periodSummary.roadFee;
+  const roadFee = periodSummary.roadFee; // #368 — bỏ ô gõ đè luật đường (đã có bảng 🔍 Chi tiết CP cố định); luôn lấy số ở bảng Tiền Luật Đường Theo Tháng
   // Tiền Thuê Nhà + Điện Nước (2026-08-31) — CHUNG CÔNG TY, không có cơ
   // chế ghi đè riêng theo màn hình như roadFee, nên lấy thẳng từ
   // periodSummary không cần tính lại.
@@ -16915,6 +16940,7 @@ function renderResults(){
       <div class="card" style="margin-top:14px;">
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">🧾 CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
+        ${(()=>{ const fv = inRange.reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,st)=>x+siteFreightOutputVat(st),0),0); return `<div class="hint" style="margin:0 0 4px;">= VAT thương mại ${fmtVND(vatPayableInRange-fv)} + VAT chở cước ${fmtVND(fv)}. Đây là tiền thu hộ nhà nước, không nằm trong doanh thu hay lợi nhuận.</div>`; })()}
         <button class="btn btn-ghost btn-sm" id="vatDetailBtn" style="margin:2px 0 6px;">🔍 Chi Tiết Cách Tính VAT</button>
         <button class="btn btn-ghost btn-sm" id="vatCompanyDetailBtn" style="margin:2px 0 6px;">🔍 Bảng VAT Cả Công Ty Theo Tháng</button>
         <div class="field" style="margin-top:8px; margin-bottom:0;">
@@ -16958,13 +16984,6 @@ function renderResults(){
         </div>
         ` : ''}
 
-      <div class="card" style="margin-top:14px;">
-        <div class="field" style="margin-bottom:0;">
-          <label>Chi phí luật đường trong kỳ này (sửa nếu kỳ không đủ 1 tháng)</label>
-          <input type="text" inputmode="decimal" id="res_roadFee">
-          ${state.resultsRoadFeeOverride!==null ? `<div class="hint" style="margin-top:6px; color:var(--loss);">⚠️ Đang HIỂN THỊ SỐ TỰ GÕ TAY ở trên, không tự cập nhật theo Luật Đường thật đã sửa ở Linh Chí Thành nữa, cho tới khi bấm nút dưới đây. <button class="link-btn" id="res_roadFeeResetBtn" style="padding:0; margin-left:2px;">↺ Dùng lại số tự động (${fmtVND(periodSummary.roadFee)})</button></div>` : ''}
-        </div>
-      </div>
     </section>
 
     <section class="group">
@@ -17169,19 +17188,6 @@ function renderResults(){
     </section>` : ''}
   `;
 
-  // SỬA 2026-09-20 (Ông Chủ báo — gõ số vào ô này "bị văng ra": TÌM RA
-  // ĐÚNG GỐC RỄ): trước đây callback này gọi renderResults() (vẽ lại
-  // TOÀN BỘ trang Kết Quả, trang rất dài) ngay mỗi lần gõ 1 KÝ TỰ — input
-  // vừa gõ bị THAY BẰNG 1 <input> HOÀN TOÀN MỚI mỗi ký tự, mất focus/con
-  // trỏ ngay lập tức, đúng cảm giác "bị văng ra" dù không hề đổi màn
-  // hình. Tách làm 2: gõ chữ chỉ lưu vào state (rẻ, không vẽ lại gì) —
-  // đợi rời khỏi ô (sự kiện change) mới thật sự tính lại + vẽ lại trang.
-  attachMoneyInput(document.getElementById('res_roadFee'), roadFee, v=>{
-    state.resultsRoadFeeOverride = v;
-  });
-  document.getElementById('res_roadFee').addEventListener('change', ()=>{ renderResults(); });
-  const res_roadFeeResetBtn = document.getElementById('res_roadFeeResetBtn');
-  if(res_roadFeeResetBtn) res_roadFeeResetBtn.addEventListener('click', ()=>{ state.resultsRoadFeeOverride=null; renderResults(); });
   attachMoneyInput(document.getElementById('res_manualCit'), manualCitValue||0, async v=>{
     if(!state.settings.manualCitByPeriod) state.settings.manualCitByPeriod = {};
     state.settings.manualCitByPeriod[citPeriodKey] = v;
@@ -20583,6 +20589,106 @@ const ADDON_ITEM_SUGGESTIONS = ['Lệ phí trước bạ','Đăng ký + biển s
 // #344 — ghi rõ nguồn nào TRỪ quỹ nào (trước đó chữ "tiền mặt" nằm ở mục tiền túi riêng nên dễ chọn nhầm, quỹ tiền mặt không bị trừ).
 // #345 (Ông Chủ yêu cầu) — hạng mục kèm chỉ còn ĐÚNG 2 nguồn: TCB và Tiền mặt. Tiền túi riêng muốn dùng thì ghi "Góp vốn" vào 1 trong 2 quỹ trước.
 const ADDON_FUNDING_LABELS = { companyBank:'🏦 TCB công ty — trừ số dư TCB', companyCash:'💵 Tiền mặt công ty — trừ quỹ tiền mặt' };
+/// #368 (Ông Chủ yêu cầu 2026-10-11) — THÊM LẦN ĐẦU TƯ: nhập NHIỀU hạng mục kèm theo xe trong 1 lần,
+/// mỗi dòng tự gõ tay tên hạng mục + số tiền + VAT (nếu có hoá đơn) + nguồn trả. Mỗi dòng lưu thành 1 lần
+/// đầu tư kiểu "hạng mục kèm" (kind:'addon') đúng khuôn dữ liệu sẵn có — không sửa hàm tính nào.
+function openInvestmentBatchEditor(opts){
+  opts = opts || {};
+  const goBack = opts.onBack || (()=>{ if(state.showCompanyDashboard) renderCompanyDashboardPage(true); else renderAll(); restoreMainScroll(); });
+  if(!opts.onBack) saveMainScroll();
+  const vehicles = state.vehicles||[];
+  const head = { date: todayLocalDateStr(), vehicleId: opts.vehicleId || activeVehicleIdForEditing() || (vehicles.length===1 ? vehicles[0].id : '') };
+  const rows = [];
+  const newRow = ()=>({ key: 'r'+Math.random().toString(36).slice(2,8), name:'', amount:0, vat:0, source:'companyBank' });
+  rows.push(newRow());
+  scrollMainToTop();
+  const paint = ()=>{
+    document.getElementById('app').innerHTML = `
+      <section class="group"><button class="btn btn-ghost btn-sm" id="ib_backBtn">← Quay Lại</button></section>
+      <section class="group"><div class="card">
+        <h3 style="margin-top:0;">➕ Thêm Lần Đầu Tư — Hạng Mục Kèm Theo Xe</h3>
+        <div class="hint" style="margin-top:0; margin-bottom:10px;">Liệt kê mọi khoản đã chi để xe đủ điều kiện hoạt động (thùng, đăng ký, lốp, định vị, phù hiệu...). Tên hạng mục tự gõ tay, mỗi khoản 1 dòng, thêm bao nhiêu dòng cũng được.</div>
+        <div class="two-col">
+          <div class="field"><label>Ngày chi</label><input type="date" id="ib_date" value="${head.date}"></div>
+          <div class="field"><label>Của xe nào</label>
+            <select id="ib_vehicle">
+              <option value="">— Chọn xe —</option>
+              ${vehicles.map(v=>`<option value="${v.id}" ${head.vehicleId===v.id?'selected':''}>🚛 ${escapeHtml(v.name||v.plate||'')}</option>`).join('')}
+            </select></div>
+        </div>
+        ${rows.map((r,i)=>`
+        <div class="site-card" style="border:1.5px dashed var(--line); border-radius:14px; padding:12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;"><strong>Hạng mục ${i+1}</strong>${rows.length>1?`<button class="link-btn ib-del" data-key="${r.key}" style="padding:0; color:var(--loss);">Xoá dòng</button>`:''}</div>
+          <div class="field"><label>Tên hạng mục (tự gõ)</label><input type="text" class="ib-name" data-key="${r.key}" value="${escapeHtml(r.name)}" placeholder="VD: Thùng + cabin, Phù hiệu, Bình dầu phụ..."></div>
+          <div class="two-col">
+            <div class="field"><label>Tổng tiền đã trả (gồm VAT nếu có)</label><input type="text" inputmode="decimal" class="ib-amount" data-key="${r.key}"></div>
+            <div class="field"><label>Trong đó tiền VAT (để trống = không có hoá đơn VAT)</label><input type="text" inputmode="decimal" class="ib-vat" data-key="${r.key}" placeholder="0"></div>
+          </div>
+          <div class="field" style="margin-bottom:0;"><label>Trả bằng nguồn nào</label>
+            <div class="seg ib-src" data-key="${r.key}">
+              <button type="button" data-val="companyBank" class="${r.source==='companyBank'?'active':''}">🏦 TCB</button>
+              <button type="button" data-val="companyCash" class="${r.source==='companyCash'?'active':''}">💵 Tiền Mặt</button>
+            </div>
+          </div>
+        </div>`).join('')}
+        <button class="btn btn-ghost btn-block" id="ib_addRow">+ Thêm 1 Hạng Mục Nữa</button>
+        <div class="hint" id="ib_total" style="margin-top:10px;"></div>
+        <div style="display:flex; gap:10px; margin-top:12px;">
+          <button class="btn btn-ghost" id="ib_cancelBtn">Huỷ</button>
+          <button class="btn btn-accent btn-block" id="ib_saveBtn">Lưu Tất Cả</button>
+        </div>
+      </div></section>
+      <section class="group"><button class="btn btn-ghost btn-block" id="ib_newVehicleBtn">🚛 Đây là tiền MUA 1 XE MỚI? Bấm vào đây</button></section>
+    `;
+    const $ = x=>document.getElementById(x);
+    const rowOf = k=>rows.find(r=>r.key===k);
+    const refreshTotal = ()=>{
+      const filled = rows.filter(r=>r.name.trim() || r.amount>0);
+      const tot = rows.reduce((a,r)=>a+(r.amount||0),0), vat = rows.reduce((a,r)=>a+(r.vat||0),0);
+      const bank = rows.filter(r=>r.source==='companyBank').reduce((a,r)=>a+(r.amount||0),0);
+      $('ib_total').innerHTML = `${filled.length} hạng mục · Tổng đã trả <strong>${fmtVND(tot)}</strong> (🏦 TCB ${fmtVND(bank)} · 💵 Tiền mặt ${fmtVND(tot-bank)})${vat>0?` · trong đó VAT ${fmtVND(vat)}`:''}.`;
+    };
+    $('ib_backBtn').addEventListener('click', goBack);
+    $('ib_cancelBtn').addEventListener('click', goBack);
+    $('ib_date').addEventListener('change', e=>{ head.date = e.target.value || head.date; });
+    $('ib_vehicle').addEventListener('change', e=>{ head.vehicleId = e.target.value; });
+    document.querySelectorAll('.ib-name').forEach(el=>el.addEventListener('input', ()=>{ rowOf(el.dataset.key).name = el.value; refreshTotal(); }));
+    document.querySelectorAll('.ib-amount').forEach(el=>attachMoneyInput(el, rowOf(el.dataset.key).amount, v=>{ rowOf(el.dataset.key).amount = v; refreshTotal(); }));
+    document.querySelectorAll('.ib-vat').forEach(el=>attachMoneyInput(el, rowOf(el.dataset.key).vat, v=>{ rowOf(el.dataset.key).vat = v; refreshTotal(); }));
+    document.querySelectorAll('.ib-src button').forEach(b=>b.addEventListener('click', ()=>{
+      rowOf(b.parentElement.dataset.key).source = b.dataset.val;
+      b.parentElement.querySelectorAll('button').forEach(x=>x.classList.toggle('active', x===b));
+      refreshTotal();
+    }));
+    document.querySelectorAll('.ib-del').forEach(b=>b.addEventListener('click', ()=>{ rows.splice(rows.findIndex(r=>r.key===b.dataset.key),1); paint(); }));
+    $('ib_addRow').addEventListener('click', ()=>{ rows.push(newRow()); paint(); });
+    $('ib_newVehicleBtn').addEventListener('click', ()=>openInvestmentEntryEditor(null, { onBack: goBack }));
+    $('ib_saveBtn').addEventListener('click', async ()=>{
+      const filled = rows.filter(r=>r.name.trim() || r.amount>0);
+      if(!head.vehicleId){ showToast('Chọn xe trước đã.'); return; }
+      if(!head.date){ showToast('Chọn ngày chi trước đã.'); return; }
+      if(!filled.length){ showToast('Nhập ít nhất 1 hạng mục.'); return; }
+      for(const r of filled){
+        if(!r.name.trim()){ showToast('Có hạng mục chưa gõ tên.'); return; }
+        if(!(r.amount>0)){ showToast(`Hạng mục "${r.name.trim()}" chưa có số tiền.`); return; }
+        if((r.vat||0)>=r.amount){ showToast(`Hạng mục "${r.name.trim()}": tiền VAT phải nhỏ hơn tổng tiền.`); return; }
+      }
+      try { await ensureLegacyInvestmentInList(); } catch(e){}
+      if(!Array.isArray(state.initialInvestmentEntries)) state.initialInvestmentEntries = [];
+      const before = state.initialInvestmentEntries.slice();
+      filled.forEach(r=>{
+        const vat = Math.max(0, r.vat||0);
+        state.initialInvestmentEntries.push({ id: uid('invest'), kind:'addon', date: head.date, vehicleId: head.vehicleId, note: r.name.trim(),
+          priceExVat: r.amount - vat, vatAmount: vat, extraCosts: 0, amount: r.amount, fundingSource: r.source });
+      });
+      if(!(await saveInitialInvestmentEntries())){ state.initialInvestmentEntries = before; return; }
+      showToast(`Đã thêm ${filled.length} hạng mục. Giá trị xe đã đổi — kiểm tra lại mục 3️⃣ Khấu hao.`);
+      goBack();
+    });
+    refreshTotal();
+  };
+  paint();
+}
 function openVehicleAddonEditor(id, opts){
   const existing = id ? investmentEntriesAll().find(e=>e.id===id) : null;
   opts = opts || {};
@@ -21421,7 +21527,7 @@ function renderCompanyDashboardPage(preserveScroll){
               </tbody>
             </table>
           </div>` : '<div class="hint" style="margin-bottom:8px;">Chưa có lần đầu tư nào — bấm "+ Thêm Lần Đầu Tư" bên dưới để bắt đầu.</div>'}
-          <button class="btn btn-accent btn-block" id="addInvestEntryBtn" style="margin-top:10px;">🚛➕ Thêm Lần Đầu Tư (Xe Mới)</button>
+          <button class="btn btn-accent btn-block" id="addInvestEntryBtn" style="margin-top:10px;">➕ Thêm Lần Đầu Tư</button>
           `;
         })()}
       </div>
@@ -21511,7 +21617,7 @@ function renderCompanyDashboardPage(preserveScroll){
         <table class="grid-table">
           <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>VAT phải nộp phát sinh tháng ${monthLabelVN(ymNow)} (thương mại, mọi xe)</td><td class="num">${fmtVND(payThisMonth)}</td></tr>
+            <tr><td>VAT phải nộp phát sinh tháng ${monthLabelVN(ymNow)} (thương mại + chở cước, mọi xe)</td><td class="num">${fmtVND(payThisMonth)}</td></tr>
             <tr><td>VAT phải nộp phát sinh luỹ kế từ đầu</td><td class="num" style="font-weight:800;">${fmtVND(payAllTime)}</td></tr>
             <tr><td>− Đã khấu trừ bằng VAT mua xe công ty</td><td class="num" style="color:var(--profit);">−${fmtVND(truckUsed)}</td></tr>
             <tr><td>− Đã nộp nhà nước (luỹ kế)<div class="hint" style="margin:2px 0 0;">Riêng tháng ${monthLabelVN(ymNow)}: ${fmtVND(vatThisMonth)}</div></td><td class="num" style="color:var(--profit);">−${fmtVND(vatAllTime)}</td></tr>
@@ -21520,7 +21626,7 @@ function renderCompanyDashboardPage(preserveScroll){
         </table>
       </div>
       <button class="btn btn-ghost btn-sm" id="dashVatDetailBtn" style="width:auto; padding:8px 14px; margin:0 0 8px;">🔍 Chi tiết VAT từng tháng</button>
-      <div class="hint" style="margin:0 0 10px;">VAT phát sinh = VAT bán ra − VAT hoá đơn mỏ − VAT hoá đơn thương mại đã dùng, tính trên từng công trình thương mại. CHƯA gồm VAT bán ra của chở cước và VAT đầu vào khác (dầu, sửa chữa...) — số chính thức theo tờ khai của kế toán. Xem cách tính theo từng kỳ: tab Kết Quả → "🔍 Chi Tiết Cách Tính VAT".</div>`;
+      <div class="hint" style="margin:0 0 10px;">VAT phát sinh = VAT mảng thương mại (bán ra − hoá đơn mỏ − HĐ thương mại đã dùng) + VAT bán ra của chở cước. CHƯA trừ VAT đầu vào khác (dầu, sửa chữa...) — số chính thức theo tờ khai của kế toán.</div>`;
       })()}
       <button class="btn btn-ghost btn-block" id="openVatPaymentsBtn">🧾 Xem / Ghi Nhận Đã Nộp Thuế VAT</button>
     </section>
@@ -21670,7 +21776,7 @@ function renderCompanyDashboardPage(preserveScroll){
   let oeAmountVal = 0;
   attachMoneyInput(document.getElementById('oe_amount'), 0, v=>oeAmountVal=v);
   const addInvestEntryBtn = document.getElementById('addInvestEntryBtn');
-  if(addInvestEntryBtn) addInvestEntryBtn.addEventListener('click', ()=>openInvestmentEntryEditor(null));
+  if(addInvestEntryBtn) addInvestEntryBtn.addEventListener('click', ()=>openInvestmentBatchEditor());
   document.querySelectorAll('.investEntryEditBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>openInvestmentEntryEditor(btn.dataset.id));
   });
