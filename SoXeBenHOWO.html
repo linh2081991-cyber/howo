@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-10 · #364';
+const APP_BUILD = '2026-10-11 · #365';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -18155,7 +18155,7 @@ function openSiteDetail(siteName, from, to, preserveScroll){
       <h3>👤 Tài Xế Chạy Công Trình Này</h3>
       <div class="card dash-wrap" style="padding:0;">
         <table class="dash">
-          <thead><tr><th>Tài Xế</th><th>Số Chuyến</th><th>Doanh Thu</th><th>Chi Phí</th></tr></thead>
+          <thead><tr><th>Tài Xế</th><th>Số Chuyến</th><th>Doanh Thu</th><th>Lương Chuyến</th></tr></thead>
           <tbody>
             ${driverRows.length===0 ? '<tr><td colspan="4">Chưa có dữ liệu</td></tr>' : driverRows.map(([name,d])=>`
               <tr><td>${escapeHtml(name)}</td><td>${d.trips}</td><td>${fmtVND(d.revenue)}</td><td>${fmtVND(d.cost)}</td></tr>
