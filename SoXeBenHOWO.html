@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #371';
+const APP_BUILD = '2026-10-11 · #372';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12393,35 +12393,134 @@ function aggregateStrategyData(from, to, scope){
 /// đủ), đúng yêu cầu "liệt kê tất cả, dữ liệu phải luôn theo cập nhật
 /// mới nhất". Vẫn ép trả JSON thuần để render thành card có tổ chức,
 /// không phải 1 khối chữ.
-function buildStrategyPrompt(summary){
-  return `Mày đang đóng vai 1 HỘI ĐỒNG 4 CHUYÊN GIA cùng tư vấn cho chủ 1 đội xe ben HOWO 4 chân tại Việt Nam, gồm:
-1. Chuyên gia điều hành doanh nghiệp Logistics — nhìn vận hành, hiệu suất tài xế, hiệu suất công trình.
-2. Chuyên gia thị trường vận tải — nhìn giá cước, xu hướng, cơ hội/rủi ro thị trường.
-3. Chuyên gia pháp lý / luật vận tải — nhìn giấy tờ, hạn đăng kiểm/đăng ký/phù hiệu, rủi ro pháp lý.
-4. Chuyên gia kế toán - tài chính — nhìn chi phí cố định, dòng tiền, cơ cấu lợi nhuận.
-
-Dưới đây là số liệu vận hành đã tổng hợp sẵn (đã tính chính xác bằng công thức kế toán của app, không cần tính lại), trong khoảng ${summary.periodDays} ngày, từ ${summary.from} đến ${summary.to} — đây là dữ liệu CẬP NHẬT MỚI NHẤT tính đến thời điểm phân tích:
-
-${JSON.stringify(summary, null, 2)}
-
-YÊU CẦU BẮT BUỘC: "siteAnalysis" phải có ĐỦ từng công trình xuất hiện trong summary.siteRanking (không được bỏ sót, không giới hạn số lượng, không chỉ chọn tốt nhất/tệ nhất) — summary.siteRanking chỉ gồm công trình ĐANG CÒN CHẠY (công trình đã quá 5 ngày không có ca nào đã được loại bỏ sẵn trước khi gửi cho Mày, nên không cần cân nhắc việc "ngừng chạy" nữa). "driverAnalysis" phải có ĐỦ từng tài xế xuất hiện trong summary.driverStats.
-
-Hãy phân tích và CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc dưới đây, không kèm lời giải thích, không dùng markdown:
-{
-  "siteAnalysis": [ { "siteName": "<đúng tên công trình trong siteRanking>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<nhận xét cụ thể theo số liệu, góc điều hành logistics>" } ],
-  "driverAnalysis": [ { "driverName": "<đúng tên tài xế trong driverStats>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<nhận xét hao dầu/km, số ca, hiệu suất>" } ],
-  "marketOutlook": { "note": "<góc nhìn chuyên gia thị trường: giá cước/chuyến hiện tại có hợp lý không, xu hướng, có nên tìm thêm công trình/đàm phán lại giá không>" },
-  "legalComplianceNotes": { "note": "<góc nhìn chuyên gia pháp lý dựa trên upcomingDocumentExpirations: giấy tờ nào cần gia hạn gấp, rủi ro gì nếu chậm trễ>" },
-  "financialStrategyNotes": { "note": "<góc nhìn chuyên gia kế toán dựa trên financialSnapshot + grossProfit: cơ cấu chi phí cố định có ổn không, đề xuất gì để cải thiện dòng tiền>" },
-  "maintenanceSuggestion": { "note": "<đề xuất bảo dưỡng dựa TRƯỚC HẾT vào summary.maintenanceScheduleStatus (mỗi hạng mục dầu/lốp/xích... đã có sẵn kmRemaining/predictedDueDate tính riêng — nêu rõ hạng mục nào sắp tới hạn), có thể tham khảo thêm summary.relevantRecentRepairs (đã lọc chỉ còn sửa chữa liên quan vận hành thực tế). TUYỆT ĐỐI không dùng khoản sửa chữa không liên quan bảo dưỡng vận hành (vd lắp còi hơi, trang trí...) làm căn cứ, kể cả khi đó là khoản mới nhất trong sổ.>" },
-  "generalInsights": [ "<nhận định tổng hợp 1 — tổng hoà cả 4 góc nhìn trên, cái nhìn tổng thể nhất>", "<nhận định tổng hợp 2>", "<nhận định tổng hợp 3>" ]
+/// ===== #372 (Ông Chủ yêu cầu 2026-10-11) — TRỢ LÝ CHIẾN LƯỢC đọc TOÀN CÔNG TY =====
+/// Trước đây AI chỉ nhận số của 1 xe đang chọn (vài chỉ số vận hành), nên nhận xét cụt và sai phạm vi.
+/// Nay gom đúng các số app ĐÃ TÍNH SẴN thành 1 bộ "báo cáo quản trị": kết quả kinh doanh cả công ty,
+/// từng xe (doanh thu, chi phí cố định/biến đổi bóc từng khoản, lợi nhuận, điểm hoà vốn), tiền & công nợ,
+/// VAT, công trình, tài xế. Hàm này CHỈ ĐỌC — không tính lại công thức nào.
+function buildCompanyStrategyData(from, to){
+  const R = n => Math.round(Number(n)||0);
+  const safe = (fn, dflt)=>{ try{ return fn(); }catch(e){ return dflt; } };
+  const base = aggregateStrategyData(from, to, 'all');
+  const vehicles = state.vehicles||[];
+  const allShifts = shiftsCompanyWideSafe().filter(sh=>sh.date>=from && sh.date<=to);
+  const sharedCost = houseRentForRange(from, to) + utilitiesForRange(from, to);
+  const pv = vehicles.map(v=>({ v, r: computeVehicleAccrualProfit(v.id, from, to) }));
+  const totalActive = pv.reduce((a,x)=>a+(x.r.activeShifts||0),0);
+  const partsObj = parts => { const o = {}; (parts||[]).forEach(p=>{ o[p[0]] = R(p[1]); }); return o; };
+  const tungXe = pv.map(({v,r})=>{
+    const st = settingsOfVehicle(v.id) || {};
+    const share = totalActive>0 ? (r.activeShifts||0)/totalActive : (pv.length ? 1/pv.length : 0);
+    const alloc = sharedCost*share;
+    const be = vehicleBreakEvenOf(r, alloc);
+    const sh = allShifts.filter(x=>x._vehicleId===v.id);
+    const km = sh.reduce((a,x)=>a+shiftOdoDriven(x),0), lit = sh.reduce((a,x)=>a+shiftFuelConsumed(x),0);
+    return {
+      tenXe: v.name||v.plate||'', dungTen: vehicleOwnershipOf(st)==='company' ? 'công ty' : 'cá nhân Ông Chủ (công ty thuê)',
+      laiChinh7NgayGanNhat: state.drivers.filter(d=>d.isActive!==false && driverMainVehicleId(d.id)===v.id).map(d=>d.name),
+      doanhThu: R(r.totalRevenue), chiPhiBienDoi: R(r.totalRevenue - r.grossProfit), laiGop: R(r.grossProfit),
+      chiPhiCoDinhRiengXe: R(r.fixedCost), loiNhuanRiengXe: R(r.netProfit),
+      chiTietChiPhiCoDinh: partsObj(r.fixedParts), chiTietChiPhiBienDoi: partsObj(r.variableParts),
+      soCaTrongKy: r.tripCount, soCaCoChuyen: r.activeShifts, soChuyen: r.totalTrips,
+      tongKm: R(km), dauTieuHaoLit: Math.round(lit*100)/100, litDauMoi100Km: km>0 ? Math.round(lit/km*1000)/10 : null,
+      doanhThuMoiChuyen: r.totalTrips>0 ? R(r.totalRevenue/r.totalTrips) : null,
+      laiGopMoiChuyen: be.ok ? R(be.margin) : null, loiNhuanRongMoiChuyen: r.totalTrips>0 ? R(r.netProfit/r.totalTrips) : null,
+      soChuyenHoaVonRiengXe: be.own, phanChiPhiChungPhanBoUocTinh: R(alloc), soChuyenHoaVonGomPhanChung: be.withShared,
+      thieuChuyenSoVoiHoaVonRiengXe: be.ok ? Math.max(0, be.own - be.trips) : null,
+      soCaChuaChotDauCuoiCa: (r.openShifts||[]).length
+    };
+  });
+  const S = k => tungXe.reduce((a,x)=>a+(Number(x[k])||0),0);
+  const cBE = unifiedBreakEven(S('doanhThu'), S('soChuyen'), S('chiPhiCoDinhRiengXe') + sharedCost, S('chiPhiBienDoi'));
+  // Cơ cấu doanh thu: chở cước / thương mại
+  let cuocDT = 0, cuocChuyen = 0, tmDT = 0, tmGiaVon = 0, tmChuyen = 0, vatCuoc = 0;
+  allShifts.forEach(sh=>(sh.siteLogs||[]).forEach(s=>{
+    if(s.siteType==='commercial'){ tmDT += siteRevenue(s); tmGiaVon += siteMaterialCost(s); tmChuyen += siteTripCount(s); }
+    else { cuocDT += siteRevenue(s); cuocChuyen += siteTripCount(s); vatCuoc += siteFreightOutputVat(s); }
+  }));
+  const bank = safe(()=>computeBankBalanceReconciliation(), null), cash = safe(()=>computeCashBalanceReconciliation(), null);
+  const debt = safe(()=>computeAllPartnersDebtSummary(), {});
+  const sched = safe(()=>truckVatCreditSchedule(), { total:0, used:0, remaining:0 });
+  const payByMonth = safe(()=>commercialVatPayableByMonthCompanyWide(), {});
+  const vatPaid = (state.vatPayments||[]).reduce((a,p)=>a+(Number(p.amount)||0),0);
+  const payAll = Object.values(payByMonth).reduce((a,b)=>a+b,0);
+  const partners = safe(()=>computePartnersOverview(), []).filter(p=>p.totalOwed>0.5)
+    .map(p=>({ doiTac: p.name, conNo: R(p.totalOwed), soNgayNoLauNhat: p.daysOutstanding===undefined ? null : p.daysOutstanding }));
+  return {
+    congTy: 'CT TNHH TM&VT Linh Chí Thành', kyBaoCao: { tuNgay: from, denNgay: to, soNgay: base.periodDays, ngayPhanTich: todayLocalDateStr() },
+    donViTien: 'VND', soXe: vehicles.length,
+    ketQuaToanCongTy: {
+      doanhThu: S('doanhThu'), chiPhiBienDoi: S('chiPhiBienDoi'), laiGop: S('laiGop'),
+      chiPhiCoDinhMoiXe: S('chiPhiCoDinhRiengXe'), chiPhiChungNhaDienNuoc: R(sharedCost),
+      loiNhuanThucTe: S('loiNhuanRiengXe') - R(sharedCost), bienLoiNhuanPhanTram: S('doanhThu')>0 ? Math.round((S('loiNhuanRiengXe') - sharedCost)/S('doanhThu')*1000)/10 : null,
+      tongChuyen: S('soChuyen'), laiGopMoiChuyen: cBE.ok ? R(cBE.margin) : null,
+      soChuyenHoaVonCaCongTy: cBE.breakEvenTrips, thieuChuyenSoVoiHoaVon: cBE.ok ? Math.max(0, cBE.breakEvenTrips - cBE.trips) : null
+    },
+    coCauDoanhThu: { choCuoc: { doanhThu: R(cuocDT), soChuyen: cuocChuyen, vatThuHoNhaNuoc: R(vatCuoc) }, thuongMaiVatLieu: { doanhThu: R(tmDT), giaVonHang: R(tmGiaVon), soChuyen: tmChuyen } },
+    tungXe,
+    tienVaCongNoHienTai: {
+      tcbBank: bank ? R(bank.computedBalance) : null, tienMat: cash ? R(cash.computedBalance) : null,
+      khachThuongMaiConNo: R(debt.totalCustomerOwed), doiTacChoCuocConNo: R(debt.totalFreightOwed),
+      nhaCungCap: (debt.totalSupplierOwed||0)>=0 ? { congTyConNoMo: R(debt.totalSupplierOwed) } : { daUngDuChoMo: R(-debt.totalSupplierOwed) },
+      luongConNoTaiXe: R(safe(()=>companyWideWagePayable(), 0)),
+      tonKhoHoaDonThuongMai_sauVAT: R(safe(()=>companyWideInvoiceLotInventoryValue(), 0)), vatHoaDonThuongMaiTonChoKhauTru: R(safe(()=>invoiceLotStockPendingVat(), 0)),
+      chiTietDoiTacCuocDangNo: partners
+    },
+    thueVAT: {
+      vatPhaiNopPhatSinhLuyKe_thuongMaiVaCuoc: R(payAll), vatPhaiNopTheoThang: partsObj(Object.entries(payByMonth)),
+      vatMuaXeCongTy: { tong: R(sched.total), daKhauTru: R(sched.used), conChoKhauTru: R(sched.remaining) },
+      daNopNhaNuoc: R(vatPaid), conPhaiNopUocTinh: R(payAll - sched.used - vatPaid),
+      luuY: 'Chưa trừ VAT đầu vào của dầu, sửa chữa; số chính thức theo tờ khai của kế toán.'
+    },
+    congTrinhChoCuocDangChay: base.siteRanking, taiXe: base.driverStats.map(d=>Object.assign({}, d, { xeLaiChinh: (()=>{ const drv = state.drivers.find(x=>x.name===d.name); const vid = drv ? driverMainVehicleId(drv.id) : null; const v = vehicles.find(x=>x.id===vid); return v ? (v.name||v.plate) : null; })() })),
+    giayToSapHetHan_xeDangChon: base.upcomingDocumentExpirations, lichBaoDuong_xeDangChon: base.maintenanceScheduleStatus, suaChuaGanDay_moiXe: base.relevantRecentRepairs,
+    _coDuLieu: allShifts.length>0
+  };
 }
-Chỉ đưa nhận xét dựa trên số liệu thực tế ở trên, không suy đoán số liệu không có. Nếu không đủ dữ liệu cho 1 mục (vd chưa có giấy tờ nào sắp hết hạn), để "note" là chuỗi rỗng — nhưng KHÔNG được bỏ trống mảng siteAnalysis/driverAnalysis nếu summary có dữ liệu.`;
+function buildCompanyStrategyPrompt(data){
+  return `Mày là GIÁM ĐỐC TÀI CHÍNH kiêm CHUYÊN GIA QUẢN TRỊ doanh nghiệp vận tải - vật liệu xây dựng tại Việt Nam, đang lập BÁO CÁO QUẢN TRỊ cho chủ doanh nghiệp (gọi là "Ông Chủ") của ${data.congTy}: công ty có ${data.soXe} xe ben HOWO 4 chân, vừa chở cước thuê vừa mua bán vật liệu (đá Base).
+
+DỮ LIỆU dưới đây lấy trực tiếp từ sổ sách của app, ĐÃ TÍNH SẴN bằng đúng công thức kế toán (không được tính lại theo cách khác, không được bịa thêm số). Kỳ báo cáo ${data.kyBaoCao.tuNgay} → ${data.kyBaoCao.denNgay} (${data.kyBaoCao.soNgay} ngày), phân tích ngày ${data.kyBaoCao.ngayPhanTich}. Nhóm "tienVaCongNoHienTai" và "thueVAT" là số LUỸ KẾ tới hôm nay; các nhóm còn lại là số TRONG KỲ.
+
+${JSON.stringify(data, null, 1)}
+
+CÁCH ĐỌC:
+- Lãi gộp = doanh thu − chi phí biến đổi. Lợi nhuận riêng xe = lãi gộp − chi phí cố định riêng xe. Lợi nhuận công ty = tổng lợi nhuận các xe − chi phí chung (nhà, điện nước).
+- Số chuyến hoà vốn = chi phí cố định ÷ lãi gộp mỗi chuyến. Chi phí cố định tính cho CẢ KỲ; nếu kỳ chưa kết thúc (ngày phân tích nằm trong kỳ) thì số chuyến hiện có mới là số chạy được tới hôm nay — phải tính tốc độ cần đạt trong số ngày còn lại.
+- VAT là tiền thu hộ nhà nước, không phải doanh thu hay lợi nhuận.
+- Xe có "soCaChuaChotDauCuoiCa" > 0: tiền dầu của các ca đó là số tạm, phải nói rõ.
+
+YÊU CẦU BẮT BUỘC:
+1. Viết như một báo cáo quản trị thật: mỗi nhận định PHẢI kèm con số cụ thể lấy từ dữ liệu (ghi số tiền đầy đủ, ví dụ 41.227.143đ). Không viết chung chung, không dùng câu sáo rỗng, không khen xã giao.
+2. So sánh các xe với nhau bằng số: doanh thu, lãi gộp mỗi chuyến, chi phí cố định, lít dầu/100km, số chuyến thiếu để hoà vốn. Chỉ ra xe nào kéo lùi kết quả và vì khoản nào.
+3. Chiến lược phải làm được ngay và đo được: nêu mục tiêu bằng số (bao nhiêu chuyến/ngày, giảm khoản nào bao nhiêu tiền, thu công nợ nào trước).
+4. "vehicleAnalysis" phải có ĐỦ mọi xe trong "tungXe". "siteAnalysis" đủ mọi công trình trong "congTrinhChoCuocDangChay". "driverAnalysis" đủ mọi tài xế trong "taiXe".
+5. Dữ liệu nào thiếu hoặc bằng 0 bất thường thì ghi vào "dataQualityNotes", không được tự suy diễn.
+6. Xưng hô: gọi người đọc là "Ông Chủ". Viết tiếng Việt, câu ngắn, rõ.
+
+CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc sau, không kèm lời giải thích, không dùng markdown:
+{
+  "executiveSummary": "<3-5 câu: công ty đang lãi hay lỗ bao nhiêu trong kỳ, nguyên nhân chính, việc quan trọng nhất phải làm>",
+  "financialReport": {
+    "incomeStatement": "<đọc kết quả kinh doanh: doanh thu, cơ cấu cước/thương mại, lãi gộp, chi phí cố định, lợi nhuận, biên lợi nhuận>",
+    "costStructure": "<cơ cấu chi phí: khoản cố định nào lớn nhất ở từng xe, khoản biến đổi nào lớn nhất, khoản nào bất thường>",
+    "breakEven": "<điểm hoà vốn cả công ty và từng xe: cần bao nhiêu chuyến, đã chạy bao nhiêu, còn thiếu bao nhiêu, cần mấy chuyến/ngày trong số ngày còn lại>",
+    "cashAndReceivables": "<tiền TCB, tiền mặt, công nợ phải thu/phải trả, lương còn nợ: thanh khoản có an toàn không, khoản nào cần thu/trả trước>",
+    "taxVat": "<VAT phải nộp, đã khấu trừ bằng VAT mua xe, còn chờ khấu trừ, còn phải nộp ước tính: ý nghĩa với dòng tiền>"
+  },
+  "companyStrategy": [ { "priority": "<'cao' | 'trung_binh' | 'thap'>", "title": "<tên hành động ngắn>", "action": "<làm gì, mục tiêu bằng số>", "evidence": "<con số trong dữ liệu dẫn tới đề xuất này>" } ],
+  "vehicleAnalysis": [ { "vehicleName": "<đúng tenXe>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "result": "<kết quả xe trong kỳ bằng số>", "breakEven": "<hoà vốn riêng xe: cần/đã chạy/thiếu, tốc độ cần đạt>", "costNote": "<khoản chi phí đáng chú ý nhất của xe>", "strategy": [ "<việc cụ thể 1 cho riêng xe này>", "<việc 2>" ] } ],
+  "siteAnalysis": [ { "siteName": "<đúng tên công trình>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<doanh thu/chuyến, số chuyến, có nên giữ/đàm phán giá>" } ],
+  "driverAnalysis": [ { "driverName": "<đúng tên tài xế>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<xe lái chính, số ca, km, lít dầu/km so với tài xế khác>" } ],
+  "risks": [ { "risk": "<rủi ro>", "evidence": "<số liệu>", "mitigation": "<cách xử lý>" } ],
+  "legalMaintenanceNotes": "<giấy tờ sắp hết hạn và bảo dưỡng tới hạn (2 nhóm này chỉ có của xe đang chọn) + sửa chữa gần đây>",
+  "dataQualityNotes": [ "<dữ liệu thiếu/tạm tính làm kết luận kém chắc chắn>" ]
+}`;
 }
 
 /// Text-only Gemini call (no image) — same API, just omits the inline_data
 /// image part.
-async function callGeminiText(promptText, onRetry, shouldCancel){
+async function callGeminiText(promptText, onRetry, shouldCancel, opts){
   const apiKey = (state.settings.geminiApiKey || '').trim();
   if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
 
@@ -12455,7 +12554,7 @@ async function callGeminiText(promptText, onRetry, shouldCancel){
   // (dư sức cho báo cáo dài nhất từng thấy) để không còn bị cắt.
   const requestBody = {
     contents: [{ parts: [{ text: promptText }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: 'low' } }
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: (opts && opts.maxOutputTokens) || 8192, thinkingConfig: { thinkingLevel: 'low' } }
   };
 
   return callGeminiWithRetry(async ()=>{
@@ -12596,15 +12695,16 @@ async function runStrategyAnalysis(){
   sa.loading = true; sa.error = null; sa.cancelRequested = false;
   renderStrategy();
   try{
-    const summary = aggregateStrategyData(sa.from, sa.to);
-    if(summary.driverStats.length===0 && summary.siteRanking.length===0){
+    const summary = buildCompanyStrategyData(sa.from, sa.to); // #372 — toàn công ty + từng xe
+    if(!summary._coDuLieu){
       sa.error = 'Chưa có ca nào trong khoảng thời gian này để phân tích.';
       sa.loading = false;
       if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
       if(state.currentTab==='strategy' && state.strategyView==='ai') renderStrategy();
       return;
     }
-    const prompt = buildStrategyPrompt(summary);
+    delete summary._coDuLieu;
+    const prompt = buildCompanyStrategyPrompt(summary);
     const result = await callGeminiText(prompt, (attempt)=>{
       // Every retry: the truck itself runs back to the starting line and
       // launches a fresh forward lap, so Ông Chủ can see exactly how many
@@ -12619,7 +12719,7 @@ async function runStrategyAnalysis(){
         const hintEl = document.getElementById('strategyRetryHint');
         if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
       }
-    }, ()=>sa.cancelRequested);
+    }, ()=>sa.cancelRequested, { maxOutputTokens: 16384 }); // báo cáo toàn công ty dài hơn bản 1 xe cũ
     sa.result = result;
     sa.generatedAt = new Date().toISOString();
   }catch(e){
@@ -12919,8 +13019,8 @@ function renderStrategy(){
     </section>
     ${!hasKey ? `<div class="banner">Chưa có Gemini API Key. Vào tab "⚙️ Cài Đặt" → mục "🤖 Trí Tuệ Nhân Tạo" → dán API Key (lấy miễn phí tại aistudio.google.com) thì mới phân tích được.</div>` : ''}
     <section class="group">
-      <h3>🧭 Trợ Lý Chiến Lược${activeVehicleTagHtml()}</h3>
-      <div class="hint" style="margin-bottom:10px;">AI đọc số liệu vận hành thực tế trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
+      <h3>🧭 Trợ Lý Chiến Lược — 🏢 Toàn Công Ty${(state.vehicles||[]).length>1?` (${state.vehicles.length} xe)`:''}</h3>
+      <div class="hint" style="margin-bottom:10px;">AI đọc TOÀN BỘ kết quả công ty trong khoảng ngày đã chọn (kết quả kinh doanh, chi phí và điểm hoà vốn từng xe, tiền, công nợ, VAT, công trình, tài xế) rồi viết báo cáo quản trị và đề xuất chiến lược cho cả công ty lẫn riêng từng xe.</div>
       <div class="date-range">
         <div class="field">
           <label>Từ ngày</label>
@@ -12944,7 +13044,7 @@ function renderStrategy(){
 
     ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
       <section class="group">
-        <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc số liệu vận hành trong khoảng ngày đã chọn và đưa ra nhận xét chiến lược.</div>
+        <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc toàn bộ kết quả công ty trong khoảng ngày đã chọn và viết báo cáo quản trị kèm chiến lược.</div>
       </section>
     ` : '')}
   `;
@@ -13451,69 +13551,106 @@ function renderBonusResult(result){
 }
 
 function renderStrategyResult(result){
+  // #372 — bố cục báo cáo quản trị: tóm tắt → báo cáo tài chính → chiến lược công ty → từng xe → công trình → tài xế → rủi ro.
   const ratingBadgeClass = r => r==='tot' ? 'good' : r==='can_chu_y' ? 'watch' : 'ok';
   const ratingLabel = r => r==='tot' ? 'Tốt' : r==='can_chu_y' ? 'Cần Chú Ý' : 'Bình Thường';
-  const siteAnalysis = Array.isArray(result.siteAnalysis) ? result.siteAnalysis : [];
-  const driverAnalysis = Array.isArray(result.driverAnalysis) ? result.driverAnalysis : [];
-  const insights = Array.isArray(result.generalInsights) ? result.generalInsights : [];
-  return `
-    <section class="group">
-      <h3>🏗️ Từng Công Trình (Góc Điều Hành Logistics)</h3>
-      ${siteAnalysis.length===0 ? '<div class="hint">Chưa có công trình nào trong kỳ này.</div>' : siteAnalysis.map(s=>`
+  const arr = x => Array.isArray(x) ? x : [];
+  const txt = x => escapeHtml(x===undefined || x===null ? '' : String(x));
+  const para = x => `<div style="font-size:13.5px; color:var(--ink); line-height:1.55;">${txt(x)}</div>`;
+  const fr = result.financialReport || {};
+  const frRows = [['📈 Kết quả kinh doanh', fr.incomeStatement], ['🧾 Cơ cấu chi phí', fr.costStructure], ['⚖️ Điểm hoà vốn', fr.breakEven], ['💵 Tiền & công nợ', fr.cashAndReceivables], ['🏛️ Thuế VAT', fr.taxVat]].filter(r=>r[1]);
+  const prioLabel = p => p==='cao' ? 'Ưu tiên cao' : p==='thap' ? 'Ưu tiên thấp' : 'Ưu tiên vừa';
+  const prioClass = p => p==='cao' ? 'watch' : p==='thap' ? 'ok' : 'good';
+  const strat = arr(result.companyStrategy), veh = arr(result.vehicleAnalysis), sites = arr(result.siteAnalysis), drivers = arr(result.driverAnalysis), risks = arr(result.risks), dq = arr(result.dataQualityNotes);
+  const cardList = (items, nameKey) => items.map(s=>`
         <div class="card">
           <div class="driver-row" style="margin-bottom:4px;">
-            <strong>${escapeHtml(s.siteName||'')}</strong>
+            <strong>${txt(s[nameKey])}</strong>
             <span class="rating-badge ${ratingBadgeClass(s.rating)}">${ratingLabel(s.rating)}</span>
           </div>
-          <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(s.note||'')}</div>
-        </div>
-      `).join('')}
+          <div style="font-size:13px; color:var(--ink-soft);">${txt(s.note)}</div>
+        </div>`).join('');
+  return `
+    <section class="group">
+      <h3>🧭 Tóm Tắt Cho Ông Chủ</h3>
+      <div class="card" style="border:1.5px solid var(--accent);">${para(result.executiveSummary || 'AI không trả về phần tóm tắt.')}</div>
     </section>
 
     <section class="group">
-      <h3>👤 Từng Tài Xế (Hao Dầu &amp; Hiệu Suất)</h3>
-      ${driverAnalysis.length===0 ? '<div class="hint">Chưa có tài xế nào trong kỳ này.</div>' : driverAnalysis.map(d=>`
+      <h3>📑 Đọc Báo Cáo Tài Chính Toàn Công Ty</h3>
+      ${frRows.length===0 ? '<div class="hint">AI không trả về phần này.</div>' : `
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <tbody>
+            ${frRows.map(r=>`<tr><td style="width:30%; font-weight:800; vertical-align:top;">${r[0]}</td><td style="font-size:13px; line-height:1.55;">${txt(r[1])}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </section>
+
+    <section class="group">
+      <h3>🎯 Chiến Lược Cho Toàn Công Ty</h3>
+      ${strat.length===0 ? '<div class="hint">AI không trả về đề xuất nào.</div>' : strat.map((s,i)=>`
         <div class="card">
           <div class="driver-row" style="margin-bottom:4px;">
-            <strong>${escapeHtml(d.driverName||'')}</strong>
-            <span class="rating-badge ${ratingBadgeClass(d.rating)}">${ratingLabel(d.rating)}</span>
+            <strong>${i+1}. ${txt(s.title)}</strong>
+            <span class="rating-badge ${prioClass(s.priority)}">${prioLabel(s.priority)}</span>
           </div>
-          <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(d.note||'')}</div>
-        </div>
-      `).join('')}
+          ${para(s.action)}
+          ${s.evidence ? `<div class="hint" style="margin:6px 0 0;">Căn cứ: ${txt(s.evidence)}</div>` : ''}
+        </div>`).join('')}
     </section>
 
     <section class="group">
-      <h3>📊 Góc Nhìn Thị Trường Vận Tải</h3>
-      <div class="card"><div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.marketOutlook?.note||'Chưa đủ dữ liệu.')}</div></div>
+      <h3>🚛 Phân Tích & Chiến Lược Từng Xe</h3>
+      ${veh.length===0 ? '<div class="hint">AI không trả về phần từng xe.</div>' : veh.map(v=>`
+        <div class="card">
+          <div class="driver-row" style="margin-bottom:6px;">
+            <strong style="font-size:15px;">🚛 ${txt(v.vehicleName)}</strong>
+            <span class="rating-badge ${ratingBadgeClass(v.rating)}">${ratingLabel(v.rating)}</span>
+          </div>
+          <div class="grid-table-wrap">
+            <table class="grid-table">
+              <tbody>
+                ${[['Kết quả', v.result], ['Hoà vốn', v.breakEven], ['Chi phí', v.costNote]].filter(r=>r[1]).map(r=>`<tr><td style="width:24%; font-weight:800; vertical-align:top;">${r[0]}</td><td style="font-size:13px; line-height:1.5;">${txt(r[1])}</td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          ${arr(v.strategy).length ? `<div style="font-weight:800; margin:8px 0 4px;">Việc cần làm cho xe này</div>${arr(v.strategy).map((t,i)=>`<div style="font-size:13px; line-height:1.5; margin-bottom:3px;">${i+1}. ${txt(t)}</div>`).join('')}` : ''}
+        </div>`).join('')}
     </section>
 
     <section class="group">
-      <h3>📋 Góc Nhìn Pháp Lý / Giấy Tờ</h3>
-      <div class="card"><div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.legalComplianceNotes?.note||'Chưa có giấy tờ nào cần chú ý.')}</div></div>
+      <h3>🏗️ Từng Công Trình Chở Cước</h3>
+      ${sites.length===0 ? '<div class="hint">Không có công trình chở cước nào đang chạy trong kỳ.</div>' : cardList(sites, 'siteName')}
     </section>
 
     <section class="group">
-      <h3>💰 Góc Nhìn Kế Toán - Tài Chính</h3>
-      <div class="card"><div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.financialStrategyNotes?.note||'Chưa đủ dữ liệu.')}</div></div>
+      <h3>👤 Từng Tài Xế</h3>
+      ${drivers.length===0 ? '<div class="hint">Chưa có tài xế nào trong kỳ này.</div>' : cardList(drivers, 'driverName')}
     </section>
 
     <section class="group">
-      <h3>🔧 Đề Xuất Bảo Dưỡng</h3>
-      <div class="card">
-        <div style="font-size:13px; color:var(--ink-soft);">${escapeHtml(result.maintenanceSuggestion?.note||'Chưa đủ dữ liệu.')}</div>
-      </div>
+      <h3>⚠️ Rủi Ro Cần Theo Dõi</h3>
+      ${risks.length===0 ? '<div class="hint">AI không nêu rủi ro nào.</div>' : risks.map(r=>`
+        <div class="card">
+          <strong>${txt(r.risk)}</strong>
+          ${r.evidence ? `<div class="hint" style="margin:4px 0;">Số liệu: ${txt(r.evidence)}</div>` : ''}
+          ${r.mitigation ? para('Cách xử lý: ' + r.mitigation) : ''}
+        </div>`).join('')}
     </section>
 
-    <section class="group">
-      <h3>🧭 Nhận Định Tổng Thể (Tổng Hoà 4 Góc Nhìn)</h3>
-      ${insights.length===0 ? '<div class="hint">Không có nhận xét thêm.</div>' : insights.map(txt=>`
-        <div class="card" style="display:flex; gap:10px; align-items:flex-start;">
-          <div>💡</div>
-          <div style="font-size:13px; color:var(--ink-soft); line-height:1.5;">${escapeHtml(txt)}</div>
-        </div>
-      `).join('')}
-    </section>
+    ${result.legalMaintenanceNotes ? `<section class="group">
+      <h3>📋 Giấy Tờ & Bảo Dưỡng</h3>
+      <div class="card"><div style="font-size:13px; color:var(--ink-soft); line-height:1.5;">${txt(result.legalMaintenanceNotes)}</div></div>
+    </section>` : ''}
+
+    ${dq.length ? `<section class="group">
+      <h3>🔎 Lưu Ý Về Dữ Liệu</h3>
+      <div class="card">${dq.map(t=>`<div style="font-size:13px; color:var(--ink-soft); line-height:1.5; margin-bottom:4px;">• ${txt(t)}</div>`).join('')}</div>
+    </section>` : ''}
+
+    <section class="group"><div class="hint">Báo cáo do AI viết từ số liệu app đã tính sẵn. Con số gốc luôn là số trên các trang Kết Quả; nhận định và đề xuất là ý kiến tham khảo, Ông Chủ đối chiếu lại trước khi quyết định.</div></section>
   `;
 }
 
