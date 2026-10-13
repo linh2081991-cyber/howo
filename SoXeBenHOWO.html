@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-11 · #372';
+const APP_BUILD = '2026-10-12 · #373';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -18874,11 +18874,7 @@ function openMaintenanceEditor(id){
         <div class="hint" style="margin-bottom:0;">Có chi phí thì app tự tạo 1 khoản 🔧 Sửa Chữa (công ty chịu) đúng ngày, đúng xe — tính vào lãi/lỗ và trừ TCB/Tiền mặt đúng 1 lần. Để trống = không có chi phí.</div>
       </div>
       <div class="stat-highlight" style="margin-top:8px;"><span class="ic">🛣️</span><span class="lbl">ODO HIỆN TẠI CỦA XE&nbsp;</span><span class="val">${currentOdometer().toLocaleString('vi-VN')} km</span></div>
-      ${history.length>0 ? `
-      <div class="card" style="margin-top:10px;">
-        <div style="font-weight:700; margin-bottom:6px;">🕘 Lịch Sử Đã Làm (${history.length} lần)</div>
-        ${history.map(h=>{ const rp = h.repairId ? (state.repairs||[]).find(r=>r.id===h.repairId) : null; return `<div class="hint">Km ${Number(h.odo).toLocaleString('vi-VN')} — ${formatDateVN(h.date)}${rp?` · 💰 ${fmtVND(rp.amount)}`:''}</div>`; }).join('')}
-      </div>` : ''}
+      <div id="maint_histWrap"></div>
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing ? '<button class="btn btn-danger" id="delMaintenanceBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelMaintenanceBtn">Huỷ</button>
@@ -18890,8 +18886,101 @@ function openMaintenanceEditor(id){
   // #335 — chi phí bảo dưỡng gắn với 1 khoản Sửa Chữa (lastRepairId)
   const linkedRepair = draft.lastRepairId ? (state.repairs||[]).find(r=>r.id===draft.lastRepairId) : null;
   let maintCost = linkedRepair ? (Number(linkedRepair.amount)||0) : 0;
-  attachMoneyInput(document.getElementById('maint_cost'), maintCost, v=>{ maintCost = v; });
+  const costInput = document.getElementById('maint_cost');
+  attachMoneyInput(costInput, maintCost, v=>{ maintCost = v; });
   if(linkedRepair) document.getElementById('maint_method').value = linkedRepair.method==='cash'?'cash':'bank';
+
+  // #373 (Ông Chủ yêu cầu 2026-10-12) — SỬA / XOÁ từng dòng LỊCH SỬ ĐÃ LÀM, và đưa 1 dòng lịch sử lên làm
+  // "lần gần nhất" (khi lỡ nhập lần mới vào lịch sử). Mọi thay đổi chỉ lưu khi bấm "Lưu" của hạng mục;
+  // bấm "Huỷ" là bỏ hết. Chi phí của dòng lịch sử sửa đúng khoản 🔧 Sửa Chữa đã gắn với dòng đó.
+  const repairOf = id => id ? (state.repairs||[]).find(r=>r.id===id) : null;
+  let histSeq = 0;
+  let editedHistory = (existing ? (existing.history||[]) : []).map(h=>{ const rp = repairOf(h.repairId); return { ...h, _key: 'h'+(++histSeq), _cost: rp ? (Number(rp.amount)||0) : 0, _method: rp && rp.method==='cash' ? 'cash' : 'bank', _origCost: rp ? (Number(rp.amount)||0) : 0 }; });
+  let histEditingKey = null;
+  let swappedCurrent = false;
+  const curOdoNow = ()=>Number(document.getElementById('maint_lastOdo').value)||0;
+  const paintHistory = ()=>{
+    const wrap = document.getElementById('maint_histWrap');
+    if(!wrap) return;
+    const list = editedHistory.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'') || (Number(b.odo)||0)-(Number(a.odo)||0));
+    if(!list.length){ wrap.innerHTML = ''; return; }
+    const curOdo = curOdoNow();
+    wrap.innerHTML = `
+      <div class="card" style="margin-top:10px;">
+        <div style="font-weight:700; margin-bottom:2px;">🕘 Lịch Sử Đã Làm (${list.length} lần)</div>
+        <div class="hint" style="margin:0 0 8px;">Bấm "Sửa" để chữa số km, ngày, chi phí của từng lần. Thay đổi chỉ được lưu khi bấm nút "Lưu" ở dưới cùng.</div>
+        ${list.map(h=>{
+          const newer = (Number(h.odo)||0) > curOdo;
+          if(h._key===histEditingKey) return `
+          <div style="border:1.5px solid var(--accent); border-radius:12px; padding:10px; margin-bottom:8px;">
+            <div class="two-col">
+              <div class="field"><label>Km số</label><input type="text" inputmode="numeric" id="mh_odo" value="${Number(h.odo)||''}"></div>
+              <div class="field"><label>Ngày làm</label><input type="date" id="mh_date" value="${h.date||''}"></div>
+            </div>
+            <div class="two-col">
+              <div class="field" style="margin-bottom:0;"><label>💰 Chi phí (đ)</label><input type="text" inputmode="numeric" id="mh_cost" placeholder="Để trống = không có"></div>
+              <div class="field" style="margin-bottom:0;"><label>Trả bằng</label><select id="mh_method"><option value="bank" ${h._method!=='cash'?'selected':''}>🏦 TCB</option><option value="cash" ${h._method==='cash'?'selected':''}>💵 Tiền mặt</option></select></div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <button class="btn btn-danger btn-sm mh-del" data-key="${h._key}" style="width:auto;">Xoá dòng</button>
+              <button class="btn btn-ghost btn-sm" id="mh_cancel" style="width:auto;">Thôi</button>
+              <button class="btn btn-accent btn-sm" id="mh_ok" style="flex:1;">Xong</button>
+            </div>
+          </div>`;
+          return `
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px solid var(--line);">
+            <div style="font-size:13.5px;">
+              <strong>Km ${(Number(h.odo)||0).toLocaleString('vi-VN')}</strong> — ${formatDateVN(h.date)}${h._cost>0?` · 💰 ${fmtVND(h._cost)} ${h._method==='cash'?'💵':'🏦'}`:''}
+              ${newer ? `<div class="hint" style="margin:2px 0 0; color:var(--loss);">⚠️ Lần này MỚI HƠN "Đã làm ở Km số" phía trên (${curOdo.toLocaleString('vi-VN')}). Nếu đây mới là lần gần nhất, bấm "↑ Đặt làm lần gần nhất".</div>` : ''}
+            </div>
+            <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
+              <button class="link-btn mh-edit" data-key="${h._key}" style="padding:0; font-weight:700;">✏️ Sửa</button>
+              <button class="link-btn mh-promote" data-key="${h._key}" style="padding:0; font-size:12.5px;">↑ Đặt làm lần gần nhất</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    wrap.querySelectorAll('.mh-edit').forEach(b=>b.addEventListener('click', ()=>{ histEditingKey = b.dataset.key; paintHistory(); }));
+    wrap.querySelectorAll('.mh-promote').forEach(b=>b.addEventListener('click', ()=>{
+      const h = editedHistory.find(x=>x._key===b.dataset.key); if(!h) return;
+      // Lần "gần nhất" hiện tại (đang hiện ở các ô phía trên) xuống lịch sử; dòng được chọn lên làm lần gần nhất.
+      const curRp = !swappedCurrent ? repairOf(draft.lastRepairId) : null;
+      const down = { odo: curOdoNow(), date: document.getElementById('maint_lastDate').value || draft.lastDoneDate,
+        repairId: swappedCurrent ? (draft._promotedRepairId||null) : (draft.lastRepairId||null),
+        _key: 'h'+(++histSeq), _cost: maintCost||0, _method: document.getElementById('maint_method').value, _origCost: curRp ? (Number(curRp.amount)||0) : (maintCost||0) };
+      editedHistory = editedHistory.filter(x=>x._key!==h._key).concat([down]);
+      document.getElementById('maint_lastOdo').value = Number(h.odo)||0;
+      document.getElementById('maint_lastOdo').dispatchEvent(new Event('input', { bubbles:true }));
+      document.getElementById('maint_lastDate').value = h.date || '';
+      maintCost = h._cost||0; costInput.value = maintCost ? maintCost.toLocaleString('vi-VN') : '';
+      document.getElementById('maint_method').value = h._method==='cash' ? 'cash' : 'bank';
+      draft._promotedRepairId = h.repairId || null;
+      swappedCurrent = true; histEditingKey = null;
+      paintHistory();
+      showToast('Đã đổi chỗ — bấm "Lưu" để ghi lại.');
+    }));
+    const okBtn = document.getElementById('mh_ok');
+    if(okBtn){
+      const h = editedHistory.find(x=>x._key===histEditingKey);
+      let c = h._cost||0;
+      attachMoneyInput(document.getElementById('mh_cost'), c, v=>{ c = v; });
+      okBtn.addEventListener('click', ()=>{
+        const odo = Number(String(document.getElementById('mh_odo').value).replace(/\D/g,''))||0;
+        const date = document.getElementById('mh_date').value;
+        if(!(odo>0)){ showToast('Nhập số km của lần này.'); return; }
+        if(!date){ showToast('Chọn ngày làm.'); return; }
+        Object.assign(h, { odo, date, _cost: c||0, _method: document.getElementById('mh_method').value });
+        histEditingKey = null; paintHistory();
+      });
+      document.getElementById('mh_cancel').addEventListener('click', ()=>{ histEditingKey = null; paintHistory(); });
+      wrap.querySelector('.mh-del').addEventListener('click', ()=>{
+        if(!confirm(`Xoá lần làm ở km ${(Number(h.odo)||0).toLocaleString('vi-VN')}?${h._cost>0?' Khoản chi phí gắn với lần này cũng sẽ bị xoá.':''}`)) return;
+        editedHistory = editedHistory.filter(x=>x._key!==h._key); histEditingKey = null; paintHistory();
+      });
+    }
+  };
+  paintHistory();
+  document.getElementById('maint_lastOdo').addEventListener('input', ()=>{ if(!histEditingKey) paintHistory(); });
   document.getElementById('saveMaintenanceBtn').addEventListener('click', async ()=>{
     const newName = document.getElementById('maint_name').value.trim();
     const newInterval = Number(document.getElementById('maint_interval').value)||0;
@@ -18905,9 +18994,12 @@ function openMaintenanceEditor(id){
     // gõ nhầm) → tự động lưu giá trị CŨ vào lịch sử TRƯỚC khi ghi đè, để
     // không mất dấu vết những lần đã làm trước — không cần tạo hạng mục
     // trùng tên nữa, sửa ngay trên đúng 1 hạng mục là đủ.
-    let newHistory = existing ? [...(existing.history||[])] : [];
-    if(existing && (Number(existing.lastDoneOdo)!==newOdo || existing.lastDoneDate!==newDate)){
-      newHistory = [...newHistory, { odo: Number(existing.lastDoneOdo)||0, date: existing.lastDoneDate }];
+    if(histEditingKey){ showToast('Bấm "Xong" ở dòng lịch sử đang sửa trước đã.'); return; }
+    // #373 — lịch sử lấy từ bản đã sửa trên màn hình (editedHistory); khi đã "Đặt làm lần gần nhất" thì
+    // lần cũ đã được đưa xuống lịch sử rồi, không tự đẩy thêm 1 lần nữa.
+    let newHistory = editedHistory.slice();
+    if(existing && !swappedCurrent && (Number(existing.lastDoneOdo)!==newOdo || existing.lastDoneDate!==newDate)){
+      newHistory = [...newHistory, { odo: Number(existing.lastDoneOdo)||0, date: existing.lastDoneDate, _key:'h'+(++histSeq), _cost:0, _method:'bank', _origCost:0, _isAutoPushed:true }];
     }
     draft.name = newName;
     draft.intervalKm = newInterval;
@@ -18915,12 +19007,27 @@ function openMaintenanceEditor(id){
     draft.lastDoneDate = newDate;
     draft.notes = newNotes;
     // #335 — lần làm mới: lần cũ (kèm khoản sửa chữa của nó) vào lịch sử; tạo/cập nhật khoản sửa chữa cho lần hiện tại.
-    const isNewOccurrence = !!existing && (Number(existing.lastDoneOdo)!==newOdo || existing.lastDoneDate!==newDate);
-    if(isNewOccurrence && newHistory.length){ newHistory[newHistory.length-1].repairId = existing.lastRepairId || null; }
-    draft.history = newHistory;
+    const isNewOccurrence = !!existing && !swappedCurrent && (Number(existing.lastDoneOdo)!==newOdo || existing.lastDoneDate!==newDate);
+    if(isNewOccurrence && newHistory.length){ const pushed = newHistory[newHistory.length-1]; if(pushed._isAutoPushed){ pushed.repairId = existing.lastRepairId || null; const prp = repairOf(pushed.repairId); pushed._cost = prp ? (Number(prp.amount)||0) : 0; pushed._origCost = pushed._cost; pushed._method = prp && prp.method==='cash' ? 'cash' : 'bank'; } }
+    if(swappedCurrent) draft.lastRepairId = draft._promotedRepairId || null;
+    delete draft._promotedRepairId;
     const method = document.getElementById('maint_method').value;
     const repairsBefore = [...(state.repairs||[])];
     let repairsChanged = false;
+    // #373 — khoản chi phí của các dòng lịch sử: sửa / tạo / xoá đúng khoản 🔧 Sửa Chữa gắn với dòng đó.
+    const keptRepairIds = new Set(newHistory.map(h=>h.repairId).filter(Boolean));
+    if(draft.lastRepairId) keptRepairIds.add(draft.lastRepairId);
+    (existing ? (existing.history||[]) : []).forEach(h=>{ if(h.repairId && !keptRepairIds.has(h.repairId) && repairOf(h.repairId)){ state.repairs = state.repairs.filter(r=>r.id!==h.repairId); repairsChanged = true; } });
+    newHistory.forEach(h=>{
+      const rp = repairOf(h.repairId);
+      const item = `Bảo dưỡng: ${newName} · km ${(Number(h.odo)||0).toLocaleString('vi-VN')}`;
+      if((h._cost||0)>0){
+        if(rp){ if(Number(rp.amount)!==h._cost || rp.date!==h.date || (rp.method||'bank')!==h._method || rp.item!==item){ Object.assign(rp, { date:h.date, item, amount:h._cost, method:h._method }); repairsChanged = true; } }
+        else { const nr = { id: uid('repair'), date:h.date, item, invoiceCode:'', amount:h._cost, notes:'Tự tạo từ Bảo Dưỡng', responsibility:'owner_full', responsibleDriverId:null, driverCustomAmount:0, method:h._method, maintenanceId: draft.id };
+          state.repairs = [...(state.repairs||[]), nr]; h.repairId = nr.id; repairsChanged = true; }
+      } else if(rp){ state.repairs = state.repairs.filter(r=>r.id!==rp.id); h.repairId = null; repairsChanged = true; }
+    });
+    draft.history = newHistory.map(h=>{ const o = { odo: Number(h.odo)||0, date: h.date }; if(h.repairId) o.repairId = h.repairId; return o; });
     const curRepair = (!isNewOccurrence && draft.lastRepairId) ? (state.repairs||[]).find(r=>r.id===draft.lastRepairId) : null;
     if(maintCost>0){
       const item = `Bảo dưỡng: ${newName} · km ${newOdo.toLocaleString('vi-VN')}`;
