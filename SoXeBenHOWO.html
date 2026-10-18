@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-12 · #373';
+const APP_BUILD = '2026-10-12 · #374';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3690,38 +3690,80 @@ function taxAdjustmentForRange(from, to, vid){
   });
   return { nonDeductible, rentDeductible };
 }
-/// VAT mua xe CÔNG TY: tài sản chờ khấu trừ, trừ dần theo tháng vào VAT phải nộp (thương mại) của toàn công ty.
-/// #362 — VAT phải nộp (mảng thương mại, mọi xe) gom theo từng tháng. Tách ra từ truckVatCreditSchedule()
-/// (nguyên văn vòng lặp cũ) để trang công ty dùng chung đúng 1 nguồn số.
-function commercialVatPayableByMonthCompanyWide(){
-  const payableByMonth = {};
-  shiftsCompanyWideSafe().forEach(sh=>{
-    const ym = (sh.date||'').slice(0,7);
-    const v = (sh.siteLogs||[]).reduce((s2,site)=>s2+siteOutputVatPayable(site),0); // #368 — gồm cả VAT cước
-    if(v) payableByMonth[ym] = (payableByMonth[ym]||0) + v;
-  });
-  return payableByMonth;
+/// ===== #374 (Ông Chủ yêu cầu 2026-10-12 — "VAT phải làm thật chặt chẽ, chuẩn xác") — SỔ VAT CÔNG TY =====
+/// Nguyên tắc (đúng cách lập tờ khai GTGT): VAT tính cho CẢ CÔNG TY theo TỪNG KỲ (tháng):
+///   VAT thuần của kỳ = VAT bán ra (thương mại + chở cước) − VAT đầu vào đã dùng (HĐ mỏ + HĐ thương mại).
+///   Nếu dương → trừ tiếp số còn được khấu trừ chuyển sang (VAT mua xe, phần đầu vào dư các kỳ trước), phần còn lại mới phải nộp.
+///   Nếu âm → KHÔNG mất, chuyển sang kỳ sau trừ tiếp.
+/// Trước đây mỗi công trình bị kẹp về 0 riêng lẻ nên phần đầu vào dư của công trình này bị bỏ mất thay vì trừ vào công trình khác.
+/// Phần còn được khấu trừ được dùng theo thứ tự phát sinh trước dùng trước.
+/// VAT thuần của 1 công trình (CHƯA kẹp về 0): thương mại = bán ra − HĐ mỏ − HĐ thương mại đã rút; chở cước = VAT bán ra.
+function siteVatNetRaw(s){
+  return s.siteType==='commercial' ? commercialVatNetRaw(s) : siteFreightOutputVat(s);
 }
-function truckVatCreditSchedule(){
+/// VAT thuần mọi xe theo tháng (có thể âm). Tách 3 phần để hiển thị.
+function companyVatNetByMonth(){
+  const out = {};
+  shiftsCompanyWideSafe().forEach(sh=>{
+    const ym = (sh.date||'').slice(0,7); if(!ym) return;
+    (sh.siteLogs||[]).forEach(s=>{
+      const v = siteVatNetRaw(s), fr = s.siteType==='commercial' ? 0 : v;
+      if(Math.abs(v)<1e-9) return;
+      const o = out[ym] = out[ym] || { net:0, commercial:0, freight:0 };
+      o.net += v; o.freight += fr; o.commercial += v - fr;
+    });
+  });
+  return out;
+}
+/// VAT trên hoá đơn mua xe + hạng mục kèm của XE CÔNG TY, theo tháng hoá đơn.
+function truckVatByMonth(){
   const credits = {};
   investmentEntriesAll().forEach(e=>{
-    if(!e.vehicleId) return;
+    if(!e.vehicleId || !e.date) return;
     const s = settingsOfVehicle(e.vehicleId);
     const vat = investEntryParts(e).vat;
     if(vehicleOwnershipOf(s)==='company' && vat>0){ const ym = e.date.slice(0,7); credits[ym] = (credits[ym]||0) + vat; }
   });
-  const total = Object.values(credits).reduce((a,b)=>a+b,0);
-  const usedByMonth = {};
-  if(total<=0) return { total:0, used:0, remaining:0, usedByMonth };
-  const payableByMonth = commercialVatPayableByMonthCompanyWide();
-  const startYm = Object.keys(credits).sort()[0];
-  let avail = 0, used = 0;
-  monthsBetween(`${startYm}-01`, todayLocalDateStr()).forEach(ym=>{
-    avail += credits[ym]||0;
-    const use = Math.min(avail, Math.max(0, payableByMonth[ym]||0));
-    if(use>0){ usedByMonth[ym] = use; avail -= use; used += use; }
+  return credits;
+}
+/// Sổ VAT công ty theo tháng: phát sinh − khấu trừ chuyển sang = phải nộp; − đã nộp = còn nợ thuế luỹ kế.
+function companyVatLedger(){
+  const net = companyVatNetByMonth(), truck = truckVatByMonth();
+  const paid = {};
+  (state.vatPayments||[]).forEach(p=>{ const ym = (p.date||'').slice(0,7); if(ym) paid[ym] = (paid[ym]||0) + (Number(p.amount)||0); });
+  const keys = [...Object.keys(net), ...Object.keys(truck), ...Object.keys(paid)].sort();
+  if(!keys.length) return { rows:[], truckTotal:0, truckUsed:0, truckRemaining:0, inputCarryRemaining:0, creditRemaining:0, dueTotal:0, paidTotal:0, owedNow:0, truckUsedByMonth:{} };
+  const lastYm = [keys[keys.length-1], todayLocalDateStr().slice(0,7)].sort()[1];
+  const pool = []; // { src:'truck'|'input', amt }
+  const rows = []; let owed = 0;
+  const truckUsedByMonth = {};
+  monthsBetween(`${keys[0]}-01`, `${lastYm}-01`).forEach(ym=>{
+    const n = net[ym] || { net:0, commercial:0, freight:0 };
+    const truckNew = truck[ym]||0;
+    const carryIn = pool.reduce((a,x)=>a+x.amt,0);
+    if(truckNew>0) pool.push({ src:'truck', amt: truckNew });
+    const excessInput = Math.max(0, -n.net);
+    let need = Math.max(0, n.net), creditUsed = 0, truckUsed = 0;
+    for(const c of pool){ if(need<=0) break; const u = Math.min(c.amt, need); c.amt -= u; need -= u; creditUsed += u; if(c.src==='truck') truckUsed += u; }
+    for(let i=pool.length-1;i>=0;i--) if(pool[i].amt<0.005) pool.splice(i,1);
+    if(excessInput>0) pool.push({ src:'input', amt: excessInput });
+    const due = need, p = paid[ym]||0;
+    owed += due - p;
+    if(truckUsed>0) truckUsedByMonth[ym] = truckUsed;
+    rows.push({ ym, commercial: n.commercial, freight: n.freight, net: n.net, carryIn, truckNew, creditUsed, truckUsed, excessInput, due, paid: p,
+      carryOut: pool.reduce((a,x)=>a+x.amt,0), owed });
   });
-  return { total, used, remaining: total - used, usedByMonth };
+  const truckTotal = Object.values(truck).reduce((a,b)=>a+b,0);
+  const truckUsed = Object.values(truckUsedByMonth).reduce((a,b)=>a+b,0);
+  return { rows, truckTotal, truckUsed, truckRemaining: pool.filter(x=>x.src==='truck').reduce((a,x)=>a+x.amt,0),
+    inputCarryRemaining: pool.filter(x=>x.src==='input').reduce((a,x)=>a+x.amt,0), creditRemaining: pool.reduce((a,x)=>a+x.amt,0),
+    dueTotal: rows.reduce((a,r)=>a+r.due,0), paidTotal: rows.reduce((a,r)=>a+r.paid,0), owedNow: owed, truckUsedByMonth };
+}
+/// VAT mua xe công ty: tổng / đã khấu trừ / còn chờ — lấy từ sổ VAT công ty (giữ nguyên khuôn kết quả cũ cho mọi chỗ đang dùng).
+function truckVatCreditSchedule(){
+  const L = companyVatLedger();
+  return { total: L.truckTotal, used: L.truckUsed, remaining: L.truckRemaining, usedByMonth: L.truckUsedByMonth,
+    inputCarryRemaining: L.inputCarryRemaining, creditRemaining: L.creditRemaining };
 }
 function truckVatUsedInRange(from, to){
   const sch = truckVatCreditSchedule();
@@ -7428,15 +7470,6 @@ function renderCostPartsDetailPage(opts){
   `;
   document.getElementById('cpd_backBtn').addEventListener('click', opts.onBack);
 }
-/// #367 — VAT bán ra của CHỞ CƯỚC theo từng công trình (CHỈ để hiển thị; chưa nằm trong "VAT phải nộp" của app).
-/// Giá đã gồm VAT: tách từ giá gộp. Giá chưa VAT: chỉ tính khi có nhập thuế suất riêng trên công trình.
-/// #368 (Ông Chủ yêu cầu 2026-10-11 — "VAT cước là tiền phải nộp nhà nước, phải bóc rõ"):
-/// VAT phải nộp của 1 công trình, BẤT KỂ loại: thương mại = commercialVatPayable() như cũ;
-/// chở cước = VAT bán ra của cước. Mọi chỗ cộng "VAT phải nộp" (tab Kết Quả, bảng VAT công ty,
-/// lịch khấu trừ VAT mua xe) dùng chung hàm này.
-function siteOutputVatPayable(s){
-  return s.siteType==='commercial' ? commercialVatPayable(s) : siteFreightOutputVat(s);
-}
 function siteFreightOutputVat(s){
   if(s.siteType==='commercial') return 0;
   const gross = siteFreightGross(s);
@@ -7449,19 +7482,20 @@ function renderCompanyVatDetailPage(onBack){
   const shifts = shiftsCompanyWideSafe();
   const byMonth = {};
   shifts.forEach(sh=>{ const ym = (sh.date||'').slice(0,7); if(ym){ (byMonth[ym] = byMonth[ym]||[]).push(sh); } });
-  const sched = truckVatCreditSchedule();
   const paidByMonth = {};
   (state.vatPayments||[]).forEach(p=>{ const ym = (p.date||'').slice(0,7); paidByMonth[ym] = (paidByMonth[ym]||0) + (Number(p.amount)||0); });
-  const months = Array.from(new Set([...Object.keys(byMonth), ...Object.keys(paidByMonth), ...Object.keys(sched.usedByMonth||{})])).sort();
+  const months = Array.from(new Set([...Object.keys(byMonth), ...Object.keys(paidByMonth)])).sort();
+  // #374 — số phải nộp lấy từ SỔ VAT CÔNG TY (bù trừ cả công ty, phần dư chuyển kỳ sau).
+  const LG = companyVatLedger();
+  const lgBy = {}; LG.rows.forEach(r=>{ lgBy[r.ym] = r; });
+  const allYm = Array.from(new Set([...months, ...LG.rows.map(r=>r.ym)])).sort();
   let running = 0;
-  const rows = months.map(ym=>{
+  const rows = allYm.map(ym=>{
     const b = periodVatBreakdown(byMonth[ym]||[]);
-    const freightVat = (byMonth[ym]||[]).reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,s)=>x+siteFreightOutputVat(s),0),0);
-    const truck = (sched.usedByMonth||{})[ym]||0;
-    const paid = paidByMonth[ym]||0;
-    const due = b.totalPayableClamped + freightVat - truck - paid; // #368 — VAT cước đã vào VAT phải nộp
-    running += due;
-    return { ym, out: b.totalOutputRaw, inMine: b.totalInputRaw, inLot: b.totalSupplementCredit, payable: b.totalPayableClamped, totalPayable: b.totalPayableClamped + freightVat, truck, paid, due, running, freightVat };
+    const g = lgBy[ym] || { freight:0, net:0, carryIn:0, truckNew:0, creditUsed:0, due:0, paid:0, carryOut:0, owed:0 };
+    running = g.owed;
+    return { ym, out: b.totalOutputRaw, inMine: b.totalInputRaw, inLot: b.totalSupplementCredit, comNet: b.totalPayableRaw,
+      freightVat: g.freight, net: g.net, carryIn: g.carryIn, truckNew: g.truckNew, creditUsed: g.creditUsed, due: g.due, paid: g.paid, carryOut: g.carryOut, running: g.owed };
   });
   const T = k => rows.reduce((a,r)=>a+r[k],0);
   const m = n => Math.abs(n)<0.5 ? '<span style="color:var(--ink-soft);">—</span>' : (n<0?'−':'')+fmtVND(Math.abs(n));
@@ -7476,15 +7510,15 @@ function renderCompanyVatDetailPage(onBack){
       <h3>① VAT Mảng Thương Mại (Mua-Bán Vật Liệu)</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Tháng</th><th class="num">VAT<br>Bán Ra</th><th class="num">− VAT<br>HĐ Mỏ</th><th class="num">− VAT HĐ<br>Thương Mại<br>Đã Dùng</th><th class="num">= VAT<br>Phải Nộp</th></tr></thead>
+          <thead><tr><th>Tháng</th><th class="num">VAT<br>Bán Ra</th><th class="num">− VAT<br>HĐ Mỏ</th><th class="num">− VAT HĐ<br>Thương Mại<br>Đã Dùng</th><th class="num">= VAT<br>Thuần</th></tr></thead>
           <tbody>
-            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.out)}</td><td class="num">${m(r.inMine)}</td><td class="num">${m(r.inLot)}</td><td class="num" style="font-weight:800;">${m(r.payable)}</td></tr>`).join('')}
+            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.out)}</td><td class="num">${m(r.inMine)}</td><td class="num">${m(r.inLot)}</td><td class="num" style="font-weight:800;">${m(r.comNet)}</td></tr>`).join('')}
             ${rows.length===0?'<tr><td colspan="5" class="hint">Chưa có dữ liệu.</td></tr>':''}
-            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('out'))}</td><td class="num">${fmtVND(T('inMine'))}</td><td class="num">${fmtVND(T('inLot'))}</td><td class="num">${fmtVND(T('payable'))}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('out'))}</td><td class="num">${fmtVND(T('inMine'))}</td><td class="num">${fmtVND(T('inLot'))}</td><td class="num">${m(T('comNet'))}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">"VAT phải nộp" tính trên TỪNG công trình rồi cộng lại; công trình nào ra âm thì tính là 0, nên có tháng cột cuối lớn hơn (bán ra − hai cột trừ).</div>
+      <div class="hint" style="margin-top:6px;">VAT thuần = bán ra − HĐ mỏ − HĐ thương mại đã dùng, bù trừ cho cả công ty. Âm = đầu vào nhiều hơn đầu ra; phần âm không mất mà chuyển sang trừ tiếp ở bảng ③.</div>
     </section>
     <section class="group">
       <h3>② VAT Của Chở Cước</h3>
@@ -7500,17 +7534,17 @@ function renderCompanyVatDetailPage(onBack){
       <div class="hint" style="margin-top:6px;">Tính từ từng công trình cước: giá đã gồm VAT thì tách ra; giá chưa VAT thì giá × "Thuế suất VAT cước" đã điền trên ca (không điền thì không tính).</div>
     </section>
     <section class="group">
-      <h3>③ Tổng Hợp: Phải Nộp − Khấu Trừ − Đã Nộp</h3>
+      <h3>③ Sổ VAT Công Ty: Phát Sinh − Khấu Trừ = Phải Nộp</h3>
       <div class="grid-table-wrap">
         <table class="grid-table">
-          <thead><tr><th>Tháng</th><th class="num">VAT Phải Nộp<br>(① + ②)</th><th class="num">− Khấu Trừ<br>VAT Mua Xe</th><th class="num">− Đã Nộp<br>Nhà Nước</th><th class="num">= Còn Lại<br>Của Tháng</th><th class="num">Luỹ Kế<br>Còn Phải Nộp</th></tr></thead>
+          <thead><tr><th>Tháng</th><th class="num">VAT Thuần<br>(① + ②)</th><th class="num">+ VAT Mua<br>Xe Mới</th><th class="num">− Khấu Trừ<br>Đã Dùng</th><th class="num">= Phải Nộp<br>Của Tháng</th><th class="num">Còn Được<br>Khấu Trừ<br>Chuyển Sau</th><th class="num">− Đã Nộp</th><th class="num">Luỹ Kế<br>Còn Nợ Thuế</th></tr></thead>
           <tbody>
-            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.totalPayable)}</td><td class="num">${m(r.truck)}</td><td class="num">${m(r.paid)}</td><td class="num">${m(r.due)}</td><td class="num" style="font-weight:800; color:${r.running>0.5?'var(--loss)':'var(--profit)'};">${m(r.running)}</td></tr>`).join('')}
-            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${fmtVND(T('totalPayable'))}</td><td class="num">${fmtVND(T('truck'))}</td><td class="num">${fmtVND(T('paid'))}</td><td class="num">${m(T('due'))}</td><td class="num">${m(running)}</td></tr>
+            ${rows.map(r=>`<tr><td><strong>${monthLabelVN(r.ym)}</strong></td><td class="num">${m(r.net)}</td><td class="num">${m(r.truckNew)}</td><td class="num">${m(r.creditUsed)}</td><td class="num" style="font-weight:800;">${m(r.due)}</td><td class="num" style="color:var(--profit);">${m(r.carryOut)}</td><td class="num">${m(r.paid)}</td><td class="num" style="font-weight:800; color:${r.running>0.5?'var(--loss)':'var(--profit)'};">${m(r.running)}</td></tr>`).join('')}
+            <tr class="grid-total-row"><td style="text-align:left;">Tổng</td><td class="num">${m(T('net'))}</td><td class="num">${fmtVND(T('truckNew'))}</td><td class="num">${fmtVND(T('creditUsed'))}</td><td class="num">${fmtVND(T('due'))}</td><td class="num">${fmtVND(LG.creditRemaining)}</td><td class="num">${fmtVND(T('paid'))}</td><td class="num">${m(LG.owedNow)}</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:6px;">VAT mua xe công ty: tổng ${fmtVND(sched.total)} · đã khấu trừ ${fmtVND(sched.used)} · còn chờ khấu trừ ${fmtVND(sched.remaining)}. Cột luỹ kế âm = đã nộp dư. App chưa trừ VAT đầu vào của dầu, sửa chữa — số chính thức theo tờ khai của kế toán.</div>
+      <div class="hint" style="margin-top:6px;">Đọc mỗi dòng: VAT thuần dương thì trừ phần "còn được khấu trừ" đang có (VAT mua xe công ty, đầu vào dư các tháng trước — phát sinh trước dùng trước), phần còn lại là phải nộp; VAT thuần âm thì cộng vào phần còn được khấu trừ để trừ các tháng sau.<br>Hiện còn được khấu trừ ${fmtVND(LG.creditRemaining)} (VAT mua xe ${fmtVND(LG.truckRemaining)} + đầu vào dư ${fmtVND(LG.inputCarryRemaining)}). VAT mua xe: tổng ${fmtVND(LG.truckTotal)}, đã dùng ${fmtVND(LG.truckUsed)}.<br>App chưa có VAT đầu vào của dầu, sửa chữa, cầu đường (chưa có ô nhập), và tính theo ngày ca chứ không theo ngày hoá đơn — số chính thức theo tờ khai của kế toán.</div>
     </section>
   `;
   document.getElementById('vatd_backBtn').addEventListener('click', onBack);
@@ -7909,10 +7943,21 @@ function allShiftsForLedger(){
 
 // Tìm lại (shift, vị trí) chứa đúng site log object `s` — quét cả bản đang
 // sửa dở lẫn đã lưu, so khớp theo THAM CHIẾU object.
+// SỬA #374 (lỗi Ông Chủ phát hiện 2026-10-12: cột "VAT HĐ thương mại đã dùng" ra 0đ): trước đây chỉ dò
+// trong ca của XE ĐANG CHỌN, nên công trình thương mại của xe khác không tìm thấy vị trí → VAT và chi phí
+// hoá đơn bù của cả xe đó bị tính bằng 0 ở mọi bảng gộp toàn công ty. Nay dò thêm ca của MỌI XE (sổ hoá
+// đơn vốn đã ghi theo mọi xe, khoá theo mã ca + vị trí công trình). Có bộ nhớ đệm, luôn kiểm lại trước khi dùng.
+const _siteCtxCache = new WeakMap();
 function findSiteLogContext(s){
+  const hit = _siteCtxCache.get(s);
+  if(hit && hit.sh && Array.isArray(hit.sh.siteLogs) && hit.sh.siteLogs[hit.idx]===s && (!state.draftShift || state.draftShift.id!==hit.sh.id || state.draftShift===hit.sh)) return hit;
   for(const sh of allShiftsForLedger()){
     const idx = (sh.siteLogs||[]).indexOf(s);
-    if(idx>=0) return { sh, idx };
+    if(idx>=0){ const r = { sh, idx }; _siteCtxCache.set(s, r); return r; }
+  }
+  for(const sh of allShiftsForLedgerCompanyWide()){
+    const idx = (sh.siteLogs||[]).indexOf(s);
+    if(idx>=0){ const r = { sh, idx }; _siteCtxCache.set(s, r); return r; }
   }
   return null;
 }
@@ -8538,6 +8583,16 @@ function depreciationReserveBalanceForVehicle(vid){
 function depreciationReserveBalance(){
   return (state.depreciationReserveTransfers||[]).reduce((sum,t)=>sum + (t.direction==='toReserve' ? (Number(t.amount)||0) : -(Number(t.amount)||0)), 0);
 }
+/// #374 — VAT thuần của 1 công trình thương mại, CHƯA kẹp về 0 (âm = đầu vào dư, được trừ tiếp ở cấp công ty).
+function commercialVatNetRaw(s){
+  if(s.siteType!=='commercial') return 0;
+  const vat = siteVatRateFraction(s);
+  const outputVat = commercialNetSell(s) * (s.sellIncludesVat ? vat : 0);
+  const inputVatFromBuy = buyIsDeductible(s) ? (commercialNetBuy(s) * (siteInvoicedBuyPercent(s)/100) * vat) : 0;
+  return outputVat - inputVatFromBuy - siteInvoiceSupplementVatCredit(s);
+}
+/// VAT của RIÊNG 1 công trình (dùng cho màn tiền thực nhận của từng công trình). Số phải nộp của công ty
+/// tính theo sổ VAT công ty (companyVatLedger) — phần âm của công trình này được trừ vào công trình khác.
 function commercialVatPayable(s){
   if(s.siteType!=='commercial') return 0;
   const vat = siteVatRateFraction(s);
@@ -10896,7 +10951,7 @@ function renderPeriodVatDetailModal(inRangeShifts, vatPayableInRange){
   openModal(`
     <div class="modal-close-row"><button class="btn btn-ghost btn-sm" id="modalCloseBtn">Đóng ✕</button></div>
     <h3>🧾 VAT Phải Nộp — Giải Trình Chi Tiết</h3>
-    <div class="hint" style="margin-bottom:10px;">Gồm 2 mảng: THƯƠNG MẠI (bước 1–4) và CHỞ CƯỚC (bước 5). Cộng dồn đúng từng công trình trong kỳ đang xem — số liệu lấy trực tiếp từ đúng hàm đang chạy thật (commercialVatPayable), không tính lại theo cách khác.</div>
+    <div class="hint" style="margin-bottom:10px;">Gồm 2 mảng: THƯƠNG MẠI (bước 1–4) và CHỞ CƯỚC (bước 5), cộng dồn mọi công trình trong kỳ đang xem. Số cuối cùng phải nộp của cả công ty (sau khi trừ VAT mua xe và phần dư các kỳ trước) xem ở "Bảng VAT Cả Công Ty Theo Tháng".</div>
 
     <div class="modal-step">
       <div class="st-title">1. VAT đã thu từ khách hàng (đầu ra) — theo từng khách</div>
@@ -10918,11 +10973,10 @@ function renderPeriodVatDetailModal(inRangeShifts, vatPayableInRange){
     </div>
 
     <div class="modal-step">
-      <div class="st-title">4. Cộng dồn ra VAT phải nộp thực tế</div>
-      <div class="st-body">Mỗi công trình tính riêng rồi mới cộng lại (không gộp trước) — nếu 1 công trình tự nó bị âm (khấu trừ nhiều hơn phải nộp) thì phần âm đó bị kẹp về 0 cho đúng công trình đó (luật không cho bù chéo sang công trình khác, cũng không tự hoàn thuế).</div>
-      <div class="st-formula">VAT đầu ra − VAT đầu vào − Hoá đơn bù = ${fmtVND(b.totalOutputRaw)} − ${fmtVND(b.totalInputRaw)} − ${fmtVND(b.totalSupplementCredit)} = ${fmtVND(b.totalPayableRaw)}${b.totalLostCredit>0.5?`
-+ Khấu trừ dư bị mất (công trình lẻ âm VAT, không được bù chéo) = ${fmtVND(b.totalLostCredit)}`:''}
-= VAT PHẢI NỘP MẢNG THƯƠNG MẠI = ${fmtVND(b.totalPayableClamped)}</div>
+      <div class="st-title">4. VAT thuần mảng thương mại</div>
+      <div class="st-body">VAT tính cho cả công ty trong kỳ: công trình nào đầu vào nhiều hơn đầu ra thì phần dư được trừ vào công trình khác (không bị mất).</div>
+      <div class="st-formula">VAT đầu ra − VAT đầu vào HĐ mỏ − VAT HĐ thương mại = ${fmtVND(b.totalOutputRaw)} − ${fmtVND(b.totalInputRaw)} − ${fmtVND(b.totalSupplementCredit)}
+= VAT THUẦN MẢNG THƯƠNG MẠI = ${b.totalPayableRaw<0?'−':''}${fmtVND(Math.abs(b.totalPayableRaw))}</div>
     </div>
 
     <div class="modal-step">
@@ -10930,8 +10984,9 @@ function renderPeriodVatDetailModal(inRangeShifts, vatPayableInRange){
       <div class="st-body">Giá cước đã gồm VAT: tách VAT ra từ giá. Giá cước chưa VAT: giá × thuế suất VAT cước đã điền trên ca (không điền thuế suất thì không tính).</div>
       ${freightRows.length===0?'<div class="hint">Chưa có công trình cước nào có VAT trong kỳ.</div>':freightRows.map(rowHtml).join('')}
       <div class="summary-row total"><span>Tổng VAT chở cước</span><span class="val">${fmtVND(freightVatTotal)}</span></div>
-      <div class="st-formula">VAT thương mại + VAT chở cước = ${fmtVND(b.totalPayableClamped)} + ${fmtVND(freightVatTotal)}
-= VAT PHẢI NỘP THỰC TẾ = ${fmtVND(vatPayableInRange)}</div>
+      <div class="st-formula">VAT thuần thương mại + VAT chở cước = ${b.totalPayableRaw<0?'−':''}${fmtVND(Math.abs(b.totalPayableRaw))} + ${fmtVND(freightVatTotal)}
+= VAT PHẢI NỘP CỦA KỲ (chưa trừ VAT mua xe, số chuyển kỳ trước) = ${fmtVND(vatPayableInRange)}${b.totalPayableRaw+freightVatTotal<0?`
+(âm ${fmtVND(-(b.totalPayableRaw+freightVatTotal))} → nộp 0đ, phần dư chuyển sang kỳ sau)`:''}</div>
     </div>
 
     <div class="modal-step">
@@ -12440,10 +12495,7 @@ function buildCompanyStrategyData(from, to){
   }));
   const bank = safe(()=>computeBankBalanceReconciliation(), null), cash = safe(()=>computeCashBalanceReconciliation(), null);
   const debt = safe(()=>computeAllPartnersDebtSummary(), {});
-  const sched = safe(()=>truckVatCreditSchedule(), { total:0, used:0, remaining:0 });
-  const payByMonth = safe(()=>commercialVatPayableByMonthCompanyWide(), {});
-  const vatPaid = (state.vatPayments||[]).reduce((a,p)=>a+(Number(p.amount)||0),0);
-  const payAll = Object.values(payByMonth).reduce((a,b)=>a+b,0);
+  const LG = safe(()=>companyVatLedger(), { rows:[], truckTotal:0, truckUsed:0, truckRemaining:0, inputCarryRemaining:0, creditRemaining:0, dueTotal:0, paidTotal:0, owedNow:0 });
   const partners = safe(()=>computePartnersOverview(), []).filter(p=>p.totalOwed>0.5)
     .map(p=>({ doiTac: p.name, conNo: R(p.totalOwed), soNgayNoLauNhat: p.daysOutstanding===undefined ? null : p.daysOutstanding }));
   return {
@@ -12467,10 +12519,11 @@ function buildCompanyStrategyData(from, to){
       chiTietDoiTacCuocDangNo: partners
     },
     thueVAT: {
-      vatPhaiNopPhatSinhLuyKe_thuongMaiVaCuoc: R(payAll), vatPhaiNopTheoThang: partsObj(Object.entries(payByMonth)),
-      vatMuaXeCongTy: { tong: R(sched.total), daKhauTru: R(sched.used), conChoKhauTru: R(sched.remaining) },
-      daNopNhaNuoc: R(vatPaid), conPhaiNopUocTinh: R(payAll - sched.used - vatPaid),
-      luuY: 'Chưa trừ VAT đầu vào của dầu, sửa chữa; số chính thức theo tờ khai của kế toán.'
+      soVatTheoThang: LG.rows.map(r=>({ thang: r.ym, vatThuanThuongMai: R(r.commercial), vatCuoc: R(r.freight), vatMuaXeMoi: R(r.truckNew), khauTruDaDung: R(r.creditUsed), phaiNop: R(r.due), daNop: R(r.paid), conDuocKhauTruChuyenSau: R(r.carryOut) })),
+      phaiNopLuyKe: R(LG.dueTotal), daNopNhaNuoc: R(LG.paidTotal), conNoThueLuyKe: R(LG.owedNow),
+      vatMuaXeCongTy: { tong: R(LG.truckTotal), daKhauTru: R(LG.truckUsed), conChoKhauTru: R(LG.truckRemaining) },
+      dauVaoDuChuyenSau: R(LG.inputCarryRemaining),
+      luuY: 'Bù trừ cả công ty theo tháng, phần dư chuyển kỳ sau. Chưa có VAT đầu vào của dầu, sửa chữa; tính theo ngày ca. Số chính thức theo tờ khai của kế toán.'
     },
     congTrinhChoCuocDangChay: base.siteRanking, taiXe: base.driverStats.map(d=>Object.assign({}, d, { xeLaiChinh: (()=>{ const drv = state.drivers.find(x=>x.name===d.name); const vid = drv ? driverMainVehicleId(drv.id) : null; const v = vehicles.find(x=>x.id===vid); return v ? (v.name||v.plate) : null; })() })),
     giayToSapHetHan_xeDangChon: base.upcomingDocumentExpirations, lichBaoDuong_xeDangChon: base.maintenanceScheduleStatus, suaChuaGanDay_moiXe: base.relevantRecentRepairs,
@@ -12506,7 +12559,7 @@ CHỈ trả về DUY NHẤT một object JSON đúng cấu trúc sau, không kè
     "costStructure": "<cơ cấu chi phí: khoản cố định nào lớn nhất ở từng xe, khoản biến đổi nào lớn nhất, khoản nào bất thường>",
     "breakEven": "<điểm hoà vốn cả công ty và từng xe: cần bao nhiêu chuyến, đã chạy bao nhiêu, còn thiếu bao nhiêu, cần mấy chuyến/ngày trong số ngày còn lại>",
     "cashAndReceivables": "<tiền TCB, tiền mặt, công nợ phải thu/phải trả, lương còn nợ: thanh khoản có an toàn không, khoản nào cần thu/trả trước>",
-    "taxVat": "<VAT phải nộp, đã khấu trừ bằng VAT mua xe, còn chờ khấu trừ, còn phải nộp ước tính: ý nghĩa với dòng tiền>"
+    "taxVat": "<đọc sổ VAT theo tháng: VAT thuần, khấu trừ đã dùng (VAT mua xe, đầu vào dư), phải nộp, đã nộp, còn nợ thuế, còn được khấu trừ chuyển sau: ý nghĩa với dòng tiền>"
   },
   "companyStrategy": [ { "priority": "<'cao' | 'trung_binh' | 'thap'>", "title": "<tên hành động ngắn>", "action": "<làm gì, mục tiêu bằng số>", "evidence": "<con số trong dữ liệu dẫn tới đề xuất này>" } ],
   "vehicleAnalysis": [ { "vehicleName": "<đúng tenXe>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "result": "<kết quả xe trong kỳ bằng số>", "breakEven": "<hoà vốn riêng xe: cần/đã chạy/thiếu, tốc độ cần đạt>", "costNote": "<khoản chi phí đáng chú ý nhất của xe>", "strategy": [ "<việc cụ thể 1 cho riêng xe này>", "<việc 2>" ] } ],
@@ -16677,7 +16730,7 @@ function computePeriodSummary(from, to){
   const saleGain = saleGainInRange(from, to, vidScope); // #320 — lãi/lỗ bán xe
   const periodExtraCost = driverBonusCost + driverExpenseReportCost - repairDriverRecovery - saleGain;
   const finalNetProfit = gTotal.grossProfit - repairTotal - roadFee - houseRent - utilities - tollFee - otherFixedMonthly + invoiceSupplementVatCredit - periodExtraCost;
-  const vatPayableInRange = inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+siteOutputVatPayable(site),0),0); // #368 — gồm cả VAT cước
+  const vatPayableInRange = Math.max(0, inRange.reduce((sum,sh)=>sum+(sh.siteLogs||[]).reduce((s,site)=>s+siteVatNetRaw(site),0),0)); // #374 — bù trừ trong cả kỳ (không kẹp từng công trình); gồm cả VAT cước
   const citPeriodKey = `${from}_${to}`;
   const manualCitValue = (state.settings.manualCitByPeriod||{})[citPeriodKey] || 0;
   const cashIn = sitePaymentsTotalInRange(from, to);
@@ -17138,7 +17191,7 @@ function renderResults(){
       <div class="card" style="margin-top:14px;">
         <div style="font-weight:800; font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">🧾 CÁC KHOẢN THUẾ TRONG KỲ</div>
         <div class="summary-row"><span>VAT phải nộp (bắt buộc theo luật)</span><span class="val" style="color:var(--loss);">${vatPayableInRange>0?'−':''}${fmtVND(vatPayableInRange)}</span></div>
-        ${(()=>{ const fv = inRange.reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,st)=>x+siteFreightOutputVat(st),0),0); return `<div class="hint" style="margin:0 0 4px;">= VAT thương mại ${fmtVND(vatPayableInRange-fv)} + VAT chở cước ${fmtVND(fv)}. Đây là tiền thu hộ nhà nước, không nằm trong doanh thu hay lợi nhuận.</div>`; })()}
+        ${(()=>{ const fv = inRange.reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,st)=>x+siteFreightOutputVat(st),0),0); const cv = inRange.reduce((a,sh)=>a+(sh.siteLogs||[]).reduce((x,st)=>x+commercialVatNetRaw(st),0),0); return `<div class="hint" style="margin:0 0 4px;">= VAT thương mại (bán ra − đầu vào) ${cv<0?'−':''}${fmtVND(Math.abs(cv))} + VAT chở cước ${fmtVND(fv)}${cv+fv<0?' → âm nên phải nộp 0đ, phần dư chuyển kỳ sau':''}. Chưa trừ VAT mua xe và phần còn được khấu trừ từ kỳ trước — xem Bảng VAT cả công ty. Đây là tiền thu hộ nhà nước, không nằm trong doanh thu hay lợi nhuận.</div>`; })()}
         <button class="btn btn-ghost btn-sm" id="vatDetailBtn" style="margin:2px 0 6px;">🔍 Chi Tiết Cách Tính VAT</button>
         <button class="btn btn-ghost btn-sm" id="vatCompanyDetailBtn" style="margin:2px 0 6px;">🔍 Bảng VAT Cả Công Ty Theo Tháng</button>
         <div class="field" style="margin-top:8px; margin-bottom:0;">
@@ -18841,7 +18894,6 @@ function openMaintenanceEditor(id){
   saveMainScroll();
   const existing = id ? state.maintenanceSchedules.find(m=>m.id===id) : null;
   const draft = existing ? {...existing} : { id: uid('maint'), name:'', intervalKm:5000, lastDoneOdo: currentOdometer(), lastDoneDate: todayLocalDateStr(), notes:'', history:[] };
-  const history = [...(draft.history||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const app = document.getElementById('app');
   app.innerHTML = `
     <section class="group">
@@ -21506,7 +21558,7 @@ function renderCompanyDashboardPage(preserveScroll){
         const driverAdvanceHeld = companyWideDriverAdvanceHeldPositive();
         const driverAdvanceOwed = companyWideDriverAdvanceOwed();
         const wagePayable = companyWideWagePayable();
-        const truckVatRemaining = truckVatCreditSchedule().remaining; // #320 — VAT mua xe công ty chờ khấu trừ
+        const truckVatRemaining = truckVatCreditSchedule().creditRemaining; // #374 — toàn bộ VAT đầu vào còn được khấu trừ chuyển sau (VAT mua xe + đầu vào dư)
         // MỚI (Ông Chủ yêu cầu 2026-09-20 — "tách rõ phần tiền góp vào vận
         // hành đang ra sao, và tài sản xe đang ra sao, cho khoa học minh
         // bạch"): tách hẳn 2 bảng theo đúng bản chất — Bảng 1 gồm mọi
@@ -21547,7 +21599,7 @@ function renderCompanyDashboardPage(preserveScroll){
               <tr><td>👷 Công tác phí tài xế đang giữ <button class="link-btn" id="wcAdvanceBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--profit);">+${fmtVND(driverAdvanceHeld)}</td></tr>
               ${driverAdvanceOwed>0.5 ? `<tr><td>👷 Công ty còn nợ tài xế (chi vượt công tác phí) <button class="link-btn" id="wcAdvanceBreakdownBtn2" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:var(--loss);">−${fmtVND(driverAdvanceOwed)}</td></tr>` : ''}
               <tr><td>👷 ${wagePayable<0?'Tài xế đang nợ lại công ty (trả lương vượt)':'Lương còn nợ tài xế'} <button class="link-btn" id="wcWageBreakdownBtn" style="padding:0; font-size:11.5px; vertical-align:middle;">🔍</button></td><td class="num" style="color:${wagePayable>0?'var(--loss)':'var(--profit)'};">${wagePayable>0?'−':'+'}${fmtVND(Math.abs(wagePayable))}</td></tr>
-              ${truckVatRemaining>0.5 ? `<tr><td>🧾 VAT mua xe công ty chờ khấu trừ</td><td class="num" style="color:var(--profit);">+${fmtVND(truckVatRemaining)}</td></tr>` : ''}
+              ${truckVatRemaining>0.5 ? `<tr><td>🧾 VAT đầu vào còn được khấu trừ (VAT mua xe + đầu vào dư)</td><td class="num" style="color:var(--profit);">+${fmtVND(truckVatRemaining)}</td></tr>` : ''}
               <tr class="grid-total-row"><td style="text-align:left;">= TỔNG TIỀN VẬN HÀNH</td><td class="num" style="color:${(workingCapitalTotal-depreciationReserveBalance())>=0?'var(--profit)':'var(--loss)'}">${fmtVND(workingCapitalTotal-depreciationReserveBalance())}</td></tr>
             </tbody>
           </table>
@@ -21913,26 +21965,25 @@ function renderCompanyDashboardPage(preserveScroll){
         const vatAllTime = vatPayments.reduce((s,p)=>s+(Number(p.amount)||0),0);
         // #362 (Ông Chủ hỏi "VAT công ty phải nộp xem ở đâu") — gom về 1 chỗ: phát sinh − đã khấu trừ − đã nộp.
         // CHỈ HIỂN THỊ, dùng đúng các hàm sẵn có (commercialVatPayable từng công trình, truckVatCreditSchedule).
-        const payByMonth = commercialVatPayableByMonthCompanyWide();
-        const payThisMonth = payByMonth[ymNow]||0;
-        const payAllTime = Object.values(payByMonth).reduce((a,b)=>a+b,0);
-        const truckUsed = truckVatCreditSchedule().used;
-        const vatStillOwed = payAllTime - truckUsed - vatAllTime;
+        // #374 — lấy từ SỔ VAT CÔNG TY (bù trừ cả công ty, khấu trừ chuyển kỳ, đã nộp).
+        const LG = companyVatLedger();
+        const curRow = LG.rows.find(r=>r.ym===ymNow) || { net:0, due:0 };
+        const vatStillOwed = LG.owedNow;
         return `
       <div class="grid-table-wrap" style="margin-bottom:6px;">
         <table class="grid-table">
           <thead><tr><th>Khoản</th><th class="num">Số Tiền</th></tr></thead>
           <tbody>
-            <tr><td>VAT phải nộp phát sinh tháng ${monthLabelVN(ymNow)} (thương mại + chở cước, mọi xe)</td><td class="num">${fmtVND(payThisMonth)}</td></tr>
-            <tr><td>VAT phải nộp phát sinh luỹ kế từ đầu</td><td class="num" style="font-weight:800;">${fmtVND(payAllTime)}</td></tr>
-            <tr><td>− Đã khấu trừ bằng VAT mua xe công ty</td><td class="num" style="color:var(--profit);">−${fmtVND(truckUsed)}</td></tr>
+            <tr><td>VAT thuần tháng ${monthLabelVN(ymNow)} (bán ra − đầu vào, mọi xe)</td><td class="num">${curRow.net<0?'−':''}${fmtVND(Math.abs(curRow.net))}</td></tr>
+            <tr><td>Phải nộp tháng ${monthLabelVN(ymNow)} (sau khấu trừ chuyển sang)</td><td class="num">${fmtVND(curRow.due)}</td></tr>
+            <tr><td>Phải nộp luỹ kế từ đầu</td><td class="num" style="font-weight:800;">${fmtVND(LG.dueTotal)}</td></tr>
             <tr><td>− Đã nộp nhà nước (luỹ kế)<div class="hint" style="margin:2px 0 0;">Riêng tháng ${monthLabelVN(ymNow)}: ${fmtVND(vatThisMonth)}</div></td><td class="num" style="color:var(--profit);">−${fmtVND(vatAllTime)}</td></tr>
             <tr class="grid-total-row"><td style="text-align:left;">= ${vatStillOwed>=0?'CÒN PHẢI NỘP (ước tính)':'ĐÃ NỘP DƯ (ước tính)'}</td><td class="num" style="color:${vatStillOwed>0.5?'var(--loss)':'var(--profit)'};">${fmtVND(Math.abs(vatStillOwed))}</td></tr>
           </tbody>
         </table>
       </div>
       <button class="btn btn-ghost btn-sm" id="dashVatDetailBtn" style="width:auto; padding:8px 14px; margin:0 0 8px;">🔍 Chi tiết VAT từng tháng</button>
-      <div class="hint" style="margin:0 0 10px;">VAT phát sinh = VAT mảng thương mại (bán ra − hoá đơn mỏ − HĐ thương mại đã dùng) + VAT bán ra của chở cước. CHƯA trừ VAT đầu vào khác (dầu, sửa chữa...) — số chính thức theo tờ khai của kế toán.</div>`;
+      <div class="hint" style="margin:0 0 10px;">Còn được khấu trừ chuyển sau: ${fmtVND(LG.creditRemaining)} (VAT mua xe ${fmtVND(LG.truckRemaining)} + đầu vào dư ${fmtVND(LG.inputCarryRemaining)}). Chưa có VAT đầu vào của dầu, sửa chữa — số chính thức theo tờ khai của kế toán.</div>`;
       })()}
       <button class="btn btn-ghost btn-block" id="openVatPaymentsBtn">🧾 Xem / Ghi Nhận Đã Nộp Thuế VAT</button>
     </section>
