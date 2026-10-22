@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-13 · #376';
+const APP_BUILD = '2026-10-14 · #378';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -3397,6 +3397,24 @@ function driverExpenseReportCostInRange(from, to, vid){
     .filter(r=>r.date>=from && r.date<=to && (vid ? vehicleIdForDriverOnDate(r.driverId, r.date)===vid : true))
     .reduce((s,r)=>s+(Number(r.amount)||0),0);
 }
+/// #377 (Ông Chủ yêu cầu 2026-10-14 — "logic lại lãi vay cả 2 xe"): LÃI VAY PHÁT SINH theo NGÀY.
+/// Trước đây chi phí lãi vay của 1 kỳ chỉ gồm các kỳ trả nợ ĐÃ TICK "đã trả" có NGÀY ĐẾN HẠN nằm trong kỳ —
+/// nên xe vay mới (kỳ trả đầu tiên chưa tới hạn / chưa tick) hiện lãi 0đ, còn tháng có ngày đến hạn thì gánh
+/// trọn lãi của cả kỳ trước. Nay lãi của mỗi kỳ trả nợ được rải đều theo SỐ NGÀY của kỳ đó (từ ngày đến hạn
+/// trước, hoặc ngày giải ngân, tới ngày đến hạn này); kỳ báo cáo chứa ngày nào thì gánh đúng phần lãi ngày đó —
+/// đúng nguyên tắc dồn tích. Dòng tiền / số dư TCB vẫn theo kỳ ĐÃ TRẢ thật như cũ (các hàm tiền mặt không đổi).
+function _dayNo(d){ return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())/86400000); }
+function _dayNoStr(str){ const [y,m,dd] = str.split('-').map(Number); return Math.floor(Date.UTC(y, m-1, dd)/86400000); }
+function loanInterestAccruedInRange(loan, from, to){
+  if(!from || !to || from>to) return 0;
+  const f = _dayNoStr(from), t = _dayNoStr(to);
+  return computeFullLoanSchedule(loan).reduce((sum,row)=>{
+    const a = _dayNo(row.periodStart), b = _dayNo(row.dueDate);
+    const days = b - a; if(!(days>0)) return sum;
+    const overlap = Math.min(b, t) - Math.max(a, f-1);
+    return overlap>0 ? sum + (Number(row.interest)||0) * Math.min(overlap, days)/days : sum;
+  }, 0);
+}
 /// Mục 7b — chi phí cố định dồn tích của 1 xe, tính từ CA ĐẦU TIÊN của xe
 /// (y hệt từng phần của companyWideAccrualFixedMonthlyBreakdown()).
 function vehicleAccrualFixedBreakdown(vid, s, from, to){
@@ -3407,13 +3425,7 @@ function vehicleAccrualFixedBreakdown(vid, s, from, to){
   const effectiveFrom = vStart>from ? vStart : from;
   if(effectiveFrom>to) return zero;
   const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
-  const loanInterest = loans.reduce((sum2,loan)=>{
-    const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
-    return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
-      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-      return (paidSet.has(dueStr.slice(0,7)) && dueStr>=effectiveFrom && dueStr<=to) ? s3 + (Number(row.interest)||0) : s3;
-    }, 0);
-  }, 0);
+  const loanInterest = loans.reduce((sum2,loan)=>sum2 + loanInterestAccruedInRange(loan, effectiveFrom, to), 0); // #377 — phát sinh theo ngày
   const toCap = capToSaleDate(s, to); // #320 — dừng ở ngày bán xe
   const depreciation = effectiveFrom<=toCap ? proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, effectiveFrom, toCap) : 0;
   const insurance = effectiveFrom<=toCap ? proratedMonthlyCost(()=>Number(s.monthlyInsurance)||0, effectiveFrom, toCap) : 0;
@@ -3674,13 +3686,7 @@ function taxAdjustmentForRange(from, to, vid){
     const loans = Array.isArray(s.bankLoans) ? s.bankLoans : (s.bankLoan && Number(s.bankLoan.principal)>0 ? [s.bankLoan] : []);
     const vStart = vehicleOperatingStartDate(v);
     const effFrom = vStart && vStart>from ? vStart : from;
-    const personalLoanInterest = loans.filter(l=>(l.ownerType||'personal')!=='company').reduce((sum2,loan)=>{
-      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
-      return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
-        const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-        return (vStart && paidSet.has(dueStr.slice(0,7)) && dueStr>=effFrom && dueStr<=to) ? s3 + (Number(row.interest)||0) : s3;
-      }, 0);
-    }, 0);
+    const personalLoanInterest = vStart ? loans.filter(l=>(l.ownerType||'personal')!=='company').reduce((sum2,loan)=>sum2 + loanInterestAccruedInRange(loan, effFrom, to), 0) : 0; // #377
     nonDeductible += personalLoanInterest;
     if(vehicleOwnershipOf(s)==='personal'){
       const b = vehicleAccrualFixedBreakdown(v, s, from, to);
@@ -4384,15 +4390,7 @@ function companyWideAccrualFixedMonthlyBreakdown(from, to){
     // Sửa: cộng đúng LÃI THẬT của TỪNG KỲ ĐÃ TICK "Đã trả" (paidMonths),
     // rơi đúng vào khoảng [effectiveFrom,to] đang xét — không còn dùng 1
     // mức lãi cố định dàn đều nữa.
-    const actualLoanInterestInRange = loans.reduce((sum2,loan)=>{
-      const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
-      return sum2 + computeFullLoanSchedule(loan).reduce((s3,row)=>{
-        const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-        const ym = dueStr.slice(0,7);
-        if(paidSet.has(ym) && dueStr>=effectiveFrom && dueStr<=to) return s3 + (Number(row.interest)||0);
-        return s3;
-      }, 0);
-    }, 0);
+    const actualLoanInterestInRange = loans.reduce((sum2,loan)=>sum2 + loanInterestAccruedInRange(loan, effectiveFrom, to), 0); // #377 — phát sinh theo ngày
     const toCap = capToSaleDate(s, to); // #320 — khấu hao/bảo hiểm/đăng kiểm dừng ở ngày bán xe
     if(effectiveFrom<=toCap) depreciation += proratedMonthlyCost(()=>Number(s.monthlyVehicleDepreciation)||0, effectiveFrom, toCap);
     loanInterest += actualLoanInterestInRange;
@@ -4446,13 +4444,7 @@ function companyWideAccrualFixedMonthly(from, to){
 function loanInterestBreakdownForDisplay(from, to, isCompanyWide){
   const rows = [];
   const addLoanRow = (vehicleLabel, loan, effFrom)=>{
-    const paidSet = new Set(Array.isArray(loan.paidMonths) ? loan.paidMonths : []);
-    const interest = computeFullLoanSchedule(loan).reduce((s3,row)=>{
-      const dueStr = `${row.dueDate.getFullYear()}-${String(row.dueDate.getMonth()+1).padStart(2,'0')}-${String(row.dueDate.getDate()).padStart(2,'0')}`;
-      const ym = dueStr.slice(0,7);
-      if(paidSet.has(ym) && dueStr>=effFrom && dueStr<=to) return s3 + (Number(row.interest)||0);
-      return s3;
-    }, 0);
+    const interest = loanInterestAccruedInRange(loan, effFrom, to); // #377 — phát sinh theo ngày
     if(interest>0) rows.push({ label: `${loan.name||'Khoản vay'}${vehicleLabel?` — 🚛 ${vehicleLabel}`:''}`, interest });
   };
   if(isCompanyWide){
@@ -4692,6 +4684,7 @@ function computeVehicleAccrualProfit(vid, from, to){
   const tollFee = tollFeeForRangeVehicle(vid, from, to); // #350 — cầu đường giờ thuộc riêng xe
   const netProfit = grossProfit - breakEven.fixedCost - tollFee - driverExtraCost + saleGainInRange(from, to, vid); // #320 — lãi/lỗ bán xe
   const activeShifts = shifts.filter(sh=>(sh.siteLogs||[]).reduce((x,l)=>x+siteTripCount(l),0)>0).length;
+  const lineSplit = businessLineSplit(shifts); // #378
   // #362 — bóc CP cố định thành từng khoản (cộng lại đúng bằng fixedCost) + danh sách ca CHƯA CHỐT dầu cuối ca.
   const afb = vehicleAccrualFixedBreakdown(vid, s, from, to);
   const fixedParts = [
@@ -4708,7 +4701,7 @@ function computeVehicleAccrualProfit(vid, from, to){
   ].filter(x=>Math.abs(Number(x[1])||0)>0.5);
   const openShifts = shifts.filter(shiftFuelEndPending)
     .map(sh=>({ date: sh.date, charged: shiftFuelCost(sh), hasOdoEnd: Number(sh.odoEnd)>0 }));
-  return { totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee + driverExtraCost, tollFee, invoiceSupplementCost, netProfit, tripCount: shifts.length, totalTrips: breakEven.totalTrips||0, activeShifts, fixedParts, variableParts, openShifts };
+  return { totalRevenue: breakEven.totalRevenue, grossProfit, fixedCost: breakEven.fixedCost + tollFee + driverExtraCost, tollFee, invoiceSupplementCost, netProfit, tripCount: shifts.length, totalTrips: breakEven.totalTrips||0, activeShifts, fixedParts, variableParts, openShifts, lineSplit };
 }
 // ================= 2026-08-15/18: SỔ VỐN CHỦ SỞ HỮU + DỰ ÁN ĐẦU TƯ XE =================
 /// LỢI NHUẬN LUỸ KẾ TOÀN CÔNG TY — Dòng Tiền Thuần cộng dồn từ NGÀY BẮT
@@ -7442,6 +7435,81 @@ function siteRevenue(s){
   }
   const gross = siteFreightGross(s);
   return s.priceIncludesVat ? gross/(1+freightVatRateFraction(s)) : gross;
+}
+/// ===== #378 (Ông Chủ yêu cầu 2026-10-14) — TÁCH KẾT QUẢ CHỞ CƯỚC / THƯƠNG MẠI =====
+/// Cơ chế (chỉ đọc số đã có, không đổi lợi nhuận tổng):
+///  • Doanh thu, giá vốn hàng (tiền mua mỏ + hoá đơn thương mại sau VAT hưởng), lương chuyến: thuộc THẲNG công trình nào thì
+///    tính cho mảng đó.
+///  • Dầu, tiền ăn, phát sinh, luật phát sinh của 1 ca: chia cho 2 mảng theo SỐ CHUYẾN trong ca (ca chỉ chạy 1 loại thì
+///    mảng đó chịu hết). Ca không có chuyến nào → để riêng ở dòng "chi phí ca không có chuyến".
+///  • Chi phí cố định (khấu hao, lãi vay, luật đường, cầu đường, bảo hiểm, lương cứng...) là của XE, không chia mảng:
+///    dùng để tính điểm hoà vốn theo đúng tỷ lệ chuyến thực tế, kèm 2 mốc "nếu chỉ chạy cước / chỉ chạy thương mại".
+function businessLineSplit(shifts){
+  const mk = ()=>({ trips:0, revenue:0, goods:0, wage:0, shared:0 });
+  const L = { freight: mk(), commercial: mk() }; let unallocated = 0;
+  (shifts||[]).forEach(sh=>{
+    const tripsBy = { freight:0, commercial:0 };
+    (sh.siteLogs||[]).forEach((s,idx)=>{
+      const k = s.siteType==='commercial' ? 'commercial' : 'freight';
+      const n = siteTripCount(s);
+      tripsBy[k] += n; L[k].trips += n;
+      L[k].revenue += siteRevenue(s);
+      L[k].wage += siteWageTotal(s);
+      if(k==='commercial') L[k].goods += siteMaterialCost(s) + siteInvoiceSupplementCost(s, {sh,idx}) - siteInvoiceSupplementVatCredit(s, {sh,idx});
+    });
+    const shared = shiftFuelCost(sh) + (Number(sh.foodAllowance)||0) + (Number(sh.incidentalCost)||0) + (Number(sh.roadFeeIncidental)||0);
+    const tt = tripsBy.freight + tripsBy.commercial;
+    if(tt>0){ L.freight.shared += shared*tripsBy.freight/tt; L.commercial.shared += shared*tripsBy.commercial/tt; }
+    else unallocated += shared;
+  });
+  ['freight','commercial'].forEach(k=>{ const x = L[k]; x.gross = x.revenue - x.goods - x.wage - x.shared; x.margin = x.trips>0 ? x.gross/x.trips : null; });
+  const trips = L.freight.trips + L.commercial.trips;
+  const gross = L.freight.gross + L.commercial.gross - unallocated;
+  return { freight: L.freight, commercial: L.commercial, unallocated, trips, gross,
+    revenue: L.freight.revenue + L.commercial.revenue, margin: trips>0 ? gross/trips : null };
+}
+/// Bảng tách 2 mảng + điểm hoà vốn theo tỷ lệ chuyến thực tế. fixed = chi phí cố định cùng phạm vi.
+function businessLineSplitHtml(sp, fixed, title){
+  const f = sp.freight, c = sp.commercial;
+  if(!(f.trips>0 || c.trips>0)) return '';
+  const m = n => Math.abs(n)<0.5 ? '<span style="color:var(--ink-soft);">—</span>' : (n<0?'−':'')+fmtVND(Math.abs(n));
+  const pct = (a,b)=> b>0 ? (Math.round(a/b*1000)/10).toLocaleString('vi-VN')+'%' : '—';
+  const col = n => n>=0 ? 'var(--profit)' : 'var(--loss)';
+  const row = (label, a, b, t, strong) => `<tr${strong?' class="grid-total-row"':''}><td${strong?' style="text-align:left;"':''}>${label}</td><td class="num">${a}</td><td class="num">${b}</td><td class="num">${t}</td></tr>`;
+  const shortfall = fixed - sp.gross;
+  const beMix = (sp.margin>0) ? Math.ceil(fixed/sp.margin) : null;
+  const onlyF = f.margin>0 ? Math.ceil(fixed/f.margin) : null, onlyC = c.margin>0 ? Math.ceil(fixed/c.margin) : null;
+  return `
+      <div style="font-weight:800; margin:14px 0 6px;">${title||'🔀 Tách Chở Cước / Thương Mại'}</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th style="text-align:left;">Khoản</th><th class="num">🚚 Chở Cước</th><th class="num">🪨 Thương Mại</th><th class="num">Tổng</th></tr></thead>
+          <tbody>
+            ${row('Số chuyến', f.trips.toLocaleString('vi-VN'), c.trips.toLocaleString('vi-VN'), sp.trips.toLocaleString('vi-VN'))}
+            ${row('Doanh thu (đã bóc VAT)', m(f.revenue), m(c.revenue), m(sp.revenue))}
+            ${row('− Giá vốn hàng (mua mỏ + HĐ thương mại sau VAT hưởng)', m(-f.goods), m(-c.goods), m(-(f.goods+c.goods)))}
+            ${row('− Lương chuyến', m(-f.wage), m(-c.wage), m(-(f.wage+c.wage)))}
+            ${row('− Dầu, tiền ăn, phát sinh (chia theo số chuyến trong ca)', m(-f.shared), m(-c.shared), m(-(f.shared+c.shared)))}
+            ${sp.unallocated>0.5 ? row('− Chi phí ca không có chuyến nào', '', '', m(-sp.unallocated)) : ''}
+            ${row('= Lãi gộp', `<span style="color:${col(f.gross)};">${m(f.gross)}</span>`, `<span style="color:${col(c.gross)};">${m(c.gross)}</span>`, `<span style="color:${col(sp.gross)};">${m(sp.gross)}</span>`, true)}
+            ${row('Lãi gộp mỗi chuyến', f.margin===null?'—':m(f.margin), c.margin===null?'—':m(c.margin), sp.margin===null?'—':m(sp.margin))}
+            ${row('Biên lãi gộp / doanh thu', pct(f.gross,f.revenue), pct(c.gross,c.revenue), pct(sp.gross,sp.revenue))}
+          </tbody>
+        </table>
+      </div>
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <tbody>
+            <tr><td>Chi phí cố định cần bù trong kỳ</td><td class="num">${fmtVND(fixed)}</td></tr>
+            <tr><td><strong>Hoà vốn theo tỷ lệ chuyến thực tế</strong> (${pct(f.trips,sp.trips)} cước · ${pct(c.trips,sp.trips)} thương mại) = ${fmtVND(fixed)} ÷ ${sp.margin>0?fmtVND(sp.margin):'—'}</td><td class="num"><strong>${beMix===null?'—':beMix.toLocaleString('vi-VN')+' chuyến'}</strong></td></tr>
+            <tr><td>Mốc tham khảo: nếu CHỈ chạy cước = ${fmtVND(fixed)} ÷ ${f.margin>0?fmtVND(f.margin):'—'}</td><td class="num">${onlyF===null?'—':onlyF.toLocaleString('vi-VN')+' chuyến'}</td></tr>
+            <tr><td>Mốc tham khảo: nếu CHỈ chạy thương mại = ${fmtVND(fixed)} ÷ ${c.margin>0?fmtVND(c.margin):'—'}</td><td class="num">${onlyC===null?'—':onlyC.toLocaleString('vi-VN')+' chuyến'}</td></tr>
+            ${shortfall>0.5 ? `<tr class="grid-total-row"><td style="text-align:left;">Còn thiếu ${fmtVND(shortfall)} lãi gộp để hoà vốn — cần thêm</td><td class="num" style="color:var(--loss);">${f.margin>0?`${Math.ceil(shortfall/f.margin).toLocaleString('vi-VN')} chuyến cước`:''}${f.margin>0&&c.margin>0?'<br>hoặc ':''}${c.margin>0?`${Math.ceil(shortfall/c.margin).toLocaleString('vi-VN')} chuyến TM`:''}${!(f.margin>0)&&!(c.margin>0)?'—':''}</td></tr>`
+              : `<tr class="grid-total-row"><td style="text-align:left;">Đã vượt hoà vốn, lãi gộp dư ra</td><td class="num" style="color:var(--profit);">${fmtVND(-shortfall)}</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:6px;">Doanh thu, giá vốn, lương chuyến tính thẳng cho mảng của công trình; dầu, tiền ăn, phát sinh của ca chạy cả 2 loại chia theo số chuyến. Chi phí cố định là của xe nên không chia mảng — so sánh "lãi gộp mỗi chuyến" để biết mảng nào bù chi phí cố định nhanh hơn.</div>`;
 }
 /// ===== #367 (Ông Chủ yêu cầu 2026-10-11) — ĐIỂM HOÀ VỐN: 1 ĐỊNH NGHĨA DÙNG CHUNG =====
 /// Trước đây tab Kết Quả và trang "Kết Quả Từng Xe" tính hoà vốn theo 2 bộ chi phí khác nhau (tab Kết Quả
@@ -17363,6 +17431,8 @@ function renderResults(){
         `}
       </div>
       <div class="hint" style="margin-top:8px; color:${Math.abs(beCheckGap)<1?'var(--ink-soft)':'var(--loss)'};">${Math.abs(beCheckGap)<1 ? '✅ Doanh thu − biến đổi − cố định = đúng Lợi Nhuận Ròng của kỳ. Cùng cách tính với trang "Kết Quả Từng Xe".' : `⚠️ Bảng này lệch ${fmtVND(Math.abs(beCheckGap))} so với Lợi Nhuận Ròng của kỳ — chụp màn này gửi lại để kiểm tra.`}</div>
+      ${(()=>{ const sp = businessLineSplit(inRange); const gap = sp.gross - beU.gross;
+        return businessLineSplitHtml(sp, beU.fixed, `🔀 Tách Chở Cước / Thương Mại — 🚛 ${escapeHtml(beVehName)}`) + (sp.trips>0 && Math.abs(gap)>=1 ? `<div class="hint" style="color:var(--loss);">⚠️ Bảng tách lệch ${fmtVND(Math.abs(gap))} so với lãi gộp ở trên — chụp màn này gửi lại để kiểm tra.</div>` : ''); })()}
 
     </section>
 
@@ -19544,6 +19614,12 @@ function openLoanEditor(loanId){
           <label>Tên khoản vay (VD "Vay mua xe 29E-691.12", "Vay vốn lưu động")</label>
           <input type="text" id="loan_name" value="${escapeHtml(draft.name)}" placeholder="Đặt tên để dễ phân biệt các khoản vay">
         </div>
+        ${(state.vehicles||[]).length>1 ? `<div class="field">
+          <label>Khoản vay này dùng cho xe nào? (lãi vay tính vào chi phí của đúng xe đó)</label>
+          <select id="loan_vehicle">
+            ${state.vehicles.map(v=>`<option value="${v.id}" ${v.id===activeVehicleIdForEditing()?'selected':''}>🚛 ${escapeHtml(v.name||v.plate||'')}</option>`).join('')}
+          </select>
+        </div>` : ''}
         <div class="field">
           <label>Khoản vay này đứng tên ai với ngân hàng?</label>
           <select id="loan_ownerType">
@@ -19839,6 +19915,22 @@ function openLoanEditor(loanId){
     // nữa.
     if(!draft.rateSchedule || draft.rateSchedule.length===0){ showToast('Chưa có mức lãi suất nào — kéo xuống mục "Lộ Trình Lãi Suất", nhập % lãi + ngày áp dụng rồi bấm "+ Thêm Mức Lãi" trước khi Lưu.'); return; }
     if(!Array.isArray(state.settings.bankLoans)) state.settings.bankLoans = [];
+    // #377 — chọn xe khác xe đang mở → CHUYỂN khoản vay sang hồ sơ của xe đó (lãi vay tính cho đúng xe).
+    const loanVehSel = document.getElementById('loan_vehicle');
+    const targetVid = loanVehSel ? loanVehSel.value : activeVehicleIdForEditing();
+    if(targetVid && targetVid!==activeVehicleIdForEditing() && state.allVehiclesSettings[targetVid]){
+      const target = state.allVehiclesSettings[targetVid];
+      const before = { mine: state.settings.bankLoans.slice(), theirs: Array.isArray(target.bankLoans) ? target.bankLoans.slice() : [] };
+      state.settings.bankLoans = state.settings.bankLoans.filter(l=>l.id!==draft.id);
+      target.bankLoans = (Array.isArray(target.bankLoans) ? target.bankLoans.filter(l=>l.id!==draft.id) : []).concat([draft]);
+      try { await withTimeout(vehicleDataRef(targetVid, 'settings').set(target)); }
+      catch(e){ state.settings.bankLoans = before.mine; target.bankLoans = before.theirs; showToast('Lỗi chuyển khoản vay: ' + (e?.message || e)); return; }
+      recomputeBankLoanMonthlyPayment();
+      if(!(await saveSettings())){ state.settings.bankLoans = before.mine; target.bankLoans = before.theirs; return; }
+      showToast(`Đã chuyển khoản vay sang xe ${vehicleNameById(targetVid)}.`);
+      document.getElementById('loanEditorBackBtn').click();
+      return;
+    }
     const idx = state.settings.bankLoans.findIndex(l=>l.id===draft.id);
     if(idx>=0) state.settings.bankLoans[idx] = draft; else state.settings.bankLoans.push(draft);
     recomputeBankLoanMonthlyPayment();
@@ -20021,7 +20113,7 @@ function renderLoanList(){
             const dueYm = r.hasBasis && r.dueDate ? `${r.dueDate.getFullYear()}-${String(r.dueDate.getMonth()+1).padStart(2,'0')}` : null;
             const alreadyPaidThisPeriod = dueYm && Array.isArray(loan.paidMonths) && loan.paidMonths.includes(dueYm);
             return `<tr>
-              <td><strong>${escapeHtml(loan.name||'Khoản vay')}</strong></td>
+              <td><strong>${escapeHtml(loan.name||'Khoản vay')}</strong>${(()=>{ const mr = currentMonthRange(); const it = loanInterestAccruedInRange(loan, mr.from, mr.to); return `<div class="hint" style="margin:2px 0 0;">${(state.vehicles||[]).length>1?`🚛 ${escapeHtml(vehicleNameById(activeVehicleIdForEditing()))} · `:''}${(loan.ownerType||'personal')==='company'?'🏢 công ty vay':'👤 cá nhân vay'} · lãi phát sinh tháng này ${fmtVND(it)}</div>`; })()}</td>
               <td class="num">${r.hasBasis ? fmtVND(r.remainingBalance) : '—'}</td>
               <td class="num">${r.hasBasis ? (r.isPaidOff?'Đã hết nợ ✅':fmtVND(r.totalPaymentCurrent)) : '—'}</td>
               <td>${r.hasBasis ? `${paidCount}/${r.termMonths} kỳ` : '—'}</td>
@@ -20819,6 +20911,7 @@ function renderPerVehicleResultsPage(from, to, preserveScroll){
           </tbody>
         </table>
       </div>
+      ${(pv.r.lineSplit.freight.trips>0 && pv.r.lineSplit.commercial.trips>0) ? businessLineSplitHtml(pv.r.lineSplit, pv.r.fixedCost, '🔀 Tách Chở Cước / Thương Mại của xe này') : ''}
     </section>
     `).join('')}
     <section class="group">
@@ -20852,6 +20945,13 @@ function renderPerVehicleResultsPage(from, to, preserveScroll){
         </table>
       </div>
       <div class="hint" style="margin-top:6px;">Cùng 1 cách tính ở mọi nơi: số chuyến hoà vốn = chi phí cố định ÷ lãi gộp bình quân mỗi chuyến. Từng xe dùng chi phí của riêng xe; cả công ty cộng thêm nhà, điện nước.</div>
+      ${(()=>{ const all = perVehicle.map(pv=>pv.r.lineSplit); if(!all.length) return '';
+        const sum = k => ({ trips: all.reduce((a,x)=>a+x[k].trips,0), revenue: all.reduce((a,x)=>a+x[k].revenue,0), goods: all.reduce((a,x)=>a+x[k].goods,0), wage: all.reduce((a,x)=>a+x[k].wage,0), shared: all.reduce((a,x)=>a+x[k].shared,0) });
+        const F = sum('freight'), C = sum('commercial'); [F,C].forEach(x=>{ x.gross = x.revenue - x.goods - x.wage - x.shared; x.margin = x.trips>0 ? x.gross/x.trips : null; });
+        const un = all.reduce((a,x)=>a+x.unallocated,0), trips = F.trips + C.trips, gross = F.gross + C.gross - un;
+        const sp = { freight:F, commercial:C, unallocated:un, trips, gross, revenue: F.revenue + C.revenue, margin: trips>0 ? gross/trips : null };
+        const gap = gross - (sumGross); 
+        return businessLineSplitHtml(sp, companyBE.fixed, '🔀 Tách Chở Cước / Thương Mại — Cả Công Ty') + (Math.abs(gap)>=1 ? `<div class="hint" style="color:var(--loss);">⚠️ Bảng tách lệch ${fmtVND(Math.abs(gap))} so với tổng lãi gộp — chụp màn này gửi lại để kiểm tra.</div>` : ''); })()}
     </section>
   `;
   document.getElementById('perVehicleBackBtn').addEventListener('click', ()=>{ renderCompanyDashboardPage(true); restoreMainScroll(); });
