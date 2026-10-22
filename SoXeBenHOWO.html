@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-14 · #379';
+const APP_BUILD = '2026-10-14 · #380';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11178,9 +11178,6 @@ function shiftFinancialSummaryHtml(sh){
   // với Lợi Nhuận Ròng nếu lít đổ ≠ lít tiêu hao trong đúng ca đó (ví dụ đổ
   // dư/thiếu so với tiêu thụ thật), ĐÚNG bản chất "tiền mặt thật rời tay
   // ngay hôm nay" — không còn là lỗi trùng công thức nữa.
-  const cashPocketBySite = (sh.siteLogs||[]).reduce((sum,s)=>
-    sum + (s.siteType==='commercial' ? siteCashTakeHome(s) : siteRevenue(s)), 0);
-  const cashPocketTotal = cashPocketBySite - shiftOperatingCashCostReal(sh);
   return `
     ${(()=>{
       // #370 (Ông Chủ yêu cầu) — ca chở cước có VAT: đọc từ trên xuống đúng thứ tự tiền:
@@ -11212,24 +11209,7 @@ function shiftFinancialSummaryHtml(sh){
     <div class="summary-row total" style="font-size:15.5px;"><span>TỔNG CHI PHÍ</span><span class="val">${fmtVND(cost)}</span></div>
     <div class="formula-divider" style="margin:8px 0;"></div>
     <div class="summary-row total" style="font-size:19px;"><span>LỢI NHUẬN RÒNG</span><span class="val" style="color:${profit>=0?'var(--profit)':'var(--loss)'}">${profit>=0?'+':''}${fmtVND(profit)}</span></div>
-    <div class="hint" style="margin:2px 0 0;">Ca này LÀM ĂN lời hay lỗ: dầu tính theo số lít ĐÃ ĐỐT trong ca, mọi khoản tính chưa gồm VAT. Đây là số dùng để đánh giá hiệu quả.</div>
-    ${hasCommercialCost ? (()=>{
-      // #379 (Ông Chủ yêu cầu 2026-10-14) — giải thích chênh lệch Lợi nhuận ròng ↔ Tiền thực đút túi bằng phép cộng trừ minh bạch.
-      const fuelUsed = shiftFuelCost(sh), fuelBought = shiftFuelRefillCost(sh);
-      const other = cashPocketTotal - (profit + fuelUsed - fuelBought);
-      const sg = n => (n>=0?'+':'−') + fmtVND(Math.abs(n));
-      return `
-    <div class="summary-row total" style="font-size:17px; border-top:1.5px dashed var(--border);"><span style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">TIỀN THỰC ĐÚT TÚI (CẢ CA)</span><span class="val" style="color:${cashPocketTotal>=0?'var(--profit)':'var(--loss)'}">${cashPocketTotal>=0?'+':''}${fmtVND(cashPocketTotal)}</span></div>
-    <div class="hint" style="margin:2px 0 0;">Tiền mặt THẬT ra/vào trong ngày nếu khách và mỏ thanh toán đủ: dầu tính theo TIỀN MUA DẦU đổ thêm hôm nay (không phải lít đã đốt).</div>
-    <div style="margin-top:8px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:4px;">Vì sao 2 số khác nhau?</div>
-      <div class="summary-row"><span>Lợi nhuận ròng</span><span class="val">${sg(profit)}</span></div>
-      <div class="summary-row"><span>+ Dầu đã đốt (đã trừ trong lợi nhuận nhưng hôm nay không chi tiền)</span><span class="val">${sg(fuelUsed)}</span></div>
-      <div class="summary-row"><span>− Tiền mua dầu đổ thêm hôm nay${Number(sh.fuelAdded)>0?` (${(Number(sh.fuelAdded)||0).toLocaleString('vi-VN')} lít)`:''}</span><span class="val">${sg(-fuelBought)}</span></div>
-      ${Math.abs(other)>=1 ? `<div class="summary-row"><span>${other>=0?'+':'−'} Chênh lệch VAT và hoá đơn bù (tiền VAT khách trả − VAT trả mỏ − VAT phải nộp; VAT hoá đơn bù được khấu trừ)</span><span class="val">${sg(other)}</span></div>` : ''}
-      <div class="summary-row total"><span>= Tiền thực đút túi</span><span class="val">${sg(cashPocketTotal)}</span></div>
-      <div class="hint" style="margin:4px 0 0;">${fuelBought>fuelUsed+0.5 ? `Hôm nay đổ dầu nhiều hơn số đã đốt ${fmtVND(fuelBought-fuelUsed)} — phần dầu còn trong bình sẽ dùng cho các ca sau, nên ca sau tiền túi sẽ cao hơn lợi nhuận.` : fuelUsed>fuelBought+0.5 ? `Hôm nay đốt dầu đã mua từ trước nhiều hơn số đổ thêm ${fmtVND(fuelUsed-fuelBought)} — lần đổ dầu tới sẽ phải trả khoản này.` : 'Dầu đổ thêm vừa bằng dầu đã đốt.'} Cộng nhiều ca lại, hai số sẽ gần bằng nhau.</div>
-    </div>`; })() : ''}
+    <!-- #380 (Ông Chủ yêu cầu 2026-10-14): Tổng Kết Ca chỉ giữ 1 con số cuối — LỢI NHUẬN RÒNG sau khi trừ mọi chi phí; bỏ "Tiền thực đút túi" và phần giải thích. -->
   `;
 }
 function updateSummary(){
