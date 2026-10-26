@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-14 · #380';
+const APP_BUILD = '2026-10-26 · #381';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -2724,12 +2724,12 @@ function driverAdvancePeriodStatement(driverId, from, to){
   (state.driverAdvances||[]).filter(a=>a.driverId===driverId && a.date>=from && a.date<=to).forEach(a=>items.push({ date:a.date, label:`Ứng công tác phí${a.note?' — '+a.note:''}`, amount: Number(a.amount)||0 }));
   shiftsCompanyWideSafe().filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to && (Number(sh.incidentalCost)||0)>0)
     .forEach(sh=>items.push({ date:sh.date, label:`Chi phát sinh trên ca${sh.incidentalNotes?' — '+sh.incidentalNotes:''}`, amount: -(Number(sh.incidentalCost)||0) }));
-  (state.driverExpenseReports||[]).filter(r=>r.driverId===driverId && r.date>=from && r.date<=to)
+  (state.driverExpenseReports||[]).filter(r=>r.driverId===driverId && r.date>=from && r.date<=to && expenseReportPaidByDriver(r))
     .forEach(r=>items.push({ date:r.date, label:`Báo chi tay${r.item?' — '+r.item:''}${r.note?' ('+r.note+')':''}`, amount: -(Number(r.amount)||0) }));
   items.sort((a,b)=>a.date.localeCompare(b.date));
   const advanced = items.filter(i=>i.amount>0).reduce((s,i)=>s+i.amount,0);
   const spentShift = shiftsCompanyWideSafe().filter(sh=>sh.driverId===driverId && sh.date>=from && sh.date<=to).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
-  const spentManual = (state.driverExpenseReports||[]).filter(r=>r.driverId===driverId && r.date>=from && r.date<=to).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const spentManual = (state.driverExpenseReports||[]).filter(r=>r.driverId===driverId && r.date>=from && r.date<=to && expenseReportPaidByDriver(r)).reduce((s,r)=>s+(Number(r.amount)||0),0);
   const closing = driverAdvanceBalance(driverId, to);
   return { opening, advanced, spentShift, spentManual, closing, items };
 }
@@ -3880,7 +3880,7 @@ function driverAdvanceRows(){
   return (state.drivers||[]).map(d=>{
     const advanced = (state.driverAdvances||[]).filter(a=>a.driverId===d.id && a.date<=todayLocalDateStr()).reduce((s,a)=>s+(Number(a.amount)||0),0);
     const incidental = shiftsCompanyWideSafe().filter(sh=>sh.driverId===d.id && sh.date<=todayLocalDateStr()).reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
-    const manual = (state.driverExpenseReports||[]).filter(r=>r.driverId===d.id && r.date<=todayLocalDateStr()).reduce((s,r)=>s+(Number(r.amount)||0),0);
+    const manual = (state.driverExpenseReports||[]).filter(r=>r.driverId===d.id && r.date<=todayLocalDateStr() && expenseReportPaidByDriver(r)).reduce((s,r)=>s+(Number(r.amount)||0),0);
     return { driver: d, advanced, incidental, manual, balance: driverAdvanceBalance(d.id) };
   }).filter(r=>r.advanced||r.incidental||r.manual);
 }
@@ -11689,6 +11689,18 @@ function driverIncidentalShiftsInRange(driverId, from, to){
 /// chính xác tới từng ngày thay vì làm tròn cả tháng. Vẫn CỘNG DỒN từ
 /// trước tới giờ như cũ (không đổi bản chất "tháng trước còn thì tháng
 /// sau dùng tiếp") — chỉ đổi độ chính xác của mốc chốt.
+/// #381 (Ông Chủ yêu cầu 2026-10-26): BÁO CÁO CHI KHÁC (NGOÀI CA) có NGUỒN TRẢ:
+///  • 'driver'      — tài xế chi từ tiền ứng đang giữ → TRỪ vào số dư tài xế giữ (như trước);
+///  • 'companyBank' — Ông Chủ / công ty chuyển khoản TCB trả thẳng → KHÔNG trừ tài xế, trừ số dư TCB;
+///  • 'companyCash' — trả bằng tiền mặt công ty → KHÔNG trừ tài xế, trừ quỹ tiền mặt.
+/// Báo cáo cũ chưa có nguồn: coi là công ty chuyển khoản TCB (Ông Chủ xác nhận tiền ghi tay là tiền Ông Chủ bank đi).
+/// Chi phí vẫn tính vào lãi/lỗ như cũ, chỉ đổi chỗ trừ tiền.
+function expenseReportPaidBy(r){ return (r && (r.paidBy==='driver' || r.paidBy==='companyCash')) ? r.paidBy : 'companyBank'; }
+function expenseReportPaidByDriver(r){ return expenseReportPaidBy(r)==='driver'; }
+function expenseReportsPaidFromCompany(from, to, method){
+  return (state.driverExpenseReports||[]).filter(r=>r.date>=from && r.date<=to && expenseReportPaidBy(r)===(method==='cash'?'companyCash':'companyBank'))
+    .reduce((s,r)=>s+(Number(r.amount)||0),0);
+}
 function driverAdvanceBalance(driverId, asOfDate){
   asOfDate = asOfDate || todayLocalDateStr();
   const advanced = state.driverAdvances
@@ -11698,7 +11710,7 @@ function driverAdvanceBalance(driverId, asOfDate){
     .filter(sh=>sh.driverId===driverId && sh.date<=asOfDate && (Number(sh.incidentalCost)||0)>0)
     .reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0);
   const manual = state.driverExpenseReports
-    .filter(r=>r.driverId===driverId && r.date<=asOfDate)
+    .filter(r=>r.driverId===driverId && r.date<=asOfDate && expenseReportPaidByDriver(r)) // #381 — chỉ khoản tài xế chi từ tiền ứng
     .reduce((s,r)=>s+(Number(r.amount)||0),0);
   return advanced - incidental - manual;
 }
@@ -11734,13 +11746,13 @@ function renderDriverExpenseReportHistoryHtml(driverId){
   return `
     <div class="grid-table-wrap">
       <table class="grid-table">
-        <thead><tr><th>Ngày</th><th>Hạng Mục</th><th>Ghi Chú</th><th class="num">Số Tiền</th></tr></thead>
+        <thead><tr><th>Ngày</th><th>Hạng Mục</th><th>Ai Trả</th><th class="num">Số Tiền</th></tr></thead>
         <tbody>
           ${items.map(r=>`
           <tr class="grid-clickable-row" onclick="saveMainScroll(); openDriverExpenseReportEditor('${r.id}','${driverId}')">
             <td>${formatDateVN(r.date)}</td>
             <td>${r.item?escapeHtml(r.item):'—'}</td>
-            <td>${r.note?escapeHtml(r.note):'—'}</td>
+            <td>${expenseReportPaidBy(r)==='driver'?'👷 Tài xế':expenseReportPaidBy(r)==='companyCash'?'💵 Tiền mặt CT':'🏦 Ông Chủ / CT'}${r.note?`<div class="hint" style="margin:2px 0 0;">${escapeHtml(r.note)}</div>`:''}</td>
             <td class="num" style="color:var(--loss); font-weight:700;">−${fmtVND(Number(r.amount)||0)}</td>
           </tr>`).join('')}
         </tbody>
@@ -11776,7 +11788,7 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
   const balance = driverAdvanceBalance(driverId, to);
   const rangeIncidentalList = driverIncidentalShiftsInRange(driverId, from, to);
   const rangeAdvances = state.driverAdvances.filter(a=>a.driverId===driverId && a.date>=from && a.date<=to);
-  const rangeManualReports = state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date>=from && r.date<=to);
+  const rangeManualReports = state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date>=from && r.date<=to && expenseReportPaidByDriver(r)); // #381
   const rangeAdvancedTotal = rangeAdvances.reduce((s,a)=>s+(Number(a.amount)||0),0);
   const rangeSpentTotal = rangeIncidentalList.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0) + rangeManualReports.reduce((s,r)=>s+(Number(r.amount)||0),0);
   app.innerHTML = `
@@ -11809,7 +11821,7 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
       <div class="hint" style="margin-top:0; margin-bottom:10px;">Dùng để đối chiếu đúng 1 giai đoạn cụ thể với tài xế khi cần — tách riêng khỏi số dư cộng dồn toàn thời gian ở trên.</div>
       <div class="card">
         <div class="summary-row"><span>+ Đã ứng thêm trong khoảng</span><span class="val" style="color:var(--profit);">+${fmtVND(rangeAdvancedTotal)}</span></div>
-        <div class="summary-row total"><span>− Đã chi (phát sinh trong ca + báo cáo tay) trong khoảng</span><span class="val" style="color:var(--loss);">−${fmtVND(rangeSpentTotal)}</span></div>
+        <div class="summary-row total"><span>− Tài xế đã chi từ tiền ứng (phát sinh trong ca + báo cáo do tài xế chi) trong khoảng</span><span class="val" style="color:var(--loss);">−${fmtVND(rangeSpentTotal)}</span></div>
       </div>
     </section>
     <section class="group">
@@ -11941,6 +11953,15 @@ function openDriverExpenseReportEditor(id, driverId){
           <label>Số tiền đã chi</label>
           <input type="text" inputmode="decimal" id="de_amount">
         </div>
+        <div class="field">
+          <label>Ai trả khoản này?</label>
+          <div class="seg" id="de_paidBy">
+            <button type="button" data-val="companyBank" class="${expenseReportPaidBy(draft)==='companyBank'?'active':''}">🏦 Ông Chủ / CT chuyển khoản</button>
+            <button type="button" data-val="companyCash" class="${expenseReportPaidBy(draft)==='companyCash'?'active':''}">💵 Tiền mặt CT</button>
+            <button type="button" data-val="driver" class="${expenseReportPaidBy(draft)==='driver'?'active':''}">👷 Tài xế chi từ tiền ứng</button>
+          </div>
+          <div class="hint" id="de_paidByHint" style="margin:6px 0 0;"></div>
+        </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú thêm</label>
           <input type="text" id="de_note" value="${escapeHtml(draft.note)}">
@@ -11958,6 +11979,11 @@ function openDriverExpenseReportEditor(id, driverId){
     </section>
   `;
   attachMoneyInput(document.getElementById('de_amount'), draft.amount, v=>draft.amount=v);
+  { draft.paidBy = expenseReportPaidBy(draft);
+    const hint = document.getElementById('de_paidByHint');
+    const paint = ()=>{ hint.textContent = draft.paidBy==='driver' ? 'Trừ vào số tiền ứng tài xế đang giữ.' : draft.paidBy==='companyCash' ? 'Trừ quỹ tiền mặt công ty — KHÔNG trừ tiền tài xế đang giữ.' : 'Trừ số dư TCB — KHÔNG trừ tiền tài xế đang giữ.'; };
+    document.querySelectorAll('#de_paidBy button').forEach(b=>b.addEventListener('click', ()=>{ draft.paidBy = b.dataset.val; document.querySelectorAll('#de_paidBy button').forEach(x=>x.classList.toggle('active', x===b)); paint(); }));
+    paint(); }
   document.getElementById('saveExpBtn').addEventListener('click', async ()=>{
     draft.date = document.getElementById('de_date').value || draft.date;
     draft.item = document.getElementById('de_item').value.trim();
@@ -16307,12 +16333,13 @@ function computeBankBalanceReconciliation(){
   // đóng băng công thức đã xác minh).
   const driverAdvanceBank = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && (a.method||'bank')==='bank').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const bonusBank = allMonthlyBonusesCompanyWide().filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method!=='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
+  const expenseReportBank = expenseReportsPaidFromCompany(from, today, 'bank'); // #381
   // MỚI 2026-09-28 — Thanh toán lương cuối kỳ trả bằng TCB.
   const saleBank = saleProceedsInRange(from, today, 'bank'); // #320 — tiền bán xe về TCB
   const investBank = companyFundedInvestmentInRange(from, today, 'bank'); // #320 — TCB trả mua xe
   const salaryPayBank = (state.salaryPayments||[]).filter(p=>p.date>=from && p.date<=today && (p.method||'bank')==='bank').reduce((s,p)=>s+(Number(p.amount)||0),0); // #325 — 📌 đã trả ngoài sổ: không trừ số dư
   const operatingCostBank = fuelBank + advanceBank; // giữ tên cũ để không phá vỡ chỗ khác đang đọc field này
-  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash - driverAdvanceBank - bonusBank - reserveOut + reserveIn - salaryPayBank + saleBank - investBank;
+  const cashFlowSince = cashInBank - cashOutBank - operatingCostBank - repairBank - roadFeeBank - houseRentBank - utilitiesBank - tollFeeBank - fixedMonthlyBank - invoiceLotBank - vatPaymentBank + loanDisbursedBank - transferOutToCash + transferInFromCash - driverAdvanceBank - bonusBank - expenseReportBank - reserveOut + reserveIn - salaryPayBank + saleBank - investBank;
   // SỬA 2026-09-14 LẦN 3 (Ông Chủ báo — khai mốc chốt ĐÚNG HÔM NAY,
   // 352.090.794đ, nhưng app tính ra 264.424.794đ, lệch đúng 87.666.000đ):
   // BẮT ĐƯỢC LỖI TÍNH TRÙNG NGÀY THẬT SỰ NGHIÊM TRỌNG — 2 dòng
@@ -16343,7 +16370,7 @@ function computeBankBalanceReconciliation(){
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method!=='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
   return { checkpoint: latest, cashFlowSince, contributedSince, withdrawnSince, computedBalance,
-    saleBank, investBank, salaryPayBank, operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash, driverAdvanceBank, bonusBank, reserveOut, reserveIn };
+    saleBank, investBank, salaryPayBank, operatingCostBank, fuelBank, advanceBank, repairBank, roadFeeBank, houseRentBank, utilitiesBank, tollFeeBank, fixedMonthlyBank, invoiceLotBank, loanDisbursedBank, vatPaymentBank, transferOutToCash, transferInFromCash, driverAdvanceBank, bonusBank, expenseReportBank, reserveOut, reserveIn };
 }
 /// SỬA 2026-09-08 LẦN 2 (Ông Chủ xác nhận — "tiền mặt tao cầm ngoài thật
 /// sự còn 123tr"): SINH ĐÔI với computeBankBalanceReconciliation() ở
@@ -16380,6 +16407,7 @@ function computeCashBalanceReconciliation(){
   // hoặc tip/thưởng) thì tiền mặt đang cầm giảm đúng bằng số đó.
   const driverAdvanceCash = state.driverAdvances.filter(a=>a.date>=from && a.date<=today && a.method==='cash').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const bonusCash = allMonthlyBonusesCompanyWide().filter(b=>{ const d=bonusEffectiveDate(b); return d>=from && d<=today && b.method==='cash'; }).reduce((s,b)=>s+(Number(b.amount)||0),0);
+  const expenseReportCash = expenseReportsPaidFromCompany(from, today, 'cash'); // #381
   // SỬA 2026-09-14 (Ông Chủ — "mọi khoản chi được chọn tiền mặt hay
   // TCB, mày liên kết chuẩn để có số chuẩn xác"): thêm ĐỦ chiều tiền mặt
   // sinh đôi với mọi khoản đã có bên Ngân Hàng — sửa chữa, luật đường,
@@ -16417,7 +16445,7 @@ function computeCashBalanceReconciliation(){
   const saleCash = saleProceedsInRange(from, today, 'cash'); // #320
   const investCash = companyFundedInvestmentInRange(from, today, 'cash'); // #320
   const salaryPayCash = (state.salaryPayments||[]).filter(p=>p.date>=from && p.date<=today && p.method==='cash').reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank - driverAdvanceCash - bonusCash
+  const cashFlowSince = cashInCash - cashOutCash + transferInFromBank - transferOutToBank - driverAdvanceCash - bonusCash - expenseReportCash
     - repairCash - roadFeeCash - houseRentCash - utilitiesCash - tollFeeCash - fixedMonthlyCash - invoiceLotCash - vatPaymentCash - reserveOutCash + reserveInCash
     - fuelCash - shiftAdvanceCash - salaryPayCash + saleCash - investCash;
   // SỬA 2026-09-14 LẦN 3 (sinh đôi với lỗi vừa sửa ở computeBankBalanceReconciliation()
@@ -16431,7 +16459,7 @@ function computeCashBalanceReconciliation(){
   const contributedSince = state.ownerEquityEntries.filter(e=>e.type==='contribution' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const withdrawnSince = state.ownerEquityEntries.filter(e=>e.type==='withdrawal' && e.date>=from && e.date<=today && e.method==='cash').reduce((s,e)=>s+(Number(e.amount)||0),0);
   const computedBalance = latest.balance + cashFlowSince + contributedSince - withdrawnSince;
-  return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash,
+  return { checkpoint: latest, cashInCash, cashOutCash, cashFlowSince, contributedSince, withdrawnSince, computedBalance, transferInFromBank, transferOutToBank, driverAdvanceCash, bonusCash, expenseReportCash,
     repairCash, roadFeeCash, houseRentCash, utilitiesCash, tollFeeCash, fixedMonthlyCash, invoiceLotCash, vatPaymentCash, reserveOutCash, reserveInCash, fuelCash, shiftAdvanceCash, salaryPayCash, saleCash, investCash };
 }
 /// Theo Dõi Vốn Điều Lệ (2026-08-19) — so sánh số ĐÃ GÓP (chỉ tính đúng
