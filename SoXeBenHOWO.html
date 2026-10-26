@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-26 · #386';
+const APP_BUILD = '2026-10-26 · #387';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11792,17 +11792,6 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
   const to = toOverride || today;
   const from = fromOverride || (today.slice(0,8)+'01'); // mặc định đầu tháng hiện tại, Ông Chủ tự đổi lại nếu cần khoảng khác
   const balance = driverAdvanceBalance(driverId, to);
-  const rangeIncidentalList = driverIncidentalShiftsInRange(driverId, from, to);
-  const rangeAdvances = state.driverAdvances.filter(a=>a.driverId===driverId && a.date>=from && a.date<=to);
-  const rangeManualReports = state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date>=from && r.date<=to && expenseReportPaidByDriver(r)); // #381
-  const rangeAdvancedTotal = rangeAdvances.reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const rangeSpentTotal = rangeIncidentalList.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0) + rangeManualReports.reduce((s,r)=>s+(Number(r.amount)||0),0);
-  // #382 (Ông Chủ hỏi vì sao số dư lệch khi tự cộng trong 1 khoảng ngày): hiện SỐ DƯ ĐẦU KỲ (trước "Từ ngày")
-  // để phép tính trong khoảng khép kín: đầu kỳ + ứng thêm − đã chi = số dư cuối kỳ.
-  const rangeOpening = driverAdvancePeriodStatement(driverId, from, to).opening;
-  const rangeClosing = rangeOpening + rangeAdvancedTotal - rangeSpentTotal;
-  const dayBeforeFrom = (()=>{ const d0 = new Date(from+'T00:00:00'); d0.setDate(d0.getDate()-1); return `${d0.getFullYear()}-${String(d0.getMonth()+1).padStart(2,'0')}-${String(d0.getDate()).padStart(2,'0')}`; })();
-  const sgn = n => (n<0?'−':'') + fmtVND(Math.abs(n));
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="advDetailBackBtn">← Quay Lại Tài Xế</button>
@@ -11826,17 +11815,6 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
       <div class="two-col" style="margin-top:10px;">
         <button class="btn btn-accent" id="addAdvanceBtn">+ Ghi Ứng Thêm</button>
         <button class="btn btn-ghost" id="addExpenseReportBtn">+ Báo Cáo Chi Khác (Ngoài Ca)</button>
-      </div>
-    </section>
-    <section class="group">
-      <h3>📋 Hoạt Động Trong Khoảng Đã Chọn (${formatDateVN(from)} → ${formatDateVN(to)})</h3>
-      <div class="hint" style="margin-top:0; margin-bottom:10px;">Dùng để đối chiếu đúng 1 giai đoạn cụ thể với tài xế khi cần — tách riêng khỏi số dư cộng dồn toàn thời gian ở trên.</div>
-      <div class="card">
-        <div class="summary-row"><span>Số dư đầu kỳ (tài xế đang giữ hết ngày ${formatDateVN(dayBeforeFrom)})</span><span class="val" style="color:${rangeOpening>=0?'var(--profit)':'var(--loss)'};">${sgn(rangeOpening)}</span></div>
-        ${rangeOpening<-0.5 ? `<div class="hint" style="margin:0 0 6px; color:var(--loss);">Âm = trước ${formatDateVN(from)} tài xế đã chi vượt số được ứng ${fmtVND(-rangeOpening)} (công ty còn nợ tài xế khoản này) — phần âm được trừ vào tiền ứng của khoảng này.</div>` : rangeOpening>0.5 ? `<div class="hint" style="margin:0 0 6px;">Trước ${formatDateVN(from)} tài xế còn giữ ${fmtVND(rangeOpening)} chưa chi hết — số này cộng tiếp vào khoảng đang xem.</div>` : ''}
-        <div class="summary-row"><span>+ Đã ứng thêm trong khoảng</span><span class="val" style="color:var(--profit);">+${fmtVND(rangeAdvancedTotal)}</span></div>
-        <div class="summary-row"><span>− Tài xế đã chi từ tiền ứng (phát sinh trong ca + báo cáo do tài xế chi) trong khoảng</span><span class="val" style="color:var(--loss);">−${fmtVND(rangeSpentTotal)}</span></div>
-        <div class="summary-row total"><span>= Số dư cuối kỳ (hết ngày ${formatDateVN(to)})</span><span class="val" style="color:${rangeClosing>=0?'var(--profit)':'var(--loss)'};">${sgn(rangeClosing)}</span></div>
       </div>
     </section>
     <section class="group">
