@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-26 · #381';
+const APP_BUILD = '2026-10-26 · #383';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11791,6 +11791,12 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
   const rangeManualReports = state.driverExpenseReports.filter(r=>r.driverId===driverId && r.date>=from && r.date<=to && expenseReportPaidByDriver(r)); // #381
   const rangeAdvancedTotal = rangeAdvances.reduce((s,a)=>s+(Number(a.amount)||0),0);
   const rangeSpentTotal = rangeIncidentalList.reduce((s,sh)=>s+(Number(sh.incidentalCost)||0),0) + rangeManualReports.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  // #382 (Ông Chủ hỏi vì sao số dư lệch khi tự cộng trong 1 khoảng ngày): hiện SỐ DƯ ĐẦU KỲ (trước "Từ ngày")
+  // để phép tính trong khoảng khép kín: đầu kỳ + ứng thêm − đã chi = số dư cuối kỳ.
+  const rangeOpening = driverAdvancePeriodStatement(driverId, from, to).opening;
+  const rangeClosing = rangeOpening + rangeAdvancedTotal - rangeSpentTotal;
+  const dayBeforeFrom = (()=>{ const d0 = new Date(from+'T00:00:00'); d0.setDate(d0.getDate()-1); return `${d0.getFullYear()}-${String(d0.getMonth()+1).padStart(2,'0')}-${String(d0.getDate()).padStart(2,'0')}`; })();
+  const sgn = n => (n<0?'−':'') + fmtVND(Math.abs(n));
   app.innerHTML = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="advDetailBackBtn">← Quay Lại Tài Xế</button>
@@ -11820,8 +11826,11 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
       <h3>📋 Hoạt Động Trong Khoảng Đã Chọn (${formatDateVN(from)} → ${formatDateVN(to)})</h3>
       <div class="hint" style="margin-top:0; margin-bottom:10px;">Dùng để đối chiếu đúng 1 giai đoạn cụ thể với tài xế khi cần — tách riêng khỏi số dư cộng dồn toàn thời gian ở trên.</div>
       <div class="card">
+        <div class="summary-row"><span>Số dư đầu kỳ (tài xế đang giữ hết ngày ${formatDateVN(dayBeforeFrom)})</span><span class="val" style="color:${rangeOpening>=0?'var(--profit)':'var(--loss)'};">${sgn(rangeOpening)}</span></div>
+        ${rangeOpening<-0.5 ? `<div class="hint" style="margin:0 0 6px; color:var(--loss);">Âm = trước ${formatDateVN(from)} tài xế đã chi vượt số được ứng ${fmtVND(-rangeOpening)} (công ty còn nợ tài xế khoản này) — phần âm được trừ vào tiền ứng của khoảng này.</div>` : rangeOpening>0.5 ? `<div class="hint" style="margin:0 0 6px;">Trước ${formatDateVN(from)} tài xế còn giữ ${fmtVND(rangeOpening)} chưa chi hết — số này cộng tiếp vào khoảng đang xem.</div>` : ''}
         <div class="summary-row"><span>+ Đã ứng thêm trong khoảng</span><span class="val" style="color:var(--profit);">+${fmtVND(rangeAdvancedTotal)}</span></div>
-        <div class="summary-row total"><span>− Tài xế đã chi từ tiền ứng (phát sinh trong ca + báo cáo do tài xế chi) trong khoảng</span><span class="val" style="color:var(--loss);">−${fmtVND(rangeSpentTotal)}</span></div>
+        <div class="summary-row"><span>− Tài xế đã chi từ tiền ứng (phát sinh trong ca + báo cáo do tài xế chi) trong khoảng</span><span class="val" style="color:var(--loss);">−${fmtVND(rangeSpentTotal)}</span></div>
+        <div class="summary-row total"><span>= Số dư cuối kỳ (hết ngày ${formatDateVN(to)})</span><span class="val" style="color:${rangeClosing>=0?'var(--profit)':'var(--loss)'};">${sgn(rangeClosing)}</span></div>
       </div>
     </section>
     <section class="group">
@@ -11847,70 +11856,137 @@ function openDriverAdvanceDetail(driverId, fromOverride, toOverride, preserveScr
     if(e.target.value){ saveMainScroll(); openDriverAdvanceDetail(driverId, from, e.target.value, true); restoreMainScroll(); }
   });
 }
+/// SỬA #383 (Ông Chủ báo 2026-10-26: ô số tiền không gõ được dấu "−", sửa khoản đối trừ xong bị thành số dương).
+/// Thêm lựa chọn LOẠI khoản: ➕ ứng tiền cho tài xế / ➖ trừ vào số tài xế đang giữ. Số tiền luôn gõ số dương,
+/// app tự gắn dấu theo loại. Khoản ➖ có 3 cách:
+///   • Đối trừ vào lương (không chuyển tiền) — app ghi kèm 1 khoản "trả lương bằng đối trừ" đúng số đó cho tháng lương
+///     đã chọn, giống chức năng Quyết toán tháng (lương còn nợ giảm, không động TCB/tiền mặt);
+///   • Tài xế trả lại vào TCB / bằng tiền mặt — cộng lại vào quỹ tương ứng.
 function openDriverAdvanceEditor(id, driverId){
   scrollMainToTop();
   const existing = id ? state.driverAdvances.find(a=>a.id===id) : null;
   const did = driverId || (existing && existing.driverId);
   const d = driverById(did);
   const draft = existing ? {...existing, method: existing.method || 'bank'} : { id: uid('advc'), driverId: did, date: todayLocalDateStr(), amount:0, note:'', method:'bank' };
+  let kind = (Number(draft.amount)||0) < 0 ? 'minus' : 'plus';
+  let absAmount = Math.abs(Number(draft.amount)||0);
+  const prevYmOf = dt => { const [y,m] = dt.split('-').map(Number); const t = new Date(y, m-2, 1); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`; };
+  const linkedSal = draft.linkedSalaryPayId ? (state.salaryPayments||[]).find(p=>p.id===draft.linkedSalaryPayId) : null;
+  let salaryMonth = (linkedSal && linkedSal.forMonth) || prevYmOf(draft.date);
+  const fromSettlement = !!draft.settleId;
   const goBack = () => { openDriverAdvanceDetail(draft.driverId, undefined, undefined, true); restoreMainScroll(); };
   const app = document.getElementById('app');
-  app.innerHTML = `
+  const methodOptions = () => kind==='plus'
+    ? [['bank','🏦 Chuyển khoản TCB'],['cash','💵 Tiền mặt']]
+    : [['offset','✂️ Đối trừ vào lương (không chuyển tiền)'],['bank','🏦 Tài xế trả lại vào TCB'],['cash','💵 Tài xế trả lại tiền mặt']];
+  const paint = ()=>{
+    if(kind==='plus' && draft.method==='offset') draft.method = 'bank';
+    app.innerHTML = `
     <section class="group">
-      <h3>💰 ${existing?'Sửa':'Ghi'} Khoản Ứng Cho — ${escapeHtml(d?d.name:'')}</h3>
+      <h3>💵 ${existing?'Sửa':'Ghi'} Khoản Ứng / Trừ — ${escapeHtml(d?d.name:'')}</h3>
+      ${fromSettlement ? '<div class="hint" style="color:var(--loss);">Khoản này do "Quyết toán tháng" tạo ra — muốn sửa thì huỷ quyết toán tháng đó rồi làm lại.</div>' : ''}
       <div class="card">
         <div class="field">
-          <label>Ngày đưa tiền</label>
+          <label>Loại khoản</label>
+          <div class="seg" id="da_kind">
+            <button type="button" data-val="plus" class="${kind==='plus'?'active':''}">➕ Ứng tiền cho tài xế</button>
+            <button type="button" data-val="minus" class="${kind==='minus'?'active':''}">➖ Trừ vào số tài xế đang giữ</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Ngày</label>
           <input type="date" id="da_date" value="${draft.date}">
         </div>
         <div class="field">
-          <label>Số tiền ứng</label>
+          <label>Số tiền (gõ số dương — app tự ${kind==='plus'?'CỘNG vào':'TRỪ khỏi'} số tài xế đang giữ)</label>
           <input type="text" inputmode="decimal" id="da_amount">
         </div>
         <div class="field">
-          <label>Đưa từ nguồn nào</label>
+          <label>${kind==='plus'?'Đưa từ nguồn nào':'Trừ bằng cách nào'}</label>
           <select id="da_method">
-            <option value="bank" ${draft.method==='bank'?'selected':''}>🏦 Ngân hàng</option>
-            <option value="cash" ${draft.method==='cash'?'selected':''}>💵 Tiền mặt</option>
+            ${methodOptions().map(([v,l])=>`<option value="${v}" ${draft.method===v?'selected':''}>${l}</option>`).join('')}
           </select>
+        </div>
+        <div class="field" id="da_salMonthWrap" style="${kind==='minus' && draft.method==='offset' ? '' : 'display:none;'}">
+          <label>Trừ vào lương tháng</label>
+          <input type="month" id="da_salMonth" value="${salaryMonth}">
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú</label>
-          <input type="text" id="da_note" value="${escapeHtml(draft.note)}">
+          <input type="text" id="da_note" value="${escapeHtml(draft.note||'')}">
         </div>
+        <div class="hint" id="da_effect" style="margin:8px 0 0;"></div>
       </div>
       <div style="display:flex; gap:10px; margin-top:10px;">
-        ${existing ? '<button class="btn btn-danger" id="delAdvBtn">Xoá</button>' : ''}
+        ${existing && !fromSettlement ? '<button class="btn btn-danger" id="delAdvBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelAdvBtn">Huỷ</button>
-        <button class="btn btn-accent btn-block" id="saveAdvBtn">Lưu</button>
+        ${fromSettlement ? '' : '<button class="btn btn-accent btn-block" id="saveAdvBtn">Lưu</button>'}
       </div>
     </section>
   `;
-  attachMoneyInput(document.getElementById('da_amount'), draft.amount, v=>draft.amount=v);
-  document.getElementById('saveAdvBtn').addEventListener('click', async ()=>{
-    draft.date = document.getElementById('da_date').value || draft.date;
-    draft.note = document.getElementById('da_note').value.trim();
-    draft.method = document.getElementById('da_method').value;
-    const idx = state.driverAdvances.findIndex(a=>a.id===draft.id);
-    if(idx>=0) state.driverAdvances[idx]=draft; else state.driverAdvances.push(draft);
-    if(!(await saveDriverAdvances())) return;
-    showToast('Đã lưu khoản ứng.');
-    goBack();
-  });
-  document.getElementById('cancelAdvBtn').addEventListener('click', goBack);
-  const delBtn = document.getElementById('delAdvBtn');
-  if(delBtn) delBtn.addEventListener('click', async ()=>{
-    if(confirm('Xoá khoản ứng này?')){
+    const $ = x=>document.getElementById(x);
+    const effect = ()=>{
+      const m = $('da_method').value;
+      $('da_salMonthWrap').style.display = (kind==='minus' && m==='offset') ? '' : 'none';
+      $('da_effect').textContent = kind==='plus'
+        ? `Tài xế đang giữ TĂNG ${fmtVND(absAmount)}; ${m==='cash'?'quỹ tiền mặt':'số dư TCB'} GIẢM tương ứng.`
+        : m==='offset' ? `Tài xế đang giữ GIẢM ${fmtVND(absAmount)}; lương tháng đã chọn được ghi là đã trả ${fmtVND(absAmount)} bằng đối trừ (không động TCB / tiền mặt).`
+        : `Tài xế đang giữ GIẢM ${fmtVND(absAmount)}; ${m==='cash'?'quỹ tiền mặt':'số dư TCB'} TĂNG tương ứng (tài xế trả lại tiền).`;
+    };
+    attachMoneyInput($('da_amount'), absAmount, v=>{ absAmount = v; effect(); });
+    document.querySelectorAll('#da_kind button').forEach(b=>b.addEventListener('click', ()=>{
+      draft.date = $('da_date').value || draft.date; draft.note = $('da_note').value; draft.method = $('da_method').value;
+      const sm = $('da_salMonth'); if(sm && sm.value) salaryMonth = sm.value;
+      kind = b.dataset.val; if(kind==='minus' && draft.method!=='offset' && !existing) draft.method = 'offset'; paint();
+    }));
+    $('da_method').addEventListener('change', effect);
+    $('da_date').addEventListener('change', ()=>{ if(!linkedSal && $('da_date').value) $('da_salMonth').value = prevYmOf($('da_date').value); });
+    effect();
+    $('cancelAdvBtn').addEventListener('click', goBack);
+    const saveBtn = $('saveAdvBtn');
+    if(saveBtn) saveBtn.addEventListener('click', async ()=>{
+      if(!(absAmount>0)){ showToast('Nhập số tiền trước đã.'); return; }
+      draft.date = $('da_date').value || draft.date;
+      draft.note = $('da_note').value.trim();
+      draft.method = $('da_method').value;
+      draft.amount = kind==='minus' ? -absAmount : absAmount;
+      const oldA = state.driverAdvances.slice(), oldS = (state.salaryPayments||[]).slice();
+      // Khoản lương "trả bằng đối trừ" đi kèm: tạo / cập nhật / gỡ theo đúng loại khoản.
+      let salList = (state.salaryPayments||[]).slice();
+      if(kind==='minus' && draft.method==='offset'){
+        const ym = ($('da_salMonth').value || prevYmOf(draft.date));
+        const sid = draft.linkedSalaryPayId || uid('salpay');
+        const rec = { id: sid, driverId: draft.driverId, date: draft.date, amount: absAmount, method:'offset', note:`Đối trừ công tác phí vào lương ${monthLabelVN(ym)}${draft.note?` — ${draft.note}`:''}`, forMonth: ym, linkedAdvanceId: draft.id };
+        const k = salList.findIndex(p=>p.id===sid); if(k>=0) salList[k] = rec; else salList.push(rec);
+        draft.linkedSalaryPayId = sid;
+      } else if(draft.linkedSalaryPayId){
+        salList = salList.filter(p=>p.id!==draft.linkedSalaryPayId); delete draft.linkedSalaryPayId;
+      }
+      const idx = state.driverAdvances.findIndex(a=>a.id===draft.id);
+      if(idx>=0) state.driverAdvances[idx]=draft; else state.driverAdvances.push(draft);
+      const salChanged = JSON.stringify(salList)!==JSON.stringify(oldS);
+      state.salaryPayments = salList;
+      const ok1 = await saveDriverAdvances();
+      const ok2 = ok1 && (!salChanged || await saveSalaryPayments());
+      if(!ok1 || !ok2){ state.driverAdvances = oldA; state.salaryPayments = oldS; if(ok1) await saveDriverAdvances(); return; }
+      showToast('Đã lưu.');
+      goBack();
+    });
+    const delBtn = $('delAdvBtn');
+    if(delBtn) delBtn.addEventListener('click', async ()=>{
+      if(!confirm('Xoá khoản này?')) return;
+      const oldA = state.driverAdvances.slice(), oldS = (state.salaryPayments||[]).slice();
       state.driverAdvances = state.driverAdvances.filter(a=>a.id!==draft.id);
-      if(!(await saveDriverAdvances())) return;
+      const hadSal = draft.linkedSalaryPayId && oldS.some(p=>p.id===draft.linkedSalaryPayId);
+      if(hadSal) state.salaryPayments = oldS.filter(p=>p.id!==draft.linkedSalaryPayId);
+      const ok1 = await saveDriverAdvances(); const ok2 = ok1 && (!hadSal || await saveSalaryPayments());
+      if(!ok1 || !ok2){ state.driverAdvances = oldA; state.salaryPayments = oldS; if(ok1) await saveDriverAdvances(); return; }
       showToast('Đã xoá.');
       goBack();
-    }
-  });
+    });
+  };
+  paint();
 }
-/// Bảng kẻ ô CHỈ ĐỂ XEM (không bấm nhập gì) — hiện các ca có Chi Phí Phát
-/// Sinh > 0 trong ĐÚNG tháng yearMonth, đúng phần đang được TỰ ĐỘNG trừ
-/// vào số dư tháng đó ở driverAdvanceBalance().
 function renderIncidentalAutoDeductedHtml(driverId, from, to){
   const list = driverIncidentalShiftsInRange(driverId, from, to);
   if(list.length===0) return '<div class="hint">Chưa có Chi phí phát sinh nào trong ca ở khoảng ngày đã chọn.</div>';
