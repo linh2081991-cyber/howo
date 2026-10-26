@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-26 · #384';
+const APP_BUILD = '2026-10-26 · #386';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -11724,13 +11724,19 @@ function renderDriverAdvanceOnlyHistoryHtml(driverId){
       <table class="grid-table">
         <thead><tr><th>Ngày</th><th>Ghi Chú</th><th>Nguồn</th><th class="num">Số Tiền</th></tr></thead>
         <tbody>
-          ${items.map(a=>`
+          ${items.map(a=>{
+            // #385 — khoản trừ (số âm) hiện đúng dấu "−" + màu đỏ + cách trừ; khoản dương mà ghi chú có chữ "đối trừ / trừ vào lương"
+            // thì gắn cảnh báo: nhiều khả năng bị lưu nhầm thành số dương (bấm vào để sửa thành "➖ Trừ").
+            const amt = Number(a.amount)||0, neg = amt<0;
+            const suspicious = !neg && /đối trừ|trừ vào lương|trừ lương|hoàn ứng|trả lại/i.test(a.note||'');
+            const src = a.method==='offset' ? '✂️' : a.method==='offbook' ? '📌' : a.method==='cash' ? '💵' : '🏦';
+            return `
           <tr class="grid-clickable-row" onclick="saveMainScroll(); openDriverAdvanceEditor('${a.id}','${driverId}')">
             <td>${formatDateVN(a.date)}</td>
-            <td>${a.note?escapeHtml(a.note):'—'}</td>
-            <td>${a.method==='cash'?'💵':'🏦'}</td>
-            <td class="num" style="color:var(--profit); font-weight:700;">+${fmtVND(Number(a.amount)||0)}</td>
-          </tr>`).join('')}
+            <td>${a.note?escapeHtml(a.note):'—'}${suspicious?'<div class="hint" style="margin:2px 0 0; color:var(--loss);">⚠️ Ghi chú là khoản trừ nhưng đang lưu số DƯƠNG (cộng thêm cho tài xế) — bấm vào, chọn "➖ Trừ vào số tài xế đang giữ" rồi Lưu.</div>':''}</td>
+            <td>${src}</td>
+            <td class="num" style="color:${neg?'var(--loss)':'var(--profit)'}; font-weight:700;">${neg?'−':'+'}${fmtVND(Math.abs(amt))}</td>
+          </tr>`; }).join('')}
         </tbody>
       </table>
     </div>`;
@@ -11873,7 +11879,11 @@ function openDriverAdvanceEditor(id, driverId){
   const prevYmOf = dt => { const [y,m] = dt.split('-').map(Number); const t = new Date(y, m-2, 1); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`; };
   const linkedSal = draft.linkedSalaryPayId ? (state.salaryPayments||[]).find(p=>p.id===draft.linkedSalaryPayId) : null;
   let salaryMonth = (linkedSal && linkedSal.forMonth) || prevYmOf(draft.date);
+  // SỬA #386 (Ông Chủ báo: mở khoản "Đối trừ vào lương" thấy ô ➖ nhưng KHÔNG có nút Lưu): khoản do Quyết toán
+  // tháng tạo ra trước đây bị khoá hẳn. Nay cho sửa, nhưng giữ đúng bản chất: luôn là ➖ đối trừ vào lương, và khoản
+  // "trả lương bằng đối trừ" đi kèm của cùng lần quyết toán được sửa theo đúng số mới.
   const fromSettlement = !!draft.settleId;
+  if(fromSettlement){ kind = 'minus'; draft.method = 'offset'; if(draft.settleMonth) salaryMonth = draft.settleMonth; }
   const goBack = () => { openDriverAdvanceDetail(draft.driverId, undefined, undefined, true); restoreMainScroll(); };
   const app = document.getElementById('app');
   const methodOptions = () => kind==='plus'
@@ -11884,11 +11894,11 @@ function openDriverAdvanceEditor(id, driverId){
     app.innerHTML = `
     <section class="group">
       <h3>💵 ${existing?'Sửa':'Ghi'} Khoản Ứng / Trừ — ${escapeHtml(d?d.name:'')}</h3>
-      ${fromSettlement ? '<div class="hint" style="color:var(--loss);">Khoản này do "Quyết toán tháng" tạo ra — muốn sửa thì huỷ quyết toán tháng đó rồi làm lại.</div>' : ''}
+      ${fromSettlement ? `<div class="hint">Khoản này thuộc lần Quyết toán lương ${draft.settleMonth?monthLabelVN(draft.settleMonth):''}: luôn là khoản ➖ đối trừ vào lương. Sửa số tiền ở đây thì khoản "trả lương bằng đối trừ" đi kèm cũng đổi theo đúng số đó.</div>` : ''}
       <div class="card">
         <div class="field">
           <label>Loại khoản</label>
-          <div class="seg" id="da_kind">
+          <div class="seg" id="da_kind" style="${fromSettlement?'pointer-events:none; opacity:.6;':''}">
             <button type="button" data-val="plus" class="${kind==='plus'?'active':''}">➕ Ứng tiền cho tài xế</button>
             <button type="button" data-val="minus" class="${kind==='minus'?'active':''}">➖ Trừ vào số tài xế đang giữ</button>
           </div>
@@ -11903,13 +11913,13 @@ function openDriverAdvanceEditor(id, driverId){
         </div>
         <div class="field">
           <label>${kind==='plus'?'Đưa từ nguồn nào':'Trừ bằng cách nào'}</label>
-          <select id="da_method">
+          <select id="da_method" ${fromSettlement?'disabled':''}>
             ${methodOptions().map(([v,l])=>`<option value="${v}" ${draft.method===v?'selected':''}>${l}</option>`).join('')}
           </select>
         </div>
         <div class="field" id="da_salMonthWrap" style="${kind==='minus' && draft.method==='offset' ? '' : 'display:none;'}">
           <label>Trừ vào lương tháng</label>
-          <input type="month" id="da_salMonth" value="${salaryMonth}">
+          <input type="month" id="da_salMonth" value="${salaryMonth}" ${fromSettlement?'disabled':''}>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Ghi chú</label>
@@ -11920,7 +11930,7 @@ function openDriverAdvanceEditor(id, driverId){
       <div style="display:flex; gap:10px; margin-top:10px;">
         ${existing && !fromSettlement ? '<button class="btn btn-danger" id="delAdvBtn">Xoá</button>' : ''}
         <button class="btn btn-ghost" id="cancelAdvBtn">Huỷ</button>
-        ${fromSettlement ? '' : '<button class="btn btn-accent btn-block" id="saveAdvBtn">Lưu</button>'}
+        <button class="btn btn-accent btn-block" id="saveAdvBtn">Lưu</button>
       </div>
     </section>
   `;
@@ -11953,7 +11963,12 @@ function openDriverAdvanceEditor(id, driverId){
       const oldA = state.driverAdvances.slice(), oldS = (state.salaryPayments||[]).slice();
       // Khoản lương "trả bằng đối trừ" đi kèm: tạo / cập nhật / gỡ theo đúng loại khoản.
       let salList = (state.salaryPayments||[]).slice();
-      if(kind==='minus' && draft.method==='offset'){
+      if(fromSettlement){
+        draft.method = 'offset'; draft.amount = -absAmount;
+        const k = salList.findIndex(p=>p.settleId===draft.settleId && p.method==='offset' && p.driverId===draft.driverId);
+        if(k>=0) salList[k] = { ...salList[k], amount: absAmount, date: draft.date };
+        else salList.push({ id: uid('salpay'), driverId: draft.driverId, date: draft.date, amount: absAmount, method:'offset', note: draft.note || `Đối trừ công tác phí vào lương ${monthLabelVN(draft.settleMonth||salaryMonth)}`, forMonth: draft.settleMonth||salaryMonth, settleId: draft.settleId, settleMonth: draft.settleMonth||salaryMonth });
+      } else if(kind==='minus' && draft.method==='offset'){
         const ym = ($('da_salMonth').value || prevYmOf(draft.date));
         const sid = draft.linkedSalaryPayId || uid('salpay');
         const rec = { id: sid, driverId: draft.driverId, date: draft.date, amount: absAmount, method:'offset', note:`Đối trừ công tác phí vào lương ${monthLabelVN(ym)}${draft.note?` — ${draft.note}`:''}`, forMonth: ym, linkedAdvanceId: draft.id };
