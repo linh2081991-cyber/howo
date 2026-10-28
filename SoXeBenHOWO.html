@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-26 · #388';
+const APP_BUILD = '2026-10-26 · #389';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12325,7 +12325,7 @@ function openDriverDetail(driverId){
             </tr>
             <tr>
               <td>Tổng lương chuyến</td>
-              <td style="font-size:12.5px; color:var(--ink-soft);">${totalTrips} chuyến hiệu lực × ~${fmtVND(avgWagePerTrip)}/chuyến bình quân (có phân bậc giá chuyến 1-3/4+, xem "🔍 Chi Tiết Từng Ngày")</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">${totalTrips} chuyến hiệu lực × ~${fmtVND(avgWagePerTrip)}/chuyến bình quân (có phân bậc giá chuyến 1-3/4+) <button class="link-btn" id="driverTripDetailLink" style="padding:0 0 0 4px; font-weight:700;">🔍 Chi tiết</button></td>
               <td class="num" style="font-weight:700;">${fmtVND(tripWage)}</td>
             </tr>
             <tr>
@@ -12476,6 +12476,7 @@ function openDriverDetail(driverId){
   if(exportPayslipBtn) exportPayslipBtn.addEventListener('click', ()=>{ exportDriverPayslipXLSX(driverId); });
   const tripDetailBtn = document.getElementById('driverTripDetailBtn');
   if(tripDetailBtn) tripDetailBtn.addEventListener('click', ()=>openDriverTripDetailModal(driverId, from, to));
+  { const l = document.getElementById('driverTripDetailLink'); if(l) l.addEventListener('click', ()=>openDriverTripDetailModal(driverId, from, to)); } // #389 — nút 🔍 Chi tiết ngay ở dòng Tổng lương chuyến
   document.getElementById('dd_thisMonth').addEventListener('click', ()=>{ state.driverDetailRange = currentMonthRange(); openDriverDetail(driverId); });
   document.getElementById('dd_lastMonth').addEventListener('click', ()=>{
     const now = new Date();
