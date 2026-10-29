@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-28 · #390';
+const APP_BUILD = '2026-10-28 · #391';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12527,6 +12527,9 @@ const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400'
 // tự hồi phục trong ~1 phút) — quá mức đó, dừng lại và báo rõ nguyên nhân
 // nhiều khả năng nhất, thay vì im lặng thử mãi.
 const GEMINI_MAX_ATTEMPTS = 10;
+/// #391 — mô hình dự phòng nhanh hơn (Google khuyên dùng 3.5 Flash-Lite hoặc 3.8 Flash): sau 2 lần mô hình chính lỗi
+/// tạm thời / quá thời gian thì tự chuyển sang mô hình này để Ông Chủ không phải chờ.
+const GEMINI_FALLBACK_MODEL = 'gemini-3.5-flash-lite';
 
 /// Runs one Gemini attempt (`attemptFn`) and keeps retrying on transient
 /// failure with capped exponential backoff (1.5s → 3s → 6s → … → capped at
@@ -12799,18 +12802,12 @@ Yêu cầu bắt buộc:
 4. "vehicleAnalysis" phải có đủ mọi xe trong "tungXe". "siteAnalysis" đủ mọi công trình trong "congTrinhChoCuocDangChay". "driverAnalysis" đủ mọi tài xế trong "taiXe".
 5. Dữ liệu nào thiếu hoặc bằng 0 bất thường thì ghi vào "dataQualityNotes", không được tự suy diễn.
 6. Xưng hô: gọi người đọc là "Ông Chủ". Viết tiếng Việt, câu ngắn, rõ.
-7. GỌN: mỗi ô chữ tối đa 3 câu; "companyStrategy" tối đa 5 mục; mỗi xe tối đa 3 việc trong "strategy"; "risks" tối đa 4 mục; "dataQualityNotes" tối đa 4 mục. Không lặp lại cùng một con số ở nhiều chỗ nếu không cần.
+7. App ĐÃ TỰ HIỆN bảng số liệu (kết quả, chi phí, hoà vốn, tiền, công nợ, VAT) cho Ông Chủ — KHÔNG chép lại bảng số; chỉ trích đúng con số làm căn cứ cho nhận định.
+8. GỌN: mỗi ô chữ tối đa 3 câu; "companyStrategy" tối đa 5 mục; mỗi xe tối đa 3 việc trong "strategy"; "risks" tối đa 4 mục; "dataQualityNotes" tối đa 4 mục. Không lặp lại cùng một con số ở nhiều chỗ nếu không cần.
 
 Chỉ trả về duy nhất một object JSON đúng cấu trúc sau, không kèm lời giải thích, không dùng markdown:
 {
   "executiveSummary": "<3-5 câu: công ty đang lãi hay lỗ bao nhiêu trong kỳ, nguyên nhân chính, việc quan trọng nhất phải làm>",
-  "financialReport": {
-    "incomeStatement": "<đọc kết quả kinh doanh: doanh thu, cơ cấu cước/thương mại, lãi gộp, chi phí cố định, lợi nhuận, biên lợi nhuận>",
-    "costStructure": "<cơ cấu chi phí: khoản cố định nào lớn nhất ở từng xe, khoản biến đổi nào lớn nhất, khoản nào bất thường>",
-    "breakEven": "<điểm hoà vốn cả công ty và từng xe: cần bao nhiêu chuyến, đã chạy bao nhiêu, còn thiếu bao nhiêu, cần mấy chuyến/ngày trong số ngày còn lại>",
-    "cashAndReceivables": "<tiền TCB, tiền mặt, công nợ phải thu/phải trả, lương còn nợ: thanh khoản có an toàn không, khoản nào cần thu/trả trước>",
-    "taxVat": "<đọc sổ VAT theo tháng: VAT thuần, khấu trừ đã dùng (VAT mua xe, đầu vào dư), phải nộp, đã nộp, còn nợ thuế, còn được khấu trừ chuyển sau: ý nghĩa với dòng tiền>"
-  },
   "companyStrategy": [ { "priority": "<'cao' | 'trung_binh' | 'thap'>", "title": "<tên hành động ngắn>", "action": "<làm gì, mục tiêu bằng số>", "evidence": "<con số trong dữ liệu dẫn tới đề xuất này>" } ],
   "vehicleAnalysis": [ { "vehicleName": "<đúng tenXe>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "result": "<kết quả xe trong kỳ bằng số>", "breakEven": "<hoà vốn riêng xe: cần/đã chạy/thiếu, tốc độ cần đạt>", "costNote": "<khoản chi phí đáng chú ý nhất của xe>", "strategy": [ "<việc cụ thể 1 cho riêng xe này>", "<việc 2>" ] } ],
   "siteAnalysis": [ { "siteName": "<đúng tên công trình>", "rating": "<'tot' | 'binh_thuong' | 'can_chu_y'>", "note": "<doanh thu/chuyến, số chuyến, có nên giữ/đàm phán giá>" } ],
@@ -12827,7 +12824,8 @@ async function callGeminiText(promptText, onRetry, shouldCancel, opts){
   const apiKey = (state.settings.geminiApiKey || '').trim();
   if(!apiKey){ const e = new Error('Chưa có Gemini API Key — vào tab Cài Đặt để thêm.'); e.code='MISSING_KEY'; throw e; }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const endpointFor = model => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  let attemptNo = 0;
   // SỬA 2026-09-20 (Ông Chủ báo — sau khi lên bản Gemini mới nhất, trả lời
   // chậm hẳn và liên tục báo "mạng chập chờn" dù mạng rất khoẻ — ĐÃ TRA
   // RA GỐC RỄ THẬT): dòng Gemini 3 (gồm cả 3.6/3.7/3.8-flash đang dùng)
@@ -12866,6 +12864,10 @@ async function callGeminiText(promptText, onRetry, shouldCancel, opts){
   const timeoutMs = (opts && opts.timeoutMs) || 120000;
   return callGeminiWithRetry(async ()=>{
     let response;
+    attemptNo++;
+    const model = (opts && opts.allowFallback && attemptNo>2) ? GEMINI_FALLBACK_MODEL : GEMINI_MODEL;
+    if(opts && typeof opts.onModel==='function') opts.onModel(model, attemptNo);
+    const endpoint = endpointFor(model);
     const ctrl = new AbortController(); let timedOut = false;
     if(opts && typeof opts.registerAbort==='function') opts.registerAbort(ctrl);
     const timer = setTimeout(()=>{ timedOut = true; ctrl.abort(); }, timeoutMs);
@@ -13018,6 +13020,7 @@ async function runStrategyAnalysis(){
   renderStrategy();
   try{
     const summary = buildCompanyStrategyData(sa.from, sa.to); // #372 — toàn công ty + từng xe
+    sa.numbers = JSON.parse(JSON.stringify(summary)); renderStrategy(); // #391 — hiện số liệu app tự tính ngay
     if(!summary._coDuLieu){
       sa.error = 'Chưa có ca nào trong khoảng thời gian này để phân tích.';
       sa.loading = false;
@@ -13027,7 +13030,7 @@ async function runStrategyAnalysis(){
     }
     delete summary._coDuLieu;
     const prompt = buildCompanyStrategyPrompt(summary);
-    const result = await callGeminiText(prompt, (attempt)=>{
+    const result = await callGeminiText(prompt, (attempt, err)=>{
       // Every retry: the truck itself runs back to the starting line and
       // launches a fresh forward lap, so Ông Chủ can see exactly how many
       // attempts have run just by counting loops, in sync with the real
@@ -13039,9 +13042,9 @@ async function runStrategyAnalysis(){
       // line appear, so Ông Chủ never wonders if the app has frozen.
       if(attempt>=3){
         const hintEl = document.getElementById('strategyRetryHint');
-        if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
+        if(hintEl) hintEl.textContent = `Lần ${attempt} chưa được (${err && err.message ? err.message : 'lỗi tạm thời'}) — đang tự thử lại${attempt>=2?' bằng mô hình nhanh hơn':''}...`;
       }
-    }, ()=>sa.cancelRequested || sa.runId!==runId, { maxOutputTokens: 12288, timeoutMs: 120000, registerAbort: c=>{ sa.abortCtrl = c; } });
+    }, ()=>sa.cancelRequested || sa.runId!==runId, { maxOutputTokens: 6144, timeoutMs: 90000, allowFallback: true, registerAbort: c=>{ sa.abortCtrl = c; } });
     if(sa.runId!==runId) return; // đã huỷ / đã bắt đầu lần khác
     sa.result = result;
     sa.generatedAt = new Date().toISOString();
@@ -13366,6 +13369,7 @@ function renderStrategy(){
 
     ${sa.error ? `<section class="group"><div class="card" style="color:var(--loss);">${escapeHtml(sa.error)}</div></section>` : ''}
 
+    ${sa.numbers && sa.numbers.kyBaoCao && sa.numbers.kyBaoCao.tuNgay===sa.from && sa.numbers.kyBaoCao.denNgay===sa.to ? renderStrategyNumbersHtml(sa.numbers) : ''}
     ${sa.result ? renderStrategyResult(sa.result) : (!sa.loading && !sa.error ? `
       <section class="group">
         <div class="empty"><div class="big">🧭</div>Bấm "Phân Tích Ngay" để AI đọc toàn bộ kết quả công ty trong khoảng ngày đã chọn và viết báo cáo quản trị kèm chiến lược.</div>
@@ -13886,6 +13890,55 @@ function renderBonusResult(result){
   `;
 }
 
+/// #391 (Ông Chủ yêu cầu 2026-10-28 — phân tích nhanh hơn mà vẫn chuẩn xác): phần SỐ LIỆU do app tự tính và hiện NGAY
+/// (không chờ AI, không để AI chép lại số — tránh sai số). AI chỉ còn viết nhận định và chiến lược, nên ngắn và nhanh hơn.
+function renderStrategyNumbersHtml(d){
+  if(!d || !d.ketQuaToanCongTy) return '';
+  const k = d.ketQuaToanCongTy, t = d.tienVaCongNoHienTai || {}, v = d.thueVAT || {};
+  const m = n => (n===null || n===undefined) ? '—' : ((Number(n)<0?'−':'') + fmtVND(Math.abs(Number(n)||0)));
+  const col = n => Number(n)>=0 ? 'var(--profit)' : 'var(--loss)';
+  const veh = d.tungXe || [];
+  const ky = d.kyBaoCao || {};
+  return `
+    <section class="group">
+      <h3>📑 Số Liệu Tài Chính — App Tự Tính</h3>
+      <div class="hint" style="margin-top:0;">Kỳ ${formatDateVN(ky.tuNgay)} → ${formatDateVN(ky.denNgay)}. Số lấy thẳng từ sổ sách của app, hiện ngay không cần chờ AI.</div>
+      <div class="grid-table-wrap">
+        <table class="grid-table">
+          <thead><tr><th style="text-align:left;">Toàn công ty</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>
+            <tr><td>Doanh thu</td><td class="num">${m(k.doanhThu)}</td></tr>
+            <tr><td>− Chi phí biến đổi</td><td class="num">${m(-k.chiPhiBienDoi)}</td></tr>
+            <tr><td>= Lãi gộp</td><td class="num">${m(k.laiGop)}</td></tr>
+            <tr><td>− Chi phí cố định các xe</td><td class="num">${m(-k.chiPhiCoDinhMoiXe)}</td></tr>
+            <tr><td>− Chi phí chung (nhà, điện nước)</td><td class="num">${m(-k.chiPhiChungNhaDienNuoc)}</td></tr>
+            <tr class="grid-total-row"><td style="text-align:left;">= Lợi nhuận thực tế${k.bienLoiNhuanPhanTram!==null?` (biên ${String(k.bienLoiNhuanPhanTram).replace('.',',')}%)`:''}</td><td class="num" style="color:${col(k.loiNhuanThucTe)};">${m(k.loiNhuanThucTe)}</td></tr>
+            <tr><td>Hoà vốn cả công ty: cần / đã chạy</td><td class="num">${k.soChuyenHoaVonCaCongTy===null?'—':`${k.soChuyenHoaVonCaCongTy} / ${k.tongChuyen} chuyến`}${k.thieuChuyenSoVoiHoaVon>0?`<div class="hint" style="margin:0; color:var(--loss);">thiếu ${k.thieuChuyenSoVoiHoaVon}</div>`:''}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      ${veh.length ? `<div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <thead><tr><th>Xe</th><th class="num">Doanh Thu</th><th class="num">Lãi Gộp</th><th class="num">CP Cố Định</th><th class="num">Lợi Nhuận</th><th class="num">Lãi Gộp<br>/Chuyến</th><th class="num">Hoà Vốn<br>Cần / Chạy</th><th class="num">Lít/<br>100km</th></tr></thead>
+          <tbody>
+            ${veh.map(x=>`<tr><td><strong>${escapeHtml(x.tenXe)}</strong>${(x.laiChinh7NgayGanNhat||[]).length?`<div class="hint" style="margin:0;">${escapeHtml(x.laiChinh7NgayGanNhat.join(', '))}</div>`:''}${x.soCaChuaChotDauCuoiCa?`<div class="hint" style="margin:0; color:var(--loss);">${x.soCaChuaChotDauCuoiCa} ca chưa chốt dầu</div>`:''}</td><td class="num">${m(x.doanhThu)}</td><td class="num">${m(x.laiGop)}</td><td class="num">${m(x.chiPhiCoDinhRiengXe)}</td><td class="num" style="font-weight:800; color:${col(x.loiNhuanRiengXe)};">${m(x.loiNhuanRiengXe)}</td><td class="num">${m(x.laiGopMoiChuyen)}</td><td class="num">${x.soChuyenHoaVonRiengXe===null?'—':`${x.soChuyenHoaVonRiengXe} / ${x.soChuyen}`}</td><td class="num">${x.litDauMoi100Km===null?'—':String(x.litDauMoi100Km).replace('.',',')}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+      <div class="grid-table-wrap" style="margin-top:8px;">
+        <table class="grid-table">
+          <thead><tr><th style="text-align:left;">Tiền, công nợ, thuế (tới hôm nay)</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>
+            <tr><td>🏦 TCB / 💵 Tiền mặt</td><td class="num">${m(t.tcbBank)} / ${m(t.tienMat)}</td></tr>
+            <tr><td>Khách thương mại nợ / Đối tác cước nợ</td><td class="num">${m(t.khachThuongMaiConNo)} / ${m(t.doiTacChoCuocConNo)}</td></tr>
+            <tr><td>Lương còn nợ tài xế</td><td class="num">${m(t.luongConNoTaiXe)}</td></tr>
+            <tr><td>VAT: phải nộp luỹ kế / đã nộp / còn nợ</td><td class="num">${m(v.phaiNopLuyKe)} / ${m(v.daNopNhaNuoc)} / ${m(v.conNoThueLuyKe)}</td></tr>
+            <tr><td>VAT đầu vào còn được khấu trừ</td><td class="num">${m(v.conDuocKhauTru && v.conDuocKhauTru.tong)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+}
 function renderStrategyResult(result){
   // #372 — bố cục báo cáo quản trị: tóm tắt → báo cáo tài chính → chiến lược công ty → từng xe → công trình → tài xế → rủi ro.
   const ratingBadgeClass = r => r==='tot' ? 'good' : r==='can_chu_y' ? 'watch' : 'ok';
