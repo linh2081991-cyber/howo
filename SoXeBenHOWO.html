@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-26 · #389';
+const APP_BUILD = '2026-10-28 · #390';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12518,7 +12518,7 @@ const GEMINI_MODEL = 'gemini-3.8-flash'; // SỬA 2026-09-20 (Ông Chủ hỏi "
 // longer transient in any useful sense (most often: daily free-tier quota
 // used up), so it surfaces a clear, actionable message instead of running
 // forever with nothing to show for it.
-const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400','HTTP_401','HTTP_403','HTTP_404','TRUNCATED']);
+const GEMINI_NON_RETRYABLE_CODES = new Set(['MISSING_KEY','BAD_IMAGE','HTTP_400','HTTP_401','HTTP_403','HTTP_404','TRUNCATED','CANCELLED']);
 // SỬA 2026-09-25 (Ông Chủ báo "luôn báo lỗi, hoặc chạy rất nhiều phiên mà
 // không ra kết quả"): trước đây retry THẬT SỰ vô hạn — nếu gặp đúng 1 lỗi
 // lặp lại y hệt mãi (ví dụ hết hạn mức Gemini miễn phí trong ngày, trả về
@@ -12784,7 +12784,7 @@ function buildCompanyStrategyPrompt(data){
 
 Dữ liệu dưới đây lấy trực tiếp từ sổ sách của app, đã tính sẵn bằng đúng công thức kế toán (không được tính lại theo cách khác, không được bịa thêm số). Kỳ báo cáo ${data.kyBaoCao.tuNgay} → ${data.kyBaoCao.denNgay} (${data.kyBaoCao.soNgay} ngày), phân tích ngày ${data.kyBaoCao.ngayPhanTich}. Nhóm "tienVaCongNoHienTai" và "thueVAT" là số luỹ kế tới hôm nay; các nhóm còn lại là số trong kỳ.
 
-${JSON.stringify(data, null, 1)}
+${JSON.stringify(data)}
 
 cách đọc:
 - Lãi gộp = doanh thu − chi phí biến đổi. Lợi nhuận riêng xe = lãi gộp − chi phí cố định riêng xe. Lợi nhuận công ty = tổng lợi nhuận các xe − chi phí chung (nhà, điện nước).
@@ -12799,6 +12799,7 @@ Yêu cầu bắt buộc:
 4. "vehicleAnalysis" phải có đủ mọi xe trong "tungXe". "siteAnalysis" đủ mọi công trình trong "congTrinhChoCuocDangChay". "driverAnalysis" đủ mọi tài xế trong "taiXe".
 5. Dữ liệu nào thiếu hoặc bằng 0 bất thường thì ghi vào "dataQualityNotes", không được tự suy diễn.
 6. Xưng hô: gọi người đọc là "Ông Chủ". Viết tiếng Việt, câu ngắn, rõ.
+7. GỌN: mỗi ô chữ tối đa 3 câu; "companyStrategy" tối đa 5 mục; mỗi xe tối đa 3 việc trong "strategy"; "risks" tối đa 4 mục; "dataQualityNotes" tối đa 4 mục. Không lặp lại cùng một con số ở nhiều chỗ nếu không cần.
 
 Chỉ trả về duy nhất một object JSON đúng cấu trúc sau, không kèm lời giải thích, không dùng markdown:
 {
@@ -12859,19 +12860,37 @@ async function callGeminiText(promptText, onRetry, shouldCancel, opts){
     generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: (opts && opts.maxOutputTokens) || 8192, thinkingConfig: { thinkingLevel: 'low' } }
   };
 
+  // SỬA #390 (Ông Chủ báo: nút Huỷ không hoạt động, phân tích quá lâu): mỗi lần gọi Gemini có bộ "ngắt" riêng.
+  // Bấm Huỷ → ngắt ngay kết nối đang chờ (không đợi Gemini trả lời xong). Mỗi lần gọi tối đa opts.timeoutMs
+  // (mặc định 120 giây); quá thời gian thì tự ngắt và thử lại như lỗi mạng thông thường.
+  const timeoutMs = (opts && opts.timeoutMs) || 120000;
   return callGeminiWithRetry(async ()=>{
     let response;
+    const ctrl = new AbortController(); let timedOut = false;
+    if(opts && typeof opts.registerAbort==='function') opts.registerAbort(ctrl);
+    const timer = setTimeout(()=>{ timedOut = true; ctrl.abort(); }, timeoutMs);
+    const abortErr = ()=>{
+      if(shouldCancel && shouldCancel()){ const e = new Error('Đã huỷ.'); e.code='CANCELLED'; return e; }
+      if(timedOut){ const e = new Error('Gemini phản hồi quá lâu — đang thử lại.'); e.code='TIMEOUT'; return e; }
+      return null;
+    };
     try {
-      response = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
+      response = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody), signal: ctrl.signal });
     } catch(networkErr) {
+      clearTimeout(timer);
+      const ae = abortErr(); if(ae) throw ae;
       const e = new Error('Không kết nối được tới Gemini — kiểm tra mạng.'); e.code='NETWORK'; throw e;
     }
+    let payloadRead;
+    try { payloadRead = response.ok ? await response.json() : null; }
+    catch(readErr){ clearTimeout(timer); const ae = abortErr(); if(ae) throw ae; const e = new Error('Gemini trả về dữ liệu không đọc được.'); e.code='PARSE'; throw e; }
+    clearTimeout(timer);
     if(!response.ok){
       let detail = '';
       try{ detail = (await response.json()).error?.message || ''; }catch(e){}
       const e = new Error(`Gemini báo lỗi (${response.status})${detail ? ': ' + detail : ''}`); e.code='HTTP_'+response.status; throw e;
     }
-    const payload = await response.json();
+    const payload = payloadRead;
     const finishReason = payload?.candidates?.[0]?.finishReason;
     if(finishReason==='MAX_TOKENS'){
       // Cắt ngang giữa chừng — thử lại y hệt sẽ lại cắt y hệt (lỗi cố định,
@@ -12994,7 +13013,8 @@ let activeStrategyTruckRun = null;
 
 async function runStrategyAnalysis(){
   const sa = state.strategyAnalysis;
-  sa.loading = true; sa.error = null; sa.cancelRequested = false;
+  const runId = (sa.runId||0) + 1; sa.runId = runId;
+  sa.loading = true; sa.error = null; sa.cancelRequested = false; sa.startedAt = Date.now();
   renderStrategy();
   try{
     const summary = buildCompanyStrategyData(sa.from, sa.to); // #372 — toàn công ty + từng xe
@@ -13021,7 +13041,8 @@ async function runStrategyAnalysis(){
         const hintEl = document.getElementById('strategyRetryHint');
         if(hintEl) hintEl.textContent = `Gemini phản hồi chậm hoặc gặp lỗi tạm thời — đang tự động thử lại (lần ${attempt})...`;
       }
-    }, ()=>sa.cancelRequested, { maxOutputTokens: 16384 }); // báo cáo toàn công ty dài hơn bản 1 xe cũ
+    }, ()=>sa.cancelRequested || sa.runId!==runId, { maxOutputTokens: 12288, timeoutMs: 120000, registerAbort: c=>{ sa.abortCtrl = c; } });
+    if(sa.runId!==runId) return; // đã huỷ / đã bắt đầu lần khác
     sa.result = result;
     sa.generatedAt = new Date().toISOString();
   }catch(e){
@@ -13029,9 +13050,10 @@ async function runStrategyAnalysis(){
     // bấm Huỷ không phải "lỗi", không hiện khung đỏ báo lỗi — chỉ lặng lẽ
     // dừng, trả về đúng màn hình ban đầu để Ông Chủ có thể đổi khoảng
     // ngày hoặc quay lại dùng "Đọc Kết Quả" (nhanh hơn, không qua AI).
+    if(sa.runId!==runId) return;
     if(e.code!=='CANCELLED') sa.error = e.message || 'Không phân tích được — thử lại.';
   }
-  sa.loading = false;
+  sa.loading = false; sa.abortCtrl = null;
   if(activeStrategyTruckRun) await activeStrategyTruckRun.finish();
   if(state.currentTab==='strategy' && state.strategyView==='ai') renderStrategy();
 }
@@ -13334,11 +13356,11 @@ function renderStrategy(){
         </div>
       </div>
       <button class="btn btn-accent btn-block ${sa.loading?'strategy-run-line':''}" id="runStrategyBtn" style="margin-top:12px;" ${sa.loading?'disabled':''}>
-        ${sa.loading ? 'Đang phân tích...' : '🧭 Phân Tích Ngay'}
+        ${sa.loading ? 'Đang phân tích…<span id="strategyElapsed"></span>' : '🧭 Phân Tích Ngay'}
         ${sa.loading ? HOWO_TRUCK_HTML : ''}
       </button>
       ${sa.loading ? `<button class="btn btn-ghost btn-block" id="cancelStrategyBtn" style="margin-top:8px;">✕ Huỷ</button>` : ''}
-      ${sa.loading ? `<div class="hint" id="strategyRetryHint" style="margin-top:8px;"></div>` : ''}
+      ${sa.loading ? `<div class="hint" id="strategyRetryHint" style="margin-top:8px;">Báo cáo toàn công ty thường mất 30–90 giây. Bấm "✕ Huỷ" để dừng ngay.</div>` : ''}
       ${sa.generatedAt ? `<div class="hint" style="margin-top:8px;">Phân tích lúc: ${new Date(sa.generatedAt).toLocaleString('vi-VN')}</div>` : ''}
     </section>
 
@@ -13362,7 +13384,19 @@ function renderStrategy(){
   document.getElementById('strategy_to').addEventListener('change', e=>{ sa.to = e.target.value || sa.to; sa.result=null; sa.error=null; });
   document.getElementById('runStrategyBtn').addEventListener('click', runStrategyAnalysis);
   const cancelStrategyBtn = document.getElementById('cancelStrategyBtn');
-  if(cancelStrategyBtn) cancelStrategyBtn.addEventListener('click', ()=>{ sa.cancelRequested = true; });
+  if(cancelStrategyBtn) cancelStrategyBtn.addEventListener('click', ()=>{
+    // #390 — huỷ NGAY: ngắt kết nối đang chờ, trả màn về trạng thái sẵn sàng, không đợi Gemini.
+    sa.cancelRequested = true; sa.runId = (sa.runId||0) + 1; sa.loading = false;
+    try{ if(sa.abortCtrl) sa.abortCtrl.abort(); }catch(e){}
+    sa.abortCtrl = null;
+    showToast('Đã huỷ phân tích.');
+    renderStrategy();
+  });
+  // #390 — đồng hồ đếm giây khi đang phân tích, để Ông Chủ biết app vẫn đang chạy.
+  if(sa.loading){
+    const tick = ()=>{ const el = document.getElementById('strategyElapsed'); if(!el || !sa.loading){ return; } el.textContent = ` ${Math.max(0, Math.round((Date.now()-(sa.startedAt||Date.now()))/1000))} giây`; setTimeout(tick, 1000); };
+    tick();
+  }
 }
 
 /// MỚI (Ông Chủ yêu cầu 2026-09-24 — "cho 2 nút phân nhánh: Đọc Kết Quả /
