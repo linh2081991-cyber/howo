@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-28 · #392';
+const APP_BUILD = '2026-10-28 · #393';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -5464,12 +5464,33 @@ async function saveTaxRates(){
     return true;
   } catch(e){ showToast('Lỗi lưu thuế suất: ' + (e?.message || e)); return false; }
 }
+/// #393 — sửa dữ liệu cũ MỘT LẦN: ca thứ 29/30/31 đã lưu với mức cố định cũ (state.settings.extraDayBaseSalary,
+/// mặc định 1.000.000đ) được tính lại theo công thức mới. Chỉ đụng đúng các ca vượt ngày công chuẩn còn giữ
+/// đúng mức cũ — ca Ông Chủ đã tự sửa tay số khác thì để nguyên. Chạy lại cũng không đổi gì thêm.
+async function migrateExtraDayBaseSalary393(){
+  const oldFixed = Number(state.settings && state.settings.extraDayBaseSalary) || 1000000;
+  const standard = Number(state.settings.standardWorkDaysPerMonth)||28;
+  const changed = new Set();
+  companyShiftsWithVehicle().forEach(({sh, vid})=>{
+    if(Number(sh.baseSalaryAllocation)!==oldFixed) return;
+    const driver = driverById(sh.driverId); if(!driver) return;
+    const policy = costPoliciesForVehicle(vid)[sh.status] || {};
+    if(!policy.baseSalary) return;
+    const shv = Object.assign({}, sh, { _vehicleId: vid });
+    if(shiftPositionInfo(shv).ordinal <= standard) return;
+    const v = baseSalaryForShift(shv, driver, Number(sh.intensity)||1);
+    if(v!==sh.baseSalaryAllocation){ sh.baseSalaryAllocation = v; changed.add(vid); }
+  });
+  if(changed.size){ try{ await saveShiftsForVehicleList([...changed], true); }catch(e){ console.warn('migrate #393', e); } }
+  return changed.size;
+}
 async function startApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('dataLoadingScreen').style.display = 'flex';
   document.getElementById('loadingScreenText').textContent = 'Đang tải dữ liệu...';
   await loadAll();
   try { await ensureLegacyInvestmentInList(); } catch(e){ console.warn('legacy invest migrate', e); } // #328
+  try { await migrateExtraDayBaseSalary393(); } catch(e){ console.warn('migrate #393', e); }
   document.getElementById('dataLoadingScreen').style.display = 'none';
   document.getElementById('shell').style.display = 'block';
   renderAll();
@@ -7393,10 +7414,13 @@ function shiftPositionInfo(sh){
 /// Cường Độ Ca và không dùng công thức chia đều dailyBaseSalary() nữa —
 /// đúng theo yêu cầu Ông Chủ. Ca trong hạn mức chuẩn dùng làm tròn luỹ kế
 /// (xem shiftPositionInfo) để tổng 28 ca luôn khớp tròn lương cứng/tháng.
+// SỬA #393 (Ông Chủ yêu cầu 2026-10-28): ca thứ 29/30/31 trong tháng KHÔNG còn dùng mức cố định riêng
+// (trước đây mặc định 1.000.000đ) — tính đúng như ngày thường: lương cứng tháng ÷ ngày công chuẩn × cường độ ca,
+// làm tròn LÊN tới đồng (15.000.000 ÷ 28 = 535.715đ). Ca 1–28 giữ làm tròn luỹ kế để tổng 28 ca tròn đúng lương tháng.
 function baseSalaryForShift(sh, driver, intensity){
   const standard = Number(state.settings.standardWorkDaysPerMonth)||28;
   const { ordinal, priorIntensitySum } = shiftPositionInfo(sh);
-  if(ordinal > standard) return Number(state.settings.extraDayBaseSalary)||1000000;
+  if(ordinal > standard) return Math.ceil(dailyBaseSalary(driver)*(Number(intensity)||1) - 1e-6);
   const daily = dailyBaseSalary(driver);
   return Math.round(daily*(priorIntensitySum+intensity)) - Math.round(daily*priorIntensitySum);
 }
@@ -11440,17 +11464,14 @@ function renderDrivers(){
     <section class="group">
       <h3>📅 Công Chuẩn Toàn Đội</h3>
       <div class="card">
-        <div class="field" style="margin-bottom:14px;">
+        <div class="field" style="margin-bottom:8px;">
           <label>Số ngày công chuẩn / tháng (dùng để chia lương cứng)</label>
           <input type="text" data-numfmt="1" data-decimals="0" inputmode="numeric" id="wd_workDays" value="${s.standardWorkDaysPerMonth}">
         </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Lương cứng ca vượt ngày công chuẩn (VD ca thứ 29/30/31)</label>
-          <input type="text" inputmode="decimal" id="wd_extraDaySalary">
-        </div>
+        <div class="hint" style="margin:0;">Ca thứ 29/30/31 trong tháng tính lương cứng như ngày thường (lương tháng ÷ ngày công chuẩn).</div>
       </div>
       <button class="btn btn-ghost btn-sm" id="saveWorkDaysBtn" style="margin-top:10px;">💾 Lưu Công Chuẩn</button>
-      <div class="hint" style="margin-top:6px;">Áp dụng chung cho toàn đội (không riêng từng tài xế) — dùng để chia lương cứng mỗi ca, tính Điểm Hoà Vốn và Thẩm Định Công Trình. Ca nào vượt quá số ngày công chuẩn trong tháng của đúng tài xế đó (VD chuẩn 28 ca thì ca thứ 29 trở đi) sẽ tính lương cứng theo mức cố định riêng ở trên thay vì chia đều.</div>
+      <div class="hint" style="margin-top:6px;">Áp dụng chung cho toàn đội (không riêng từng tài xế) — dùng để chia lương cứng mỗi ca, tính Điểm Hoà Vốn và Thẩm Định Công Trình. Ca thứ 29/30/31 trong tháng vẫn tính lương cứng như ngày thường (lương tháng ÷ số ngày công chuẩn).</div>
     </section>
     ` : `
     <section class="group">
@@ -11501,13 +11522,10 @@ function renderDrivers(){
   attachMoneyInput(document.getElementById('nd_salary'), ndVals.salary, v=>ndVals.salary=v);
   attachMoneyInput(document.getElementById('nd_food'), ndVals.food, v=>ndVals.food=v);
 
-  const wdVals = { extraDaySalary: Number(s.extraDayBaseSalary)||1000000 };
-  attachMoneyInput(document.getElementById('wd_extraDaySalary'), wdVals.extraDaySalary, v=>wdVals.extraDaySalary=v);
 
   const saveWorkDaysBtn = document.getElementById('saveWorkDaysBtn');
   if(saveWorkDaysBtn) saveWorkDaysBtn.addEventListener('click', async ()=>{
     s.standardWorkDaysPerMonth = Number(document.getElementById('wd_workDays').value)||28;
-    s.extraDayBaseSalary = wdVals.extraDaySalary;
     if(!(await saveSettings())) return;
     // Số ngày công chuẩn / mức lương ca vượt vừa đổi ảnh hưởng lương cứng
     // của MỌI tài xế, MỌI ca đã lưu (không riêng ca mới) — phải tính lại
