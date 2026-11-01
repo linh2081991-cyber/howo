@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-31 · #394';
+const APP_BUILD = '2026-11-02 · #395';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -12298,6 +12298,10 @@ function openDriverDetail(driverId){
   const monthsSpanned = monthsInRange(from, to);
   const monthlyBonus = driverMonthlyBonusTotalInRange(driverId, from, to);
   const netPay = baseSalary + tripWage + food + monthlyBonus - advance - repairDeduction;
+  // #395 (Ông Chủ yêu cầu 2026-11-02): trừ thêm CÔNG TÁC PHÍ tài xế đang giữ (số dư tạm ứng tới hết ngày cuối kỳ)
+  // để ra lương còn thực nhận. Số dư âm = công ty còn nợ tài xế tiền đã chi hộ → cộng vào. Chỉ dùng để hiển thị.
+  const advanceHeldAtEnd = driverAdvanceBalance(driverId, to);
+  const netPayAfterHeld = netPay - advanceHeldAtEnd;
   // SỬA 2026-09-04 (Ông Chủ yêu cầu — "tính chi tiết số nào nhân số nào ra
   // kết quả" trước khi in phiếu lương): suy ngược ra "số lượng" từ ĐÚNG
   // số tiền đã cộng dồn sẵn (baseSalary/food/tripWage) chia cho đơn giá
@@ -12412,9 +12416,14 @@ function openDriverDetail(driverId){
               <td style="font-size:12.5px; color:var(--ink-soft);">Đúng phần tài xế này chịu trách nhiệm, cộng từ Sổ Chi Phí Sửa Chữa trong kỳ</td>
               <td class="num" style="font-weight:700; color:${repairDeduction>0?'var(--loss)':'inherit'}">${fmtVND(repairDeduction)}</td>
             </tr>
+            <tr>
+              <td>${advanceHeldAtEnd>=0?'− Công tác phí tài xế đang giữ':'+ Công tác phí công ty còn nợ tài xế'}</td>
+              <td style="font-size:12.5px; color:var(--ink-soft);">Số dư tạm ứng công tác phí tới hết ngày ${formatDateVN(to)} (tiền ứng − tài xế đã chi), xem ở "💵 Tạm Ứng Chi Phí"</td>
+              <td class="num" style="font-weight:700; color:${advanceHeldAtEnd>0.5?'var(--loss)':advanceHeldAtEnd<-0.5?'var(--profit)':'inherit'}">${fmtVND(Math.abs(advanceHeldAtEnd))}</td>
+            </tr>
             <tr class="grid-total-row">
               <td colspan="2">= LƯƠNG THỰC NHẬN</td>
-              <td class="num" style="color:${netPay>=0?'var(--profit)':'var(--loss)'}">${fmtVND(netPay)}</td>
+              <td class="num" style="color:${netPayAfterHeld>=0?'var(--profit)':'var(--loss)'}">${fmtVND(netPayAfterHeld)}</td>
             </tr>
           </tbody>
         </table>
