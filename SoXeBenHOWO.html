@@ -764,7 +764,7 @@
 // Dấu phiên bản — hiện ở đầu tab Cài Đặt. Mỗi lần giao bản mới, số này đổi;
 // Ông Chủ đối chiếu số này trên máy với số em báo để biết chắc đang chạy
 // đúng bản mới hay máy vẫn kẹt bản cũ (cache).
-const APP_BUILD = '2026-10-28 · #393';
+const APP_BUILD = '2026-10-31 · #394';
 
 const STATUS_OPTIONS = [
   {key:'active', label:'Hoạt Động'},
@@ -9811,8 +9811,9 @@ function renderShiftList(){
     <div class="search-bar-hint">${state.searchDate ? `Đang lọc đúng ngày ${formatDateVN(state.searchDate)} (xuyên suốt mọi tháng).` : 'Bấm vào ô ngày để mở lịch, chọn ngày cần xem. Chưa chọn (hoặc bấm "Xoá") sẽ xem ca của tháng này, mới nhất trước.'}</div>
     <div class="month-picker-row">
       <input type="month" id="shiftArchiveMonthPicker">
-      <button class="btn btn-ghost" id="viewOtherMonthBtn">+ Thêm Tháng Mới</button>
-    </div>`;
+      <button class="btn btn-ghost" id="viewOtherMonthBtn">📅 Mở Tháng Đã Chọn</button>
+    </div>
+    <div class="hint" style="margin:-4px 0 10px;">Chọn tháng cũ rồi bấm "Mở" để xem, sửa hoặc <strong>thêm ca bị quên</strong> của tháng đó.</div>`;
 
   if(state.shifts.length===0){
     app.innerHTML = warningsBannerHtml + searchBarHtml + `
@@ -10002,6 +10003,8 @@ function renderShiftMonthArchive(){
   const backBtnHtml = `
     <section class="group">
       <button class="btn btn-ghost btn-sm" id="shiftArchiveBackBtn">← Quay Lại Tháng Hiện Tại</button>
+      <button class="btn btn-accent btn-block" id="shiftArchiveAddBtn" style="margin-top:10px;">+ Thêm Ca Cho Tháng ${monthLabelVN(ym)}</button>
+      <div class="hint" style="margin:6px 0 0;">Ngày được điền sẵn là ngày đầu tiên của tháng còn chưa có ca — đổi ngày trong form nếu cần. ODO / dầu đầu ca tự lấy theo ca liền trước ngày đó.</div>
     </section>
     <div class="hint" style="margin:0 0 10px;">Đang xem lại Tháng ${monthLabelVN(ym)} — bấm vào 1 ca để xem chi tiết hoặc sửa lại số liệu nếu cần.</div>`;
 
@@ -10013,6 +10016,7 @@ function renderShiftMonthArchive(){
     document.getElementById('shiftArchiveBackBtn').addEventListener('click', ()=>{
       state.shiftArchiveMonth = null; renderAll(); restoreMainScroll();
     });
+    document.getElementById('shiftArchiveAddBtn').addEventListener('click', ()=>startNewShift(firstEmptyShiftDateOfMonth(ym)));
     return;
   }
 
@@ -10053,6 +10057,7 @@ function renderShiftMonthArchive(){
   document.getElementById('shiftArchiveBackBtn').addEventListener('click', ()=>{
     state.shiftArchiveMonth = null; renderAll(); restoreMainScroll();
   });
+  document.getElementById('shiftArchiveAddBtn').addEventListener('click', ()=>startNewShift(firstEmptyShiftDateOfMonth(ym)));
   document.querySelectorAll('.driver-tab').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       state.shiftArchiveDriverTab = btn.dataset.key;
@@ -10078,14 +10083,14 @@ function openShift(id){
   renderAll();
 }
 
-function startNewShift(){
+// #394 (Ông Chủ yêu cầu 2026-10-31): cho phép tạo ca với NGÀY CHO TRƯỚC (thêm ca bị quên của tháng đã qua).
+function startNewShift(presetDate){
   if(state.drivers.length===0){
     showToast('Hãy thêm tài xế trước ở tab "Tài Xế".');
     return;
   }
   saveMainScroll();
-  const today=new Date();
-  const dateStr=todayLocalDateStr();
+  const dateStr = (typeof presetDate==='string' && /^\d{4}-\d{2}-\d{2}$/.test(presetDate)) ? presetDate : todayLocalDateStr();
   const shiftType='day';
   const prev = findPreviousShift(dateStr, shiftType, null);
   // SỬA 2026-08-23 (yêu cầu Ông Chủ — cơ chế 2 tài xế thay phiên theo
@@ -11385,6 +11390,45 @@ function refreshFixedCostInputs(){
   if(ff) ff.value = toIntSafe(sh.foodAllowance).toLocaleString('vi-VN');
 }
 
+/// #394 — ngày đầu tiên trong tháng (của xe đang mở) CHƯA có ca nào; không còn ngày trống thì lấy ngày cuối tháng
+/// (tháng hiện tại: không vượt quá hôm nay).
+function firstEmptyShiftDateOfMonth(ym){
+  const [y,m] = ym.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  const today = todayLocalDateStr();
+  const used = new Set(state.shifts.filter(sh=>(sh.date||'').slice(0,7)===ym).map(sh=>sh.date));
+  for(let d=1; d<=last; d++){
+    const ds = `${ym}-${String(d).padStart(2,'0')}`;
+    if(ds>today) break;
+    if(!used.has(ds)) return ds;
+  }
+  const lastDs = `${ym}-${String(last).padStart(2,'0')}`;
+  return lastDs>today ? today : lastDs;
+}
+/// #394 — sau khi lưu 1 ca của THÁNG ĐÃ QUA: tính lại lương cứng phân bổ các ca CÙNG THÁNG của đúng tài xế đó
+/// (thứ tự ca trong tháng đã đổi), và nhắc nếu ca kế tiếp đang ghi ODO / dầu đầu ca không khớp cuối ca vừa thêm.
+async function afterSavePastMonthShift(sh){
+  const ym = (sh.date||'').slice(0,7);
+  if(!ym || ym>=todayLocalDateStr().slice(0,7)) return;
+  const driver = driverById(sh.driverId);
+  if(driver){
+    const changed = new Set();
+    companyShiftsWithVehicle().forEach(({sh:s, vid})=>{
+      if(s.driverId!==sh.driverId || (s.date||'').slice(0,7)!==ym) return;
+      const policy = costPoliciesForVehicle(vid)[s.status] || {};
+      const v = policy.baseSalary ? baseSalaryForShift(Object.assign({}, s, { _vehicleId: vid }), driver, Number(s.intensity)||1) : 0;
+      if(v!==s.baseSalaryAllocation){ s.baseSalaryAllocation = v; changed.add(vid); }
+    });
+    if(changed.size){ try{ await saveShiftsForVehicleList([...changed], true); }catch(e){ console.warn('recalc past month', e); } }
+  }
+  const next = state.shifts.filter(s=>s.id!==sh.id && chronoKey(s.date,s.shiftType)>chronoKey(sh.date,sh.shiftType))
+    .sort((a,b)=>chronoKey(a.date,a.shiftType)-chronoKey(b.date,b.shiftType))[0];
+  if(next && (Number(sh.odoEnd)>0 || Number(sh.fuelEnd)>0)){
+    const odoOff = Number(sh.odoEnd)>0 && Number(next.odoStart)!==Number(sh.odoEnd);
+    const fuelOff = Number(sh.fuelEnd)>0 && Math.abs((Number(next.fuelStart)||0)-(Number(sh.fuelEnd)||0))>0.001;
+    if(odoOff || fuelOff) setTimeout(()=>showToast(`⚠️ Ca kế tiếp ${formatDateVN(next.date)} đang ghi ${odoOff?`ODO đầu ${Number(next.odoStart).toLocaleString('vi-VN')}`:''}${odoOff&&fuelOff?', ':''}${fuelOff?`dầu đầu ${Number(next.fuelStart).toLocaleString('vi-VN')} lít`:''} — không khớp cuối ca vừa thêm, mở ca đó kiểm tra lại.`), 1200);
+  }
+}
 async function saveDraftShift(){
   const sh = state.draftShift;
   if(!sh.driverId){ showToast('Hãy chọn tài xế trước khi lưu.'); return; }
@@ -11425,9 +11469,11 @@ async function saveDraftShift(){
     return;
   }
   state.view='list'; state.draftShift=null;
+  if(cleanShift.date.slice(0,7) < todayLocalDateStr().slice(0,7)){ state.shiftArchiveMonth = cleanShift.date.slice(0,7); }
   renderAll();
   restoreMainScroll();
   showToast('Đã lưu ca thành công.');
+  try{ await afterSavePastMonthShift(cleanShift); }catch(e){ console.warn('afterSavePastMonthShift', e); }
 }
 
 // ========================= DRIVERS TAB =========================
